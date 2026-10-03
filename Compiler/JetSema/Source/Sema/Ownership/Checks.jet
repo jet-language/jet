@@ -2408,11 +2408,57 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
 // ────────────────────────────────────────────────────────────────────────────
 // Branch and scope state
 
-fn sema_ownership_moved_contains(values: [SemaOwnershipMovedPlace], candidate: SemaOwnershipMovedPlace) -> Bool Never! {
-    loop value in values {
-        if sema_ownership_places_overlap(value.place, candidate.place) -> return true
+// Branch facts are joined per key, like Rust `FlowFacts::merge_paths` rows:
+// `slots` maps a key to its bucket in `rows`, and each bucket lists the
+// merged rows of that key in merge order.
+fn sema_ownership_bucket_add(slots: &[String:Int], rows: &[[Int]], key: String, row: Int) Never! {
+    if slots.get(key) == .Val(slot) {
+        &rows[slot].push(row)
+    } else {
+        slots[key] = rows.len()
+        &rows.push([Int]{row})
+    }
+}
+
+// Overlapping places share one root, so a candidate move is compared only
+// with the merged moves of its root.
+fn sema_ownership_moved_covered(merged: [SemaOwnershipMovedPlace], slots: [String:Int], rows: [[Int]], candidate: SemaOwnershipMovedPlace) -> Bool Never! {
+    slot :: slots.get(candidate.place.root_key) ?? return false
+    loop row in rows[slot] {
+        if sema_ownership_places_overlap(merged[row].place, candidate.place) -> return true
     }
     false
+}
+
+// An exact loan shares its root with the loan it repeats.
+fn sema_ownership_merge_loan(merged: &[SemaOwnershipLoan], slots: &[String:Int], rows: &[[Int]], loan: SemaOwnershipLoan) Never! {
+    if slots.get(loan.place.root_key) == .Val(slot) {
+        loop row in rows[slot] {
+            if sema_ownership_loan_same(loan, merged[row]) -> return
+        }
+    }
+    sema_ownership_bucket_add(&slots, &rows, loan.place.root_key, merged.len())
+    &merged.push(loan)
+}
+
+// A repeated view has the same carrier; merged views are all active.
+fn sema_ownership_merge_view(merged: &[SemaOwnershipViewFact], slots: &[String:Int], rows: &[[Int]], fact: SemaOwnershipViewFact) Never! {
+    if slots.get(fact.carrier_key) == .Val(slot) {
+        loop row in rows[slot] {
+            if sema_ownership_view_same(fact, merged[row]) {
+                if fact.invalidated && !merged[row].invalidated {
+                    merged[row].invalidated = true
+                    merged[row].invalidated_span = fact.invalidated_span
+                    merged[row].invalidated_verb = fact.invalidated_verb
+                }
+                return
+            }
+        }
+    }
+    if fact.active {
+        sema_ownership_bucket_add(&slots, &rows, fact.carrier_key, merged.len())
+        &merged.push(fact)
+    }
 }
 
 fn sema_ownership_loan_same(left: SemaOwnershipLoan, right: SemaOwnershipLoan) -> Bool Never! {
@@ -2453,15 +2499,26 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     }
 
     merged_moves := [SemaOwnershipMovedPlace]{}
+    move_slots := [String:Int]{}
+    move_rows := [[Int]]{}
     loop moved in then_state.moved {
-        if !sema_ownership_moved_contains(merged_moves, moved) -> &merged_moves.push(moved)
+        if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
+            sema_ownership_bucket_add(&move_slots, &move_rows, moved.place.root_key, merged_moves.len())
+            &merged_moves.push(moved)
+        }
     }
     loop moved in else_state.moved {
-        if !sema_ownership_moved_contains(merged_moves, moved) -> &merged_moves.push(moved)
+        if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
+            sema_ownership_bucket_add(&move_slots, &move_rows, moved.place.root_key, merged_moves.len())
+            &merged_moves.push(moved)
+        }
     }
     if !has_else {
         loop moved in base.moved {
-            if !sema_ownership_moved_contains(merged_moves, moved) -> &merged_moves.push(sema_ownership_moved_snapshot(moved))
+            if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
+                sema_ownership_bucket_add(&move_slots, &move_rows, moved.place.root_key, merged_moves.len())
+                &merged_moves.push(sema_ownership_moved_snapshot(moved))
+            }
         }
     }
     state.moved = merged_moves
@@ -2475,62 +2532,24 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     // path carries them.  Keep pre-merge hazards and union both branch facts;
     // lexical scope cleanup has already removed facts whose owners ended.
     merged_loans := base.loans
-    loop loan in then_state.loans {
-        found := false
-        loop merged in merged_loans {
-            if sema_ownership_loan_same(loan, merged) {
-                found = true
-                break
-            }
-        }
-        if !found -> &merged_loans.push(loan)
-    }
-    loop loan in else_state.loans {
-        found := false
-        loop merged in merged_loans {
-            if sema_ownership_loan_same(loan, merged) {
-                found = true
-                break
-            }
-        }
-        if !found -> &merged_loans.push(loan)
-    }
+    loan_slots := [String:Int]{}
+    loan_rows := [[Int]]{}
+    loop (row, loan) in merged_loans -> sema_ownership_bucket_add(&loan_slots, &loan_rows, loan.place.root_key, row)
+    loop loan in then_state.loans -> sema_ownership_merge_loan(&merged_loans, &loan_slots, &loan_rows, loan)
+    loop loan in else_state.loans -> sema_ownership_merge_loan(&merged_loans, &loan_slots, &loan_rows, loan)
     state.loans = merged_loans
 
     merged_views := [SemaOwnershipViewFact]{}
+    view_slots := [String:Int]{}
+    view_rows := [[Int]]{}
     loop view in base.views {
-        if view.active -> &merged_views.push(sema_ownership_view_snapshot(view))
-    }
-    loop fact in then_state.views {
-        found := false
-        loop other_index in 0..<merged_views.len() {
-            if sema_ownership_view_same(fact, merged_views[other_index]) {
-                if fact.invalidated && !merged_views[other_index].invalidated {
-                    merged_views[other_index].invalidated = true
-                    merged_views[other_index].invalidated_span = fact.invalidated_span
-                    merged_views[other_index].invalidated_verb = fact.invalidated_verb
-                }
-                found = true
-                break
-            }
+        if view.active {
+            sema_ownership_bucket_add(&view_slots, &view_rows, view.carrier_key, merged_views.len())
+            &merged_views.push(sema_ownership_view_snapshot(view))
         }
-        if fact.active && !found -> &merged_views.push(fact)
     }
-    loop fact in else_state.views {
-        found := false
-        loop other_index in 0..<merged_views.len() {
-            if sema_ownership_view_same(fact, merged_views[other_index]) {
-                if fact.invalidated && !merged_views[other_index].invalidated {
-                    merged_views[other_index].invalidated = true
-                    merged_views[other_index].invalidated_span = fact.invalidated_span
-                    merged_views[other_index].invalidated_verb = fact.invalidated_verb
-                }
-                found = true
-                break
-            }
-        }
-        if fact.active && !found -> &merged_views.push(fact)
-    }
+    loop fact in then_state.views -> sema_ownership_merge_view(&merged_views, &view_slots, &view_rows, fact)
+    loop fact in else_state.views -> sema_ownership_merge_view(&merged_views, &view_slots, &view_rows, fact)
     state.views = merged_views
     merged_references := base.references
     anchors := sema_ownership_reference_anchors(merged_references)
@@ -2544,26 +2563,34 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
 // unwritten by either path stays unwritten, and a fixed-list slot counts as
 // written only where every path wrote it.
 fn sema_ownership_uninit_join(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {
+    right_slots := [String:Int]{}
+    right_rows := [[Int]]{}
+    loop (row, other) in right -> sema_ownership_bucket_add(&right_slots, &right_rows, other.key, row)
     merged := [SemaOwnershipUninitFact]{}
+    merged_keys := [String:Bool]{}
     loop fact in left {
         joined := fact
-        loop other in right {
-            if other.key != joined.key -> next
-            if joined.fixed_len == other.fixed_len {
-                kept := [Int]{}
-                loop slot in joined.initialized {
-                    if other.initialized.contains(slot) -> &kept.push(slot)
+        if right_slots.get(joined.key) == .Val(key_slot) {
+            loop row in right_rows[key_slot] {
+                if joined.fixed_len == right[row].fixed_len {
+                    kept := [Int]{}
+                    loop slot in joined.initialized {
+                        if right[row].initialized.contains(slot) -> &kept.push(slot)
+                    }
+                    joined.initialized = kept
+                } else {
+                    joined.fixed_len = None
+                    joined.initialized = [Int]{}
                 }
-                joined.initialized = kept
-            } else {
-                joined.fixed_len = None
-                joined.initialized = [Int]{}
             }
         }
+        merged_keys[joined.key] = true
         &merged.push(joined)
     }
     loop fact in right {
-        if !sema_ownership_uninit_contains(merged, fact.key) -> &merged.push(fact)
+        if merged_keys.get(fact.key) != None -> next
+        merged_keys[fact.key] = true
+        &merged.push(fact)
     }
     merged
 }

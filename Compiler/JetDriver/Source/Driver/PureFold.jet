@@ -129,7 +129,7 @@ fn jet_driver_pure_fold_evaluate_sites(program: ^MIRProgram, sites: [JetDriverPu
 // the test behind `xs.min_by(f) ?? -1`), so every tier reads a literal.
 fn jet_driver_pure_fold_resolve_joins(program: &MIRProgram) {
     loop function_index in 0..<program.functions.len() {
-        function := program.functions[function_index]
+        function :: program.functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
         if initializers.len() == 0 -> next
         constants :: jet_driver_pure_fold_constants(function, initializers, jet_driver_pure_fold_root_locals(function))
@@ -191,7 +191,7 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
         preludes: preludes,
     }
     loop function_index in 0..<program.functions.len() {
-        function := program.functions[function_index]
+        function :: program.functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
         if initializers.len() == 0 -> next
         definitions := [U64:MIROperation]{}

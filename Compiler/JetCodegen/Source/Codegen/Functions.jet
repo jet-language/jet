@@ -4,6 +4,7 @@ use jet_foundation.[
     CORE_CALLS,
     CallablePolicy,
     CallablePolicyChain,
+    CompilerTraceSink,
     ConstAttr,
     CoreCallCompletion,
     CoreCallRecord,
@@ -2718,7 +2719,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows
-pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenFunctions {
+pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile], trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
@@ -2744,7 +2745,18 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     lowered_rows := [JetCodegenLoweredFunction]{}
     if functions.len() > 0 {
         builder := jet_codegen_new_builder(functions[0], function_index, modules, field_symbols, source_files, source_index)
-        loop function in functions -> &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
+        trace_functions := false
+        if trace_sink == .Val(sink) -> trace_functions = sink.functions()
+        loop (position, function) in functions {
+            if trace_sink == .Val(sink) -> sink.progress("lower", position, functions.len())
+            if trace_functions {
+                if trace_sink == .Val(sink) -> sink.begin("lower.function", function.name, position, functions.len())
+            }
+            &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
+            if trace_functions {
+                if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
+            }
+        }
     }
     loop lowered in lowered_rows {
         id_key :: "{lowered.function.id.value}"

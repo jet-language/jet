@@ -1325,7 +1325,10 @@ fn emit_stage_zero_source(
             MirArtifactKind::NativeLibrary,
             MirArtifactBuildMode::Dev,
         );
+        let mut lower_span = jet_driver::Trace::span("lower");
         let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        lower_span.items(mir.functions.len());
+        drop(lower_span);
         assert_evaluator_materialization_helpers_in_mir(&mir);
         let mut execution = MirRustExecutionConfig::for_artifact(artifact);
         execution.ffi = reference_ffi.as_ref();
@@ -1342,7 +1345,10 @@ fn emit_stage_zero_source(
             root_prefix: String::new(),
             execution: execution.clone(),
         };
+        let mut emit_span = jet_driver::Trace::span("emit");
         let reference_rust = crate::Codegen::MIRRust::emit_mir_program(&mir, &metadata_config);
+        emit_span.items(mir.functions.len());
+        drop(emit_span);
         // A kept run also retains the unpackaged emitted Rust, so a Host/Runner
         // packaging failure still leaves the compiler's Rust to check.
         if let Some(keep) = std::env::var_os("JET_STAGE_ZERO_KEEP").map(PathBuf::from) {
@@ -1360,6 +1366,7 @@ fn emit_stage_zero_source(
             root_prefix: "crate::".to_string(),
             execution,
         };
+        let _package_span = jet_driver::Trace::span("package");
         let metadata = crate::Codegen::MIRRust::mir_rust_aot_metadata(&mir, &metadata_config);
         crate::prepare_bootstrap_artifact_from_aot(
             reference_rust,

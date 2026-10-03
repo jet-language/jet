@@ -1,5 +1,6 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
+    CompilerTraceSink,
     Diagnostic,
     JetReleaseDevtoolsPolicy,
     MIRAllocatorPolicy,
@@ -99,9 +100,12 @@ pub struct JetDriverCompileRequest {
     pub eval_config: JetEvalConfig
     pub target: JetDriverCompileTarget
     pub record_store: JetDriverRecordStore?
-    // Full verification: MIR Lint checks the lowered program and the result
-    // of every optimizer pass, not only the final program. Tests and
-    // `--verify` turn it on; ordinary compiles leave it off.
+    // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
+    pub trace_sink: CompilerTraceSink?
+    // Full verification: the optimizer re-verifies legality and runs MIR
+    // Lint on the lowered program and the result of every pass, not only
+    // legality on entry and Lint on the final program. Tests and `--verify`
+    // turn it on; ordinary compiles leave it off.
     pub mir_lint_every_pass: Bool
 }
 

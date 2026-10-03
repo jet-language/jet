@@ -540,20 +540,15 @@ fn sema_contract_type_name(ty: Type) -> String? {
 
 fn sema_contract_distinct_range(ty: Type, environment: SemaScopeEnvironment) -> TIntegerRange? {
     name :: sema_contract_type_name(ty) ?? return None
-    loop definition in environment.checked_types {
-        qualified :: "{definition.module_identity}::{definition.name}"
-        if {
-            name == definition.name -> {
-                if definition.module_identity != environment.module_identity -> next
-            }
-            name != qualified -> next
-            else -> {}
-        }
-        if definition.kind == {
-            .Distinct(_, range) -> return range
-            else -> return None
-        }
-    }
+    // The first row that is either `name` owned by this module or the
+    // qualified `module::name` itself.
+    local_row :: sema_scope_checked_type_row(environment, environment.module_identity, name)
+    qualified_row :: environment.checked_type_rows.get(name)
+    row := -1
+    if local_row == .Val(local) -> row = local
+    if qualified_row == .Val(qualified) && (row < 0 || qualified < row) -> row = qualified
+    if row < 0 -> return None
+    if environment.checked_types[row].kind == .Distinct(_, range) -> return range
     None
 }
 
@@ -689,21 +684,8 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_i
 
 pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolID) -> Func? {
     if environment.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            loop function in module_row.functions {
-                if function.symbol.id.key == target.key -> return Val(function.declaration)
-            }
-            loop nominal in module_row.nominals {
-                loop method in nominal.methods {
-                    if method.symbol.id.key == target.key -> return Val(method.declaration)
-                }
-            }
-            loop implementation in module_row.impls {
-                loop method in implementation.methods {
-                    if method.symbol.id.key == target.key -> return Val(method.declaration)
-                }
-            }
-        }
+        declaration :: sema_registration_callable_declaration(graph, target)
+        if declaration != None -> return declaration
     }
     loop declaration in environment.declarations {
         if declaration.symbol_id.key == target.key {

@@ -7836,10 +7836,11 @@ fn jet_eval_gc_edit_route_valid(row: MIRPreludeCall, kind: MIRGCEditKind) -> Boo
     loop index in 0..<borrow_mask.len() {
         if row.signature.borrow_mask[index] != borrow_mask[index] -> return false
     }
+    expected_symbol :: "jet_gc_{member}"
     row.family == MIRPreludeFamily.StaticPrelude
         && row.module_name == "core.gc"
         && row.member == member
-        && mir_symbol_name(row.symbol) == "jet_gc_{member}"
+        && mir_symbol_name(row.symbol) == expected_symbol
         && row.signature.arity == borrow_mask.len()
         && row.signature.max_arity == borrow_mask.len()
         && row.abi == MIRPreludeABI.Value

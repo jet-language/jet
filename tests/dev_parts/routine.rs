@@ -6751,6 +6751,29 @@ fn interpolation_holes_borrow_their_values() {
     );
 }
 
+/// #4318: a read-only binding of a stable place holds a shared reference to
+/// it (`Option<&T>`), never a copy: an or-pattern payload binding over a read
+/// parameter, and a `::` let of a read parameter's field.
+#[test]
+fn read_only_bindings_borrow_their_payload() {
+    let src = "enum Shape {\n    Circle(label: String)\n    Rect(label: String, parts: [String])\n    Dot\n}\n\nstruct Bag {\n    name: String\n    tags: [String]\n}\n\nfn label_len(shape: Shape) -> Int {\n    if shape == {\n        .Circle(label) | .Rect(label, _) -> return label.len()\n        .Dot -> return 0\n    }\n    0\n}\n\nfn tag_count(bag: Bag) -> Int {\n    tags :: bag.tags\n    tags.len()\n}\n\nfn run() {\n    print(label_len(Shape.Rect{label: \"ab\", parts: [String]{\"x\"}}))\n    print(tag_count(Bag{name: \"b\", tags: [String]{\"x\", \"y\"}}))\n}\n";
+    let rust = emitted_rust("ref_bindings", src);
+    let label = emitted_body(&rust, "label_ulen");
+    assert!(
+        label.contains("Option<&String>"),
+        "an or-pattern binding of a read parameter's payload must hold a reference:\n{label}"
+    );
+    assert!(
+        !label.contains("payload.clone()") && !label.contains("payload.as_ref().clone()"),
+        "an or-pattern binding must not copy its payload:\n{label}"
+    );
+    let tags = emitted_body(&rust, "tag_ucount");
+    assert!(
+        !tags.contains("__jet_tags).clone()"),
+        "a `::` let of a read parameter's field must not copy it:\n{tags}"
+    );
+}
+
 /// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
 /// shape is compatible; an incompatible shape reset reports the exact reason
 /// and reseeds from the new initializer. Shared store is consulted by both

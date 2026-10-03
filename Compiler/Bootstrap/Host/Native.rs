@@ -2256,6 +2256,89 @@ fn emit_bootstrap_record_store(
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
 
+/// Emit the `CompilerTraceSink` carrier over the one process trace writer
+/// (`jet_driver::Trace`, opened from `JET_TRACE_FILE`), plus
+/// `__jet_bootstrap_trace_sink()`, which yields the request's optional sink
+/// (absent when tracing is off). The impl follows the checked trait's own
+/// method list.
+fn emit_bootstrap_trace_sink(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+) -> Result<(), BootstrapHostCodecError> {
+    let trait_symbol = symbols.trait_symbol("CompilerTraceSink")?;
+    out.push_str(
+        "#[doc(hidden)]\n\
+         #[derive(Clone)]\n\
+         struct __JetBootstrapTraceSink {\n\
+             sink: &'static ::jet_driver::Trace::TraceSink,\n\
+         }\n",
+    );
+    writeln!(out, "impl {trait_symbol} for __JetBootstrapTraceSink {{")
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    for metadata in symbols.trait_methods("CompilerTraceSink")? {
+        let receiver = match metadata.receiver_access {
+            Some(jet_foundation::MIR::MirAccess::Read) => "&self",
+            Some(jet_foundation::MIR::MirAccess::Write) => "&mut self",
+            Some(jet_foundation::MIR::MirAccess::Move) | None => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "CompilerTraceSink.{} has no borrowed (read or write) checked receiver",
+                    metadata.name
+                )))
+            }
+        };
+        // Checked `Int` arguments are `JetInt`; the trace takes `i64`.
+        let (arity, body) = match metadata.name.as_str() {
+            "begin" => (4, "self.sink.begin(&__jet_arg_0, &__jet_arg_1, __jet_arg_2.to_i64().unwrap_or(-1), __jet_arg_3.to_i64().unwrap_or(-1))"),
+            "end" => (2, "self.sink.end(&__jet_arg_0, __jet_arg_1.to_i64().unwrap_or(-1))"),
+            "progress" => (3, "self.sink.progress(&__jet_arg_0, __jet_arg_1.to_i64().unwrap_or(-1), __jet_arg_2.to_i64().unwrap_or(-1))"),
+            "functions" => (0, "self.sink.functions()"),
+            name => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "CompilerTraceSink.{name} has no host implementation"
+                )))
+            }
+        };
+        if metadata.parameter_types.len() != arity {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "CompilerTraceSink.{} does not take {arity} checked arguments",
+                metadata.name
+            )));
+        }
+        let parameters = metadata
+            .parameter_types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| format!(", __jet_arg_{index}: {ty}"))
+            .collect::<String>();
+        // The trait's methods are `Never!`, emitted as an outcome carrier whose
+        // error is `JetErr` or `Infallible`; the call itself never fails.
+        let return_type = metadata.return_type.trim_start_matches("crate::");
+        let body = if return_type.starts_with("JetOutcome<") {
+            format!("Ok({body})")
+        } else {
+            body.to_string()
+        };
+        writeln!(
+            out,
+            "    fn {}({receiver}{parameters}) -> {} {{ {body} }}",
+            metadata.symbol, metadata.return_type,
+        )
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    }
+    writeln!(
+        out,
+        "}}\n\
+         #[doc(hidden)]\n\
+         fn __jet_bootstrap_trace_sink() -> crate::JetOutcome<Box<dyn {trait_symbol}>, crate::JetAbsent> {{\n\
+             match ::jet_driver::Trace::sink() {{\n\
+                 Some(sink) => Ok(Box::new(__JetBootstrapTraceSink {{ sink }})),\n\
+                 None => Err(Default::default()),\n\
+             }}\n\
+         }}"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
 fn emit_bootstrap_host_factory(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
@@ -2263,6 +2346,7 @@ fn emit_bootstrap_host_factory(
     _runtime_config_symbol: &str,
 ) -> Result<(), BootstrapHostCodecError> {
     emit_bootstrap_record_store(out, symbols)?;
+    emit_bootstrap_trace_sink(out, symbols)?;
     let request_type = symbols.type_symbol("JetDriverCompileRequest")?;
     let request_sources = symbols.field_symbol("JetDriverCompileRequest", "authorized_sources")?;
     let request_host_facts = symbols.field_symbol("JetDriverCompileRequest", "host_facts")?;
@@ -2270,6 +2354,7 @@ fn emit_bootstrap_host_factory(
     let request_target = symbols.field_symbol("JetDriverCompileRequest", "target")?;
     let request_effect_source = symbols.field_symbol("JetDriverCompileRequest", "canonical_effect_source")?;
     let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
+    let request_trace_sink = symbols.field_symbol("JetDriverCompileRequest", "trace_sink")?;
     let request_mir_lint_every_pass =
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
     let request_core_sources = symbols.field_symbol("JetDriverCompileRequest", "core_sources")?;
@@ -2380,6 +2465,7 @@ fn emit_bootstrap_host_factory(
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
+            "        {request_trace_sink}: __jet_bootstrap_trace_sink(),\n",
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
@@ -2413,6 +2499,7 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_core_sources = request_core_sources,
         core_source_type = core_source_type,
@@ -2439,12 +2526,16 @@ fn emit_bootstrap_host_factory(
             ") -> Result<crate::BootstrapJetCompileResult<{mir_program_type}, {eval_config_type}>, crate::BootstrapHostCodecError> {{\n",
             "    let __jet_request = __jet_bootstrap_request_from_host(__jet_snapshot, __jet_requested_target)?;\n",
             "    let __jet_completion_scope = __jet_completion_owner.completion_scope();\n",
+            "    let __jet_compile_span = ::jet_driver::Trace::span(\"compile\");\n",
             "    let __jet_result = __jet_bootstrap_compile_with_native(__jet_request, __jet_selected_tier, __jet_execution, __jet_completion_owner)?;\n",
+            "    drop(__jet_compile_span);\n",
             "    let mut __jet_runtime_config = Some(__jet_result.runtime_config);\n",
+            "    let __jet_decode_span = ::jet_driver::Trace::span(\"decode\");\n",
             "    let __jet_output = __jet_completion_scope.with_current(|| {{\n",
             "        let _activation = __jet_result.resources.activate();\n",
             "        __jet_bootstrap_bindings_from_result(__jet_result.result, __jet_snapshot, &mut __jet_runtime_config, __jet_result.selected_factory_tier, __jet_result.actual_factory_tier)\n",
             "    }});\n",
+            "    drop(__jet_decode_span);\n",
             "    match __jet_output {{\n",
             "        Ok(mut output) => {{ output.resources = Some(__jet_result.resources); Ok(output) }},\n",
             "        Err(error) => {{ let error = crate::BootstrapHostCodecError::InvalidMetadata(error); match __jet_completion_scope.with_current(|| __jet_result.resources.retire()) {{\n",
@@ -2835,9 +2926,9 @@ fn emit_bootstrap_manifest_adapter(
             "    let reports = __jet_bootstrap_reports_from_result(&{value}, snapshot)?;\n",
             "    let source_program = ({value}).{result_mir}.ok();\n",
             "    let mir = source_program.as_ref().map(__jet_bootstrap_mir_program_to_host).transpose()?;\n",
-            "    let entry_function = ({value}).{result_entry_function}.as_ref().ok().map(|function| Ok::<_, String>(::jet_foundation::MIR::MirFunctionId(function.{function_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet entry function ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
-            "    let runtime_artifact = ({value}).{result_runtime_artifact}.as_ref().ok().map(|artifact| Ok::<_, String>(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet runtime artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
-            "    let web_artifact = ({value}).{result_web_artifact}.as_ref().ok().map(|artifact| Ok::<_, String>(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet Web artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
+            "    let entry_function = ({value}).{result_entry_function}.as_ref().ok().map(|function| ::jet_foundation::MIR::MirFunctionId(function.{function_value}));\n",
+            "    let runtime_artifact = ({value}).{result_runtime_artifact}.as_ref().ok().map(|artifact| ::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}));\n",
+            "    let web_artifact = ({value}).{result_web_artifact}.as_ref().ok().map(|artifact| ::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}));\n",
             "    let web_artifacts = ({value}).{result_web_artifacts}.as_ref().ok().map(|artifacts| crate::BootstrapWebArtifacts {{\n",
             "        manifest_json: artifacts.{web_manifest_json}.clone(),\n",
             "        wasm_rust: artifacts.{web_wasm_rust}.clone(),\n",
@@ -2864,7 +2955,7 @@ fn emit_bootstrap_manifest_adapter(
             "    }}\n",
             "    let manifest = ({value}).{result_manifest}.as_ref().ok().ok_or_else(|| \"complete bootstrap compiler result has no Rust emission manifest\".to_string())?;\n",
             "    let callables = manifest.{manifest_callables}.iter().map(|row| Ok((({row}).{callable_source_name}.clone(), crate::Codegen::MIRRust::MirRustCallableMetadata {{\n",
-            "        function: ::jet_foundation::MIR::MirFunctionId(({row}).{callable_function}.{function_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest callable function ID is not an unsigned integer\".to_string())?),\n",
+            "        function: ::jet_foundation::MIR::MirFunctionId(({row}).{callable_function}.{function_value}),\n",
             "        symbol: ({row}).{callable_symbol}.clone(),\n",
             "        parameter_types: ({row}).{callable_parameter_types}.clone(),\n",
             "        parameter_access: ({row}).{callable_parameter_access}.iter().map(|access| match access {{\n",
@@ -2877,32 +2968,32 @@ fn emit_bootstrap_manifest_adapter(
             "        callable_type: ({row}).{callable_type}.clone(),\n",
             "    }}))).collect::<Result<Vec<_>, String>>()?;\n",
             "    let types = manifest.{manifest_type_metadata}.iter().map(|row| Ok((\n",
-            "        ::jet_foundation::MIR::MirTypeId(({row}).{type_ty}.{type_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest type ID is not an unsigned integer\".to_string())?),\n",
+            "        ::jet_foundation::MIR::MirTypeId(({row}).{type_ty}.{type_value}),\n",
             "        ({row}).{type_source_name}.clone(),\n",
             "        ({row}).{type_symbol}.clone(),\n",
             "    ))).collect::<Result<Vec<_>, String>>()?;\n",
             "    let fields = manifest.{manifest_fields}.iter().map(|row| {{\n",
-            "        let field_id = ::jet_foundation::MIR::MirFieldId(({row}).{field_field}.{field_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest field ID is not an unsigned integer\".to_string())?);\n",
-            "        let owner_id = ::jet_foundation::MIR::MirTypeId(({row}).{field_owner}.{type_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest field owner ID is not an unsigned integer\".to_string())?);\n",
+            "        let field_id = ::jet_foundation::MIR::MirFieldId(({row}).{field_field}.{field_value});\n",
+            "        let owner_id = ::jet_foundation::MIR::MirTypeId(({row}).{field_owner}.{type_value});\n",
             "        let ty = mir.as_ref().and_then(|program| program.fields.iter().find(|candidate| candidate.id == field_id && candidate.owner == owner_id)).map(|candidate| candidate.field.ty.clone()).ok_or_else(|| format!(\"manifest field {{:?}}/{{:?}} is absent from converted MIR\", field_id, owner_id))?;\n",
             "        Ok((field_id, owner_id, ({row}).{field_source_name}.clone(), ({row}).{field_symbol}.clone(), ty))\n",
             "    }}).collect::<Result<Vec<_>, String>>()?;\n",
             "    let variants = manifest.{manifest_variants}.iter().map(|row| Ok(crate::Codegen::MIRRust::MirRustVariantMetadata {{\n",
-            "        owner: ::jet_foundation::MIR::MirTypeId(({row}).{variant_owner}.{type_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest variant owner ID is not an unsigned integer\".to_string())?),\n",
+            "        owner: ::jet_foundation::MIR::MirTypeId(({row}).{variant_owner}.{type_value}),\n",
             "        source_name: ({row}).{variant_source_name}.clone(),\n",
             "        wire_name: ({row}).{variant_wire_name}.clone(),\n",
             "        symbol: ({row}).{variant_symbol}.clone(),\n",
             "        payload_types: ({row}).{variant_payload_types}.clone(),\n",
             "    }})).collect::<Result<Vec<_>, String>>()?;\n",
             "    let traits = manifest.{manifest_traits}.iter().map(|row| Ok(crate::Codegen::MIRRust::MirRustTraitMetadata {{\n",
-            "        trait_id: ::jet_foundation::MIR::MirTraitId(({row}).{trait_id}.{trait_id_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest trait ID is not an unsigned integer\".to_string())?),\n",
+            "        trait_id: ::jet_foundation::MIR::MirTraitId(({row}).{trait_id}.{trait_id_value}),\n",
             "        key: ({row}).{trait_key}.clone(),\n",
             "        name: ({row}).{trait_name}.clone(),\n",
             "        symbol: ({row}).{trait_symbol}.clone(),\n",
             "    }})).collect::<Result<Vec<_>, String>>()?;\n",
             "    let trait_methods = manifest.{manifest_trait_methods}.iter().map(|row| Ok(crate::Codegen::MIRRust::MirRustTraitMethodMetadata {{\n",
-            "        trait_id: ::jet_foundation::MIR::MirTraitId(({row}).{trait_method_trait_id}.{trait_id_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest trait-method owner ID is not an unsigned integer\".to_string())?),\n",
-            "        method_id: ::jet_foundation::MIR::MirTraitMethodId(({row}).{trait_method_id}.{trait_method_id_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest trait-method ID is not an unsigned integer\".to_string())?),\n",
+            "        trait_id: ::jet_foundation::MIR::MirTraitId(({row}).{trait_method_trait_id}.{trait_id_value}),\n",
+            "        method_id: ::jet_foundation::MIR::MirTraitMethodId(({row}).{trait_method_id}.{trait_method_id_value}),\n",
             "        key: ({row}).{trait_method_key}.clone(),\n",
             "        name: ({row}).{trait_method_name}.clone(),\n",
             "        symbol: ({row}).{trait_method_symbol}.clone(),\n",
@@ -3015,16 +3106,14 @@ fn emit_bootstrap_type_codec(out: &mut String) {
     out.push_str(
         r#"
 fn __jet_bootstrap_type_id_to_host(value: &@t.MIRTypeID@) -> Result<::jet_foundation::MIR::MirTypeId, String> {
-    let text = value.@f.MIRTypeID.value@.to_string_rep();
-    let id = text.parse::<u64>().map_err(|_| "MIR type identity is not an unsigned integer".to_string())?;
+    let id = value.@f.MIRTypeID.value@;
     if id == 0 {
         return Err("MIR type identity is zero".to_string());
     }
     Ok(::jet_foundation::MIR::MirTypeId(id))
 }
 fn __jet_bootstrap_type_id_from_host(value: ::jet_foundation::MIR::MirTypeId) -> Result<@t.MIRTypeID@, String> {
-    let value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(value.0));
-    Ok(@s.MIRTypeID@{ value })
+    Ok(@s.MIRTypeID@{ value: value.0 })
 }
 fn __jet_bootstrap_measure_to_host(value: &@t.MIRMeasure@) -> Result<::jet_foundation::MIR::MirMeasure, String> {
     match value {
@@ -3226,7 +3315,7 @@ fn __jet_bootstrap_type_to_host(value: &@t.MIRType@) -> Result<::jet_foundation:
         },
         @p.MIRTypeKind.TraitObject@{ bounds } => ::jet_foundation::MIR::MirTypeKind::TraitObject(
             bounds.iter().map(|bound| {
-                let id = __jet_bootstrap_source_u64(&bound.@f.MIRTraitRef.id@.@f.MIRTraitID.value@, "MIR trait identity")?;
+                let id = bound.@f.MIRTraitRef.id@.@f.MIRTraitID.value@;
                 if id == 0 { return Err("MIR trait identity is zero".to_string()); }
                 // Host trait-object bounds are nominal refs keyed by the trait's MIR identity.
                 Ok(::jet_foundation::MIR::MirNominalRef { id: ::jet_foundation::MIR::MirTypeId(id), name: bound.@f.MIRTraitRef.name@.clone() })
@@ -3311,7 +3400,7 @@ fn __jet_bootstrap_type_from_host(value: &::jet_foundation::MIR::MirType) -> Res
             bounds: bounds.iter().map(|bound| {
                 if bound.id.0 == 0 { return Err("MIR trait identity is zero".to_string()); }
                 Ok(@s.MIRTraitRef@{
-                    id: @s.MIRTraitID@{ value: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(bound.id.0)) },
+                    id: @s.MIRTraitID@{ value: bound.id.0 },
                     name: bound.name.clone(),
                 })
             }).collect::<Result<Vec<_>, String>>()?,
@@ -3690,7 +3779,7 @@ fn __jet_bootstrap_type_from_shape_node(
             ))).collect::<Result<Vec<_>, String>>()?),
         )),
         @p.JetEvalHostTypeNode.Struct@{ type_id, type_name, args, fields: _ } | @p.JetEvalHostTypeNode.Enum@{ type_id, type_name, args, variants: _ } => {
-            let id = ::jet_foundation::MIR::MirTypeId(__jet_bootstrap_source_u64(&type_id.@f.MIRTypeID.value@, "host nominal type ID")?);
+            let id = ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@);
             let args = args.iter().map(|arg| child(arg, "nominal argument type node")).collect::<Result<Vec<_>, String>>()?;
             Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {
                 name: ::jet_foundation::MIR::MirNominalRef { id, name: type_name.clone() },
@@ -3815,9 +3904,8 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              capability: &{cap_type},
              owner: {host_owner},
          ) -> Result<{host_value}, String> {{
-             let handle_value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(capability.handle.0));
              Ok(@new.JetEvalHostValue.Handle@{{
-                 handle: {source_handle} {{ {handle_value}: handle_value }},
+                 handle: {source_handle} {{ {handle_value}: capability.handle.0 }},
                  raw: jet_foundation::Numeric::JetInt::from_i64(capability.raw),
                  owner,
                  payload: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }},
@@ -3867,7 +3955,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token }} = value else {{
                 return Err("committed Source resource transfer has no checked foreign-handle input".to_string());
             }};
-            let handle = __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource transfer handle")?;
+            let handle = handle.{handle_value};
             let raw_value = raw.to_string_rep().parse::<i64>()
                 .map_err(|_| "Source resource transfer capability is outside i64".to_string())?;
             if consumed.handle != {mir_handle}(handle) || consumed.raw != raw_value {{
@@ -3877,7 +3965,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                 {transfer_argument}: jet_foundation::Numeric::JetInt::from_i64(0),
                 {transfer_path}: Vec::new(),
                 {transfer_token}: token.clone(),
-                {transfer_handle}: {source_handle} {{ {handle_value}: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(handle)) }},
+                {transfer_handle}: {source_handle} {{ {handle_value}: handle }},
                 {transfer_raw}: raw.clone(),
             }})
         }}
@@ -3894,7 +3982,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token: _ }} = value else {{
                  return Err("checked Source resource operation requires a live native handle".to_string());
              }};
-             let handle = __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource handle")?;
+             let handle = handle.{handle_value};
              let raw = raw.to_string_rep().parse::<i64>()
                  .map_err(|_| "Source resource capability is outside i64".to_string())?;
              Ok(({mir_handle}(handle), raw))
@@ -4101,10 +4189,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  return Err(jet_foundation::Outcome::JetAbsent);
              }}
              let span = span.clone();
-             let handle = match __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource handle") {{
-                 Ok(value) => {mir_handle}(value),
-                 Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-             }};
+             let handle = {mir_handle}(handle.{handle_value});
              let raw = match raw.to_string_rep().parse::<i64>() {{
                  Ok(value) => value,
                  Err(_) => return Ok(__jet_bootstrap_host_failure(span, "Source resource capability is outside i64".to_string())),
@@ -4158,7 +4243,6 @@ fn emit_bootstrap_callback(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let row = symbols.type_symbol("MIRPreludeCall")?;
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
@@ -4360,10 +4444,7 @@ fn emit_bootstrap_foreign_callback(
 
     writeln!(
         out,
-        "fn __jet_bootstrap_source_u64(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<u64, String> {{
-             value.to_string_rep().parse::<u64>().map_err(|_| format!(\"{{label}} is not a nonnegative integer\"))
-         }}
-         fn __jet_bootstrap_source_index(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<usize, String> {{
+        "fn __jet_bootstrap_source_index(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<usize, String> {{
              value.to_string_rep().parse::<usize>().map_err(|_| format!(\"{{label}} is not a usize\"))
          }}
          fn __jet_bootstrap_mir_access_to_host(value: &{access}) -> Result<::jet_foundation::MIR::MirAccess, String> {{
@@ -4450,15 +4531,15 @@ fn emit_bootstrap_foreign_callback(
                  web: target.{target_web},
              }};
              let return_type = value.{foreign_return_type}.ok().map(|ty| __jet_bootstrap_type_to_host(&ty)).transpose()?;
-             let link = value.{foreign_link}.ok().map(|id| __jet_bootstrap_source_u64(&id.{link_unit_id_value}, \"foreign link id\").map(::jet_foundation::MIR::MirLinkUnitId)).transpose()?;
-             let callback = value.{foreign_callback}.ok().map(|id| __jet_bootstrap_source_u64(&id.{callback_id_value}, \"foreign callback id\").map(::jet_foundation::MIR::MirCallbackId)).transpose()?;
-             let handle = value.{foreign_handle}.ok().map(|id| __jet_bootstrap_source_u64(&id.{handle_id_value}, \"foreign handle id\").map(::jet_foundation::MIR::MirHandleId)).transpose()?;
-             let close_function = value.{foreign_close_function}.ok().map(|id| __jet_bootstrap_source_u64(&id.{function_id_value}, \"foreign close function id\").map(::jet_foundation::MIR::MirFunctionId)).transpose()?;
-             let close_foreign = value.{foreign_close_foreign}.ok().map(|id| __jet_bootstrap_source_u64(&id.{foreign_id_value}, \"foreign close id\").map(::jet_foundation::MIR::MirForeignId)).transpose()?;
-             let undo_function = value.{foreign_undo_function}.ok().map(|id| __jet_bootstrap_source_u64(&id.{function_id_value}, \"foreign undo function id\").map(::jet_foundation::MIR::MirFunctionId)).transpose()?;
+             let link = value.{foreign_link}.ok().map(|id| ::jet_foundation::MIR::MirLinkUnitId(id.{link_unit_id_value}));
+             let callback = value.{foreign_callback}.ok().map(|id| ::jet_foundation::MIR::MirCallbackId(id.{callback_id_value}));
+             let handle = value.{foreign_handle}.ok().map(|id| ::jet_foundation::MIR::MirHandleId(id.{handle_id_value}));
+             let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+             let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
+             let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
              Ok(::jet_foundation::MIR::MirForeign {{
-                 id: ::jet_foundation::MIR::MirForeignId(__jet_bootstrap_source_u64(&value.{foreign_id}.{foreign_id_value}, \"foreign id\")?),
-                 module_id: ::jet_foundation::MIR::MirModuleId(__jet_bootstrap_source_u64(&value.{foreign_module_id}.{module_id_value}, \"foreign module id\")?),
+                 id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}),
+                 module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
                  key: value.{foreign_key},
                  module: value.{foreign_module_name},
                  name: value.{foreign_name},

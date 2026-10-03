@@ -183,7 +183,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     copies_receiver := if contract.row.op == {.Copy -> true else -> false}
     if copies_receiver {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, &context, &diagnostics, false)
+        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, &context, &diagnostics, false, false)
         return SemaMethodSpecialCheck{handled: true, value: copied}
     }
 

@@ -410,12 +410,16 @@ fn jet_rust_emit_c_abi_type(ctx: &JetRustEmitContext, source: MIRType) -> String
     }
 }
 
+// MIRRust c_abi_enum_variant_name: the variant's `mangle_variant` spelling, so
+// grouped `Net.Ping` and flat `Net_Ping` name distinct payload carriers.
 fn jet_rust_emit_c_abi_payload_type_name(definition: MIRTypeDef, variant: MIRVariant) -> String Never! {
-    "{jet_rust_emit_c_abi_nominal_name(definition, "enum")}_payload_{jet_rust_emit_sanitize(variant.name)}"
+    "{jet_rust_emit_c_abi_nominal_name(definition, "enum")}_payload_{jet_rust_emit_mangle_variant(variant.name)}"
 }
 
+// The union member keeps the `__jet_variant` prefix so no variant spelling
+// meets the `__jet_empty` unit member.
 fn jet_rust_emit_c_abi_payload_field_name(variant: MIRVariant) -> String Never! {
-    "__jet_variant_{jet_rust_emit_sanitize(variant.name)}"
+    "__jet_variant{jet_rust_emit_mangle_variant(variant.name)}"
 }
 
 fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
@@ -429,7 +433,7 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C ABI record has a field with no checked physical representation", "every stored field of a `#layout(C)` record must be a C scalar, fixed array, pointer, C record, or tagged C enum", Val(definition.span))
                 return
             }
-            jet_rust_emit_layout_attributes(definition, &lines)
+            jet_rust_emit_layout_attributes(&ctx, definition, &lines)
             &lines.push("#[derive(Clone, Copy)]")
             name := jet_rust_emit_c_abi_nominal_name(definition, "record")
             &lines.push("struct {name} {{")
@@ -502,6 +506,7 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
 
 fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     loop definition in ctx.program.types {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
         start :: lines.len()
         jet_rust_emit_c_abi_type_definition(&ctx, definition, &lines)
         if lines.len() > start -> &lines.push("")
@@ -751,6 +756,10 @@ fn jet_rust_emit_native_rust_derive_name_for_id(id: MIRTraitID) -> String? {
     }
 }
 
+fn jet_rust_emit_is_native_rust_derive_name(name: String) -> Bool Never! {
+    name == "Clone" || name == "Copy" || name == "Debug" || name == "Default" || name == "Eq" || name == "Hash" || name == "Ord" || name == "PartialEq" || name == "PartialOrd"
+}
+
 fn jet_rust_emit_capability_trait_ref(ctx: &JetRustEmitContext, trait_name: String) -> MIRTraitRef? {
     expected_id :: mir_trait_id(trait_name)
     native_name := jet_rust_emit_native_rust_derive_name_for_id(expected_id)
@@ -789,13 +798,46 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(implementation.span))
             return false
         }
-        if !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
+        if !jet_rust_emit_module_selected(ctx, implementation.module_id) || !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
         if mir_type_same_checked_type(implementation.self_type, ty) -> return true
         if implementation.self_type.kind == {
             .Apply(name, _) -> {
                 if name.id == nominal_id -> return true
             }
             else -> {}
+        }
+    }
+    false
+}
+
+// MIRRust derives_trait: the row derives a trait whose declaration has this name.
+fn jet_rust_emit_type_def_derives_trait(ctx: JetRustEmitContext, definition: MIRTypeDef, trait_name: String) -> Bool Never! {
+    loop trait_id in definition.derives {
+        loop candidate in jet_rust_emit_trait_rows(ctx, trait_id) {
+            if candidate.id == trait_id && candidate.name == trait_name -> return true
+        }
+    }
+    false
+}
+
+// MIRRust selected_user_capability_impl for a trait selected by name (the
+// user impls keyed by `trait_ref.name`): a selected non-generated impl of
+// `trait_name` whose self type is `ty` or shares its nominal name.
+fn jet_rust_emit_selected_user_impl_named(ctx: &JetRustEmitContext, ty: MIRType, trait_name: String) -> Bool Never! {
+    nominal :: if ty.kind == {
+        .Apply(name, _) -> Val(name.name)
+        else -> String?{None}
+    }
+    loop implementation in ctx.program.impls {
+        if implementation.compiler_generated -> next
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.name != trait_name || !jet_rust_emit_module_selected(ctx, implementation.module_id) || !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
+        if mir_type_same_checked_type(implementation.self_type, ty) -> return true
+        if nominal == .Val(name) {
+            if implementation.self_type.kind == {
+                .Apply(self_name, _) -> { if self_name.name == name -> return true }
+                else -> {}
+            }
         }
     }
     false
@@ -839,7 +881,10 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             loop field in fields { if !jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, bindings, generic_params) -> return false }
             true
         }
+        // Union values are spelled as the synthetic `__JetUnion_*` carrier,
+        // which has no sema `Equatable` derive and so no Rust `PartialEq`.
         .Union(members) -> {
+            if trait_name == "PartialEq" -> return false
             loop member in members { if !jet_rust_emit_type_derive_capability(&ctx, member, trait_name, &visiting, bindings, generic_params) -> return false }
             true
         }
@@ -864,6 +909,14 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             row :: definition ?? return false
             if trait_name == "Clone" && row.ownership == MIROwnershipMode.Move -> return false
             if !jet_rust_emit_type_derives_allowed(row) -> return false
+            // A nominal field compares through Rust `PartialEq` only when its
+            // own row carries sema's structural `Equatable` derive (a user
+            // `Equatable` impl has no Rust `PartialEq`); an alias is
+            // transparent and answers for its target. A union row is spelled
+            // as its synthetic carrier (see `Union` above).
+            if trait_name == "PartialEq" && !(row.kind == .Alias(_)) {
+                if !jet_rust_emit_type_def_derives_trait(ctx, row, "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || row.name.starts_with("__JetUnion_") -> return false
+            }
             if visiting.contains(row.id) {
                 position := 0
                 loop position < visiting.len() && visiting[position] != row.id {
@@ -971,13 +1024,33 @@ fn jet_rust_emit_field_declaration(ctx: &JetRustEmitContext, field: MIRField, bo
     "{visibility}{jet_rust_emit_field_name(&ctx, field.id)}: {ty}"
 }
 
-fn jet_rust_emit_layout_attributes(definition: MIRTypeDef, lines: &[String]) Never! {
-    if definition.layout == .Val(layout) {
-        if layout == {
-            .C -> &lines.push("#[repr(C)]")
-            .CAligned(alignment, _) -> &lines.push("#[repr(C, align({alignment}))]")
-            .Columnar -> {}
+// MIRRust emit_type_def / emit_c_abi_records layout attributes: a tagged C
+// enum keeps its checked non-`c_int` tag width, and an aligned record takes
+// the checked effective alignment.
+fn jet_rust_emit_layout_attributes(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
+    layout :: definition.layout ?? return
+    if layout == {
+        .C -> {
+            repr := "C"
+            if definition.kind == .Enum(_, _) {
+                if definition.c_layout_tag == .Val(enum_tag) {
+                    if enum_tag != MIRCEnumTag.CInt -> repr = "C, {jet_rust_emit_c_abi_tag_type(enum_tag)}"
+                }
+            }
+            &lines.push("#[repr({repr})]")
         }
+        .CAligned(alignment, _) -> {
+            fact :: definition.layout_alignment ?? {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR aligned type has no layout alignment fact", "aligned layouts carry the checked sema alignment fact", Val(definition.span))
+                return
+            }
+            if fact.requested_alignment != alignment {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR aligned type fact disagrees with its requested alignment", "the checked alignment fact records the layout's requested alignment", Val(definition.span))
+                return
+            }
+            &lines.push("#[repr(C, align({fact.effective_alignment}))]")
+        }
+        .Columnar -> {}
     }
 }
 
@@ -1033,8 +1106,13 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
     &lines.push("impl Drop for {name} {{")
     &lines.push("    fn drop(&mut self) {{")
     &lines.push("        if let Some((_, __jet_raw)) = self.__jet_token.take_raw() {{")
+    // MIRRust emit_handle_type: a selected foreign close wins over the Jet close.
     if {
-        close_function != None -> {
+        close_foreign != None -> {
+        close := jet_rust_emit_foreign_name(&ctx, close_foreign_id)
+        &lines.push("            unsafe {{ let _ = {close}(__jet_raw as *mut core::ffi::c_void); }}")
+        }
+        else -> {
         close := jet_rust_emit_function_name(&ctx, close_function_id)
         needs_unsafe := false
         if jet_rust_emit_function_index(ctx, close_function_id) == .Val(function_index) {
@@ -1050,11 +1128,7 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
             }
         }
         }
-        else -> {
-        close := jet_rust_emit_foreign_name(&ctx, close_foreign_id)
-        &lines.push("            unsafe {{ let _ = {close}(__jet_raw as *mut core::ffi::c_void); }}")
     }
-        }
     &lines.push("        }}")
     &lines.push("    }}")
     &lines.push("}}")
@@ -1141,20 +1215,28 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
             }
         }
         if duplicate_trait_row -> next
+        // MIRRust emit_type_def: a native Rust derive name is a Rust derive
+        // whether or not a declaration row carries it; only other names are
+        // custom derives validated against their generated provider. Jet
+        // lowering may omit the row of a canonical native derive ID.
+        derive_name := ""
         if trait_row == .Val(row) {
-            jet_rust_emit_validate_derived_trait(&ctx, definition, trait_id, row.name)
+            derive_name = row.name
+        } else {
+            derive_name = jet_rust_emit_native_rust_derive_name_for_id(trait_id) ?? {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "only canonical native Rust derive IDs may omit a checked trait declaration", Val(definition.span))
+                next
+            }
+        }
+        if !jet_rust_emit_is_native_rust_derive_name(derive_name) {
+            jet_rust_emit_validate_derived_trait(&ctx, definition, trait_id, derive_name)
             // Sema's structural `Equatable` derive is the checked fact behind
             // Rust `PartialEq` (`jet_eq` for `assert_eq`); every nominal field
             // must carry the same fact to derive it (MIRRust emit_type_def).
-            if row.name == "Equatable" && derives_allowed && !derives.contains("PartialEq") && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "PartialEq") -> &derives.push("PartialEq")
+            if derive_name == "Equatable" && derives_allowed && !derives.contains("PartialEq") && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "PartialEq") -> &derives.push("PartialEq")
             next
         }
-        native_name := jet_rust_emit_native_rust_derive_name_for_id(trait_id)
-        if native_name == None {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "only canonical native Rust derive IDs may omit a checked trait declaration", Val(definition.span))
-            next
-        }
-        name :: native_name ?? next
+        name :: derive_name
         if name == "Clone" && !clone_capable && !clone_user_impl {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
         }
@@ -1346,7 +1428,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     }
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
-    jet_rust_emit_layout_attributes(definition, &lines)
+    jet_rust_emit_layout_attributes(&ctx, definition, &lines)
     jet_rust_emit_type_derive_lines(&ctx, definition, &lines)
     visibility :: if {
         definition.public -> MIRVisibility.Public
@@ -1388,7 +1470,8 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
                         // visibility; a Rust qualifier there is E0449.
                         loop field in fields {
                             boxed := false
-                            loop edge in definition.boxed_edges { if edge == "{variant.name}.{field.name}" -> boxed = true }
+                            boxed_key :: "{variant.name}.{field.name}"
+                            loop edge in definition.boxed_edges { if edge == boxed_key -> boxed = true }
                             rust_type :: jet_rust_emit_type(&ctx, field.ty)
                             ty :: if boxed -> "Box<{rust_type}>" else -> rust_type
                             &lines.push("        {jet_rust_emit_field_name(&ctx, field.id)}: {ty},")

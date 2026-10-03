@@ -47,7 +47,7 @@ fn sema_plugin_handle_identity(ty: Type, environment: SemaScopeEnvironment) -> S
     graph :: graph_option ?? return None
     // A source declaration named Plugin is never the compiler-owned loader
     // handle, even if it happens to use the same type application spelling.
-    if sema_type_resolve_nominal(graph, resolved, environment.module_identity) != None -> return None
+    if sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) != None -> return None
     Val(value)
 }
 
@@ -56,10 +56,8 @@ fn sema_plugin_forbidden_component_name(name: String) -> Bool Never! {
 }
 
 fn sema_plugin_checked_type_definition(environment: SemaScopeEnvironment, nominal: SemaRegistrationNominal) -> TTypeDef? {
-    loop definition in environment.checked_types {
-        if definition.module_identity == nominal.symbol.module_name && definition.name == nominal.symbol.name -> return Val(definition)
-    }
-    None
+    row :: sema_scope_checked_type_row(environment, nominal.symbol.module_name, nominal.symbol.name) ?? return None
+    Val(environment.checked_types[row])
 }
 
 fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, ty: Type, seen: [String]) -> MIRComponentTypeDescriptor? {
@@ -80,7 +78,8 @@ fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: S
         .Named(name) | .Apply(name, _) -> {
             if sema_plugin_forbidden_component_name(name) -> return None
             if sema_type_bound_satisfied(graph, ty, "Encode", environment.module_identity) != (Val(true)) || sema_type_bound_satisfied(graph, ty, "Decode", environment.module_identity) != (Val(true)) -> return None
-            nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? return None
+            nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             definition :: sema_plugin_checked_type_definition(environment, nominal) ?? return None
             type_args := if ty == {.Apply(_, args) -> args else -> [Type]{}}
             if type_args.len() != definition.generic_params.len() -> return None

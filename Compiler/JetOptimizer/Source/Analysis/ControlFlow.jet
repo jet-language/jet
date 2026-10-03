@@ -165,18 +165,31 @@ fn mir_pass_reachable(function: MIRFunction) -> [MIRBlockID] Never! {
 }
 
 // Block-ordered, deduplicated predecessor ids keyed by target id, from one
-// terminator walk.
+// terminator walk. Buckets grow in place and land in the map once (Rust
+// `entry(target).or_default().push`); `edges` keeps each target/source pair
+// once.
+// Rust: crates/jet-foundation/src/MIROptimization.rs::predecessor_map
 fn mir_pass_predecessor_map(function: MIRFunction) -> [U64:[MIRBlockID]] Never! {
-    predecessors := [U64:[MIRBlockID]]{}
+    slots := [U64:Int]{}
+    targets := [U64]{}
+    buckets := [[MIRBlockID]]{}
+    edges := [String:Bool]{}
     loop block in function.blocks {
         loop target in mir_terminator_targets(block.terminator) {
-            sources := predecessors.get(target.value) ?? [MIRBlockID]{}
-            if !mir_pass_block_id_seen(sources, block.id) {
-                &sources.push(block.id)
-                &predecessors.add(target.value, sources).drop("the list replaces the prior list")
+            edge :: "{target.value}:{block.id.value}"
+            if edges.get(edge) != None -> next
+            edges[edge] = true
+            if slots.get(target.value) == .Val(slot) {
+                &buckets[slot].push(block.id)
+            } else {
+                slots[target.value] = buckets.len()
+                &targets.push(target.value)
+                &buckets.push([MIRBlockID]{block.id})
             }
         }
     }
+    predecessors := [U64:[MIRBlockID]]{}
+    loop slot in 0..<buckets.len() -> &predecessors.add(targets[slot], buckets[slot]).drop("each target has one bucket")
     predecessors
 }
 

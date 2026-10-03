@@ -23,14 +23,13 @@ fn sema_serde_named_leaf(name: String) -> String Never! {
 fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -> TTypeDef? {
     if environment.registration_graph == .Val(graph) {
         resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
-        loop definition in environment.checked_types {
-            if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name -> return Val(definition)
-        }
-        return None
+        row :: sema_scope_checked_type_row(environment, resolved.target_module_identity, resolved.symbol.name) ?? return None
+        return Val(environment.checked_types[row])
     }
     leaf := sema_serde_named_leaf(name)
     loop definition in environment.checked_types {
-        if definition.key == name || (definition.name == leaf && (name == leaf || name == "{definition.module_identity}::{leaf}")) -> return Val(definition)
+        qualified :: "{definition.module_identity}::{leaf}"
+        if definition.key == name || (definition.name == leaf && (name == leaf || name == qualified)) -> return Val(definition)
     }
     None
 }
@@ -148,10 +147,8 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, di
     definition :: sema_serde_type_definition(environment, name) ?? return true
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return true
-    loop module_row in graph.modules {
-        if module_row.module_identity == definition.module_identity -> return module_row.module_name == "core.data" || module_row.module_name == "core.encoding"
-    }
-    false
+    module_index :: sema_registration_module_index(graph, definition.module_identity) ?? return false
+    graph.modules[module_index].module_name == "core.data" || graph.modules[module_index].module_name == "core.encoding"
 }
 
 pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {

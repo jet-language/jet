@@ -334,6 +334,15 @@ pub struct SemaScopeEnvironment {
     pub source_origin: SemaSourceOrigin
     pub source_segments: [SemaSourceSegment]
     pub checked_types: [TTypeDef]
+    // Rust `Checker::types` (keyed registry): `checked_types` rows by
+    // "{module_identity}::{name}" (first row), and every row of a bare name
+    // in order (`checked_type_name_slots` -> `checked_type_name_rows`).
+    pub checked_type_rows: [String:Int]{[String:Int]{}}
+    pub checked_type_name_slots: [String:Int]{[String:Int]{}}
+    pub checked_type_name_rows: [[Int]]{[[Int]]{}}
+    // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
+    // key -> its boxed recursive-layout keys, computed once per environment.
+    pub boxed_edges: [String:[String]]{[String:[String]]{}}
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
     pub comptime_body_values: [SemaComptimeBodyValue]
@@ -516,6 +525,21 @@ pub struct SemaScopeHardwareFacts {
 // The environment owns the registration graph it is given: callers hand over
 // one copy rather than a read value the constructor would copy again.
 pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+    rows := [String:Int]{}
+    name_slots := [String:Int]{}
+    name_rows := [[Int]]{}
+    loop (index, definition) in checked_types {
+        key :: "{definition.module_identity}::{definition.name}"
+        if rows.get(key) == None -> rows[key] = index
+        if name_slots.get(definition.name) == .Val(slot) {
+            &name_rows[slot].push(index)
+        } else {
+            name_slots[definition.name] = name_rows.len()
+            &name_rows.push([Int]{index})
+        }
+    }
+    boxed_edges := [String:[String]]{}
+    if graph == .Val(value) -> boxed_edges = sema_checked_program_boxed_edges(value)
     SemaScopeEnvironment{
         registration_graph: graph,
         module_identity: module_identity,
@@ -525,10 +549,25 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
         source_origin: source_origin,
         source_segments: source_segments,
         checked_types: checked_types,
+        checked_type_rows: rows,
+        checked_type_name_slots: name_slots,
+        checked_type_name_rows: name_rows,
+        boxed_edges: boxed_edges,
         declarations: declarations,
         generic_params: [TGenericParam]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
     }
+}
+
+// The first checked declaration of `name` owned by `module_identity`.
+pub fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, module_identity: String, name: String) -> Int? {
+    environment.checked_type_rows.get("{module_identity}::{name}")
+}
+
+// Every checked declaration row named `name`, in declaration order.
+pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, name: String) -> [Int] {
+    slot :: environment.checked_type_name_slots.get(name) ?? return [Int]{}
+    environment.checked_type_name_rows[slot]
 }
 
 // One environment serves every module of a graph pass: the registration
@@ -549,22 +588,39 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
     environment.function_name = ""
 }
 
+// A comptime probe checks one expression or function of `module_identity`
+// against the environment's own graph, so one environment serves every
+// probe of a pass instead of a graph copy per probe. The module's identity
+// and source facts replace the previous target's; every other per-module or
+// per-function fact starts empty, as in a newly built probe environment.
+// False when the graph has no such module.
+pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
+    if environment.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        environment.module_identity = graph.modules[module_index].module_identity
+        environment.package_identity = graph.modules[module_index].package_identity
+        environment.module_name = graph.modules[module_index].module_name
+        environment.source_file = graph.modules[module_index].source_file
+        environment.source_origin = graph.modules[module_index].source_origin
+        environment.source_segments = graph.modules[module_index].source_segments
+        environment.declarations = [SemaScopeDeclaration]{}
+        environment.generic_params = [TGenericParam]{}
+        environment.comptime_body_values = comptime_body_values
+        environment.else_arms = [ElseArmSpan]{}
+        environment.debug_sites = [DebugTraceSite]{}
+        environment.function_name = ""
+        return true
+    }
+    false
+}
+
 pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolID, edge: String) -> Bool Never! {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return false
-    loop module_row in graph.modules {
-        loop nominal in module_row.nominals {
-            if nominal.symbol.id.key == owner.key {
-                loop checked in environment.checked_types {
-                    if checked.module_identity == module_row.module_identity && checked.name == nominal.symbol.name -> return sema_checked_type_has_boxed_edge(checked, edge)
-                }
-                definition :: sema_registration_nominal_source_item(nominal.source) ?? return false
-                checked_edges := sema_checked_boxed_edges(graph, module_row, definition)
-                loop checked_edge in checked_edges {
-                    if checked_edge == edge -> return true
-                }
-                return false
-            }
+    if environment.registration_graph == .Val(graph) {
+        row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
+        module_identity :: graph.modules[row.module_index].module_identity
+        if sema_scope_checked_type_row(environment, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(environment.checked_types[checked_row], edge)
+        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(definition) {
+            return sema_checked_boxed_edges(graph, environment.boxed_edges, module_identity, definition).contains(edge)
         }
     }
     false
@@ -1145,7 +1201,8 @@ pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> B
 }
 
 pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool Never! {
-    nominal :: sema_registration_compiler_builtin_nominal(graph, "Err") ?? return true
+    builtin :: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
+    nominal :: graph.modules[builtin.module_index].nominals[builtin.row]
     loop binding in table.bindings {
         if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id.key == nominal.symbol.id.key -> return true
     }

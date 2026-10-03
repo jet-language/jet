@@ -162,9 +162,10 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment) -> B
     name :: sema_type_graph_base_name(ty) ?? return false
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
     if resolved.symbol.kind != SymbolKind.Type -> return false
-    item :: resolved.declaration ?? return false
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-    sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
+    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
+    false
 }
 
 // The `file.jet:LINE` site of a trace (Rust `check_debug_trace`).

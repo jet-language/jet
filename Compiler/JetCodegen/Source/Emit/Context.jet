@@ -205,12 +205,19 @@ pub struct JetRustEmitContext {
     // (jet_rust_emit_move_facts): values read once in their own block, and
     // moved enum subjects whose payload bindings take them apart once.
     pub move_facts: JetRustEmitMoveFacts
+    // #4318 reference bindings of the function being printed
+    // (jet_rust_emit_ref_bindings): binding locals held as `Option<&T>`.
+    pub ref_bindings: JetRustEmitRefBindings
     // Lookup rows of the function being printed (jet_rust_emit_body_index).
     pub body_index: JetRustEmitBodyIndex
     // Ratio-use classification of the last queried function; rebuilt when
     // its function id changes (jet_rust_emit_is_unit_ratio_parameter).
     pub unit_ratio_function: MIRFunctionID?
     pub unit_ratio_parameters: [U64:Bool]
+    // Module id keys of the selected artifact plan (MIRRust module_selected),
+    // set by jet_rust_emit_program; every module is selected without a plan.
+    pub selected_modules: [String:Bool]
+    pub all_modules_selected: Bool
 }
 
 pub struct JetRustEmitPayloadMember {
@@ -230,6 +237,25 @@ fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
     JetRustEmitMoveFacts{single_use: [String:Bool]{}, payload_groups: [String:[JetRustEmitPayloadMember]]{}, payload_subjects: [String:String]{}}
 }
 
+// MIRRust RefBindings (#4318): binding locals stored as a shared reference to
+// the value they bind, keyed by local id value, and the reads whose only use
+// binds one of them (their write borrows in place; they have no slot).
+pub struct JetRustEmitRefBindings {
+    pub locals: [U64:Bool]
+    pub payloads: [U64:Bool]
+}
+
+fn jet_rust_emit_empty_ref_bindings() -> JetRustEmitRefBindings Never! {
+    JetRustEmitRefBindings{locals: [U64:Bool]{}, payloads: [U64:Bool]{}}
+}
+
+// One binding write of a reference binding candidate: the bound read and the
+// reference binding its stable place is rooted at (None: a read parameter).
+struct JetRustEmitRefSource {
+    value: MIRValueID
+    root: MIRLocalID?
+}
+
 // Lookup rows of one function body (MIRRust FunctionIndex), keyed by id
 // value; the first row per id wins, as a linear scan would. Per-value
 // queries read them instead of rescanning the body.
@@ -247,6 +273,45 @@ pub struct JetRustEmitBodyIndex {
     // MIRRust shared_capture_locals: locals held in one shared cell because a
     // non-Send closure writes them (jet_rust_emit_shared_capture_locals).
     pub shared_locals: [U64:Bool]
+    // Every use of each value in body order, one row per user (MIRRust
+    // FunctionIndex::uses): `use_slots` maps a value to its row list.
+    pub use_slots: [U64:Int]{[U64:Int]{}}
+    pub uses: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
+    // Position of each place's function.places row.
+    pub place_rows: [U64:Int]{[U64:Int]{}}
+    // Predecessor block positions of each block, along terminator edges.
+    pub predecessors: [[Int]]{[[Int]]{}}
+    // MIRRust local_writes / escaped_locals: per local, the instructions
+    // that may change or release it, and the locals place-based tracking
+    // cannot follow.
+    pub write_slots: [U64:Int]{[U64:Int]{}}
+    pub local_writes: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
+    pub escaped_locals: [U64:Bool]{[U64:Bool]{}}
+    // Temporary values whose own slot some instruction reads through a
+    // projecting place (jet_rust_emit_inspected_only).
+    pub slot_read_values: [U64:Bool]{[U64:Bool]{}}
+    // Places some instruction moves out of (MovePlace or a Move address).
+    pub moved_places: [U64:Bool]{[U64:Bool]{}}
+    // Partial moves per root place base (jet_rust_emit_place_base_identity):
+    // the field path of each move of a field place, in body order.
+    pub partial_slots: [String:Int]{[String:Int]{}}
+    pub partial_paths: [[[MIRFieldID]]]{[[[MIRFieldID]]]{}}
+    // MIRRust FunctionIndex::stable_reads: jet_rust_emit_stable_local_read
+    // answers per read value, computed on first query.
+    pub stable_reads: [U64:Bool]{[U64:Bool]{}}
+    // MIRRust FunctionIndex scopes / test_members: the position of each
+    // scope's function.scopes row, and the block and instruction position of
+    // the first ScopeEnter of each scope that carries a test member.
+    pub scope_rows: [U64:Int]{[U64:Int]{}}
+    pub test_member_blocks: [U64:Int]{[U64:Int]{}}
+    pub test_member_positions: [U64:Int]{[U64:Int]{}}
+}
+
+// One use of a value: its block position and instruction position, or -1
+// for the block's terminator.
+pub struct JetRustEmitUse {
+    pub block: Int
+    pub instruction: Int
 }
 
 fn jet_rust_emit_empty_body_index() -> JetRustEmitBodyIndex Never! {
@@ -886,9 +951,12 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         derive_capability_cycle_floor: JET_RUST_EMIT_NO_CYCLE_FLOOR,
         skipped_methods: [String:Bool]{},
         move_facts: jet_rust_emit_empty_move_facts(),
+        ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
+        selected_modules: [String:Bool]{},
+        all_modules_selected: true,
     }
     if ctx.program.schema_version != MIR_SCHEMA_VERSION {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR schema is not supported by the Jet Rust emitter", "rebuild the emitter and lowering together so both sides use the same MIR schema", None)

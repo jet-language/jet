@@ -124,7 +124,7 @@ fn jet_rust_emit_switch_coverage(ctx: &JetRustEmitContext, function: MIRFunction
         &items.push(jet_rust_emit_cfg_edge(block_id, otherwise, indent))
         return
     }
-    &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_read(arms[arm].condition)} {{"))
+    &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_owned(ctx, function, arms[arm].condition)} {{"))
     &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, true)}"))
     &items.push(jet_rust_emit_cfg_edge(block_id, arms[arm].target, "{indent}    "))
     &items.push(jet_rust_emit_cfg_line("{indent}}} else {{"))

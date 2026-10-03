@@ -1691,17 +1691,13 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_from_source(
             },
             @p.JetEvalHostTypeNode.Tuple@(fields) => Node::Tuple(field_shapes(fields, "tuple field type node")?),
             @p.JetEvalHostTypeNode.Struct@(type_id, type_name, args, fields) => Node::Struct {
-                type_id: ::jet_foundation::MIR::MirTypeId(
-                    __jet_bootstrap_source_u64(&type_id.@f.MIRTypeID.value@, "host nominal type ID")?,
-                ),
+                type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
                 type_name: type_name.clone(),
                 args: indices(args, "nominal argument type node")?,
                 fields: field_shapes(fields, "record field type node")?,
             },
             @p.JetEvalHostTypeNode.Enum@(type_id, type_name, args, variants) => Node::Enum {
-                type_id: ::jet_foundation::MIR::MirTypeId(
-                    __jet_bootstrap_source_u64(&type_id.@f.MIRTypeID.value@, "host nominal type ID")?,
-                ),
+                type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
                 type_name: type_name.clone(),
                 args: indices(args, "nominal argument type node")?,
                 variants: variants.iter().map(|variant| {
@@ -1717,9 +1713,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_from_source(
                 }).collect::<Result<Vec<_>, String>>()?,
             },
             @p.JetEvalHostTypeNode.Closure@(ty, function, captures) => Node::Closure {
-                function: ::jet_foundation::MIR::MirFunctionId(
-                    __jet_bootstrap_source_u64(&function.@f.MIRFunctionID.value@, "host closure function ID")?,
-                ),
+                function: ::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@),
                 captures: indices(captures, "closure capture type node")?,
                 ty: __jet_bootstrap_type_to_host(ty)?,
             },

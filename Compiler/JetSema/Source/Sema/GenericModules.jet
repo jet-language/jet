@@ -120,7 +120,7 @@ fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegist
     enums :: sema_genmod_enums(items, [GenericModuleDef]{})
     values :: sema_genmod_const_values(items, [String:Type]{}, enums)
     templates := [SemaGenericModuleTemplate]{}
-    module_index :: sema_genmod_module_index(graph, module_row.module_identity) ?? return
+    module_index :: sema_registration_module_index(graph, module_row.module_identity) ?? return
     loop template in templates_by_module[module_index] -> &templates.push(template)
     // `use defs.box` brings a template in under its local name. A private
     // template was refused by import registration (E0609); its aliases stay
@@ -128,7 +128,7 @@ fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegist
     denied := [String:Bool]{}
     loop import in module_row.imports {
         if import.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            target_index :: sema_genmod_module_index(graph, import.target_module_identity) ?? next
+            target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? next
             loop entry in imported {
                 source :: sema_genmod_find_template(templates_by_module[target_index], entry.original) ?? next
                 bound_local := String?{None}
@@ -157,13 +157,6 @@ fn sema_genmod_import_local(entry: ImportedItem) -> String {
     if entry.alias == .Val(alias) -> return alias
     parts :: entry.original.split(".").to_list()
     parts[parts.len() - 1]
-}
-
-fn sema_genmod_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
-    loop (index, module_row) in graph.modules {
-        if module_row.module_identity == identity -> return Val(index)
-    }
-    None
 }
 
 // The last template bound to a name wins, like Rust's template map where an
@@ -371,7 +364,7 @@ fn sema_genmod_arg_span(arg: ModuleArg) -> Span {
 fn sema_genmod_implements(graph: SemaRegistrationGraph, module_identity: String, ty: Type, bound: String) -> Bool {
     resolved_bound :: sema_registration_lookup_name(graph, module_identity, bound) ?? return true
     if resolved_bound.symbol.kind != SymbolKind.Trait -> return true
-    if sema_type_resolve_nominal(graph, ty, module_identity) == None -> return false
+    if sema_type_resolve_nominal_row(graph, ty, module_identity) == None -> return false
     sema_type_bound_satisfied(graph, ty, bound, module_identity) ?? true
 }
 

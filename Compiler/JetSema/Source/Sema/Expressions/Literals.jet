@@ -769,15 +769,13 @@ fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnviron
     name :: sema_type_graph_base_name(ty) ?? return false
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
     if resolved.symbol.kind != SymbolKind.Type -> return false
-    loop definition in environment.checked_types {
-        if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name {
-            if sema_serde_has_name(definition.derives, "Printable") || sema_serde_has_name(definition.derives, "Display") -> return true
-            break
-        }
+    if sema_scope_checked_type_row(environment, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+        if sema_serde_has_name(environment.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(environment.checked_types[checked_row].derives, "Display") -> return true
     }
-    item :: resolved.declaration ?? return false
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-    sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable
+    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable
+    false
 }
 
 // D-DISPLAYDBG1 (Rust `is_displayable`): bare `{value}` needs a value whose

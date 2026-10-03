@@ -39,13 +39,9 @@ fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, scopes:
 fn sema_must_use_method(type_name: String, method: String, environment: SemaScopeEnvironment) -> Bool {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
-            owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
-            if owner_name != type_name -> next
-            loop function in nominal.methods {
-                if function.symbol.name == method && function.declaration.is_must_use -> return true
-            }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
+        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+            if function.symbol.name == method && function.declaration.is_must_use -> return true
         }
     }
     false

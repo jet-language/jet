@@ -1437,8 +1437,8 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?,
 
 fn sema_stmt_for_in_columnar(environment: SemaScopeEnvironment, item_type: Type) -> Bool Never! {
     item_name :: sema_stmt_for_in_layout_type_name(item_type) ?? return false
-    loop definition in environment.checked_types {
-        if definition.name == item_name && definition.layout == (Val(TStructLayout.Columnar)) -> return true
+    loop row in sema_scope_checked_type_name_rows(environment, item_name) {
+        if environment.checked_types[row].layout == (Val(TStructLayout.Columnar)) -> return true
     }
     false
 }
@@ -1567,7 +1567,8 @@ fn sema_stmt_call_return_views_for_expr(expr: Expr, context: SemaCheckContext) -
             index := 0
             loop index < source.len() {
                 fact :: source[index]
-                if fact.slot.len() > 0 && (fact.slot[0] == member || fact.slot[0] == ".{member}") {
+                dotted :: ".{member}"
+                if fact.slot.len() > 0 && (fact.slot[0] == member || fact.slot[0] == dotted) {
                     slot := [String]{}
                     slot_index := 1
                     loop slot_index < fact.slot.len() {
@@ -1610,8 +1611,9 @@ fn sema_stmt_local_view_facts_for_expr(expr: Expr, scopes: SemaScopeTable, state
         .Field(base, member, _) | .OptField(base, member, _, _, _) -> {
             source := sema_stmt_local_view_facts_for_expr(base, scopes, &state, context)
             result := [SemaCallReturnViewFact]{}
+            dotted :: ".{member}"
             loop fact in source {
-                if fact.slot.len() == 0 || (fact.slot[0] != member && fact.slot[0] != ".{member}") -> next
+                if fact.slot.len() == 0 || (fact.slot[0] != member && fact.slot[0] != dotted) -> next
                 slot := [String]{}
                 index := 1
                 loop index < fact.slot.len() {
@@ -1912,7 +1914,8 @@ fn sema_stmt_type_contains_shared_guard(ty: Type, graph: SemaRegistrationGraph?,
         else -> return false
     }
     if graph == .Val(registered) {
-        nominal :: sema_pattern_nominal(registered, module_identity, resolved) ?? return false
+        nominal_row :: sema_pattern_nominal_row(registered, module_identity, resolved) ?? return false
+        nominal :: registered.modules[nominal_row.module_index].nominals[nominal_row.row]
         key := nominal.symbol.id.key
         if seen.contains(key) -> return false
         &seen.push(key)
@@ -2460,15 +2463,24 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             span = pattern_span
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return None
-            actual := sema_pattern_nominal(graph, environment.module_identity, ty)
-            if actual == None || (actual ?? panic("missing destructure nominal")).kind != SemaRegistrationNominalKind.Struct {
+            actual :: sema_pattern_nominal_row(graph, environment.module_identity, ty)
+            actual_is_struct :: if actual == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Struct
+                .None -> false
+            }
+            if !actual_is_struct {
                 &diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {type_name(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
                 sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
                 return None
             }
-            nominal :: actual ?? return None
-            named := sema_pattern_nominal(graph, environment.module_identity, Type.Named{name: written_type})
-            if named == None || (named ?? nominal).symbol.id.key != nominal.symbol.id.key {
+            nominal_row :: actual ?? return None
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
+            named_matches :: if named == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
+                .None -> false
+            }
+            if !named_matches {
                 &diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
                 sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
                 return None
@@ -2476,9 +2488,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             generic_names := (loop parameter in nominal.generic_params -> parameter.name)
             arguments := sema_pattern_subject_args(ty)
             owner_package := ""
-            loop graph_module in graph.modules {
-                if graph_module.module_identity == nominal.symbol.module_name -> owner_package = graph_module.package_identity
-            }
+            if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
             loop selected_field in selected {
                 field_type := Type?{None}
                 loop field in nominal.fields {
@@ -3021,8 +3031,8 @@ fn sema_stmt_transaction_collect_roots(statements: [Stmt], roots: &[String]) Nev
 fn sema_stmt_transaction_impl_matches_nominal(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool Never! {
     if implementation.target_identity_key == nominal.identity_key -> return true
     if implementation.target_module_identity == (Val(nominal.symbol.module_name)) && implementation.target_type_name == nominal.symbol.name -> return true
-    resolved :: sema_type_resolve_nominal(graph, implementation.target_type, implementation.source_module_identity) ?? return false
-    resolved.symbol.id.key == nominal.symbol.id.key
+    row :: sema_type_resolve_nominal_row(graph, implementation.target_type, implementation.source_module_identity) ?? return false
+    graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
 }
 
 fn sema_stmt_transaction_rollback_trait_symbol(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Symbol? {
@@ -3039,7 +3049,8 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
     }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? return None
+    nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     loop graph_module in graph.modules {
         loop implementation in graph_module.impls {
             trait_matches := implementation.trait_name == (Val("Rollback"))

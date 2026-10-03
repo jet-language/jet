@@ -312,7 +312,7 @@ pub(crate) fn append_runtime_mir_codec(
     emit_binary_overflow_derivation(out, symbols)?;
     writeln!(
         out,
-        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_to_host(\n    value: &{program_source},\n) -> Result<::jet_foundation::MIR::MirProgram, String> {{\n    __jet_bootstrap_with_trap_routes(__jet_bootstrap_source_trap_routes(value)?, || __jet_bootstrap_mir_MIRProgram_to_host(value))\n}}\n"
+        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_to_host(\n    value: &{program_source},\n) -> Result<::jet_foundation::MIR::MirProgram, String> {{\n    __jet_bootstrap_with_trap_routes(__jet_bootstrap_source_trap_routes(value), || __jet_bootstrap_mir_MIRProgram_to_host(value))\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     if !matches!(program.body, Body::Struct(_)) {
@@ -501,7 +501,7 @@ fn emit_id_from_host_converter(
     let host_path = host_type_path(name, host_by_name);
     writeln!(
         out,
-        "fn __jet_bootstrap_mir_{name}_from_host(value: &{host_path}) -> Result<{source}, String> {{\n    let raw = value.0;\n    if raw == 0 {{ return Err(\"MIR identity must be non-zero\".to_string()); }}\n    Ok({source} {{ {value_field}: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(raw)) }})\n}}\n"
+        "fn __jet_bootstrap_mir_{name}_from_host(value: &{host_path}) -> Result<{source}, String> {{\n    let raw = value.0;\n    if raw == 0 {{ return Err(\"MIR identity must be non-zero\".to_string()); }}\n    Ok({source} {{ {value_field}: raw }})\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
@@ -749,7 +749,7 @@ fn emit_id_converter(
     let host_path = host_type_path(name, host_by_name);
     writeln!(
         out,
-        "fn __jet_bootstrap_mir_{name}_to_host(value: &{source}) -> Result<{host_path}, String> {{\n    let raw = value.{value_field}.to_string_rep().parse::<u64>().map_err(|_| \"MIR identity is not an unsigned integer\".to_string())?;\n    if raw == 0 {{ return Err(\"MIR identity must be non-zero\".to_string()); }}\n    Ok({host_path}(raw))\n}}\n"
+        "fn __jet_bootstrap_mir_{name}_to_host(value: &{source}) -> Result<{host_path}, String> {{\n    let raw = value.{value_field};\n    if raw == 0 {{ return Err(\"MIR identity must be non-zero\".to_string()); }}\n    Ok({host_path}(raw))\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
@@ -2032,7 +2032,7 @@ fn emit_binary_overflow_derivation(
          fn __jet_bootstrap_fixed_trap_member(member: &str) -> bool {{\n    member.split_once(\".trap.\").is_some_and(|(width, op)| matches!(width, \"i8\" | \"i16\" | \"i32\" | \"i64\" | \"u8\" | \"u16\" | \"u32\" | \"u64\") && matches!(op, \"add\" | \"sub\" | \"mul\" | \"div\" | \"pow\" | \"shl\" | \"shr\"))\n}}\n\
          fn __jet_bootstrap_with_trap_routes<T>(routes: ::std::collections::BTreeSet<u64>, convert: impl FnOnce() -> Result<T, String>) -> Result<T, String> {{\n    let previous = __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.replace(Some(routes)));\n    let result = convert();\n    __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| *cell.borrow_mut() = previous);\n    result\n}}\n\
          fn __jet_bootstrap_binary_traps(dispatch: &::jet_foundation::MIR::MirBinaryDispatch) -> Result<bool, String> {{\n    match dispatch {{\n        ::jet_foundation::MIR::MirBinaryDispatch::Primitive => Ok(false),\n        ::jet_foundation::MIR::MirBinaryDispatch::Prelude {{ call, .. }} => __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.borrow().as_ref().map(|routes| routes.contains(&call.0))).ok_or_else(|| \"MIR Binary overflow derives from the program's Prelude routes; convert the whole program\".to_string()),\n    }}\n}}\n\
-         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> Result<::std::collections::BTreeSet<u64>, String> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}.to_string_rep().parse::<u64>().map_err(|_| \"MIR identity is not an unsigned integer\".to_string())).collect()\n}}\n\
+         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n\
          fn __jet_bootstrap_host_trap_routes(value: &::jet_foundation::MIR::MirProgram) -> ::std::collections::BTreeSet<u64> {{\n    value.prelude_calls.iter().filter(|row| matches!(row.family, ::jet_foundation::MIR::MirPreludeFamily::Overflow) && __jet_bootstrap_fixed_trap_member(&row.member)).map(|row| row.id.0).collect()\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))

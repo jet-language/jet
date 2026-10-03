@@ -113,21 +113,23 @@ pub struct TargetLayoutNameResolution {
 
 // The engine owns the selected target and the complete source-item registry.
 // The registry is required for nominal field/payload resolution; the target is
-// required explicitly so sema cannot infer a host default.
+// required explicitly so sema cannot infer a host default. The registry's
+// name indexes (first row per name) are built once with the engine, not per
+// query (Rust `TargetLayoutEngine::new`).
 pub struct TargetLayoutEngine {
     pub target: JetTargetLayout
     pub items: [Item]
     pub qualified_items: [TargetLayoutQualifiedItem]
     pub name_resolutions: [TargetLayoutNameResolution]
+    pub item_positions: [String:Int]
+    pub qualified_positions: [String:Int]
+    pub resolution_positions: [String:Int]
 }
 
 // The target/profile and registry are fixed for this query. Completed byte
 // facts are keyed by registry row plus generic arguments, never by an active
 // recursion path. Cycle-dependent unknown results must not enter the memo.
 struct JetTargetLayoutQuery {
-    item_positions: [String:Int]
-    qualified_positions: [String:Int]
-    resolution_positions: [String:Int]
     active: [String:Bool]
     cycle_hits: Int
     completed_positions: [String:Int]
@@ -139,30 +141,13 @@ fn jet_target_layout_resolution_key(owner: String, source: String) -> String Nev
     "{owner.bytes().len()}:{owner}{source}"
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::new
-fn jet_target_layout_query(engine: TargetLayoutEngine) -> JetTargetLayoutQuery Never! {
-    query := JetTargetLayoutQuery{
-        item_positions: [String:Int]{},
-        qualified_positions: [String:Int]{},
-        resolution_positions: [String:Int]{},
+fn jet_target_layout_query() -> JetTargetLayoutQuery Never! {
+    JetTargetLayoutQuery{
         active: [String:Bool]{},
         cycle_hits: 0,
         completed_positions: [String:Int]{},
         completed: [ByteLayout?]{},
     }
-    loop position in 0..<engine.items.len() {
-        name :: jet_target_layout_item_name(engine.items[position])
-        if query.item_positions.get(name) == None -> query.item_positions[name] = position
-    }
-    loop position in 0..<engine.qualified_items.len() {
-        name :: engine.qualified_items[position].qualified_name
-        if query.qualified_positions.get(name) == None -> query.qualified_positions[name] = position
-    }
-    loop position in 0..<engine.name_resolutions.len() {
-        key :: jet_target_layout_resolution_key(engine.name_resolutions[position].owner_qualified_name, engine.name_resolutions[position].source_name)
-        if query.resolution_positions.get(key) == None -> query.resolution_positions[key] = position
-    }
-    query
 }
 
 pub fn jet_target_layout_support_unknown() -> MIRLayoutSupportFacts Never! {
@@ -450,8 +435,24 @@ pub fn jet_target_layout_engine(items: [Item], target: JetTargetLayout) -> Targe
     jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, target)
 }
 
+// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::new
 pub fn jet_target_layout_engine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
-    TargetLayoutEngine{target: target, items: items, qualified_items: qualified_items, name_resolutions: name_resolutions}
+    item_positions := [String:Int]{}
+    loop position in 0..<items.len() {
+        name :: jet_target_layout_item_name(items[position])
+        if item_positions.get(name) == None -> item_positions[name] = position
+    }
+    qualified_positions := [String:Int]{}
+    loop position in 0..<qualified_items.len() {
+        name :: qualified_items[position].qualified_name
+        if qualified_positions.get(name) == None -> qualified_positions[name] = position
+    }
+    resolution_positions := [String:Int]{}
+    loop position in 0..<name_resolutions.len() {
+        key :: jet_target_layout_resolution_key(name_resolutions[position].owner_qualified_name, name_resolutions[position].source_name)
+        if resolution_positions.get(key) == None -> resolution_positions[key] = position
+    }
+    TargetLayoutEngine{target: target, items: items, qualified_items: qualified_items, name_resolutions: name_resolutions, item_positions: item_positions, qualified_positions: qualified_positions, resolution_positions: resolution_positions}
 }
 
 pub fn jet_target_layout_engine_target(engine: TargetLayoutEngine) -> JetTargetLayout Never! {
@@ -460,13 +461,13 @@ pub fn jet_target_layout_engine_target(engine: TargetLayoutEngine) -> JetTargetL
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
 pub fn jet_target_layout_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query(engine)
+    query := jet_target_layout_query()
     jet_target_layout_struct_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
 pub fn jet_target_layout_struct_facts_in_module(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
-    query := jet_target_layout_query(engine)
+    query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, &query)
 }
@@ -535,20 +536,20 @@ pub fn jet_target_layout_mir_c_tag(enum_tag: CEnumTag) -> MIRCEnumTag Never! {
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
 pub fn jet_target_layout_enum_facts(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query(engine)
+    query := jet_target_layout_query()
     jet_target_layout_enum_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
 pub fn jet_target_layout_enum_facts_in_module(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
-    query := jet_target_layout_query(engine)
+    query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::type_layout_inner
 pub fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
-    query := jet_target_layout_query(engine)
+    query := jet_target_layout_query()
     jet_target_layout_type_inner(engine, ty, "", &query)
 }
 
@@ -736,9 +737,9 @@ fn jet_target_layout_atomic_layout(engine: TargetLayoutEngine, args: [Type]) -> 
 }
 
 // Rust: none (Jet-only pass)
-fn jet_target_layout_resolved_name(engine: TargetLayoutEngine, owner_qualified_name: String, source_name: String, query: JetTargetLayoutQuery) -> String Never! {
+fn jet_target_layout_resolved_name(engine: TargetLayoutEngine, owner_qualified_name: String, source_name: String) -> String Never! {
     key :: jet_target_layout_resolution_key(owner_qualified_name, source_name)
-    position :: query.resolution_positions.get(key) ?? return ~source_name
+    position :: engine.resolution_positions.get(key) ?? return ~source_name
     engine.name_resolutions[position].qualified_name
 }
 
@@ -781,16 +782,16 @@ fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, args: 
     if name == "String" || name == "List" -> return jet_target_layout_pointer_layout(engine.target)
     if name == "Unit" || name == "()" -> return Val(ByteLayout{size: 0, alignment: 1, stride: 0})
 
-    resolved_name :: jet_target_layout_resolved_name(engine, owner_qualified_name, name, query)
+    resolved_name :: jet_target_layout_resolved_name(engine, owner_qualified_name, name)
     if resolved_name != name {
         if jet_target_layout_numeric_type(resolved_name) == .Val(numeric_resolved) -> return jet_target_layout_type_inner(engine, numeric_resolved, owner_qualified_name, &query)
-        position :: query.qualified_positions.get(resolved_name) ?? return None
+        position :: engine.qualified_positions.get(resolved_name) ?? return None
         return jet_target_layout_named_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, "qualified:{position}", args, &query)
     }
-    if query.item_positions.get(name) == .Val(position) {
+    if engine.item_positions.get(name) == .Val(position) {
         return jet_target_layout_named_item(engine, engine.items[position], name, "item:{position}", args, &query)
     }
-    position :: query.qualified_positions.get(name) ?? return None
+    position :: engine.qualified_positions.get(name) ?? return None
     jet_target_layout_named_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, "qualified:{position}", args, &query)
 }
 

@@ -3063,6 +3063,16 @@ struct MoveFacts {
     payload_subjects: BTreeMap<MirValueId, MirValueId>,
 }
 
+/// #4318: pattern binding locals stored as a shared reference to the payload
+/// they bind (`Option<&T>`) instead of a copy of it (`plan_ref_bindings`).
+#[derive(Default)]
+struct RefBindings {
+    locals: BTreeSet<MirLocalId>,
+    /// Payload reads whose only use binds one of `locals`: that write
+    /// borrows the payload in place and the read has no slot of its own.
+    payloads: BTreeSet<MirValueId>,
+}
+
 struct RustEmitter<'a> {
     program: &'a MirProgram,
     config: &'a MirRustConfig<'a>,
@@ -3109,6 +3119,8 @@ struct RustEmitter<'a> {
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
     move_facts: BTreeMap<MirFunctionId, MoveFacts>,
+    /// Per-function reference bindings, planned on a function's first query.
+    ref_bindings: std::cell::RefCell<HashMap<MirFunctionId, std::rc::Rc<RefBindings>>>,
     /// D-SHAPE-PLACE1=A: `(function, parameter index)` rows emitted as
     /// `&mut [T]` because a caller fills them with a range write window.
     window_params: BTreeSet<(MirFunctionId, usize)>,
@@ -3298,6 +3310,7 @@ impl<'a> RustEmitter<'a> {
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
             move_facts: BTreeMap::new(),
+            ref_bindings: std::cell::RefCell::new(HashMap::new()),
             window_params: Self::collect_window_params(program),
             source_lines: program
                 .source_files
@@ -16328,9 +16341,14 @@ impl<'a> RustEmitter<'a> {
     /// does). The place projects fields, payloads, and list indexes from a
     /// read parameter, which cannot change while the function runs, or from
     /// an owned local that nothing changes or releases between the read and
-    /// any use of the value (`stable_local_read`).
+    /// any use of the value (`stable_local_read`). #4318 §8: a transfer of
+    /// such a read (`transparent_read`) is inspected in the same place.
     fn immutable_read_place(&self, function: &MirFunction, value: MirValueId) -> Option<MirPlaceId> {
-        let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
+        let read = match self.value_definition(function, value) {
+            Some(MirOperation::ReadPlace(_)) => value,
+            _ => self.transparent_read(function, value)?,
+        };
+        let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, read) else {
             return None;
         };
         let row = self.place_row(function, *place)?;
@@ -16353,10 +16371,59 @@ impl<'a> RustEmitter<'a> {
                         .iter()
                         .any(|param| param.index == *index && param.access == MirAccess::Read)
             ),
-            MirPlaceBase::Local(local) => self.stable_local_read(function, value, *local),
+            MirPlaceBase::Local(local) => {
+                self.stable_local_read(function, read, *local)
+                    && (read == value || self.stable_local_read(function, value, *local))
+            }
             _ => false,
         };
         stable.then_some(*place)
+    }
+
+    /// #4318 §8: the place read `value` transfers when `value` is a `Move`,
+    /// or a `Copy` that is neither the programmer's `~` nor a view
+    /// materialization, of a `ReadPlace` value. Such a transfer copies nothing
+    /// a consumer that only inspects it needs: that consumer reads the place
+    /// (`immutable_read_place`), and when every consumer does, neither the
+    /// transfer nor the read is emitted.
+    fn transparent_read(&self, function: &MirFunction, value: MirValueId) -> Option<MirValueId> {
+        let read = match self.value_definition(function, value)? {
+            MirOperation::Move { value: read } => *read,
+            MirOperation::Copy { value: read, fact }
+                if !matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) =>
+            {
+                *read
+            }
+            _ => return None,
+        };
+        matches!(self.value_definition(function, read), Some(MirOperation::ReadPlace(_)))
+            .then_some(read)
+    }
+
+    /// #4318 §8: whether the transfer `value` (`transparent_read`) is never
+    /// made: every user is a variant test, payload read or primitive
+    /// comparison, which render through the read's place
+    /// (`inspected_value_reference`), or a drop, and each of them may read
+    /// that place (`direct_borrow_only`). Any other borrowed consumer would
+    /// name the transfer's slot, so it keeps the transfer.
+    fn inspected_transfer(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.transparent_read(function, value).is_some()
+            && self.value_users(function, value).into_iter().all(|user| {
+                user.is_some_and(|user| {
+                    matches!(
+                        user.operation,
+                        MirOperation::EnumIs { .. }
+                            | MirOperation::EnumPayload { .. }
+                            | MirOperation::OptionIsSome { .. }
+                            | MirOperation::OptionValue { .. }
+                            | MirOperation::ResultIsOk { .. }
+                            | MirOperation::ResultValue { .. }
+                            | MirOperation::Binary { dispatch: MirBinaryDispatch::Primitive, .. }
+                            | MirOperation::Drop { .. }
+                    )
+                })
+            })
+            && self.direct_borrow_only(function, value)
     }
 
     /// D-MEM-COPYSEM1: true when no operation that may change or release
@@ -16844,6 +16911,30 @@ impl<'a> RustEmitter<'a> {
                         .result
                         .is_some_and(|field| self.direct_borrow_only(function, field))
                 }
+                // #4318 §8: an inspected-only transfer of this read reads
+                // the place, so the read feeds nothing.
+                MirOperation::Move { value: operand } | MirOperation::Copy { value: operand, .. }
+                    if *operand == value
+                        && instruction.result.is_some_and(|transfer| {
+                            self.transparent_read(function, transfer) == Some(value)
+                        }) =>
+                {
+                    instruction
+                        .result
+                        .is_some_and(|transfer| self.inspected_transfer(function, transfer))
+                }
+                // A transfer that was never made owns nothing to release.
+                MirOperation::Drop { value: operand, kind }
+                    if *operand == value
+                        && !matches!(kind, MirDropKind::ForeignHandle)
+                        && self.transparent_read(function, value).is_some()
+                        && !matches!(
+                            self.value_type(function, value).kind(),
+                            MirTypeKind::Apply { name, args } if args.is_empty() && name.name == STM_TYPE
+                        ) =>
+                {
+                    true
+                }
                 _ => self.borrowed_operation_use(function, &instruction.operation, value),
             };
             if !borrowed {
@@ -17002,6 +17093,11 @@ impl<'a> RustEmitter<'a> {
             let (MirOperation::Move { .. }, Some(ty)) = (&instruction.operation, &instruction.ty) else {
                 continue;
             };
+            // #4318 §8: a moved stable read is inspected in its place; its
+            // payload bindings borrow or copy just the payload from there.
+            if self.immutable_read_place(function, subject).is_some() {
+                continue;
+            }
             if uses.get(&subject).map(|(count, _)| *count) != Some(rows.len()) {
                 continue;
             }
@@ -17110,6 +17206,339 @@ impl<'a> RustEmitter<'a> {
             }
             MirVariantPayload::Unit => None,
         }
+    }
+
+    /// #4318: the binding locals of `function` that may hold a shared
+    /// reference to the value they bind instead of a copy of it. Every write
+    /// of such a local binds, read once and earlier in the writing block,
+    /// either a plain enum, option or result payload of a stable place or the
+    /// stable place itself (`x :: p.f`). A stable place is rooted at a read
+    /// parameter, which nothing changes while the function runs, or at
+    /// another reference binding, whose referent is just as stable however
+    /// that binding is later rebound. Nothing else writes the local, borrows
+    /// it for writing, moves out of a projection of it, captures it or lets it
+    /// escape. Its reads then borrow the referent; a consuming move copies the
+    /// referent, as the binding did before; a whole move that only feeds a
+    /// drop releases nothing.
+    fn plan_ref_bindings(&self, function: &MirFunction) -> RefBindings {
+        let mut bindings = RefBindings::default();
+        if !function.optimization.checked_vector_facts.is_empty()
+            || function.generator.is_some()
+            || function
+                .blocks
+                .iter()
+                .any(|block| matches!(block.terminator, MirTerminator::Yield { .. }))
+        {
+            return bindings;
+        }
+        let index = self.function_index(function);
+        let mut rejected: BTreeSet<MirLocalId> = BTreeSet::new();
+        for local in &function.locals {
+            let storage = self.place_row(function, local.place).is_some_and(|place| {
+                place.base == MirPlaceBase::Local(local.id) && place.projections.is_empty()
+            });
+            if !storage
+                || local.mutable
+                || local.uninit
+                || local.comptime
+                || local.arena_view
+                || local.string_view
+                || local.gc_root
+                || allocator_view_inner(&local.ty).is_some()
+                || copy_scalar_type(&self.rust_local_type(&local.ty))
+                || self.handle_for_type(&local.ty).is_some()
+                || self.local_is_shared_capture(function, local.id)
+                || index.escaped_locals.contains(&local.id)
+                || self.partial_moves.get(&function.id).is_some_and(|roots| {
+                    roots.iter().any(|root| root.base == MirPlaceBase::Local(local.id))
+                })
+            {
+                rejected.insert(local.id);
+            }
+        }
+        // Values some place is rooted at are read through that place too.
+        let mut rooted: HashSet<MirValueId> = HashSet::new();
+        for place in &function.places {
+            match &place.base {
+                MirPlaceBase::Local(local) if place.persist_key.is_some() => {
+                    rejected.insert(*local);
+                }
+                MirPlaceBase::Temporary(value) => {
+                    rooted.insert(*value);
+                }
+                _ => {}
+            }
+        }
+        let place_local = |place: MirPlaceId| {
+            let row = self.place_row(function, place)?;
+            match row.base {
+                MirPlaceBase::Local(local) => Some((local, row.projections.is_empty())),
+                _ => None,
+            }
+        };
+        // Per local: its binding writes, each with the reference binding its
+        // source is rooted at (`None`: a read parameter).
+        let mut writes: BTreeMap<MirLocalId, Vec<(MirValueId, Option<MirLocalId>)>> = BTreeMap::new();
+        let mut allowed: BTreeSet<(MirLocalId, usize, usize)> = BTreeSet::new();
+        for (block, row) in function.blocks.iter().enumerate() {
+            for (position, instruction) in row.instructions.iter().enumerate() {
+                match &instruction.operation {
+                    MirOperation::WritePlace { place, value } => {
+                        if let Some((local, whole)) = place_local(*place) {
+                            let root = (whole && !rooted.contains(value))
+                                .then(|| self.ref_binding_source(function, *value, block, position))
+                                .flatten();
+                            match root {
+                                Some(root) => {
+                                    writes.entry(local).or_default().push((*value, root));
+                                    allowed.insert((local, block, position));
+                                }
+                                None => {
+                                    rejected.insert(local);
+                                }
+                            }
+                        }
+                    }
+                    MirOperation::MovePlace { place } => {
+                        if let Some((local, whole)) = place_local(*place) {
+                            if whole {
+                                allowed.insert((local, block, position));
+                            } else {
+                                rejected.insert(local);
+                            }
+                        }
+                    }
+                    MirOperation::AddressOf { place, access } if *access != MirAccess::Read => {
+                        rejected.extend(place_local(*place).map(|(local, _)| local));
+                    }
+                    MirOperation::ReplacePlace { place, .. }
+                    | MirOperation::InitializeUninit { place }
+                    | MirOperation::RawAddressOf { place }
+                    | MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                        receiver_place: Some(place),
+                        ..
+                    }) => {
+                        rejected.extend(place_local(*place).map(|(local, _)| local));
+                    }
+                    MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
+                        rejected.insert(*local);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (local, positions) in &index.local_writes {
+            if positions
+                .iter()
+                .any(|(block, position)| !allowed.contains(&(*local, *block, *position)))
+            {
+                rejected.insert(*local);
+            }
+        }
+        writes.retain(|local, _| !rejected.contains(local));
+        // A binding rooted at another binding needs that one to stay a
+        // reference binding too.
+        loop {
+            let dropped: Vec<MirLocalId> = writes
+                .iter()
+                .filter(|(local, sources)| {
+                    sources.iter().any(|(_, root)| {
+                        root.is_some_and(|root| root == **local || !writes.contains_key(&root))
+                    })
+                })
+                .map(|(local, _)| *local)
+                .collect();
+            if dropped.is_empty() {
+                break;
+            }
+            for local in dropped {
+                writes.remove(&local);
+            }
+        }
+        for (local, sources) in writes {
+            bindings.locals.insert(local);
+            bindings.payloads.extend(sources.into_iter().map(|(value, _)| value));
+        }
+        bindings
+    }
+
+    /// When `value`, written to a binding local at `(block, position)`, is a
+    /// plain payload of a stable place, or a stable place itself, used only
+    /// by that write and defined earlier in the same block with nothing
+    /// changing the place's root in between: `Some(None)` for a place rooted
+    /// at a read parameter, `Some(Some(local))` for one rooted at `local`,
+    /// which must itself be a reference binding (`plan_ref_bindings`).
+    fn ref_binding_source(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+        block: usize,
+        position: usize,
+    ) -> Option<Option<MirLocalId>> {
+        let index = self.function_index(function);
+        if index.uses.get(&value).map(Vec::as_slice) != Some(&[(block, Some(position))][..]) {
+            return None;
+        }
+        let &(def_block, def_position) = index.definitions.get(&value)?;
+        if def_block != block || def_position >= position {
+            return None;
+        }
+        let read = match &function.blocks[block].instructions[def_position].operation {
+            MirOperation::EnumPayload { subject, owner, variant, index: payload } => {
+                let taken = self
+                    .move_facts
+                    .get(&function.id)
+                    .is_some_and(|facts| facts.payload_subjects.contains_key(&value));
+                if taken
+                    || self
+                        .plain_payload_pattern(function, *subject, *owner, variant, *payload)
+                        .is_none()
+                {
+                    return None;
+                }
+                *subject
+            }
+            MirOperation::OptionValue { subject } | MirOperation::ResultValue { subject, .. } => {
+                *subject
+            }
+            MirOperation::ReadPlace(_) => value,
+            _ => return None,
+        };
+        let place = self.place_row(function, self.immutable_read_place(function, read)?)?;
+        match place.base {
+            // A range-window parameter reads as a copied list, not in place.
+            MirPlaceBase::Parameter(parameter)
+                if place.projections.is_empty()
+                    && self.window_parameter_value(function, parameter) =>
+            {
+                None
+            }
+            MirPlaceBase::Parameter(_) => Some(None),
+            MirPlaceBase::Local(root) => {
+                let changed = index.local_writes.get(&root).is_some_and(|writes| {
+                    writes.iter().any(|(at_block, at)| {
+                        *at_block == block && def_position < *at && *at < position
+                    })
+                });
+                (!changed).then_some(Some(root))
+            }
+            _ => None,
+        }
+    }
+
+    /// The Rust pattern binding `payload` to payload `index` of `variant`,
+    /// and whether that slot is a boxed edge, when the subject's enum keeps
+    /// the payload in its Jet representation: not a Core or native-projected
+    /// enum, whose payload readers convert (`enum_payload`).
+    fn plain_payload_pattern(
+        &self,
+        function: &MirFunction,
+        subject: MirValueId,
+        owner: MirTypeId,
+        variant: &str,
+        index: usize,
+    ) -> Option<(String, bool)> {
+        let ty = self.value_type(function, subject);
+        let owner = ty.nominal_id().or(ty.identity).unwrap_or(owner);
+        let key = &self.type_def(owner).key;
+        if key.starts_with("<corelib>/")
+            || has_native_type_projection(key)
+            || crate::Codegen::core_rust_type_name(key).is_some()
+        {
+            return None;
+        }
+        match self.enum_variant_payload(owner, variant) {
+            MirVariantPayload::Unit => None,
+            MirVariantPayload::Single(_) if index != 0 => None,
+            MirVariantPayload::Named(fields) if index >= fields.len() => None,
+            _ => Some(self.payload_pattern(&MirPayloadKind::Enum {
+                owner,
+                variant: variant.to_string(),
+                index,
+            })),
+        }
+    }
+
+    /// The shared reference a `RefBindings::payloads` value binds: the
+    /// stable place it reads, or the payload borrowed in that place.
+    fn ref_payload_reference(&self, function: &MirFunction, value: MirValueId) -> String {
+        let operation = self
+            .value_definition(function, value)
+            .expect("checked binding read");
+        let read = match operation {
+            MirOperation::EnumPayload { subject, .. }
+            | MirOperation::OptionValue { subject }
+            | MirOperation::ResultValue { subject, .. } => *subject,
+            MirOperation::ReadPlace(_) => value,
+            _ => unreachable!("checked binding read"),
+        };
+        let place = self
+            .immutable_read_place(function, read)
+            .expect("checked stable binding place");
+        let reference = self.place_reference(function, place, MirAccess::Read);
+        match operation {
+            MirOperation::ReadPlace(_) => reference,
+            MirOperation::EnumPayload { subject, owner, variant, index } => {
+                let (pattern, boxed) = self
+                    .plain_payload_pattern(function, *subject, *owner, variant, *index)
+                    .expect("checked plain payload");
+                let payload = if boxed { "&**payload" } else { "payload" };
+                format!("match {reference} {{ {pattern} => {payload}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}")
+            }
+            MirOperation::ResultValue { ok: false, .. } => format!(
+                "match {reference} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
+            ),
+            MirOperation::ResultValue { .. } => format!(
+                "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}"
+            ),
+            _ => format!(
+                "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
+            ),
+        }
+    }
+
+    /// The reference bindings of `function` (`plan_ref_bindings`), planned on
+    /// the first query.
+    fn ref_bindings_of(&self, function: &MirFunction) -> std::rc::Rc<RefBindings> {
+        if let Some(bindings) = self.ref_bindings.borrow().get(&function.id) {
+            return bindings.clone();
+        }
+        let bindings = std::rc::Rc::new(self.plan_ref_bindings(function));
+        self.ref_bindings
+            .borrow_mut()
+            .insert(function.id, bindings.clone());
+        bindings
+    }
+
+    fn ref_binding_local(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        self.ref_bindings_of(function).locals.contains(&local)
+    }
+
+    fn ref_binding_payload(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.ref_bindings_of(function).payloads.contains(&value)
+    }
+
+    /// A whole move out of a reference binding whose every user drops it:
+    /// the binding owns nothing, so the move and its drops emit no copy.
+    fn ref_binding_drop(&self, function: &MirFunction, value: MirValueId) -> Option<MirLocalId> {
+        let MirOperation::MovePlace { place } = self.value_definition(function, value)? else {
+            return None;
+        };
+        let place = self.place_row(function, *place)?;
+        let MirPlaceBase::Local(local) = place.base else {
+            return None;
+        };
+        if !place.projections.is_empty() || !self.ref_binding_local(function, local) {
+            return None;
+        }
+        let users = self.value_users(function, value);
+        let dropped = !users.is_empty()
+            && users.iter().all(|user| {
+                user.is_some_and(|instruction| {
+                    matches!(&instruction.operation, MirOperation::Drop { value: operand, .. } if *operand == value)
+                })
+            });
+        dropped.then_some(local)
     }
 
     fn plan_partial_moves(&self, function: &MirFunction) -> Vec<PartialMoveRoot> {
@@ -17584,9 +18013,11 @@ impl<'a> RustEmitter<'a> {
                 );
             } else {
                 let ty = self.rust_local_type(&local.ty);
+                // A reference binding holds the payload it binds in place.
+                let borrow = if self.ref_binding_local(function, local.id) { "&" } else { "" };
                 let _ = writeln!(
                     out,
-                    "    let mut {}: Option<{ty}> = None;",
+                    "    let mut {}: Option<{borrow}{ty}> = None;",
                     local_slot(local.id)
                 );
             }
@@ -17606,6 +18037,9 @@ impl<'a> RustEmitter<'a> {
                         value_slot(*value)
                     );
                 }
+                continue;
+            }
+            if self.ref_binding_payload(function, *value) {
                 continue;
             }
             let ty = self.rust_local_type(ty);
@@ -17748,7 +18182,7 @@ impl<'a> RustEmitter<'a> {
             ];
             if let Some(context) = context.as_ref() {
                 extras.push(format!("{:?}", context.function));
-                extras.push(format!("{}u32", context.source_line));
+                extras.push(format!("{:?}", context.source_line));
             }
             self.append_prelude_context(call, &mut args, &extras);
             return self.prelude_call_args_exact(call, &args);
@@ -17901,9 +18335,17 @@ impl<'a> RustEmitter<'a> {
         if instruction.result.is_some_and(|value| {
             self.partial_drop_node(function, value).is_some()
                 || self.uninit_fixed_drop_local(function, value).is_some()
+                || self.ref_binding_drop(function, value).is_some()
         }) {
             // The sole consumer drops the backing storage without reconstructing
             // a complete fixed-list value.
+            return;
+        }
+        if instruction
+            .result
+            .is_some_and(|value| self.ref_binding_payload(function, value))
+        {
+            // The binding it feeds borrows the payload in place.
             return;
         }
         if self.partial_moves.contains_key(&function.id)
@@ -17964,7 +18406,12 @@ impl<'a> RustEmitter<'a> {
                 || matches!(&instruction.operation, MirOperation::BuildString { .. })
                     && instruction
                         .result
-                        .is_some_and(|value| self.literal_borrow_only(function, value));
+                        .is_some_and(|value| self.literal_borrow_only(function, value))
+                // #4318 §8: an inspected-only transfer of a stable read.
+                || matches!(&instruction.operation, MirOperation::Move { .. } | MirOperation::Copy { .. })
+                    && instruction
+                        .result
+                        .is_some_and(|value| self.inspected_transfer(function, value));
         if direct_borrow_projection
             && instruction
                 .result
@@ -18014,6 +18461,19 @@ impl<'a> RustEmitter<'a> {
                     out,
                     "{pad}{};",
                     self.initialize_uninit_expression(function, *place)
+                );
+            }
+            MirOperation::WritePlace { place, value }
+                if self.ref_binding_payload(function, *value) =>
+            {
+                let slot = match self.place_row(function, *place).map(|row| &row.base) {
+                    Some(MirPlaceBase::Local(local)) => local_slot(*local),
+                    _ => unreachable!("checked reference binding write"),
+                };
+                let _ = writeln!(
+                    out,
+                    "{pad}{slot} = Some({});",
+                    self.ref_payload_reference(function, *value)
                 );
             }
             MirOperation::WritePlace { place, value }
@@ -18360,6 +18820,10 @@ impl<'a> RustEmitter<'a> {
                 let place = self
                     .place_row(function, action.place)
                     .unwrap_or_else(|| panic!("MIR drop place {:?} has no row", action.place));
+                // A reference binding owns nothing to release.
+                if matches!(place.base, MirPlaceBase::Local(local) if self.ref_binding_local(function, local)) {
+                    continue;
+                }
                 let expression = if let Some(handle) = self.handle_for_type(&place.ty) {
                     let moved = self.place_move_for_drop(function, place);
                     self.close_handle_drop(handle, moved)
@@ -18565,13 +19029,16 @@ impl<'a> RustEmitter<'a> {
                 self.rust_struct_literal(*type_id, fields, &[], false)
             },
             MirOperation::Enum { type_id, variant, args } => self.enum_value(function, *type_id, variant, args, location.as_ref()),
+            // A one-field tuple keeps its trailing comma: `(value,)` is the
+            // singleton tuple `rust_type` spells as `(T,)`, not a scalar.
             MirOperation::Tuple { fields, .. } => format!(
-                "({})",
+                "({}{})",
                 fields
                     .iter()
                     .map(|(_, value)| self.value_move(*value))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                if fields.len() == 1 { "," } else { "" }
             ),
             MirOperation::Present { value } | MirOperation::ResultOk { value } => format!("Ok({})", self.value_move(*value)),
             MirOperation::Convert { value, parameters, target, conversion } => self.conversion(function, *value, parameters, target, conversion),
@@ -25906,6 +26373,14 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         kind: MirDropKind,
     ) -> String {
+        if let Some(local) = self.ref_binding_drop(function, value) {
+            return format!("{{ {} = None; () }}", local_slot(local));
+        }
+        // #4318 §8: an inspected-only transfer of a stable read was never
+        // made (`transparent_read`); there is nothing to release.
+        if self.inspected_transfer(function, value) {
+            return "()".to_string();
+        }
         if let Some(local) = self.uninit_fixed_drop_local(function, value) {
             return format!(
                 "{{ drop({}.take()); () }}",
@@ -28777,6 +29252,13 @@ impl<'a> RustEmitter<'a> {
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {
+                    // A reference binding reads (copies) its referent.
+                    if self.ref_binding_local(function, *local) {
+                        return format!(
+                            "(**{}.as_ref().expect(\"MIR local\")).clone()",
+                            local_slot(*local)
+                        );
+                    }
                     if self.local_uninit_fixed_type(function, *local).is_some() {
                         return format!(
                             "{}.as_ref().expect(\"MIR local\").read_array()",
@@ -28910,6 +29392,13 @@ impl<'a> RustEmitter<'a> {
         }
         match base {
             MirPlaceBase::Local(local) => {
+                // Moving a reference binding's value out copies the referent.
+                if self.ref_binding_local(function, *local) {
+                    return format!(
+                        "(*{}.take().expect(\"MIR local\")).clone()",
+                        local_slot(*local)
+                    );
+                }
                 if self.local_uninit_fixed_type(function, *local).is_some() {
                     return format!(
                         "{}.take().expect(\"MIR local\").into_array()",
@@ -29043,6 +29532,9 @@ impl<'a> RustEmitter<'a> {
                         self.local_storage(function, *local)
                     );
                 }
+                MirPlaceBase::Local(local) if self.ref_binding_local(function, *local) => {
+                    panic!("MIR reference binding local {:?} has a write", local)
+                }
                 MirPlaceBase::Local(local) => return self.local_storage(function, *local),
                 MirPlaceBase::Temporary(value) => return value_slot(*value),
                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {
@@ -29081,7 +29573,12 @@ impl<'a> RustEmitter<'a> {
         } else {
             match base {
             MirPlaceBase::Local(local) => {
-                if self.local_uninit_fixed_type(function, *local).is_some() {
+                if self.ref_binding_local(function, *local) {
+                    if mutable {
+                        panic!("MIR reference binding local {:?} has a write", local);
+                    }
+                    format!("**{}.as_ref().expect(\"MIR local\")", local_slot(*local))
+                } else if self.local_uninit_fixed_type(function, *local).is_some() {
                     if mutable {
                         format!(
                             "*{}.as_mut().expect(\"MIR local\").as_array_mut()",
@@ -29298,6 +29795,12 @@ impl<'a> RustEmitter<'a> {
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {
+                    if self.ref_binding_local(function, *local) {
+                        if mutable {
+                            panic!("MIR reference binding local {:?} has a write", local);
+                        }
+                        return format!("(*{}.as_ref().expect(\"MIR local\"))", local_slot(*local));
+                    }
                     if self.local_uninit_fixed_type(function, *local).is_some() {
                         return if mutable {
                             format!(

@@ -252,10 +252,8 @@ fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
 pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    loop module_row in graph.modules {
-        if module_row.module_identity == environment.module_identity -> return module_row.program.no_prelude
-    }
-    false
+    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
+    graph.modules[module_index].program.no_prelude
 }
 
 // The D-FAIL-CONV2 route of one propagation site: a family member reaching the
@@ -357,9 +355,8 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    loop module_row in graph.modules {
-        if module_row.module_identity != environment.module_identity -> next
-        local :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment)
+    if sema_registration_module_index(graph, environment.module_identity) == .Val(module_index) {
+        local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, leaf, seen, environment)
         if local != None -> return local
     }
     loop module_row in graph.modules {

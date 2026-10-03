@@ -2019,7 +2019,9 @@ fn lower_builtin_arg(
     // Builtins store values directly in Rust collections, unlike ordinary call
     // arguments whose `TCallArg` carries the implicit-clone bit to emission.
     // Preserve Jet's read-by-value argument semantics at this plain-argument
-    // boundary: places are copied before a storing builtin consumes them.
+    // boundary: places are copied before a storing builtin consumes them. An
+    // argument the builtin only reads is never copied here: emission borrows
+    // it where the kernel borrows and copies it only where the kernel owns it.
     let resource_take = matches!(&value.kind, TExprKind::ResourceTake(_));
     let already_owned = matches!(
         &value.kind,
@@ -2028,10 +2030,10 @@ fn lower_builtin_arg(
             | TExprKind::MaterializeView(_)
             | TExprKind::ResourceTake(_)
     );
-    let place_copy = owns_value && builtin_arg_is_place(&arg.expr);
-    if !resource_take
+    if owns_value
+        && !resource_take
         && !already_owned
-        && (arg.flags.implicit_clone || place_copy)
+        && (arg.flags.implicit_clone || builtin_arg_is_place(&arg.expr))
         && !value.ty.is_scalar()
     {
         let ty = value.ty.clone();

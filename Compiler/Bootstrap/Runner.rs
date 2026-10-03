@@ -1092,6 +1092,8 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
         .callables
         .iter()
         .any(|callable| callable.source_name == "jet_bootstrap_compile");
+    // Compiler image, runtime text, Host/Runner splice and backend write.
+    let _package_span = jet_driver::Trace::span("package");
     let (native_artifact, embedded_image) =
         if compiling_canonical_source {
             let compiler_root = match checked_compiler_factory_root(program, &bindings) {

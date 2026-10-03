@@ -104,12 +104,15 @@ fn mir_optimizer_succeeded(program: MIRProgram, report: MIROptimizationReport) -
 // This is the only public optimization entry. It runs after MIR lowering and
 // before any target adapter; errors are returned rather than repaired locally.
 // It consumes the program, so the pipeline rewrites it in place instead of a
-// second copy of the largest compile-time structure. MIR Lint checks the
-// result once; `lint_every_pass` (full verification) also checks the program
-// each pass produces.
-pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIROptimizationResult {
+// second copy of the largest compile-time structure. Legality is verified
+// once, when the lowered program enters; MIR Lint checks the result once.
+// `full_verification` (tests and `--verify`) also lints the input and
+// re-verifies legality and lints the program every pass produces; an
+// ordinary compile trusts the passes after the entry check (Rust
+// MIROptimization `validate_after`).
+pub fn optimize_mir_program(program: ^MIRProgram, full_verification: Bool) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
-    validation := mir_pass_check(program, .LegalityVerification, lint_every_pass)
+    validation := mir_pass_check(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     if mir_optimizer_has_complete_seal(program) {
         report.completed = mir_optimizer_production_order()
@@ -134,7 +137,7 @@ pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIRO
     if inline_result.error == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_mark(&optimized, .LegalityVerification)
     &report.completed.push(.LegalityVerification)
-    validation = mir_pass_check(optimized, .LegalityVerification, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks := mir_pass_block_count(&optimized)
@@ -142,7 +145,7 @@ pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIRO
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
     mir_pass_mark(&optimized, .UnreachableBlockElimination)
     &report.completed.push(.UnreachableBlockElimination)
-    validation = mir_pass_check(optimized, .UnreachableBlockElimination, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .UnreachableBlockElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks = mir_pass_block_count(&optimized)
@@ -150,25 +153,25 @@ pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIRO
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
     mir_pass_mark(&optimized, .CFGSimplification)
     &report.completed.push(.CFGSimplification)
-    validation = mir_pass_check(optimized, .CFGSimplification, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .CFGSimplification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.folded_values = mir_pass_fold_exact_constants(&optimized)
     mir_pass_mark(&optimized, .ExactConstantFolding)
     &report.completed.push(.ExactConstantFolding)
-    validation = mir_pass_check(optimized, .ExactConstantFolding, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .ExactConstantFolding, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
     mir_pass_mark(&optimized, .BoundsCheckElimination)
     &report.completed.push(.BoundsCheckElimination)
-    validation = mir_pass_check(optimized, .BoundsCheckElimination, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .BoundsCheckElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.dead_values_removed = mir_pass_eliminate_dead_pure(&optimized)
     mir_pass_mark(&optimized, .DeadPureValueElimination)
     &report.completed.push(.DeadPureValueElimination)
-    validation = mir_pass_check(optimized, .DeadPureValueElimination, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .DeadPureValueElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     loop_counts :: mir_pass_derive_loop_and_vector_facts(&optimized)
@@ -188,13 +191,15 @@ pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIRO
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
     mir_pass_mark(&optimized, .CanonicalLoopFacts)
     &report.completed.push(.CanonicalLoopFacts)
-    validation = mir_pass_check(optimized, .CanonicalLoopFacts, lint_every_pass)
+    validation = mir_pass_validate_after(optimized, .CanonicalLoopFacts, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.acceleration_facts = mir_pass_refresh_acceleration_facts(&optimized)
     mir_pass_canonicalize_program_order(&optimized)
-    validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+    if full_verification {
+        validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
+        if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+    }
     validation = mir_pass_lint(optimized, .CanonicalLoopFacts)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&optimized)
@@ -204,11 +209,18 @@ pub fn optimize_mir_program(program: ^MIRProgram, lint_every_pass: Bool) -> MIRO
     mir_optimizer_succeeded(optimized, report)
 }
 
-// Legality after `pass`, then MIR Lint when every pass is linted.
+// Legality, then MIR Lint when `lint` is set: the entry check.
 fn mir_pass_check(program: MIRProgram, pass: MIROptimizationPassID, lint: Bool) -> MIROptimizationError? {
     validation :: mir_pass_validate_program(program, pass)
     if validation != None || !lint -> return validation
     mir_pass_lint(program, pass)
+}
+
+// The check after `pass`: legality and MIR Lint, only under full
+// verification (Rust MIROptimization `validate_after`).
+fn mir_pass_validate_after(program: MIRProgram, pass: MIROptimizationPassID, full_verification: Bool) -> MIROptimizationError? {
+    if !full_verification -> return None
+    mir_pass_check(program, pass, true)
 }
 
 // MIR Lint over the program `pass` produced; a failure names the pass and rule.

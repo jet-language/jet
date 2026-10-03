@@ -747,8 +747,8 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
 
 fn sema_call_http_expand_type_alias(graph: SemaRegistrationGraph, ty: Type, module_identity: String, active_aliases: [String]) -> Type Never! {
     resolved := sema_type_resolve_declared(graph, ty, module_identity)
-    nominal := sema_type_resolve_nominal(graph, resolved, module_identity)
-    alias_nominal :: nominal ?? return resolved
+    alias_row :: sema_type_resolve_nominal_row(graph, resolved, module_identity) ?? return resolved
+    alias_nominal :: graph.modules[alias_row.module_index].nominals[alias_row.row]
     if alias_nominal.kind != SemaRegistrationNominalKind.TypeAlias -> return resolved
     loop active in active_aliases { if active == alias_nominal.symbol.id.key -> return resolved }
     item :: sema_registration_nominal_source_item(alias_nominal.source) ?? return resolved
@@ -789,7 +789,8 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    model_nominal :: sema_type_resolve_nominal(graph, Type.Named{name: model_name}, environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    model_row :: sema_type_resolve_nominal_row(graph, Type.Named{name: model_name}, environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    model_nominal :: graph.modules[model_row.module_index].nominals[model_row.row]
     model_module_identity := model_nominal.symbol.module_name
     action_name :: if args[action_index].expr == {.Ident(name, _) -> name else -> {
         &diagnostics.push(sema_error("E2474", args[action_index].span, "web.form action must be a named function", "the action is registered through the existing typed server-function boundary", "pass a named action function: `web.form({model_name}, action: submit)`"))
@@ -811,8 +812,8 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     action_accepts_model := false
     if action_function.declaration.params.len() == 1 {
         action_parameter_type := sema_type_resolve_declared(graph, action_function.declaration.params[0].ty, action_function.symbol.module_name)
-        action_nominal :: sema_type_resolve_nominal(graph, action_parameter_type, action_function.symbol.module_name)
-        if action_nominal == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id.key == action_type.symbol.id.key
+        action_row :: sema_type_resolve_nominal_row(graph, action_parameter_type, action_function.symbol.module_name)
+        if action_row == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id.key == graph.modules[action_type.module_index].nominals[action_type.row].symbol.id.key
     }
     if !action_accepts_model {
         &diagnostics.push(sema_error("E2474", args[action_index].span, "form action `{action_name}` does not accept `{model_name}`", "the form derives its fields from the model and the one server-function action must receive that exact input type", "change `{action_name}` to accept `{model_name}` as its only parameter"))

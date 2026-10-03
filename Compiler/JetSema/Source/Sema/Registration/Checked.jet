@@ -788,8 +788,8 @@ fn sema_checked_foreign_type(graph: SemaRegistrationGraph, ty: Type, caller_modu
         .Apply(name, args) -> c_abi && name == "Ptr" && args.len() == 1 && sema_checked_foreign_type(graph, args[0], caller_module, c_abi, false, handles, seen)
         .Named(name) -> {
             if sema_checked_foreign_builtin_type(name) -> return true
-            nominal :: sema_type_resolve_nominal(graph, qualified, caller_module) ?? return false
-            sema_checked_foreign_nominal_type(graph, nominal, c_abi, generated, handles, seen)
+            nominal_row :: sema_type_resolve_nominal_row(graph, qualified, caller_module) ?? return false
+            sema_checked_foreign_nominal_type(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], c_abi, generated, handles, seen)
         }
         .Tagged(_, inner) -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
         .InlineRange(base, _, _) -> sema_checked_foreign_type(graph, base, caller_module, c_abi, generated, handles, seen)
@@ -828,7 +828,8 @@ fn sema_checked_foreign_has_array_length(params: [Param]) -> Bool Never! {
 
 fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     qualified :: sema_checked_qualify_type(graph, ty, module_identity)
-    nominal :: sema_type_resolve_nominal(graph, qualified, module_identity) ?? return false
+    nominal_row :: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return false
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.ForeignHandle -> return false
     if nominal.source == {
         .ForeignHandle(facts) -> sema_checked_foreign_handle_source_matches(handles, facts)
@@ -1286,7 +1287,8 @@ fn sema_checked_inline_undo(graph: SemaRegistrationGraph, module_row: SemaRegist
 
 fn sema_checked_foreign_handle_key_for_type(graph: SemaRegistrationGraph, module_identity: String, ty: Type, provider: SemaCheckedForeignProvider) -> String? {
     qualified :: sema_checked_qualify_type(graph, ty, module_identity)
-    nominal :: sema_type_resolve_nominal(graph, qualified, module_identity) ?? return None
+    nominal_row :: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return None
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.source == {
         .ForeignHandle(facts) -> if sema_checked_foreign_handle_source_matches(provider.handles, facts) -> Val("c::{provider.module_library}::{facts.jet_name}") else -> None
         .SourceAST(_) -> None
@@ -1889,66 +1891,215 @@ fn sema_checked_variants(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     variants
 }
 
-fn sema_checked_box_walk(graph: SemaRegistrationGraph, owner: String, edge: String, ty: Type, stack: [String], caller_module: String, boxed: &[String]) Never! {
+// The graph nodes `ty` names through the containers a recursive layout sees
+// (option, list, map, result), resolved from `caller_module` like any field
+// type. Only struct and enum nominals are nodes: no other type has fields.
+fn sema_checked_box_targets(graph: SemaRegistrationGraph, ty: Type, caller_module: String, nodes: [String:Int], targets: &[Int]) Never! {
     if ty == {
-        .Named(name) | .Apply(name, _) -> sema_checked_box_named(graph, owner, edge, name, stack, caller_module, &boxed)
-        .Option(inner) | .List(inner) -> sema_checked_box_walk(graph, owner, edge, inner, stack, caller_module, &boxed)
+        .Named(name) | .Apply(name, _) -> {
+            row :: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, caller_module) ?? return
+            node :: nodes.get(graph.modules[row.module_index].nominals[row.row].symbol.id.key) ?? return
+            &targets.push(node)
+        }
+        .Option(inner) | .List(inner) -> sema_checked_box_targets(graph, inner, caller_module, nodes, &targets)
         .Map(key, _, value) -> {
-            sema_checked_box_walk(graph, owner, edge, key, stack, caller_module, &boxed)
-            sema_checked_box_walk(graph, owner, edge, value, stack, caller_module, &boxed)
+            sema_checked_box_targets(graph, key, caller_module, nodes, &targets)
+            sema_checked_box_targets(graph, value, caller_module, nodes, &targets)
         }
         .Result(ok, err) -> {
-            sema_checked_box_walk(graph, owner, edge, ok, stack, caller_module, &boxed)
-            sema_checked_box_walk(graph, owner, edge, err, stack, caller_module, &boxed)
+            sema_checked_box_targets(graph, ok, caller_module, nodes, &targets)
+            sema_checked_box_targets(graph, err, caller_module, nodes, &targets)
         }
         else -> {}
     }
 }
 
-fn sema_checked_box_named(graph: SemaRegistrationGraph, owner: String, edge: String, name: String, stack: [String], caller_module: String, boxed: &[String]) Never! {
-    nominal :: sema_type_resolve_nominal(graph, Type.Named{name: name}, caller_module) ?? return
-    loop active in stack {
-        if active == nominal.symbol.id.key {
-            duplicate :: loop existing in boxed {
-                if existing == edge -> break true
-            } ?? false
-            if !duplicate -> &boxed.push(edge)
-            return
+fn sema_checked_box_is_node(nominal: SemaRegistrationNominal) -> Bool Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == {
+            .Struct(_) | .Enum(_) -> return true
+            else -> {}
         }
     }
-    next_stack := stack
-    &next_stack.push(nominal.symbol.id.key)
-    next_caller :: nominal.symbol.module_name
-    item :: sema_registration_nominal_source_item(nominal.source) ?? return
-    if item == {
-        .Struct(definition) -> {
-            loop field in definition.fields {
-                sema_checked_box_walk(graph, nominal.symbol.name, field.name, field.ty, next_stack, next_caller, &boxed)
+    false
+}
+
+// One edge per field, single payload (`Variant`) and named payload field
+// (`Variant.field`) of `nominal`, appended to `box_graph`.
+fn sema_checked_box_node_edges(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, nodes: [String:Int], box_graph: &SemaCheckedBoxGraph) Never! {
+    caller :: nominal.symbol.module_name
+    if nominal.source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> {
+                loop field in definition.fields {
+                    &box_graph.names.push(field.name)
+                    &box_graph.target_starts.push(box_graph.targets.len())
+                    sema_checked_box_targets(graph, field.ty, caller, nodes, &box_graph.targets)
+                }
+            }
+            .Enum(definition) -> {
+                loop variant in definition.variants {
+                    if variant.payload == {
+                        .Single(ty, _) -> {
+                            &box_graph.names.push(variant.name)
+                            &box_graph.target_starts.push(box_graph.targets.len())
+                            sema_checked_box_targets(graph, ty, caller, nodes, &box_graph.targets)
+                        }
+                        .Named(fields) -> {
+                            loop field in fields {
+                                &box_graph.names.push("{variant.name}.{field.name}")
+                                &box_graph.target_starts.push(box_graph.targets.len())
+                                sema_checked_box_targets(graph, field.ty, caller, nodes, &box_graph.targets)
+                            }
+                        }
+                        .Unit -> {}
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+// The recursive-layout edge graph over struct and enum nodes: node `n`
+// (nominal SymbolId key `keys[n]`) owns edges `edge_starts[n]..<edge_starts[n + 1]`,
+// and edge `e` (key `names[e]`) names nodes `targets[target_starts[e]..<target_starts[e + 1]]`.
+// A node's successors are therefore one contiguous run of `targets`.
+struct SemaCheckedBoxGraph {
+    keys: [String]
+    edge_starts: [Int]
+    names: [String]
+    target_starts: [Int]
+    targets: [Int]
+}
+
+// Iterative Tarjan: the strongly connected component of every node.
+fn sema_checked_box_components(box_graph: SemaCheckedBoxGraph) -> [Int] Never! {
+    count :: box_graph.keys.len()
+    order := [Int]{}
+    low := [Int]{}
+    on_stack := [Bool]{}
+    component := [Int]{}
+    loop _ in 0..<count {
+        &order.push(-1)
+        &low.push(0)
+        &on_stack.push(false)
+        &component.push(-1)
+    }
+    stack := [Int]{}
+    frame_nodes := [Int]{}
+    frame_cursors := [Int]{}
+    next_order := 0
+    components := 0
+    loop start in 0..<count {
+        if order[start] >= 0 -> next
+        order[start] = next_order
+        low[start] = next_order
+        next_order += 1
+        &stack.push(start)
+        on_stack[start] = true
+        &frame_nodes.push(start)
+        &frame_cursors.push(box_graph.target_starts[box_graph.edge_starts[start]])
+        loop frame_nodes.len() > 0 {
+            top :: frame_nodes.len() - 1
+            node := frame_nodes[top]
+            cursor := frame_cursors[top]
+            if cursor < box_graph.target_starts[box_graph.edge_starts[node + 1]] {
+                child :: box_graph.targets[cursor]
+                frame_cursors[top] = cursor + 1
+                if order[child] < 0 {
+                    order[child] = next_order
+                    low[child] = next_order
+                    next_order += 1
+                    &stack.push(child)
+                    on_stack[child] = true
+                    &frame_nodes.push(child)
+                    &frame_cursors.push(box_graph.target_starts[box_graph.edge_starts[child]])
+                } else if on_stack[child] && order[child] < low[node] {
+                    low[node] = order[child]
+                }
+                next
+            }
+            _ := &frame_nodes.pop()
+            _ := &frame_cursors.pop()
+            if frame_nodes.len() > 0 {
+                parent :: frame_nodes[frame_nodes.len() - 1]
+                if low[node] < low[parent] -> low[parent] = low[node]
+            }
+            if low[node] == order[node] {
+                loop stack.len() > 0 {
+                    member :: &stack.pop() ?? break
+                    on_stack[member] = false
+                    component[member] = components
+                    if member == node -> break
+                }
+                components += 1
             }
         }
-        .Enum(definition) -> {
-            loop variant in definition.variants {
-                if variant.payload == {
-                    .Single(ty, _) -> sema_checked_box_walk(graph, nominal.symbol.name, variant.name, ty, next_stack, next_caller, &boxed)
-                    .Named(fields) -> {
-                        loop field in fields {
-                            sema_checked_box_walk(graph, nominal.symbol.name, "{variant.name}.{field.name}", field.ty, next_stack, next_caller, &boxed)
-                        }
-                    }
-                    .Unit -> {}
+    }
+    component
+}
+
+// `owner --key--> target` is boxed iff `target` reaches `owner`: the two share
+// a component (a self-loop is its owner's own component). Each owner's keys
+// are sorted like Rust `owner_boxed_edges`; owners with none are absent.
+fn sema_checked_box_select(box_graph: SemaCheckedBoxGraph, component: [Int]) -> [String:[String]] Never! {
+    boxed := [String:[String]]{}
+    loop node in 0..<box_graph.keys.len() {
+        owner_edges := [String]{}
+        loop edge in box_graph.edge_starts[node]..<box_graph.edge_starts[node + 1] {
+            loop position in box_graph.target_starts[edge]..<box_graph.target_starts[edge + 1] {
+                if component[box_graph.targets[position]] == component[node] {
+                    if !owner_edges.contains(box_graph.names[edge]) -> &owner_edges.push(box_graph.names[edge])
+                    break
                 }
             }
         }
-        else -> {}
+        if owner_edges.len() == 0 -> next
+        &owner_edges.sort()
+        boxed[box_graph.keys[node]] = owner_edges
     }
+    boxed
 }
 
-pub fn sema_checked_boxed_edges(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item) -> [String] Never! {
+// The recursive-layout edges that need a box, for every struct and enum of
+// the graph, computed once: Rust `find_box_edges` (Codegen/Context.rs).
+// Every struct and enum is a root and only those have edges, so no
+// multi-type cycle runs through a non-root and Rust's SCC answer is exact
+// (its path-enumeration fallback never applies). Result: nominal SymbolId
+// key -> the owner's boxed keys.
+pub fn sema_checked_program_boxed_edges(graph: SemaRegistrationGraph) -> [String:[String]] Never! {
+    nodes := [String:Int]{}
+    rows := [SemaRegistrationRowRef]{}
+    box_graph := SemaCheckedBoxGraph{keys: [String]{}, edge_starts: [Int]{}, names: [String]{}, target_starts: [Int]{}, targets: [Int]{}}
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            if !sema_checked_box_is_node(graph.modules[module_index].nominals[row]) -> next
+            key :: graph.modules[module_index].nominals[row].symbol.id.key
+            // Names resolve to the first registered row of a key.
+            first :: graph.nominal_symbol_rows.get(key) ?? next
+            if first.module_index != module_index || first.row != row || nodes.get(key) != None -> next
+            nodes[key] = box_graph.keys.len()
+            &box_graph.keys.push(key)
+            &rows.push(first)
+        }
+    }
+    loop row in rows {
+        &box_graph.edge_starts.push(box_graph.names.len())
+        sema_checked_box_node_edges(graph, graph.modules[row.module_index].nominals[row.row], nodes, &box_graph)
+    }
+    &box_graph.edge_starts.push(box_graph.names.len())
+    &box_graph.target_starts.push(box_graph.targets.len())
+    sema_checked_box_select(box_graph, sema_checked_box_components(box_graph))
+}
+
+// The checked recursive-layout keys of `definition`, read from the graph's
+// one edge set (`sema_checked_program_boxed_edges`).
+pub fn sema_checked_boxed_edges(graph: SemaRegistrationGraph, boxed_edges: [String:[String]], module_identity: String, definition: Item) -> [String] Never! {
     owner :: sema_registration_root_name(definition)
-    boxed := [String]{}
-    if owner == "" -> return boxed
-    sema_checked_box_walk(graph, owner, owner, Type.Named{name: owner}, [String]{}, module_row.module_identity, &boxed)
-    boxed
+    if owner == "" -> return [String]{}
+    row :: sema_type_resolve_nominal_row(graph, Type.Named{name: owner}, module_identity) ?? return [String]{}
+    boxed_edges.get(graph.modules[row.module_index].nominals[row.row].symbol.id.key) ?? [String]{}
 }
 
 pub fn sema_checked_type_has_boxed_edge(definition: TTypeDef, edge: String) -> Bool Never! {
@@ -2016,7 +2167,7 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
     }
 }
 
-fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
+fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]], module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
     definition :: sema_registration_nominal_source_item(nominal.source) ?? return None
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
     name :: nominal.symbol.name
@@ -2026,7 +2177,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     enum_layout := LayoutFacts?{None}
     serde := [TSerdeAttribute]{}
     cli_bindings := [TCLIBinding]{}
-    boxed_edges := sema_checked_boxed_edges(graph, module_row, definition)
+    boxed_edges := sema_checked_boxed_edges(graph, boxed, module_row.module_identity, definition)
     if nominal.compiler_owned -> boxed_edges = [String]{}
     derives := [String]{}
     auto_derive_default := false
@@ -2239,15 +2390,10 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     }
 }
 
-fn sema_checked_trait_nominal(graph: SemaRegistrationGraph, module_identity: String, trait_name: String) -> SemaRegistrationNominal? {
+fn sema_checked_trait_nominal_row(graph: SemaRegistrationGraph, module_identity: String, trait_name: String) -> SemaRegistrationRowRef? {
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, trait_name) ?? return None
     if resolved.symbol.kind != SymbolKind.Trait -> return None
-    loop module_row in graph.modules {
-        loop nominal in module_row.nominals {
-            if nominal.symbol.id.key == resolved.symbol.id.key -> return Val(nominal)
-        }
-    }
-    None
+    sema_type_graph_nominal_row(graph, resolved.symbol.id.key)
 }
 
 fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, diagnostics: &[Diagnostic]) {
@@ -2261,8 +2407,8 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
         else -> {}
     }
-    trait_row :: sema_checked_trait_nominal(graph, module_row.module_identity, trait_name) ?? return
-    loop expected in trait_row.trait_methods {
+    trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
+    loop expected in graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
             if actual.declaration.name == expected.declaration.name {
@@ -2299,8 +2445,18 @@ struct SemaCheckedOperatorImpl {
 }
 
 struct SemaCheckedCoherence {
-    trait_keys: [String]
-    operator_impls: [SemaCheckedOperatorImpl]
+    // Registered `{owner}::{trait}` pairs (Rust `trait_impls`).
+    trait_keys: [String:Bool]
+    // `{left}::{trait}` -> the right-hand types of its valid operator impls.
+    operator_slots: [String:Int]
+    operator_rhs: [[Type]]
+    // The module's declarations, indexed once per check (Rust `local_types`,
+    // `local_tags`, `local_traits`): local type names, the applied owner type
+    // of the first struct, enum or alias of each name, tag and trait names.
+    local_types: [String:Bool]
+    owner_types: [String:Type]
+    tags: [String:Bool]
+    traits: [String:Bool]
 }
 
 // Rust `Generics::BUILTIN_TRAITS` plus the synthetic protocol traits the trait
@@ -2316,29 +2472,41 @@ fn sema_checked_coherence_arithmetic(trait_name: String) -> Bool Never! {
     trait_name == "Add" || trait_name == "Sub" || trait_name == "Mul" || trait_name == "Div"
 }
 
-// A type declared by this module (Rust `local_types`).
-fn sema_checked_coherence_local_type(module_row: SemaRegistrationModule, type_name: String) -> Bool Never! {
+// Rust `TraitRegistry` local sets: one pass over the module's items and
+// nominals.
+fn sema_checked_coherence_state(module_row: SemaRegistrationModule) -> SemaCheckedCoherence Never! {
+    state := SemaCheckedCoherence{trait_keys: [String:Bool]{}, operator_slots: [String:Int]{}, operator_rhs: [[Type]]{}, local_types: [String:Bool]{}, owner_types: [String:Type]{}, tags: [String:Bool]{}, traits: [String:Bool]{}}
     loop item in module_row.program.items {
         if item == {
             .Struct(value) -> {
-                if value.name == type_name -> return true
+                state.local_types[value.name] = true
+                if state.owner_types.get(value.name) == None -> state.owner_types[value.name] = sema_checked_coherence_applied(value.name, value.type_params)
             }
             .Enum(value) -> {
-                if value.name == type_name -> return true
+                state.local_types[value.name] = true
+                if state.owner_types.get(value.name) == None -> state.owner_types[value.name] = sema_checked_coherence_applied(value.name, value.type_params)
             }
             .TypeAlias(value) -> {
-                if value.name == type_name -> return true
+                state.local_types[value.name] = true
+                if state.owner_types.get(value.name) == None -> state.owner_types[value.name] = sema_checked_coherence_applied(value.name, value.type_params)
             }
-            .Distinct(value) -> {
-                if value.name == type_name -> return true
-            }
+            .Distinct(value) -> state.local_types[value.name] = true
             .UnitFamily(value) -> loop member in value.members {
-                if member.name == type_name -> return true
+                state.local_types[member.name] = true
             }
             else -> {}
         }
     }
-    false
+    loop nominal in module_row.nominals {
+        if nominal.kind == SemaRegistrationNominalKind.Tag -> state.tags[nominal.symbol.name] = true
+        if nominal.kind == SemaRegistrationNominalKind.Trait -> state.traits[nominal.symbol.name] = true
+    }
+    state
+}
+
+// A type declared by this module (Rust `local_types`).
+fn sema_checked_coherence_local_type(state: SemaCheckedCoherence, type_name: String) -> Bool Never! {
+    state.local_types.get(type_name) != None
 }
 
 fn sema_checked_coherence_applied(name: String, params: [TypeParam]) -> Type Never! {
@@ -2348,50 +2516,26 @@ fn sema_checked_coherence_applied(name: String, params: [TypeParam]) -> Type Nev
 }
 
 // Rust `impl_owner_type`: a generic owner is applied to its own parameters.
-fn sema_checked_coherence_owner_type(module_row: SemaRegistrationModule, owner_name: String) -> Type Never! {
-    loop item in module_row.program.items {
-        if item == {
-            .Struct(value) -> {
-                if value.name == owner_name -> return sema_checked_coherence_applied(owner_name, value.type_params)
-            }
-            .Enum(value) -> {
-                if value.name == owner_name -> return sema_checked_coherence_applied(owner_name, value.type_params)
-            }
-            .TypeAlias(value) -> {
-                if value.name == owner_name -> return sema_checked_coherence_applied(owner_name, value.type_params)
-            }
-            else -> {}
-        }
-    }
-    Type.Named{name: owner_name}
-}
-
-fn sema_checked_coherence_local_tag(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
-    loop nominal in module_row.nominals {
-        if nominal.kind == SemaRegistrationNominalKind.Tag && nominal.symbol.name == name -> return true
-    }
-    false
+fn sema_checked_coherence_owner_type(state: SemaCheckedCoherence, owner_name: String) -> Type Never! {
+    state.owner_types.get(owner_name) ?? Type.Named{name: owner_name}
 }
 
 // Rust `local_traits`: a builtin or synthetic protocol trait, a trait this
 // module declares, or one imported from the same package (D-MOD-CYCLE1=A: the
 // package is the orphan unit).
-fn sema_checked_coherence_local_trait(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, trait_name: String) -> Bool Never! {
+fn sema_checked_coherence_local_trait(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, trait_name: String) -> Bool Never! {
     if trait_name.contains(".") -> return false
     if sema_checked_coherence_builtin_trait(trait_name) -> return true
-    loop nominal in module_row.nominals {
-        if nominal.kind == SemaRegistrationNominalKind.Trait && nominal.symbol.name == trait_name -> return true
-    }
-    trait_row :: sema_checked_trait_nominal(graph, module_row.module_identity, trait_name) ?? return false
-    loop candidate in graph.modules {
-        if candidate.module_identity == trait_row.symbol.module_name -> return candidate.package_identity == module_row.package_identity
-    }
-    false
+    if state.traits.get(trait_name) != None -> return true
+    trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return false
+    trait_module :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].symbol.module_name
+    trait_module_index :: sema_registration_module_index(graph, trait_module) ?? return false
+    graph.modules[trait_module_index].package_identity == module_row.package_identity
 }
 
-fn sema_checked_coherence_rhs_local(module_row: SemaRegistrationModule, rhs: Type) -> Bool Never! {
+fn sema_checked_coherence_rhs_local(state: SemaCheckedCoherence, rhs: Type) -> Bool Never! {
     if rhs == {
-        .Named(name) | .Apply(name, _) -> sema_checked_coherence_local_type(module_row, name)
+        .Named(name) | .Apply(name, _) -> sema_checked_coherence_local_type(state, name)
         else -> false
     }
 }
@@ -2436,39 +2580,50 @@ fn sema_checked_coherence_operator_valid(trait_name: String, owner_type: Type, r
 // Rust `validate_trait_impl` up to the orphan rule: E0731, E0908, E0902.
 fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, trait_name: String, operator_rhs: Type?, operator_marker: OperatorMarker?, methods: [Func], local_type: Bool, span: Span, state: &SemaCheckedCoherence, diagnostics: &[Diagnostic]) {
     if !sema_checked_coherence_operator_marker(operator_marker, Val(trait_name), operator_rhs, span, &diagnostics) -> return
-    if sema_checked_coherence_local_tag(module_row, trait_name) {
+    if state.tags.get(trait_name) != None {
         &diagnostics.push(sema_error("E0731", span, "`{trait_name}` is a tag, but an `impl` block needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{trait_name}` as a `trait` with the method(s) it should provide"))
         return
     }
     operator_trait :: sema_checked_operator_trait(trait_name)
     arithmetic_trait :: sema_checked_coherence_arithmetic(trait_name)
-    owner_type :: sema_checked_coherence_owner_type(module_row, owner_name)
+    owner_type :: sema_checked_coherence_owner_type(state, owner_name)
     rhs :: operator_rhs ?? owner_type
     rhs_name :: type_name(rhs)
     key :: "{owner_name}::{trait_name}"
     if operator_trait {
-        loop existing in state.operator_impls {
-            if existing.left == owner_name && existing.trait_name == trait_name && type_identity_equal(existing.rhs, rhs) {
-                &diagnostics.push(sema_error("E0908", span, "`{owner_name}` already implements `{trait_name}` for `{rhs_name}`", "operator implementation identity includes both the left and right operand types", "remove the duplicate hook or choose a different right-hand type than `{rhs_name}`"))
-                return
+        if state.operator_slots.get(key) == .Val(operator_slot) {
+            loop existing in state.operator_rhs[operator_slot] {
+                if type_identity_equal(existing, rhs) {
+                    &diagnostics.push(sema_error("E0908", span, "`{owner_name}` already implements `{trait_name}` for `{rhs_name}`", "operator implementation identity includes both the left and right operand types", "remove the duplicate hook or choose a different right-hand type than `{rhs_name}`"))
+                    return
+                }
             }
         }
-        if !state.trait_keys.contains(key) -> &state.trait_keys.push(key)
+        state.trait_keys[key] = true
     } else {
-        if state.trait_keys.contains(key) {
+        if state.trait_keys.get(key) != None {
             &diagnostics.push(sema_error("E0908", span, "`{owner_name}` already implements `{trait_name}`", "each type may implement a trait only once", "remove the duplicate `impl` block"))
             return
         }
-        &state.trait_keys.push(key)
+        state.trait_keys[key] = true
     }
-    local_trait :: sema_checked_coherence_local_trait(graph, module_row, trait_name)
-    rhs_local :: operator_rhs != None && sema_checked_coherence_rhs_local(module_row, rhs)
+    local_trait :: sema_checked_coherence_local_trait(graph, module_row, state, trait_name)
+    rhs_local :: operator_rhs != None && sema_checked_coherence_rhs_local(state, rhs)
     if (operator_trait && !local_type && !(arithmetic_trait && rhs_local)) || (!local_type && !local_trait) {
         &diagnostics.push(sema_error("E0902", span, "this `impl` can't live here", "at least one of the trait or the type must be defined in this program (orphan rule)", "define the trait or type in this file, or move the impl"))
         return
     }
-    if operator_trait && sema_checked_coherence_operator_valid(trait_name, owner_type, rhs, methods) {
-        &state.operator_impls.push(SemaCheckedOperatorImpl{left: owner_name, trait_name: trait_name, rhs: rhs})
+    if operator_trait && sema_checked_coherence_operator_valid(trait_name, owner_type, rhs, methods) -> sema_checked_coherence_add_operator(&state, owner_name, trait_name, rhs)
+}
+
+// Operator identity is the left owner, the trait and the right-hand type.
+fn sema_checked_coherence_add_operator(state: &SemaCheckedCoherence, left: String, trait_name: String, rhs: Type) Never! {
+    operator_key :: "{left}::{trait_name}"
+    if state.operator_slots.get(operator_key) == .Val(slot) {
+        &state.operator_rhs[slot].push(rhs)
+    } else {
+        state.operator_slots[operator_key] = state.operator_rhs.len()
+        &state.operator_rhs.push([Type]{rhs})
     }
 }
 
@@ -2482,20 +2637,20 @@ fn sema_checked_coherence_impl(graph: SemaRegistrationGraph, module_row: SemaReg
     literal_capability :: trait_name == "Literal.Int" || trait_name == "Literal.Float"
     if definition.delegation_field != None && !literal_capability {
         key :: "{definition.type_name}::{trait_name}"
-        if !state.trait_keys.contains(key) -> &state.trait_keys.push(key)
+        state.trait_keys[key] = true
         if sema_checked_coherence_arithmetic(trait_name) {
-            rhs :: definition.operator_rhs ?? sema_checked_coherence_owner_type(module_row, definition.type_name)
-            &state.operator_impls.push(SemaCheckedOperatorImpl{left: definition.type_name, trait_name: trait_name, rhs: rhs})
+            rhs :: definition.operator_rhs ?? sema_checked_coherence_owner_type(state, definition.type_name)
+            sema_checked_coherence_add_operator(&state, definition.type_name, trait_name, rhs)
         }
         return
     }
-    local_type :: sema_checked_coherence_local_type(module_row, definition.type_name) || implementation.target_module_identity != None
+    local_type :: sema_checked_coherence_local_type(state, definition.type_name) || implementation.target_module_identity != None
     sema_checked_coherence_register(graph, module_row, definition.type_name, trait_name, definition.operator_rhs, None, definition.methods, local_type, definition.type_span, &state, &diagnostics)
 }
 
-fn sema_checked_coherence_derives(module_row: SemaRegistrationModule, derives: [NamedSpan], diagnostics: &[Diagnostic]) {
+fn sema_checked_coherence_derives(state: SemaCheckedCoherence, derives: [NamedSpan], diagnostics: &[Diagnostic]) {
     loop request in derives {
-        if sema_checked_coherence_local_tag(module_row, request.name) -> &diagnostics.push(sema_error("E0731", request.span, "`{request.name}` is a tag, but `derive` needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{request.name}` as a `trait` with the method(s) it should provide"))
+        if state.tags.get(request.name) != None -> &diagnostics.push(sema_error("E0731", request.span, "`{request.name}` is a tag, but `derive` needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{request.name}` as a `trait` with the method(s) it should provide"))
     }
 }
 
@@ -2512,45 +2667,44 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     trait_name :: definition.trait_name ?? return
     field_name :: definition.delegation_field ?? return
     owner_module :: implementation.target_module_identity ?? return
-    loop candidate in graph.modules {
-        if candidate.module_identity != owner_module -> next
-        loop nominal in candidate.nominals {
-            if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.name != definition.type_name -> next
-            loop field in nominal.fields {
-                if field.symbol.name != field_name -> next
-                field_type_name :: type_name(field.ty)
-                satisfied :: sema_type_bound_satisfied(graph, field.ty, trait_name, module_row.module_identity) ?? true
-                if !satisfied {
-                    &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
-                }
-                return
+    owner_index :: sema_registration_module_index(graph, owner_module) ?? return
+    loop nominal in graph.modules[owner_index].nominals {
+        if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.name != definition.type_name -> next
+        loop field in nominal.fields {
+            if field.symbol.name != field_name -> next
+            field_type_name :: type_name(field.ty)
+            satisfied :: sema_type_bound_satisfied(graph, field.ty, trait_name, module_row.module_identity) ?? true
+            if !satisfied {
+                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
             }
-            &diagnostics.push(sema_error("E2401", definition.type_span, "`{definition.type_name}` has no field `{field_name}`", "`impl {definition.type_name}.{trait_name} using {field_name}` needs `{definition.type_name}` to have a field named `{field_name}`", "add `{field_name}: Type` to `struct {definition.type_name}`"))
             return
         }
+        &diagnostics.push(sema_error("E2401", definition.type_span, "`{definition.type_name}` has no field `{field_name}`", "`impl {definition.type_name}.{trait_name} using {field_name}` needs `{definition.type_name}` to have a field named `{field_name}`", "add `{field_name}: Type` to `struct {definition.type_name}`"))
+        return
     }
 }
 
 fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
-    state := SemaCheckedCoherence{trait_keys: [String]{}, operator_impls: [SemaCheckedOperatorImpl]{}}
+    state := sema_checked_coherence_state(module_row)
     loop implementation in module_row.impls -> sema_checked_coherence_impl(graph, module_row, implementation, &state, &diagnostics)
-    sources := [Item]{}
+    // The struct and enum sources are read in place (derives first, then
+    // the inline trait blocks), never copied out of their nominal rows.
     loop nominal in module_row.nominals {
-        source_item :: sema_registration_nominal_source_item(nominal.source) ?? next
-        &sources.push(source_item)
-    }
-    loop item in sources {
-        if item == {
-            .Struct(value) -> sema_checked_coherence_derives(module_row, value.derives, &diagnostics)
-            .Enum(value) -> sema_checked_coherence_derives(module_row, value.derives, &diagnostics)
-            else -> {}
+        if nominal.source == .SourceAST(item) {
+            if item == {
+                .Struct(value) -> sema_checked_coherence_derives(state, value.derives, &diagnostics)
+                .Enum(value) -> sema_checked_coherence_derives(state, value.derives, &diagnostics)
+                else -> {}
+            }
         }
     }
-    loop item in sources {
-        if item == {
-            .Struct(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
-            .Enum(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
-            else -> {}
+    loop nominal in module_row.nominals {
+        if nominal.source == .SourceAST(item) {
+            if item == {
+                .Struct(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
+                .Enum(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
+                else -> {}
+            }
         }
     }
     loop implementation in module_row.impls -> sema_checked_validate_delegation(graph, module_row, implementation, &diagnostics)
@@ -2718,13 +2872,6 @@ fn sema_checked_constant(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, definition.name), name: definition.name, span: definition.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: definition.is_comptime, is_storage: !definition.is_comptime && (definition.is_persist || definition.mutable), value: checked_value}
 }
 
-fn sema_checked_constant_value(module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, values: [SemaComptimeItemValue]) -> SemaComptimeItemValue? {
-    loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == module_row.module_identity && value.key == constant.symbol.id.key -> return Val(value)
-    }
-    None
-}
-
 // An immutable module constant holds any folded literal value; runtime
 // storage (mutable or `#Persist`) keeps the portable scalar carriers.
 fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeValue) -> Bool Never! {
@@ -2764,12 +2911,13 @@ fn sema_checked_constant_from_value(graph: SemaRegistrationGraph, module_row: Se
     TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value}
 }
 
-fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, values: [SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
+// `staged_values` holds the module's staged constant values by symbol key.
+fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
     if !sema_checked_module_value_evaluates(constant.declaration) {
         &diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
-    staged :: sema_checked_constant_value(module_row, constant, values)
+    staged :: staged_values.get(constant.symbol.id.key)
     if staged == {
         .Val(value) -> sema_checked_constant_from_value(graph, module_row, constant, value, &diagnostics)
         else -> sema_checked_constant(graph, module_row, constant.declaration, &diagnostics)
@@ -2998,10 +3146,10 @@ fn sema_checked_layout_engine(graph: SemaRegistrationGraph, module_row: SemaRegi
 }
 
 pub fn sema_registration_check_declarations(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) -> TDeclarationFacts {
-    sema_registration_check_declarations_with_values(graph, module_index, &diagnostics, [SemaComptimeItemValue]{})
+    sema_registration_check_declarations_with_values(graph, module_index, &diagnostics, [SemaComptimeItemValue]{}, sema_checked_program_boxed_edges(graph))
 }
 
-fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue]) -> TDeclarationFacts {
+fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {
     if module_index < 0 || module_index >= graph.modules.len() -> return TDeclarationFacts{type_defs: [TTypeDef]{}, traits: [TTraitDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}, core_builtin_owners: [TCoreBuiltinOwner]{}}
     module_row :: graph.modules[module_index]
     layout_engine := TargetLayoutEngine?{None}
@@ -3019,7 +3167,7 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
         }
         trait_row :: sema_checked_trait_row(graph, module_row, nominal)
         if trait_row == .Val(value) -> &traits.push(value)
-        definition :: sema_checked_type_def(graph, module_row, layout_engine, nominal, &diagnostics)
+        definition :: sema_checked_type_def(graph, boxed, module_row, layout_engine, nominal, &diagnostics)
         if definition == .Val(value) -> &type_defs.push(value)
         if source_item == .Val(item) {
             if item == .UnitFamily(value) -> sema_checked_unit_member_defs(module_row, value, &type_defs)
@@ -3031,13 +3179,23 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
         sema_checked_validate_impl(graph, module_row, implementation, &diagnostics)
         &impls.push(sema_checked_impl_row(graph, module_row, implementation))
     }
+    // The module's staged constant values by key, first row winning: one
+    // pass over the values rather than one per constant.
+    staged_values := [String:SemaComptimeItemValue]{}
+    if module_row.constants.len() > 0 {
+        loop value in values {
+            if value.kind != SemaComptimeItemKind.Constant || value.module_identity != module_row.module_identity -> next
+            if staged_values.get(value.key) == None -> staged_values[value.key] = value
+        }
+    }
     loop constant in module_row.constants {
-        row :: sema_checked_constant_with_values(graph, module_row, constant, values, &diagnostics) ?? next
+        row :: sema_checked_constant_with_values(graph, module_row, constant, staged_values, &diagnostics) ?? next
         &constants.push(row)
     }
     TDeclarationFacts{type_defs: type_defs, traits: traits, impls: impls, constants: constants, core_builtin_owners: core_builtin_owners}
 }
 
-pub fn sema_registration_check_declarations_with_values(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue]) -> TDeclarationFacts {
-    sema_checked_declaration_facts(graph, module_index, &diagnostics, values)
+// `boxed` is `sema_checked_program_boxed_edges(graph)`, computed once per graph.
+pub fn sema_registration_check_declarations_with_values(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {
+    sema_checked_declaration_facts(graph, module_index, &diagnostics, values, boxed)
 }

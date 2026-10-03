@@ -56,7 +56,9 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     }
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
-    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{jet_rust_emit_type(&ctx, local.ty)}> = None;"
+    // MIRRust emit_slots: a reference binding holds the value it binds in place.
+    borrow :: if ctx.ref_bindings.locals.get(local.id.value) != None -> "&" else -> ""
+    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{jet_rust_emit_type(&ctx, local.ty)}> = None;"
 }
 
 // MIRRust emit_slots: a `Global` read of a shared constant holds the shared
@@ -368,6 +370,7 @@ fn jet_rust_emit_fold_pure(expression: String) -> Bool Never! {
     if jet_rust_emit_fold_numbered(text, "__jet_l_", ".as_ref().expect(\"MIR local\").clone()") -> return true
     if jet_rust_emit_fold_numbered(text, "__jet_l_", ".take().expect(\"MIR local\")") -> return true
     if jet_rust_emit_fold_numbered(text, "(__jet_v_", ".as_ref().expect(\"MIR value\")).clone()") -> return true
+    if jet_rust_emit_fold_numbered(text, "*__jet_v_", ".as_ref().expect(\"MIR value\")") -> return true
     if jet_rust_emit_fold_numbered(text, "__jet_v_", ".take().expect(\"MIR value\")") -> return true
     if !text.ends_with(".clone()") -> return false
     bytes :: text.bytes()
@@ -678,7 +681,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         if indent != definition.indent || jet_rust_emit_fold_attributed(body, consumer) -> next
         form := ""
         at := -1
-        forms :: [String]{"({name}.as_ref().expect(\"MIR value\")).clone()", "{name}.take().expect(\"MIR value\")"}
+        forms :: [String]{"({name}.as_ref().expect(\"MIR value\")).clone()", "(*{name}.as_ref().expect(\"MIR value\"))", "{name}.take().expect(\"MIR value\")"}
         loop candidate in forms {
             positions :: jet_rust_emit_fold_occurrences(bytes, candidate.bytes())
             if positions.len() == 1 {
@@ -1137,10 +1140,10 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MIRFun
                 else -> MIRPlaceID?{None}
             }
             id :: place_id ?? next
-            path :: jet_rust_emit_partial_place_path(function, id)
+            path :: jet_rust_emit_partial_place_path(ctx, function, id)
             if path.len() == 0 -> next
-            base := MIRPlaceBase.Static{name: ""}
-            loop place in function.places { if place.id == id -> base = place.base }
+            row :: ctx.body_index.place_rows.get(id.value) ?? next
+            base :: function.places[row].base
             if base == {
                 .Static(_) -> {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR partial move targets static storage", "static places do not expose a checked split-storage ownership protocol", Val(function.span))
@@ -1464,7 +1467,9 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         }
         unsafe_prefix = "unsafe "
     }
-    method_visibility :: if implementation.trait_ref != None -> "" else -> jet_rust_emit_visibility(function.visibility)
+    // A trait impl, or the extension-trait impl of a runtime carrier, takes
+    // no method visibility.
+    method_visibility :: if implementation.trait_ref != None || jet_rust_emit_impl_carrier_trait(&ctx, implementation) != None -> "" else -> jet_rust_emit_visibility(function.visibility)
     generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(&ctx, local_generic_params) else -> ""
     direct_call :: "{jet_rust_emit_function_name(&ctx, function.id)}({call_args.join(", ")})"
     call_expression :: if function.is_unsafe -> "unsafe {{ {direct_call} }}" else -> direct_call
@@ -1474,6 +1479,25 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     &lines.push("")
 }
 
+// MIRRust emit_impl carrier_trait: an inherent impl on a carrier the runtime
+// declares (Core `URL`/`MIME` are the Prelude's `JetURL`/`JetMIME`) would be
+// rejected across the runtime crate boundary (E0116); its methods form a
+// crate-local extension trait instead. The generated crate is one flat
+// namespace, so every `recv.__jet_method()` call site sees the trait.
+fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> String? {
+    if implementation.trait_ref != None || jet_rust_emit_type_application_generic_params(&ctx, implementation.self_type).len() > 0 -> return None
+    owner_id :: if implementation.self_type.kind == {
+        .Apply(name, _) -> Val(implementation.self_type.identity ?? name.id)
+        else -> MIRTypeID?{None}
+    }
+    identity :: owner_id ?? return None
+    position :: jet_rust_emit_type_index(ctx, identity) ?? return None
+    definition :: ~ctx.program.types[position]
+    if definition.id != identity -> return None
+    if jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition) -> return None
+    Val("__jet_ext{jet_rust_emit_generated_path(implementation.key)}")
+}
+
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_impl
 fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRImplDef, lines: &[String]) Never! {
     previous_generic_params := ctx.current_generic_params
@@ -1481,6 +1505,16 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
     impl_scope :: jet_rust_emit_merge_generic_params(previous_generic_params, impl_type_params)
     ctx.current_generic_params = impl_scope
     impl_generics :: jet_rust_emit_generic_params(&ctx, impl_scope)
+    carrier_trait :: jet_rust_emit_impl_carrier_trait(&ctx, implementation)
+    // MIRRust emit_impl: a typed arithmetic impl names its RHS in the runtime
+    // operator trait (`__jet_Add<Rhs>`) and supplies `Output` from its method
+    // return when MIR carries no explicit row.
+    rust_operator := false
+    if implementation.operator_rhs != None {
+        operator_trait :: if implementation.trait_ref == .Val(operator_ref) -> operator_ref.name else -> ""
+        rust_operator = operator_trait == "Add" || operator_trait == "Sub" || operator_trait == "Mul" || operator_trait == "Div"
+        if !rust_operator && operator_trait != "Equatable" && operator_trait != "Comparable" -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR operator implementation has a non-operator trait", "only Add, Sub, Mul, Div, Equatable and Comparable impls carry an operator RHS", Val(implementation.span))
+    }
     if implementation.trait_ref == {
         .Val(trait_ref) -> {
         trait_found := false
@@ -1490,7 +1524,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
                 loop required in definition.associated_types {
                     supplied := false
                     loop actual in implementation.associated_types { if actual.name == required.name -> supplied = true }
-                    if !supplied -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits an associated type", "every checked trait associated type must have one impl alias", Val(implementation.span))
+                    if !supplied && !(rust_operator && required.name == "Output") -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits an associated type", "every checked trait associated type must have one impl alias", Val(implementation.span))
                 }
                 loop actual in implementation.associated_types {
                     declared := false
@@ -1511,12 +1545,23 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
             }
         }
         if !trait_found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "trait impl references a missing trait", "checked impl dispatch must resolve its trait declaration before source emission", Val(implementation.span))
-        &lines.push("impl{impl_generics} {jet_rust_emit_trait_name(&ctx, trait_ref.id)} for {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
+        trait_text := jet_rust_emit_trait_name(&ctx, trait_ref.id)
+        if rust_operator {
+            rhs :: implementation.operator_rhs ?? implementation.self_type
+            trait_text = "{trait_text}<{jet_rust_emit_type(&ctx, rhs)}>"
+        }
+        &lines.push("impl{impl_generics} {trait_text} for {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
         }
         else -> {
-        &lines.push("impl{impl_generics} {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
+        if carrier_trait == .Val(carrier) {
+            &lines.push("impl {carrier} for {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
+        } else {
+            &lines.push("impl{impl_generics} {jet_rust_emit_type(&ctx, implementation.self_type)} {{")
+        }
         }
     }
+    methods_start :: lines.len()
+    operator_return := MIRType?{None}
     loop method_id in implementation.methods {
         found := false
         if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
@@ -1525,6 +1570,13 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
             function :: ~ctx.program.functions[function_index]
             if function.id == method_id {
                 found = true
+                if rust_operator {
+                    if operator_return == .Val(previous) {
+                        if !mir_type_same_checked_type(previous, function.return_type) -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR operator implementation methods disagree on Output", "every method of a typed arithmetic impl returns its one Output type", Val(implementation.span))
+                    } else {
+                        operator_return = Val(function.return_type)
+                    }
+                }
                 if ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function) {
                     previous_method_params := ctx.current_generic_params
                     ctx.current_generic_params = jet_rust_emit_merge_generic_params(impl_scope, function.generic_params)
@@ -1540,7 +1592,37 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         if !found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR impl method is missing", "impl dispatch rows must resolve every checked method identity", Val(implementation.span))
     }
     loop associated in implementation.associated_types -> &lines.push("    type {jet_rust_emit_associated_type_name(associated.name)} = {jet_rust_emit_type(&ctx, associated.ty)};")
+    if rust_operator {
+        if operator_return == .Val(output) {
+            explicit := false
+            loop associated in implementation.associated_types {
+                if associated.name == "Output" {
+                    explicit = true
+                    if !mir_type_same_checked_type(associated.ty, output) -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR operator implementation Output type disagrees with method return", "an explicit Output alias must name the operator methods' return type", Val(implementation.span))
+                }
+            }
+            if !explicit -> &lines.push("    type Output = {jet_rust_emit_type(&ctx, output)};")
+        } else {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR operator implementation has no materialized method", "a typed arithmetic impl derives Output from its method return", Val(implementation.span))
+        }
+    }
+    methods_end :: lines.len()
     &lines.push("}}")
+    if carrier_trait == .Val(carrier) {
+        // MIRRust carrier_trait_signatures: each emitted method header becomes
+        // a body-less declaration without `mut` parameter bindings.
+        &lines.push("")
+        &lines.push("trait {carrier} {{")
+        loop position in methods_start..<methods_end {
+            line :: lines[position]
+            if !line.starts_with("    ") || !line.ends_with(" {{") -> next
+            bytes :: line.bytes()
+            header :: String.from_bytes(~(bytes[4..<bytes.len() - 2])) ?? ""
+            if !header.starts_with("fn ") && !header.starts_with("unsafe fn ") -> next
+            &lines.push("    {header.replace("(mut ", "(").replace(", mut ", ", ")};")
+        }
+        &lines.push("}}")
+    }
     ctx.current_generic_params = previous_generic_params
 }
 
@@ -2027,20 +2109,28 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_function := ctx.current_function
     previous_generic_params := ctx.current_generic_params
     previous_move_facts := ctx.move_facts
+    previous_ref_bindings := ctx.ref_bindings
     previous_body_index := ctx.body_index
     ctx.current_function = Val(function.id)
-    ctx.body_index = jet_rust_emit_body_index(function, jet_rust_emit_shared_capture_locals(ctx, function))
-    move_facts :: jet_rust_emit_move_facts(ctx, function)
+    ctx.body_index = jet_rust_emit_body_index(function)
+    // The shared-capture plan reads the new index's partial-move rows.
+    shared_locals :: jet_rust_emit_shared_capture_locals(ctx, function)
+    ctx.body_index.shared_locals = shared_locals
+    move_facts :: jet_rust_emit_move_facts(&ctx, function)
     ctx.move_facts = move_facts
     owner_generic_params :: jet_rust_emit_function_owner_generic_params(&ctx, function)
     function_scope :: jet_rust_emit_merge_generic_params(ctx.current_generic_params, owner_generic_params)
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(function_scope, function.generic_params)
+    ref_bindings :: jet_rust_emit_ref_bindings(&ctx, function)
+    ctx.ref_bindings = ref_bindings
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
-    loop value in function.values -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
+    loop value in function.values {
+        if ctx.ref_bindings.payloads.get(value.id.value) == None -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
+    }
     values_end :: lines.len()
     // Slots that park later payloads of a moved enum subject.
     loop value in function.values {
@@ -2093,6 +2183,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.current_function = previous_function
     ctx.current_generic_params = previous_generic_params
     ctx.move_facts = previous_move_facts
+    ctx.ref_bindings = previous_ref_bindings
     ctx.body_index = previous_body_index
     // MIRRust emit_callable_named: the inline attributes precede the item.
     if !function.is_inline_always && !function.is_inline -> return lines

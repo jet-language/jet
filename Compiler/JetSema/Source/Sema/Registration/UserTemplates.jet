@@ -197,6 +197,7 @@ fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int,
     problems := diagnostics
     if generated.len() > 0 {
         module_row := graph.modules[module_index]
+        first_nominal :: module_row.nominals.len()
         source_file :: ~module_row.source_file
         source_origin :: ~module_row.source_origin
         source_segments :: ~module_row.source_segments
@@ -211,6 +212,7 @@ fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int,
         }
         loop item in generated -> sema_registration_add_impl(&module_row, item, &problems)
         graph.modules[module_index] = module_row
+        sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
     }
     loop problem in problems -> sema_registration_push_graph_diagnostic(&graph, module_index, problem)
 }

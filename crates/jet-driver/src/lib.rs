@@ -61,6 +61,7 @@ pub mod InterpreterBoundary;
 pub mod Loader;
 pub mod ProjectParts;
 pub mod QueryService;
+pub mod Trace;
 pub mod Migrations;
 // Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the
 // read-only package/config data model (manifest/lock/store-listing/script-

@@ -158,6 +158,40 @@ mod jet_c_abi {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_string_compare(left: JetCString, right: JetCString) -> i64 {
+        guard(|| match view(left).as_bytes().cmp(view(right).as_bytes()) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
+        guard(|| super::jet_string_is_empty(unsafe { &*value }))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_string_contains(value: JetCString, needle: JetCString) -> bool {
+        guard(|| super::jet_string_contains(view(value), view(needle)))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
+        guard(|| super::jet_string_starts_with(unsafe { &*value }, unsafe { &*needle }))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
+        guard(|| super::jet_string_ends_with(unsafe { &*value }, unsafe { &*needle }))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
         guard(|| handle(String::new()))
     }
@@ -187,6 +221,11 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_i64_to_string(value: i64) -> JetCString {
+        guard(|| handle(value.to_string()))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
         guard(|| handle(value.to_string()))
     }
 
@@ -228,10 +267,23 @@ mod jet_c_abi {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_panic_list_bounds(len: i64, index: i64) {
+        guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_unreachable(ptr: *const u8, len: usize) {
         let reason = text(ptr, len).into_owned();
         // Generated Rust spells MIR `Never` as `unreachable!(reason)`.
         guard(move || -> () { unreachable!("{}", reason) })
+    }
+
+    /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
+    /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
+        let message = text(ptr, len).into_owned();
+        guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
     }
 
     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
@@ -256,6 +308,21 @@ mod jet_c_abi {
 
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr);
+
+    #[no_mangle]
+    pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
+        guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
+        guard(|| native(value))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
+        guard(|| crate::jet_std::jet_int_to_f64(value))
+    }
 
     #[no_mangle]
     pub extern "C" fn jet_term_write_stdout_line(value: JetCString, flush: u8) {

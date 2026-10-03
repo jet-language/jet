@@ -329,7 +329,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         @v.MIRDecisionDisposition.Unavailable@ => ::jet_foundation::MIR::MirDecisionDisposition::Unavailable,
     };
     let function = match value.@f.MIRDecisionRow.function@.as_ref().ok() {
-        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(__jet_bootstrap_int_u64(&function.@f.MIRFunctionID.value@, "decision function ID")?)),
+        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@)),
         None => None,
     };
     let edit = match value.@f.MIRDecisionRow.edit@.as_ref().ok() {
@@ -379,7 +379,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         None => None,
     };
     Ok(::jet_foundation::MIR::MirDecisionRow {
-        id: __jet_bootstrap_int_u64(&value.@f.MIRDecisionRow.id@, "decision row ID")?,
+        id: value.@f.MIRDecisionRow.id@,
         kind,
         disposition,
         function,
@@ -398,7 +398,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
 }
 fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecisionRow) -> Result<@t.MIRDecisionRow@, String> {
     Ok(@t.MIRDecisionRow@ {
-        @f.MIRDecisionRow.id@: __jet_bootstrap_u64_int(value.id, "decision row ID")?,
+        @f.MIRDecisionRow.id@: value.id,
         @f.MIRDecisionRow.kind@: match value.kind {
             ::jet_foundation::MIR::MirDecisionKind::Tier => @v.MIRDecisionKind.Tier@,
             ::jet_foundation::MIR::MirDecisionKind::Inline => @v.MIRDecisionKind.Inline@,
@@ -418,7 +418,7 @@ fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecision
             ::jet_foundation::MIR::MirDecisionDisposition::Unavailable => @v.MIRDecisionDisposition.Unavailable@,
         },
         @f.MIRDecisionRow.function@: match value.function {
-            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: __jet_bootstrap_u64_int(function.0, "decision function ID")? }),
+            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: function.0 }),
             None => Err(jet_foundation::Outcome::JetAbsent),
         },
         @f.MIRDecisionRow.function_name@: value.function_name.clone(),

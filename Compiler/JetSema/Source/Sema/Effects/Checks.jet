@@ -490,13 +490,9 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, ef
     graph :: graph_option ?? return None
     canonical_identity :: graph.canonical_effect_module_identity
     if canonical_identity == "" -> return None
-    loop module_row in graph.modules {
-        if module_row.module_identity == canonical_identity {
-            if module_row.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || module_row.module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
-            return sema_effect_declarations_irreversible_fact(module_row.program.items, effect_name)
-        }
-    }
-    None
+    module_index :: sema_registration_module_index(graph, canonical_identity) ?? return None
+    if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
+    sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
 }
 
 pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {

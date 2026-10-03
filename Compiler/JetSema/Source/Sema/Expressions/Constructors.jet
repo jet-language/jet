@@ -572,11 +572,9 @@ fn sema_expression_typed_literal_printable(ty: Type, environment: SemaScopeEnvir
         .Named(name) -> {
             if name == "Unit" -> return true
             if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
-            loop definition in environment.checked_types {
-                if definition.name == name {
-                    if definition.single_use -> return false
-                    if definition.auto_printable -> return true
-                }
+            loop row in sema_scope_checked_type_name_rows(environment, name) {
+                if environment.checked_types[row].single_use -> return false
+                if environment.checked_types[row].auto_printable -> return true
             }
             return sema_expression_typed_literal_printable_bound(ty, environment)
         }
@@ -609,17 +607,8 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
     if owner.kind != SymbolKind.Type -> return None
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    nominal := SemaRegistrationNominal?{None}
-    loop graph_module in graph.modules {
-        loop candidate in graph_module.nominals {
-            if candidate.symbol.id.key == owner.id.key {
-                nominal = Val(candidate)
-                break
-            }
-        }
-        if nominal != None -> break
-    }
-    registered :: nominal ?? return None
+    registered_row :: sema_type_graph_nominal_row(graph, owner.id.key) ?? return None
+    registered :: graph.modules[registered_row.module_index].nominals[registered_row.row]
     if registered.kind != SemaRegistrationNominalKind.Distinct -> return None
     definition :: sema_registration_nominal_source_item(registered.source) ?? return None
     if definition == {

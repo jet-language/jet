@@ -2,6 +2,7 @@
 // canonical driver evaluator remains the sole execution path; this file owns
 // body-site discovery, staging, and the value-fed function recheck boundary.
 use jet_foundation.[
+    CompilerTraceSink,
     Diagnostic,
 ]
 use jet_sema.[
@@ -257,7 +258,7 @@ pub fn jet_driver_orchestrate_comptime_bodies(
         }
         values = run.values
         functions = run.functions
-        current_graph = jet_driver_recheck_comptime_bodies(graph, body_stage, values, functions)
+        current_graph = jet_driver_recheck_comptime_bodies(graph, body_stage, values, functions, request.trace_sink)
     }
 }
 
@@ -327,6 +328,7 @@ pub fn jet_driver_recheck_comptime_bodies(
     stage: SemaComptimeDeclarationStage,
     values: [SemaComptimeItemValue],
     comptime_functions: [SemaComptimeFunctionResult],
+    trace_sink: CompilerTraceSink?,
 ) -> SemaGraphResult {
-    sema_finalize_registration_graph(graph, stage, values, comptime_functions)
+    sema_finalize_registration_graph(graph, stage, values, comptime_functions, trace_sink)
 }

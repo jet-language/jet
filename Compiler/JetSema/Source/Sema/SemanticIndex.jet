@@ -1519,7 +1519,7 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
             complete = false
             next
         }
-        registered_module := registration.modules[module_index]
+        registered_module :: registration.modules[module_index]
         source :: sema_compiler_index_module_source(module_sources, node.module_identity) ?? {
             complete = false
             next
@@ -1663,10 +1663,10 @@ pub fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationG
     }
     loop checked_module in graph.modules {
         module_index :: sema_registration_module_index(registration, checked_module.module_identity) ?? next
-        registered_module := registration.modules[module_index]
+        registered_module :: registration.modules[module_index]
         loop reference in checked_module.name_references {
             target_index := sema_registration_module_index(registration, reference.symbol.module_name) ?? module_index
-            target_module := registration.modules[target_index]
+            target_module :: registration.modules[target_index]
             sema_compiler_index_append_definition(reference.symbol, target_module, checked_functions, &definitions, &definition_keys)
             &references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path))
         }

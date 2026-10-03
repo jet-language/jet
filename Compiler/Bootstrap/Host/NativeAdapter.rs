@@ -1412,9 +1412,7 @@ fn emit_native_binding_helpers(
                 return Err(not_interface());
             }
             let receiver_type = __jet_bootstrap_type_to_host(receiver_type)?;
-            let handle = ::jet_foundation::MIR::MirHandleId(
-                __jet_bootstrap_source_u64(&handle.@f.MIRHandleID.value@, "host_adapter capability handle")?,
-            );
+            let handle = ::jet_foundation::MIR::MirHandleId(handle.@f.MIRHandleID.value@);
             if !receiver_type.same_checked_type(checked_type)
                 || !receiver_type.same_checked_type(&physical.adapter.root.receiver_type)
                 || handle != physical.adapter.capability.handle

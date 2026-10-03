@@ -26,13 +26,10 @@ use jet_foundation.[
 // ended the whole query, because every caller short-circuits on the first
 // failure. So a visited type answers `true`, and each type is walked once per
 // query. Without the guard a recursive type never terminates and a shared
-// graph costs exponential time. `definitions` indexes the checked types by
-// owner module and name; it is built on the first nominal lookup, so a scalar
-// query never pays for it.
+// graph costs exponential time. Checked declarations are read through the
+// environment's keyed index, built once per pass.
 struct SemaComparabilityQuery {
     visited: [String:Bool]
-    definitions: [String:Int]
-    indexed: Bool
 }
 
 // A comparison operator the comparability rule decided. `handled` is false when
@@ -44,7 +41,7 @@ pub struct SemaComparabilityBinary {
 }
 
 fn sema_comparability_query() -> SemaComparabilityQuery Never! {
-    SemaComparabilityQuery{visited: [String:Bool]{}, definitions: [String:Int]{}, indexed: false}
+    SemaComparabilityQuery{visited: [String:Bool]{}}
 }
 
 fn sema_comparability_definition_key(definition: TTypeDef) -> String Never! {
@@ -67,19 +64,12 @@ fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
 // Resolve `name` from `module_identity` to its checked declaration. Field and
 // alias types are qualified in their declaring module, so nested lookups pass
 // that module rather than the caller's.
-fn sema_comparability_definition(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> TTypeDef? {
+fn sema_comparability_definition(environment: SemaScopeEnvironment, module_identity: String, name: String) -> TTypeDef? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return sema_serde_type_definition(environment, name)
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
     if resolved.symbol.kind != SymbolKind.Type -> return None
-    if !query.indexed {
-        loop (index, definition) in environment.checked_types {
-            key := sema_comparability_definition_key(definition)
-            if query.definitions.get(key) == None -> query.definitions[key] = index
-        }
-        query.indexed = true
-    }
-    index :: query.definitions.get("{resolved.target_module_identity}::{resolved.symbol.name}") ?? return None
+    index :: sema_scope_checked_type_row(environment, resolved.target_module_identity, resolved.symbol.name) ?? return None
     Val(environment.checked_types[index])
 }
 
@@ -94,16 +84,14 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, tr
     name :: sema_type_graph_base_name(ty) ?? return false
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
     if resolved.symbol.kind != SymbolKind.Type -> return false
-    loop definition in environment.checked_types {
-        if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name {
-            if sema_serde_has_name(definition.derives, trait_name) -> return true
-            break
-        }
+    if sema_scope_checked_type_row(environment, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+        if sema_serde_has_name(environment.checked_types[checked_row].derives, trait_name) -> return true
     }
     if trait_name != "Equatable" -> return false
-    item :: resolved.declaration ?? return false
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-    sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
+    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
+    false
 }
 
 // Rust `native_structural_ordering`: the shapes whose ordering is the
@@ -123,7 +111,7 @@ fn sema_comparability_native_ordering(environment: SemaScopeEnvironment, module_
         .Named(name) -> {
             leaf := sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" -> return true
-            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            definition :: sema_comparability_definition(environment, module_identity, name) ?? return false
             if definition.generic_params.len() > 0 -> return false
             key := sema_comparability_definition_key(definition)
             loop alias in aliases {
@@ -179,7 +167,7 @@ fn sema_comparability_structural(environment: SemaScopeEnvironment, module_ident
 // Rust `named_fields_comparable`: a declared nominal is comparable when every
 // field is; the query's visited set makes the walk coinductive and linear.
 fn sema_comparability_named_fields(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> Bool Never! {
-    definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+    definition :: sema_comparability_definition(environment, module_identity, name) ?? return false
     key := sema_comparability_definition_key(definition)
     if query.visited.get(key) != None -> return true
     query.visited[key] = true
@@ -219,7 +207,7 @@ fn sema_comparability_definition_incomparable_field(environment: SemaScopeEnviro
 fn sema_comparability_incomparable_field(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> String? {
     if ty == {
         .Named(name) -> {
-            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return None
+            definition :: sema_comparability_definition(environment, module_identity, name) ?? return None
             key := sema_comparability_definition_key(definition)
             if query.visited.get(key) == None -> query.visited[key] = true
             sema_comparability_definition_incomparable_field(environment, definition, &query)
@@ -438,7 +426,7 @@ fn sema_comparability_map_key(environment: SemaScopeEnvironment, module_identity
         }
         .Named(name) -> {
             if sema_serde_named_leaf(name) == "U8" -> return true
-            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            definition :: sema_comparability_definition(environment, module_identity, name) ?? return false
             key := sema_comparability_definition_key(definition)
             if query.visited.get(key) == .Val(answer) -> return answer
             query.visited[key] = false
@@ -499,7 +487,7 @@ fn sema_comparability_hashable(environment: SemaScopeEnvironment, module_identit
         }
         .Named(name) -> {
             if sema_serde_named_leaf(name) == "U8" -> return true
-            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            definition :: sema_comparability_definition(environment, module_identity, name) ?? return false
             key := sema_comparability_definition_key(definition)
             if query.visited.get(key) == .Val(answer) -> return answer
             query.visited[key] = false
@@ -511,7 +499,7 @@ fn sema_comparability_hashable(environment: SemaScopeEnvironment, module_identit
             leaf := sema_serde_named_leaf(name)
             if leaf == "ID" -> return sema_type_equatable(environment, ty)
             if leaf == "Task" || leaf == "Sender" || leaf == "Receiver" || leaf == "SharedGuard" || leaf == "Pool" || leaf == "Set" -> return false
-            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            definition :: sema_comparability_definition(environment, module_identity, name) ?? return false
             if definition.generic_params.len() != args.len() -> return false
             key := "<{type_name(ty)}>"
             if query.visited.get(key) == .Val(answer) -> return answer

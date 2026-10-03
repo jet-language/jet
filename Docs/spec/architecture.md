@@ -516,6 +516,21 @@ dependencies of compiler workspace crates. A bridge starts from a ratified
 interop surface and dependency approval, and declarations are parsed and
 checked by the ordinary front end before codegen.
 
+D-UPSTREAM-SCOPE1=A makes upstream-first ownership the default for optional
+tooling and compatibility integrations, with upstream vendors or applications
+owning those integrations; D-NEST-UPSTREAM1=A remains the unchanged
+service-binding baseline. This preference approves no provider, dependency,
+version, command, public API or deletion: each concrete adoption needs its own
+exact choice and source, version, license, hash, target and boundary proof,
+including values, callbacks, ownership, authority, errors and deployment. No
+ambient provider or silent fallback is permitted. Existing Core contracts,
+ratified bindings and approved native implementations remain until a named
+cutover is approved; mandatory language operations cannot become optional host
+features. Safety, authority, I6 dependency seams, pure planning, native build
+and boot, lifecycle, I9 execution meaning and matched-performance gates remain
+obligations of the concrete implementation cards, not evidence supplied by this
+policy.
+
 `crates/jet-pkg-model/src/FFI.rs` (or `CFFI.rs` for C) prepares a generated,
 content-addressed bridge. Its generated `Cargo.toml` owns foreign dependencies,
 and `FfiLink` records the crate, rlib, selected-target runtime directory, and

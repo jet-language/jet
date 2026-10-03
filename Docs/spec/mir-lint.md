@@ -15,7 +15,10 @@ archived Rust bootstrap compiler does not carry the lint.
   build mode, including a program that skips the passes because it carries a
   complete seal.
 - After every optimizer pass, and on the lowered input, when full MIR
-  verification is on (`optimize_mir_program(program, lint_every_pass: true)`).
+  verification is on (`optimize_mir_program(program, full_verification: true)`),
+  together with the legality re-verification after every pass. An ordinary
+  compile verifies legality once on entry and trusts the passes after it, as
+  the Rust reference's `validate_after` does.
 - A failure is an internal compiler error. The report names the pass that
   produced the program, the rule family, the function, and the offending
   operation.

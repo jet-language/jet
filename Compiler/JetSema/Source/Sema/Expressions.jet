@@ -516,7 +516,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
     // is the canonical leaf. Owner inference below still checks the identity.
     receiver_canonical :: receiver_name.contains("::")
     receiver_name = sema_expr_operator_row_name(receiver_name)
-    nominal_rows :: graph.nominal_rows.get(receiver_name) ?? [SemaRegistrationRowRef]{}
+    nominal_rows :: sema_registration_nominal_rows_named(graph, receiver_name)
     loop nominal_row in nominal_rows {
         module_index :: nominal_row.module_index
         nominal :: graph.modules[module_index].nominals[nominal_row.row]
@@ -622,7 +622,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
             else -> {}
         }
     }
-    impl_rows :: graph.impl_rows.get(receiver_name) ?? [SemaRegistrationRowRef]{}
+    impl_rows :: sema_registration_impl_rows_named(graph, receiver_name)
     loop impl_row in impl_rows {
         module_index :: impl_row.module_index
         implementation :: graph.modules[module_index].impls[impl_row.row]
@@ -825,11 +825,9 @@ fn sema_expr_expected_trait_symbol(graph: SemaRegistrationGraph, bound: String, 
         index += 1
     }
     module_name := module_parts.join("::")
-    loop module_row in graph.modules {
-        if module_row.module_identity != module_name -> next
-        loop symbol in module_row.symbols {
-            if symbol.kind == SymbolKind.Trait && symbol.name == leaf -> return Val(symbol)
-        }
+    module_index :: sema_registration_module_index(graph, module_name) ?? return None
+    loop symbol in graph.modules[module_index].symbols {
+        if symbol.kind == SymbolKind.Trait && symbol.name == leaf -> return Val(symbol)
     }
     None
 }
@@ -850,9 +848,9 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
                     graph :: graph_option ?? return updated
                     trait_name :: bounds[0]
                     trait_symbol :: sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) ?? return updated
-                    concrete :: sema_type_resolve_nominal(graph, offered, environment.module_identity) ?? return updated
+                    concrete :: sema_type_resolve_nominal_row(graph, offered, environment.module_identity) ?? return updated
                     updated.ty = required
-                    updated.kind = TExprKind.StructLit{fields: fields, extra: extra, as_trait: Val(TCoercionTarget{trait_symbol: trait_symbol.id, concrete_type: concrete.symbol.id})}
+                    updated.kind = TExprKind.StructLit{fields: fields, extra: extra, as_trait: Val(TCoercionTarget{trait_symbol: trait_symbol.id, concrete_type: graph.modules[concrete.module_index].nominals[concrete.row].symbol.id})}
                     return updated
                 }
                 else -> {}
@@ -2060,17 +2058,14 @@ fn sema_expr_comptime_local_method_target(environment: SemaScopeEnvironment, sym
 
 fn sema_expr_comptime_target(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, symbol: SymbolID) -> SemaExprComptimeTarget? {
     if environment.registration_graph == .Val(graph) {
-        loop graph_module in graph.modules {
-            loop function in graph_module.functions {
-                if function.symbol.id.key == symbol.key -> return Val(SemaExprComptimeTarget{module_identity: graph_module.module_identity, declaration: function.declaration, path: function.symbol.name, kind: "function"})
-            }
-            loop nominal in graph_module.nominals {
-                loop function in nominal.methods {
-                    if function.symbol.id.key == symbol.key -> return Val(SemaExprComptimeTarget{module_identity: graph_module.module_identity, declaration: function.declaration, path: "{nominal.symbol.name}.{function.symbol.name}", kind: "method"})
-                }
-            }
+        // One keyed `callable_rows` lookup (Rust `funcs.get`): top-level
+        // functions and nominal methods are compile-time targets.
+        row :: graph.callable_rows.get(symbol.key) ?? return None
+        if row == {
+            .Function(module_index, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].functions[index].declaration, path: graph.modules[module_index].functions[index].symbol.name, kind: "function"})
+            .NominalMethod(module_index, owner, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].nominals[owner].methods[index].declaration, path: "{graph.modules[module_index].nominals[owner].symbol.name}.{graph.modules[module_index].nominals[owner].methods[index].symbol.name}", kind: "method"})
+            else -> return None
         }
-        return None
     }
     declaration :: sema_scope_resolve_declaration(environment, symbol) ?? {
         target :: sema_expr_comptime_local_method_target(environment, symbol) ?? return None
@@ -2185,30 +2180,26 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     candidates := [SemaCallMethodCandidate]{}
     caller_module := environment.module_identity
     caller_package := ""
-    loop graph_module in graph.modules {
-        if graph_module.module_identity == caller_module -> caller_package = graph_module.package_identity
-    }
+    if sema_registration_module_index(graph, caller_module) == .Val(caller_index) -> caller_package = graph.modules[caller_index].package_identity
     trait_candidates := sema_call_trait_method_candidates(graph, receiver_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics)
     if trait_candidates.len() > 0 -> return trait_candidates
     receiver_name :: sema_expr_type_base_name(receiver_type) ?? return candidates
     found_owner := false
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
-            owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
-            if owner_name != receiver_name -> next
-            found_owner = true
-            owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
-            if !owner_inference.complete || !owner_inference.compatible -> next
-            owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
-            loop function in nominal.methods {
-                if function.symbol.name != method || function.parameters.len() == 0 -> next
-                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
-                method_function := function
-                method_function.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                candidate :: sema_call_method_candidate_from_registration(method_function, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
-                &candidates.push(candidate)
-            }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
+        owner_index :: nominal_row.module_index
+        nominal :: graph.modules[owner_index].nominals[nominal_row.row]
+        found_owner = true
+        owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
+        if !owner_inference.complete || !owner_inference.compatible -> next
+        owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
+        loop function in nominal.methods {
+            if function.symbol.name != method || function.parameters.len() == 0 -> next
+            if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[owner_index].module_identity, graph.modules[owner_index].package_identity) -> next
+            method_function := function
+            method_function.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+            method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            candidate :: sema_call_method_candidate_from_registration(method_function, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+            &candidates.push(candidate)
         }
     }
     if !found_owner -> return sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
@@ -2224,13 +2215,9 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
     graph :: graph_option ?? return false
     receiver_name :: sema_expr_type_base_name(receiver_type) ?? return false
     if !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
-            owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
-            if owner_name != receiver_name -> next
-            loop function in nominal.methods {
-                if function.symbol.name == method && function.parameters.len() > 0 -> return true
-            }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
+        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+            if function.symbol.name == method && function.parameters.len() > 0 -> return true
         }
     }
     false
@@ -2387,7 +2374,8 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     source_fact :: sema_expr_unit_fact(source_probe.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_method := sema_expr_unit_conversion_method(source_fact)
     if !rounded && method != expected_method -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if rounded && method != "{expected_method}_rounded" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    rounded_method :: "{expected_method}_rounded"
+    if rounded && method != rounded_method -> return SemaMethodSpecialCheck{handled: false, value: None}
     measured_crossing := sema_expr_unit_is_measured(source_fact) || sema_expr_unit_is_measured(destination_fact)
     if rounded && !probe_rounded_allowed -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !rounded && measured_crossing -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -3181,7 +3169,9 @@ fn sema_expr_copy_string_view(value: Expr, scopes: &SemaScopeTable) -> Bool Neve
     }
 }
 
-pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool) -> TExpr? {
+// `share`: a D-COPY-DEFAULT1 share site (sema_expr_check_shared_identifier),
+// whose copy MIR records with the Share fact, not the authored `~`.
+pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool, share: Bool) -> TExpr? {
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Explicit, environment, context.generic_params, string_view)
     effect_name := sema_copy_effect_name(facts)
     if effect_name != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
@@ -3191,9 +3181,9 @@ pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, e
         return None
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
-    result_kind := TExprKind.ExplicitCopy{value: checked}
+    result_kind := if share -> TExprKind.Clone{value: checked, fact: MIRCopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}
     if facts.lowering == {
-        .Clone -> result_kind = TExprKind.Clone{value: checked, fact: MIRCopyFact.Explicit}
+        .Clone -> result_kind = TExprKind.Clone{value: checked, fact: if share -> MIRCopyFact.Share else -> MIRCopyFact.Explicit}
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         else -> {}
     }
@@ -3209,11 +3199,12 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked :: checked_value ?? return None
-    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(value, &scopes))
+    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(value, &scopes), false)
 }
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached is a
-// share. It checks exactly like the authored copy `~name`.
+// share. It checks like the authored copy `~name`; MIR records it as a Share
+// copy, the clone the TIR read paths can elide like any sema-inserted copy.
 fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
     previous_string_view_read := context.allow_string_view_read
@@ -3223,7 +3214,7 @@ fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, 
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked :: checked_value ?? return None
-    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(Expr.Ident{name: name, span: span}, &scopes))
+    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(Expr.Ident{name: name, span: span}, &scopes), true)
 }
 
 fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {

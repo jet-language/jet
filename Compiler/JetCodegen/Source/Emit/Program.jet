@@ -1,5 +1,6 @@
 // Public MIR -> Rust source boundary. Incomplete artifacts never carry source.
 use jet_foundation.[
+    CompilerTraceSink,
     MIRAccess,
     MIRConstantDef,
     MIRForeign,
@@ -50,6 +51,11 @@ fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MIRFo
         }
     }
     false
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::module_selected
+fn jet_rust_emit_module_selected(ctx: JetRustEmitContext, module_id: MIRModuleID) -> Bool Never! {
+    ctx.all_modules_selected || ctx.selected_modules.get(jet_rust_emit_id_key(module_id.value)) != None
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::impl_selected_for_target
@@ -280,7 +286,7 @@ fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) Neve
     }
 }
 
-pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitResult Never! {
+pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
     jet_rust_emit_validate_program(&ctx)
@@ -293,12 +299,11 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
     jet_rust_emit_program_header(&ctx, &lines)
     jet_rust_emit_hardware_facts(&ctx, &lines)
     // MIRRust module_selected: only the selected artifact's modules emit items.
-    selected := [String:Bool]{}
     artifact :: jet_rust_emit_selected_artifact(&ctx)
     if artifact == .Val(plan) {
-        loop module_id in plan.modules -> selected[jet_rust_emit_id_key(module_id.value)] = true
+        ctx.all_modules_selected = false
+        loop module_id in plan.modules -> ctx.selected_modules[jet_rust_emit_id_key(module_id.value)] = true
     }
-    all_selected :: artifact == None
     // MIRRust emit_mir_program_items order: types, traits and constants (all
     // under emit_types), link closure, C ABI records, foreign items, callback
     // trampolines, impls, then top-level functions.
@@ -310,14 +315,14 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             if handle_lines.len() > 0 -> &lines.push("")
         }
         loop definition in ctx.program.types {
-            if !all_selected && selected.get(jet_rust_emit_id_key(definition.module_id.value)) == None -> next
+            if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
             start :: lines.len()
             jet_rust_emit_type_definition(&ctx, definition, &lines)
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
         jet_rust_emit_period_anchor_impls(&ctx, &lines)
         loop definition in ctx.program.traits {
-            if !all_selected && selected.get(jet_rust_emit_id_key(definition.module_id.value)) == None -> next
+            if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
             // MIRRust: the cached runtime declares compiler-owned traits; only
             // Rollback keeps a per-program declaration.
             if definition.name != "Rollback" && (jet_rust_emit_compiler_owned_trait(definition.name) || jet_rust_emit_compiler_owned_trait(definition.key)) -> next
@@ -341,7 +346,7 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             }
         }
         loop constant in ctx.program.constants {
-            if !all_selected && selected.get(jet_rust_emit_id_key(constant.module_id.value)) == None -> next
+            if !jet_rust_emit_module_selected(ctx, constant.module_id) -> next
             if !constant.is_storage && global_reads.get(constant.key) == None -> next
             start :: lines.len()
             &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
@@ -353,7 +358,7 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
     jet_rust_emit_c_abi_type_definitions(&ctx, &lines)
     if ctx.config.emit_foreign {
         loop foreign in ctx.program.foreign {
-            if !all_selected && selected.get(jet_rust_emit_id_key(foreign.module_id.value)) == None -> next
+            if !jet_rust_emit_module_selected(ctx, foreign.module_id) -> next
             if jet_rust_emit_foreign_target_enabled(&ctx, foreign) {
                 start :: lines.len()
                 foreign_lines :: jet_rust_emit_foreign(&ctx, foreign)
@@ -366,7 +371,7 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
     jet_rust_emit_callback_trampolines(&ctx, &lines)
     codec_keep :: mir_demanded_codec_impls(ctx.program)
     loop (index, implementation) in ctx.program.impls {
-        if !all_selected && selected.get(jet_rust_emit_id_key(implementation.module_id.value)) == None {
+        if !jet_rust_emit_module_selected(ctx, implementation.module_id) {
             loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
             next
         }
@@ -383,17 +388,28 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_impl_unit(&ctx, units, implementation), start, lines.len())
         }
     }
-    loop function in ctx.program.functions {
-        if !all_selected && selected.get(jet_rust_emit_id_key(function.module_id.value)) == None -> next
+    trace_functions := false
+    if trace_sink == .Val(sink) -> trace_functions = sink.functions()
+    loop (position, function) in ctx.program.functions {
+        if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())
+        if !jet_rust_emit_module_selected(ctx, function.module_id) -> next
         if jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None {
+            if trace_functions {
+                if trace_sink == .Val(sink) -> sink.begin("emit.function", function.name, position, ctx.program.functions.len())
+            }
             start :: lines.len()
             function_lines :: jet_rust_emit_function(&ctx, function)
             loop line in function_lines -> &lines.push(line)
             &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_file_unit(units, jet_rust_emit_id_key(function.source_file.value), function.span.start), start, lines.len())
+            if trace_functions {
+                if trace_sink == .Val(sink) -> sink.end("emit.function", lines.len() - start)
+            }
         }
     }
     items_end :: lines.len()
+    // The emit phase's end closes this span on every return below.
+    if trace_sink == .Val(sink) -> sink.begin("emit.assemble", "", -1, -1)
     jet_rust_emit_artifact_assembly(&ctx, &lines)
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
     if units.split -> return jet_rust_emit_result(ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
@@ -440,10 +456,20 @@ fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {
     loop file in program.source_files {
         rows := [JetRustEmitUnitStart]{}
         offset := 0
-        loop line in file.source.split("\n").to_list() {
-            bytes :: line.bytes()
-            offset += bytes.len() + 1
-            if !line.starts_with(JET_RUST_EMIT_UNIT_PROVENANCE_MARKER) || !line.ends_with("]") -> next
+        // MIRRust EmissionUnits::new: offsets count each line with its real
+        // newline (split_inclusive), and a marker line matches with its
+        // trailing whitespace (`\r`, spaces) trimmed.
+        segments :: file.source.split("\n").to_list()
+        loop (index, line) in segments {
+            last :: index == segments.len() - 1
+            width :: line.bytes().len()
+            if last && width == 0 -> break
+            newline :: if last -> 0 else -> 1
+            offset += width + newline
+            if !line.starts_with(JET_RUST_EMIT_UNIT_PROVENANCE_MARKER) -> next
+            marker :: line.trim_end()
+            if !marker.ends_with("]") -> next
+            bytes :: marker.bytes()
             path :: String.from_bytes(~(bytes[marker_length..<bytes.len() - 1])) ?? ""
             parts :: path.split("/").to_list()
             unit :: if parts.len() > 1 -> parts[1] else -> JET_RUST_EMIT_BASE_UNIT

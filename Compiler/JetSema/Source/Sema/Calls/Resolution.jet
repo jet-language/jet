@@ -346,24 +346,29 @@ pub fn sema_call_resolve_method(receiver_type: Type, method: String, args: [Call
     }
 }
 
-fn sema_call_trait_nominal_for_bound(graph: SemaRegistrationGraph, bound: String) -> SemaRegistrationNominal? {
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
+fn sema_call_trait_row_for_bound(graph: SemaRegistrationGraph, bound: String) -> SemaRegistrationRowRef? {
+    loop (module_index, graph_module) in graph.modules {
+        loop (row, nominal) in graph_module.nominals {
             if nominal.kind != SemaRegistrationNominalKind.Trait -> next
             canonical :: "{nominal.symbol.module_name}::{nominal.symbol.name}"
-            if bound == canonical -> return Val(nominal)
+            if bound == canonical -> return Val(SemaRegistrationRowRef{module_index: module_index, row: row})
         }
     }
     None
 }
 
-fn sema_call_trait_nominal_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationNominal? {
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
-            if nominal.kind == SemaRegistrationNominalKind.Trait && nominal.symbol.id.key == symbol.key -> return Val(nominal)
-        }
+fn sema_call_trait_row_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationRowRef? {
+    row :: sema_type_graph_nominal_row(graph, symbol.key) ?? return None
+    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait -> return None
+    Val(row)
+}
+
+fn sema_call_trait_rows_push(graph: SemaRegistrationGraph, rows: &[SemaRegistrationRowRef], row: SemaRegistrationRowRef) Never! {
+    key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
+    loop existing in rows {
+        if graph.modules[existing.module_index].nominals[existing.row].symbol.id.key == key -> return
     }
-    None
+    &rows.push(row)
 }
 
 fn sema_call_generic_receiver_name(ty: Type) -> String? {
@@ -377,12 +382,7 @@ fn sema_call_generic_receiver_name(ty: Type) -> String? {
 fn sema_call_trait_visible(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: String, caller_package: String) -> Bool Never! {
     if nominal.symbol.module_name == caller_module -> return true
     owner_package := ""
-    loop graph_module in graph.modules {
-        if graph_module.module_identity == nominal.symbol.module_name {
-            owner_package = graph_module.package_identity
-            break
-        }
-    }
+    if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
     if nominal.symbol.visibility >= 2 -> return true
     nominal.symbol.visibility >= 1 && owner_package == caller_package
 }
@@ -423,15 +423,12 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
 
 pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     resolved_receiver :: sema_type_resolve_declared_with_generics(graph, receiver_type, caller_module, generic_params)
-    trait_nominals := [SemaRegistrationNominal]{}
+    trait_rows := [SemaRegistrationRowRef]{}
     if resolved_receiver == {
         .TraitObject(bounds) -> {
             loop bound in bounds {
-                nominal :: sema_call_trait_nominal_for_bound(graph, bound) ?? next
-                duplicate :: loop existing in trait_nominals {
-                    if existing.symbol.id.key == nominal.symbol.id.key -> break true
-                } ?? false
-                if !duplicate -> &trait_nominals.push(nominal)
+                row :: sema_call_trait_row_for_bound(graph, bound) ?? next
+                sema_call_trait_rows_push(graph, &trait_rows, row)
             }
         }
         else -> {
@@ -448,16 +445,14 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
             }
             current :: parameter ?? return [SemaCallMethodCandidate]{}
             loop bound in current.bounds {
-                nominal :: sema_call_trait_nominal_for_symbol(graph, bound) ?? next
-                duplicate :: loop existing in trait_nominals {
-                    if existing.symbol.id.key == nominal.symbol.id.key -> break true
-                } ?? false
-                if !duplicate -> &trait_nominals.push(nominal)
+                row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
+                sema_call_trait_rows_push(graph, &trait_rows, row)
             }
         }
     }
     candidates := [SemaCallMethodCandidate]{}
-    loop nominal in trait_nominals {
+    loop trait_row in trait_rows {
+        nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
         if !sema_call_trait_visible(graph, nominal, caller_module, caller_package) -> next
         loop trait_method in nominal.trait_methods {
             if trait_method.declaration.name != method -> next

@@ -111,8 +111,8 @@ fn sema_pattern_subject_args(ty: Type) -> [Type] Never! {
     }
 }
 
-fn sema_pattern_nominal(graph: SemaRegistrationGraph, module_identity: String, ty: Type) -> SemaRegistrationNominal? {
-    sema_type_resolve_nominal(graph, sema_pattern_nominal_type(ty) ?? return None, module_identity)
+fn sema_pattern_nominal_row(graph: SemaRegistrationGraph, module_identity: String, ty: Type) -> SemaRegistrationRowRef? {
+    sema_type_resolve_nominal_row(graph, sema_pattern_nominal_type(ty) ?? return None, module_identity)
 }
 
 fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] Never! {
@@ -234,10 +234,11 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` cannot be resolved", "pattern validation needs the completed declaration graph", "resolve the subject's declaration before matching it"))
         return result
     }
-    nominal :: sema_pattern_nominal(graph, env.module_identity, normalized) ?? {
+    nominal_row :: sema_pattern_nominal_row(graph, env.module_identity, normalized) ?? {
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
         return result
     }
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     result.owner = Val(nominal.symbol.id)
     if nominal.source == {
         .SourceAST(item) -> {
@@ -552,10 +553,11 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
         &diagnostics.push(sema_error("E0313", span, "a struct pattern needs the declaration graph", "struct patterns read registered fields", "resolve the subject declaration before matching it"))
         return SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, rest: rest, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
-    nominal :: sema_pattern_nominal(graph, env.module_identity, subject_ty) ?? {
+    nominal_row :: sema_pattern_nominal_row(graph, env.module_identity, subject_ty) ?? {
         &diagnostics.push(sema_error("E0313", span, "`{{ … }}` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
         return SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, rest: rest, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     is_struct :: nominal.kind == SemaRegistrationNominalKind.Struct
     if !is_struct {
         &diagnostics.push(sema_error("E0313", span, "`{{ … }}` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))

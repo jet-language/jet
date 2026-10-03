@@ -423,17 +423,9 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
 }
 
 
-fn sema_taint_module_index(graph: SemaRegistrationGraph, module_identity: String) -> Int? {
-    index := 0
-    loop index < graph.modules.len() {
-        if graph.modules[index].module_identity == module_identity -> return Val(index)
-        index += 1
-    }
-    None
-}
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
-    module_index :: sema_taint_module_index(graph, module_identity) ?? return ""
-    module_row := graph.modules[module_index]
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
+    module_row :: graph.modules[module_index]
     loop import in module_row.imports {
         loop binding in import.bindings {
             if binding.local == name -> return binding.target_module_identity
@@ -1301,7 +1293,7 @@ fn sema_taint_switch_exhaustive(arms: [SwitchArm], diagnostics: [Diagnostic], sp
 }
 
 fn sema_taint_module_name(graph: SemaRegistrationGraph, module_identity: String) -> String Never! {
-    module_index :: sema_taint_module_index(graph, module_identity) ?? return ""
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
     graph.modules[module_index].module_name
 }
 
@@ -1316,8 +1308,8 @@ fn sema_taint_import_module_name(graph: SemaRegistrationGraph, import: SemaRegis
 
 fn sema_taint_collect_imports(graph: SemaRegistrationGraph, module_identity: String) -> [SemaTaintImportAlias] Never! {
     imports := [SemaTaintImportAlias]{}
-    module_index :: sema_taint_module_index(graph, module_identity) ?? return imports
-    module_row := graph.modules[module_index]
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return imports
+    module_row :: graph.modules[module_index]
     loop import in module_row.imports {
         target_name := sema_taint_import_module_name(graph, import)
         &imports.push(SemaTaintImportAlias{alias: import.declaration.alias, module_name: target_name})
@@ -1376,29 +1368,33 @@ fn sema_taint_initial_parameter_bindings(state: &SemaTaintFlowState, function: F
 }
 
 fn sema_taint_function_for_key(graph: SemaRegistrationGraph, module_identity: String, owner_key: String) -> Func? {
-    module_index :: sema_taint_module_index(graph, module_identity) ?? return None
-    module_row := graph.modules[module_index]
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    module_row :: graph.modules[module_index]
     loop item in module_row.program.items {
         if item == {
             .Func(function) -> if owner_key == function.name || owner_key == sema_taint_callable_key(module_identity, "", function.name) -> return Val(function)
             .Struct(definition) -> {
                 loop method in definition.methods {
-                    if owner_key == "{definition.name}::{method.name}" || owner_key == sema_taint_callable_key(module_identity, definition.name, method.name) -> return Val(method)
+                    method_key :: "{definition.name}::{method.name}"
+                    if owner_key == method_key || owner_key == sema_taint_callable_key(module_identity, definition.name, method.name) -> return Val(method)
                 }
                 loop trait_impl in definition.trait_impls {
                     loop method in trait_impl.methods {
-                        if owner_key == "{definition.name}::{method.name}" -> return Val(method)
+                        method_key :: "{definition.name}::{method.name}"
+                        if owner_key == method_key -> return Val(method)
                     }
                 }
             }
             .Enum(definition) -> {
                 loop method in definition.methods {
-                    if owner_key == "{definition.name}::{method.name}" -> return Val(method)
+                    method_key :: "{definition.name}::{method.name}"
+                    if owner_key == method_key -> return Val(method)
                 }
             }
             .Impl(definition) -> {
                 loop method in definition.methods {
-                    if owner_key == "{definition.type_name}::{method.name}" -> return Val(method)
+                    method_key :: "{definition.type_name}::{method.name}"
+                    if owner_key == method_key -> return Val(method)
                 }
             }
             else -> {}
@@ -1415,7 +1411,7 @@ fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key:
     sema_taint_collect_tag_declarations(&catalog, graph, &diagnostics)
     scrubber_diagnostics := [Diagnostic]{}
     sema_taint_register_scrubbers(catalog, graph, module_identity, &scrubber_diagnostics)
-    source_module_index := sema_taint_module_index(graph, module_identity)
+    source_module_index := sema_registration_module_index(graph, module_identity)
     if source_module_index == {
         .Val(index) -> sema_attach_diagnostic_source_locations(&scrubber_diagnostics, 0, graph.modules[index].source_segments)
         .None -> {}
@@ -1432,7 +1428,7 @@ fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key:
         .None -> {}
     }
     sema_taint_check_block(&state, body)
-    source_module_index = sema_taint_module_index(graph, module_identity)
+    source_module_index = sema_registration_module_index(graph, module_identity)
     if source_module_index == {
         .Val(index) -> sema_attach_diagnostic_source_locations(&state.diagnostics, 0, graph.modules[index].source_segments)
         .None -> {}
@@ -1451,7 +1447,7 @@ pub fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics
     sema_taint_collect_tag_declarations(&catalog, graph, &diagnostics)
     module_index := 0
     loop module_index < graph.modules.len() {
-        module_row := graph.modules[module_index]
+        module_row :: graph.modules[module_index]
         scrubber_diagnostics := [Diagnostic]{}
         sema_taint_register_scrubbers(catalog, graph, module_row.module_identity, &scrubber_diagnostics)
         sema_attach_diagnostic_source_locations(&scrubber_diagnostics, 0, module_row.source_segments)
@@ -1460,7 +1456,7 @@ pub fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics
     }
     module_index = 0
     loop module_index < graph.modules.len() {
-        module_row := graph.modules[module_index]
+        module_row :: graph.modules[module_index]
         loop item in module_row.program.items {
             if item == {
                 .Func(function) -> {
