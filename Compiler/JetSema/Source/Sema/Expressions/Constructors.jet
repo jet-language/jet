@@ -26,17 +26,20 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     TFailureCarrier,
+    TFieldRef,
     THostCall,
     TNamedEnumArg,
     TStrPart,
     TStructFieldValue,
     Type,
+    TypeTupleField,
     TypedLitBody,
     Variant,
     ast_empty_call_arg_flags,
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_enum_variants,
+    core_record_literal_fields,
     core_call,
     expr_span,
     regex_syntax_validate,
@@ -252,7 +255,83 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     Val(TStructFieldValue{field: reference, value: checked, boxed: reference.boxed})
 }
 
+// A builtin Core record (`IOContext{...}`, `Tensor{...}`) has no Jet
+// declaration; its literal checks against the generated Core record rows.
+// A program declaration of the same name takes precedence.
+fn sema_expression_core_record_name(struct_name: String, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> String? {
+    if type_args.len() > 0 -> return None
+    name := struct_name
+    if name == "" {
+        expected_ty :: expected ?? return None
+        name = if sema_expr_unwrap_tag(expected_ty) == {
+            .Named(expected_name) -> expected_name
+            else -> { return None }
+        }
+    }
+    if sema_expression_type_symbol(&scopes, environment, name) != None -> return None
+    if core_record_literal_fields(name) == None -> return None
+    Val(name)
+}
+
+fn sema_expression_core_record_field_value(owner_name: String, field: TypeTupleField, field_value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+    sema_copy_site_check_field(field_value, environment, scopes, &tail_store, &context, &diagnostics)
+    checked :: sema_check_expression_with_lambda_escapes(field_value, Val(field.ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
+    compatible :: sema_expr_expected_assignable(field.ty, checked.ty, environment) ?? return None
+    if !compatible {
+        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field.ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(field_value)))
+        return None
+    }
+    if !sema_copy_site_record_move(field_value, scopes, &state, &tail_store, &context, &diagnostics) -> return None
+    reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, field.name), name: field.name, ty: field.ty, boxed: false}
+    Val(TStructFieldValue{field: reference, value: checked, boxed: false})
+}
+
+fn sema_expression_core_record_literal(owner_name: String, fields: [ExprField], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    declared :: core_record_literal_fields(owner_name) ?? return None
+    supplied := [Bool]{}
+    loop _ in declared -> &supplied.push(false)
+    loop source in fields {
+        found := -1
+        loop (index, row) in declared {
+            if row.name == source.name {
+                found = index
+                break
+            }
+        }
+        if found < 0 {
+            &diagnostics.push(sema_error("E0302", source.name_span, "`{owner_name}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
+            return None
+        }
+        if supplied[found] {
+            &diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
+            return None
+        }
+        supplied[found] = true
+    }
+    loop (index, row) in declared {
+        if !supplied[index] {
+            &diagnostics.push(sema_error("E0108", span, "field `{row.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{row.name}: ...`"))
+            return None
+        }
+    }
+    values := [TStructFieldValue]{}
+    loop source in fields {
+        loop row in declared {
+            if row.name != source.name -> next
+            checked :: sema_expression_core_record_field_value(owner_name, row, source.value, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            &values.push(checked)
+            break
+        }
+    }
+    value :: sema_tir_expr(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values, extra: None, as_trait: None}, span)
+    sema_expr_expected(value, expected, environment, &diagnostics)
+}
+
 fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if as_trait == None {
+        core_record :: sema_expression_core_record_name(struct_name, type_args, expected, environment, &scopes)
+        if core_record == .Val(core_name) -> return sema_expression_core_record_literal(core_name, fields, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     resolved :: sema_expression_struct_type(struct_name, type_args, expected, span, environment, &scopes, &diagnostics) ?? return None
     owner := resolved.owner
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})

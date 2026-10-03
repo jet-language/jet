@@ -327,3 +327,49 @@ pub fn core_module_declaration_from_source(source_text: String, module_name: Str
         dependencies: core_module_source_names(dependency_text),
     })
 }
+
+// One field of a builtin Core record (Rust `core_struct_field`); rows are
+// generated into CoreRecordRows.jet in the oracle's first-match order.
+pub struct CoreRecordFieldRow {
+    pub owner: String
+    pub field: String
+    pub ty: Type
+}
+
+// The declared field list of a Core record users can build with a struct
+// literal (Rust `core_constructable_fields`), in declaration order.
+pub struct CoreRecordLiteralRow {
+    pub owner: String
+    pub fields: [TypeTupleField]
+}
+
+// Corelib nominal types carry a source identity; the record oracle is keyed
+// by the declared leaf (`<corelib>/Core/process::...::ProcessReceipt`).
+fn core_record_leaf(owner: String) -> String Never! {
+    if !owner.starts_with("<corelib>/") -> return "{owner}"
+    parts :: owner.split("::").to_list()
+    "{parts[parts.len() - 1]}"
+}
+
+pub fn core_record_field(owner: String, field: String) -> Type? {
+    core_record_field_in(CORE_RECORD_FIELD_ROWS, core_record_leaf(owner), field)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String) -> Type? {
+    loop row in rows {
+        if row.owner == owner && row.field == field -> return Val(row.ty)
+    }
+    None
+}
+
+pub fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
+    core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
+}
+
+fn core_record_literal_fields_in(rows: [CoreRecordLiteralRow], owner: String) -> [TypeTupleField]? {
+    loop row in rows {
+        if row.owner == owner -> return Val(row.fields)
+    }
+    None
+}

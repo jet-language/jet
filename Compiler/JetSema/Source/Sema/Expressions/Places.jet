@@ -20,6 +20,7 @@ use jet_foundation.[
     TagMarker,
     TextEdit,
     Type,
+    core_record_field,
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
     expr_span,
@@ -288,6 +289,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     // for prepared-constant paths, which codegen folds to their values.
     reflection :: sema_fact_reflection_field(base, member, span)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, &diagnostics)
+    // A builtin Core record (`ProcessReceipt.success`, `IOContext.operation`)
+    // has no Jet declaration; its fields are the generated Core record rows.
+    if owner_name != "" {
+        core_field :: core_record_field(owner_name, member)
+        if core_field == .Val(core_field_ty) {
+            core_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: core_field_ty, boxed: false}
+            core_value :: sema_tir_expr(core_field_ty, TExprKind.Field{receiver: base, field: core_reference}, span)
+            return sema_expr_expected(core_value, expected, environment, &diagnostics)
+        }
+    }
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
 }
