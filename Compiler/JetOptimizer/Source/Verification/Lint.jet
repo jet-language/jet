@@ -1200,9 +1200,13 @@ fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic:
             mir_lint_declared_fields(ctx, fields)
         }
         .OptionLift2(_, function, _, _) -> mir_lint_expect_value_class(ctx, rule, "lifted function", function, mir_lint_callable())
+        // `checked_*` yields an Option of the operand; wrapping, saturating,
+        // trapping (`checked_policy`) and rotate routes yield the operand's
+        // integer type (Rust tir_to_mir_expr `OverflowOpt` types the op with the
+        // checked expression's type).
         .OverflowOption(_, _, _, _) -> {
             ty :: instruction.ty ?? return mir_lint_no_result(rule)
-            mir_lint_expect_class(ctx, rule, "checked arithmetic", ty, [MIRLintClass]{MIRLintClass.Option})
+            mir_lint_expect_class(ctx, rule, "overflow arithmetic", ty, [MIRLintClass]{MIRLintClass.Option, MIRLintClass.Integer})
         }
         .NumericMethod(_, receiver) | .NumericBinaryMethod(_, receiver, _) -> mir_lint_expect_value_class(ctx, rule, "numeric receiver", receiver, mir_lint_numeric())
         .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())

@@ -326,6 +326,9 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
     // numeric type's own constants.
     if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
+        // Rust `numeric_const_type`: a numeric constant is a value, not a
+        // call, so the site is known-pure rather than an unknown callee.
+        if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, &diagnostics) -> return None
         bound :: sema_tir_expr(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
         return sema_expr_expected(bound, expected, environment, &diagnostics)
     }

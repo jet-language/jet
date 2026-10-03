@@ -147,7 +147,11 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
     checked_value :: sema_expr_expected(inline_value, expected, environment, &diagnostics) ?? return None
     checked_args := [CallArg]{}
     binding :: sema_call_bind_value(signature, &checked_args, span, &diagnostics) ?? return None
-    facts :: sema_call_facts(signature, [Type]{}, binding) ?? return None
+    facts := sema_call_facts(signature, [Type]{}, binding) ?? return None
+    // An inline loop is control flow, not a call (Rust walks it as the
+    // owner's statements): its body's calls are already facts of the owner,
+    // so the loop site itself is known-pure rather than an unknown callee.
+    facts.effect_bound = Val([EffectRowEntry]{})
     return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked_value, binding: binding, facts: facts, return_view_facts: return_view_facts})
 }

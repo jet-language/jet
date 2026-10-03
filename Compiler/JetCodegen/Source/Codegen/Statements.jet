@@ -1930,7 +1930,10 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, expression: TExpr
         .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {
             jet_codegen_lower_statement(&builder, body[body.len() - 1])
             if jet_codegen_current_is_open(builder) -> panic("checked divergent inline tail did not terminate")
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
+            // Control left the block, so its value is never read; like the
+            // all-diverging joins, the inert placeholder is a Unit constant at
+            // Unit (at the block's own type it mistypes a non-Unit result).
+            jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Unit"}, MIROperation.Constant{value: MIRConstant.Unit})
         }
         else -> panic("checked inline contract block has no expression tail")
     }
@@ -2640,6 +2643,16 @@ fn jet_codegen_lower_result_handler(builder: &JetCodegenBuilder, expression: TEx
 fn jet_codegen_lower_unreachable(builder: &JetCodegenBuilder, expression: TExpr, line: Int) -> MIRValueID Never! {
     value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Unit"}, MIROperation.Constant{value: MIRConstant.Unit})
     jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "checked exhaustive dispatch at line {line}"})
+    value
+}
+
+// Sema's uninhabited `.Never` node (the `no else arm` end of an else-less
+// exhaustive dispatch, `todo`) is Rust's TExprKind::Unreachable: it ends the
+// current block in an Unreachable terminator, so no join ever receives it as
+// a phi edge (whose `Never` ownership would carry no drop obligation).
+fn jet_codegen_lower_never(builder: &JetCodegenBuilder, expression: TExpr, reason: String) -> MIRValueID Never! {
+    value := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Never{reason: reason})
+    jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: reason})
     value
 }
 

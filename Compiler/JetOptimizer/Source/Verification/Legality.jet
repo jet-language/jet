@@ -1354,12 +1354,6 @@ fn mir_pass_validate_operation_legality(
         .PtrFromAddr(_, element) -> {
             if !mir_pass_type_valid(element) -> return Val("pointer element type is invalid")
         }
-        .Drop(value, kind) -> {
-            if kind != .NoDrop {
-                type :: mir_pass_value_type(function, definitions, value) ?? return Val("drop value type is missing")
-                if mir_pass_drop_forbidden_type(type) -> return Val("scalar value cannot be dropped")
-            }
-        }
         else -> {}
     }
     None

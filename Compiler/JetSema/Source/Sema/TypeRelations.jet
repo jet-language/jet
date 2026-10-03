@@ -19,6 +19,7 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
+    core_module_export,
     type_identity_equal,
     type_is_unit_callable_return,
     type_with_effective_fn_returns,
@@ -699,8 +700,48 @@ pub fn sema_type_assignable_in_graph_with_generics(graph: SemaRegistrationGraph,
             }
             Val(true)
         }
-        else -> Val(false)
+        else -> Val(sema_type_assignable(sema_type_core_leaf_form(graph, required_resolved, caller_module_identity), sema_type_core_leaf_form(graph, offered_resolved, caller_module_identity)))
     }
+}
+
+// Rust `resolve_type` names a qualified Core type export (`files.Stat`) by
+// its bare leaf, the spelling a fixed Core row returns (`core.files.stat`'s
+// `Stat`). Registration gives the export its owner's canonical identity
+// (`<corelib>/Core/files::Core/files/files.jet::Stat`), so a canonical Core
+// nominal meets the bare leaf when its owner Core module exports that type
+// and the leaf names nothing in the caller's module. As in Rust, a Core
+// record that only shares a built-in typed head's leaf (`core.files.path`'s
+// `Path`) and the `core.crypto` structs keep their canonical identity.
+fn sema_type_core_leaf_form(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String) -> Type Never! {
+    if ty == {
+        .Named(name) -> if sema_type_core_leaf_name(graph, name, caller_module_identity) == .Val(leaf) -> Type.Named{name: leaf} else -> ty
+        .Apply(name, args) -> Type.Apply{name: name, args: loop arg in args -> sema_type_core_leaf_form(graph, arg, caller_module_identity)}
+        .List(inner) -> Type.List{element: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
+        .Shared(inner) -> Type.Shared{inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
+        .Option(inner) -> Type.Option{inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
+        .Result(ok, err) -> Type.Result{ok: sema_type_core_leaf_form(graph, ok, caller_module_identity), err: sema_type_core_leaf_form(graph, err, caller_module_identity)}
+        .Map(key, key_span, value) -> Type.Map{key: sema_type_core_leaf_form(graph, key, caller_module_identity), key_span: key_span, value: sema_type_core_leaf_form(graph, value, caller_module_identity)}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
+        else -> ty
+    }
+}
+
+// The bare leaf a canonical Core nominal `name` meets, if any (see above).
+fn sema_type_core_leaf_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String? {
+    if !name.starts_with("<corelib>/") -> return None
+    parts :: name.split("::").to_list()
+    if parts.len() < 2 -> return None
+    last :: parts.len() - 1
+    leaf :: parts[last]
+    owner_parts := [String]{}
+    loop index in 0..<last -> &owner_parts.push(parts[index])
+    module_name :: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
+    if module_name == "core.crypto" -> return None
+    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") -> return None
+    exports :: core_module_export(module_name) ?? return None
+    if !exports.type_exports.contains(leaf) -> return None
+    if sema_type_graph_lookup_symbol(graph, caller_module_identity, leaf) != None -> return None
+    Val(leaf)
 }
 
 pub fn sema_type_assignable_in_graph(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: String) -> Bool? {

@@ -336,7 +336,12 @@ fn jet_rust_emit_pattern_capture_value(ctx: &JetRustEmitContext, function: MIRFu
     if ty.kind == {
         .String -> return "match {capture} {{ JetPatternCapture::Text(value) => value, _ => unreachable!(\"MIR text capture type mismatch\") }}"
         .Char -> return "match {capture} {{ JetPatternCapture::Text(value) => {{ let mut chars = value.chars(); match (chars.next(), chars.next()) {{ (Some(value), None) => value, _ => unreachable!(\"MIR char capture contains more than one scalar\") }} }}, _ => unreachable!(\"MIR char capture type mismatch\") }}"
-        .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Measure(_) -> return "match {capture} {{ JetPatternCapture::Int(value) => value as {jet_rust_emit_type(&ctx, ty)}, _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+        .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Measure(_) -> {
+            // The exact Int carrier is not a Rust primitive: a host `i64`
+            // capture enters it through `from_i64`, never an `as` cast.
+            converted :: if jet_rust_emit_exact_int_carrier(ty) -> "jet_foundation::Numeric::JetInt::from_i64(value)" else -> "value as {jet_rust_emit_type(&ctx, ty)}"
+            return "match {capture} {{ JetPatternCapture::Int(value) => {converted}, _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+        }
         .Float | .Float32 -> return "match {capture} {{ JetPatternCapture::Float(value) => value as {jet_rust_emit_type(&ctx, ty)}, _ => unreachable!(\"MIR float capture type mismatch\") }}"
         .Bool -> return "match {capture} {{ JetPatternCapture::Bool(value) => value, _ => unreachable!(\"MIR bool capture type mismatch\") }}"
         .List(inner) -> {

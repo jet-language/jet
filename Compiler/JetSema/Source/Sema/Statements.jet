@@ -697,7 +697,7 @@ fn sema_stmt_check_unit_if(expr: Expr, return_type: Type?, environment: SemaScop
             // D-FLOWTYPE1=A: a stable `x == None` test reads as its presence
             // test with the branches swapped, as in the value form.
             if sema_expression_absent_optional_test(condition) == .Val(test) {
-                if sema_expression_flow_optional_payload(scopes, test.name.name) != None && !sema_expression_if_continues_dispatch(else_value, test.name.name) -> return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+                if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) -> return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
             }
             sema_stmt_check_unit_if_parts(condition, then_body, then_value, else_body, else_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         }
@@ -858,6 +858,11 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             &checked_conditions.push(checked.value)
         }
         sema_coverage_check_table(checked_conditions, multi_head, span, environment, &diagnostics)
+        // Rust `lower_enum_match`: the miss path of a covered else-less table
+        // is unreachable (codegen ends it in an Unreachable terminator), so it
+        // never falls through to the join, exactly as
+        // sema_stmt_refutable_switch_exits already assumes.
+        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span), span: span}})
     }
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}

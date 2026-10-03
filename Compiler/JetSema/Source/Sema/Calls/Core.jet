@@ -201,7 +201,11 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
 pub fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
-    projection :: core_call_projection(module_name, member, CORE_CALL_COVERAGE_SEMA, actual_arity)
+    // D-VERDICT-1321-1: variadic `core.term.eprint` joins its arguments into
+    // one write through the arity-1 row (Rust `checked_core_record(…, 1, …)`);
+    // its special checker owns the argument count.
+    projection_arity :: if module_name == "core.term" && member == "eprint" -> 1 else -> actual_arity
+    projection :: core_call_projection(module_name, member, CORE_CALL_COVERAGE_SEMA, projection_arity)
     if projection == {
         .Row(record) -> return Val(record)
         .Error(error) -> {
@@ -551,7 +555,9 @@ fn sema_call_core_result_type(signature: CoreTypedCallSignature, type_args: [Typ
     names :: loop parameter in signature.type_parameters -> parameter.name
     if signature.result_rule == {
         .Declared -> {
-            declared :: signature.return_type ?? return None
+            // A fixed row with no declared return (`-` in the host tables)
+            // is a Unit call, as in Rust `infer_core_call`.
+            declared :: signature.return_type ?? return Val(Type.Named{name: "Unit"})
             return Val(sema_inference_substitute_type(declared, names, type_args))
         }
         .AbsoluteValue(parameter_index) -> {
@@ -608,9 +614,14 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into TIR", "complete the source typed return contract"))
         return None
     }
-    fallibility := sema_call_failure_carrier(Val(result_type))
+    // Rust `core_call_expr` / `checked_core_type_args`: the CoreCall carrier is
+    // derived from the checked result type (`TFailureCarrier::from_checked_type`:
+    // only a Result or Option result can fail), and its type arguments are the
+    // call's written ones. The inferred signature arguments check constraints
+    // and record the call fact; the native kernel takes no inferred generic.
+    fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
-    value :: sema_call_core_tir(canonical_record, values, span, resolved_type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
+    value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, context, &diagnostics)
 }
 

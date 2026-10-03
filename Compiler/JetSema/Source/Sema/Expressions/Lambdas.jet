@@ -1580,6 +1580,14 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
     checked
 }
 
+// A lambda's written, expected and inferred returns are one type when they
+// agree in resolved form: an expected `[module::Name]` (resolved by the slot
+// that supplied it) and a body's bare `[Name]` name the same declaration.
+fn sema_expression_lambda_return_fits(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    if sema_type_assignable(required, offered) -> return true
+    sema_type_assignable(sema_expr_expected_type(required, environment), sema_expr_expected_type(offered, environment))
+}
+
 fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
     lambda_work := lambda
     inline_loop := lambda_work.params.len() == 0 && (lambda_work.meta.collecting_loop || lambda_work.meta.result_loop)
@@ -1981,7 +1989,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
 
     success_ty := body_result_ty
-    if lambda.result_type != None && !sema_type_assignable(lambda.result_type ?? success_ty, success_ty) {
+    if lambda.result_type != None && !sema_expression_lambda_return_fits(lambda.result_type ?? success_ty, success_ty, environment) {
         &diagnostics.push(sema_type_mismatch(lambda.result_type ?? success_ty, success_ty, lambda.span))
         return None
     }
@@ -2008,7 +2016,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             }
         }
     }
-    if expected_ret != None && !sema_type_assignable(expected_ret ?? ret_ty, ret_ty) {
+    if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment) {
         // The inferred carrier cannot fit a plain expected return: the
         // failure has no route out of this callback (lambdas.rs E0403).
         if lambda_work.meta.fallible_propagation && ret_ty == .Result(_, inferred_error) {

@@ -1695,11 +1695,14 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MIRScopeID) Never
 fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, capture: MIRValueID?, parameter_access: MIRAccess?, capture_ownership: MIROwnership?, string_view: Bool) -> MIRPlaceID Never! {
     identity := ""
     symbol_key := ""
+    // A local's MIR identity is its sema symbol, except a `_` discard: sema
+    // never declares one, so every `_` in a frame shares one symbol id. Like
+    // Rust's `reserve_identity`, each discard binding is then its own local.
     if {
         local.symbol_id != None -> {
             symbol :: local.symbol_id ?? SymbolID{key: ""}
             symbol_key = symbol.key
-            identity = "{builder.function.key}|local|{symbol.key}"
+            identity = if local.name == "_" -> jet_codegen_identity(&builder, "local", local.span, local.name, "") else -> "{builder.function.key}|local|{symbol.key}"
         } else -> {
             identity = jet_codegen_identity(&builder, "local", local.span, local.name, "")
         }
@@ -1771,7 +1774,7 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: 
     identity := if local.symbol_id == {
         .Val(symbol) -> {
             symbol_key = symbol.key
-            "{builder.function.key}|local|{symbol.key}"
+            if local.name == "_" -> jet_codegen_identity(&builder, "local", local.span, local.name, "") else -> "{builder.function.key}|local|{symbol.key}"
         }
         else -> {
             jet_codegen_identity(&builder, "local", local.span, local.name, "")

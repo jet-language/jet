@@ -670,20 +670,71 @@ fn jet_codegen_lower_target_os(target: TTargetOS?) -> MIROSTarget? {
     }
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], fields_by_name: [String:MIRFieldID]) -> MIRImplDef? {
-    method_ids := [MIRFunctionID]{}
-    seen_methods := [U64:Bool]{}
-    loop key in definition.methods {
-        function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
-        if function == None -> next
-        id := jet_codegen_function_id(function ?? panic("checked impl method lookup lost its TFunc"))
-        if seen_methods.get(id.value) == None {
-            _ := &seen_methods.add(id.value, true)
-            &method_ids.push(id)
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::method_base_leaf: the
+// method leaf of an impl method key, without an operator `<Rhs>` suffix.
+fn jet_codegen_impl_method_leaf(key: String) -> String Never! {
+    bytes :: key.bytes()
+    end := bytes.len()
+    if end > 0 && Int.from_u8(bytes[end - 1]) == 62 {
+        depth := 0
+        position := end - 1
+        loop position >= 0 {
+            byte :: Int.from_u8(bytes[position])
+            if byte == 62 -> depth += 1
+            if byte == 60 {
+                depth -= 1
+                if depth == 0 {
+                    end = position
+                    break
+                }
+            }
+            position -= 1
         }
     }
-    if definition.methods.len() > 0 && method_ids.len() == 0 -> return None
+    start := 0
+    position := end - 2
+    loop position >= 0 {
+        if Int.from_u8(bytes[position]) == 58 && Int.from_u8(bytes[position + 1]) == 58 {
+            start = position + 2
+            break
+        }
+        position -= 1
+    }
+    String.from_bytes(~(bytes[start..<end])) ?? ""
+}
+
+fn jet_codegen_impl_owner_name(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> type_name(ty)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::impl_method_matches. Sema
+// keys a checked method by its registration symbol, while an impl row names
+// it `<module>::<Owner>::<Trait>::<method><Rhs>`, so the row's method is the
+// same-module method with that leaf on the same owner. A trait-block method
+// in a struct or enum body (derived ones included) is checked as an owner
+// method; a trait method must name the row's trait.
+fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_ref: MIRTraitRef?, modules: [SemaGraphModuleResult], leaf: String) -> Bool Never! {
+    if function.module_identity != definition.module_identity || function.name != leaf -> return false
+    owner := Type?{None}
+    if function.kind == {
+        .Method(_, owner_type) -> owner = Val(owner_type)
+        .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
+            expected :: trait_ref ?? return false
+            if jet_codegen_mir_trait_ref_for_symbol(modules, trait_symbol).id != expected.id -> return false
+            owner = Val(owner_type)
+        }
+        .TopLevel -> return false
+    }
+    actual :: owner ?? return false
+    jet_codegen_canonical_target_type(definition.module_identity, jet_codegen_impl_owner_name(definition.self_type)) == jet_codegen_canonical_target_type(function.module_identity, jet_codegen_impl_owner_name(actual))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows. Only a
+// lowered function (`lowered_ids`) is an executable impl method.
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], fields_by_name: [String:MIRFieldID], lowered_ids: [String:Bool]) -> MIRImplDef? {
     trait_name := if definition.trait_ref == {
         Val(name) -> Val(name)
         None -> definition.trait_name
@@ -692,6 +743,25 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
         None -> None
         Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(modules, name, definition.module_identity))
     }
+    method_ids := [MIRFunctionID]{}
+    seen_methods := [U64:Bool]{}
+    loop key in definition.methods {
+        candidates := [MIRFunctionID]{}
+        function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
+        if function == .Val(found) -> &candidates.push(jet_codegen_function_id(found))
+        leaf :: jet_codegen_impl_method_leaf(key)
+        row := functions.first_by_name.get(leaf) ?? -1
+        loop row >= 0 {
+            if jet_codegen_impl_method_matches(functions.rows[row], definition, trait_ref, modules, leaf) -> &candidates.push(jet_codegen_function_id(functions.rows[row]))
+            row = functions.next_by_name[row]
+        }
+        loop id in candidates {
+            if lowered_ids.get("{id.value}") == None || seen_methods.get(id.value) != None -> next
+            _ := &seen_methods.add(id.value, true)
+            &method_ids.push(id)
+        }
+    }
+    if definition.methods.len() > 0 && method_ids.len() == 0 -> return None
     associated_types := [MIRAssociatedTypeValue]{}
     loop value in definition.associated_types {
         &associated_types.push(MIRAssociatedTypeValue{
@@ -1879,6 +1949,24 @@ fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCode
     }
 }
 
+// Rust `project_lambda_effect_facts` (D-EFFECT-LAMBDA1): a lambda's solved row
+// is its reachability row, its direct effects plus the solved row of every
+// function it calls. Jet's effect graph folds each lambda into its enclosing
+// function's node, so the checked lambda carries only its direct seed; the
+// callees' rows are solved by now, so project them here.
+fn jet_codegen_lambda_effects(function_index: JetCodegenFunctionIndex, effects: TEffectFacts) -> TEffectFacts Never! {
+    projected := effects
+    loop edge in effects.call_edges {
+        if edge == "__jet_panic__" {
+            _ := sema_effect_set_union(&projected.solved, [String]{"Panic"})
+            next
+        }
+        row :: jet_codegen_find_function_row(function_index, edge) ?? next
+        _ := sema_effect_set_union(&projected.solved, function_index.rows[row].effects.solved)
+    }
+    projected
+}
+
 fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: Bool, purpose: String) -> JetCodegenLambdaValue {
     jet_codegen_validate_lambda_metadata(lambda)
     base_key := "{builder.function.key}::lambda@{lambda.source_span.start}..{lambda.source_span.end}"
@@ -1932,7 +2020,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         source_file: builder.function.source_file,
         source_span: lambda.source_span,
         failure_carrier: lambda.failure_carrier,
-        effects: lambda.effects,
+        effects: jet_codegen_lambda_effects(builder.function_index, lambda.effects),
         target_applicability: TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
         web_bucket: builder.function.web_bucket,
         web_marker: None,
@@ -2405,6 +2493,54 @@ fn jet_codegen_synthetic_union_definition(ty: MIRType, module_id: MIRModuleID) -
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_record (`Range`)
+fn jet_codegen_range_record_definition(module_identity: String) -> MIRTypeDef {
+    span :: Span{start: 0, end: 0}
+    fields := [MIRField]{}
+    loop field in jet_codegen_range_record_fields() {
+        &fields.push(MIRField{
+            id: jet_codegen_range_record_field_id(field.name),
+            name: field.name,
+            shape_names: jet_codegen_tuple_shape_names(field.name),
+            skip: false,
+            ty: jet_codegen_lower_type(field.ty),
+            span: span,
+            public: true,
+            package_public: false,
+            computed: false,
+            has_default: false,
+            redact: false,
+        })
+    }
+    return MIRTypeDef{
+        id: mir_type_id(JET_CODEGEN_RANGE_RECORD),
+        module_id: mir_module_id(module_identity),
+        key: JET_CODEGEN_RANGE_RECORD,
+        name: JET_CODEGEN_RANGE_RECORD,
+        span: span,
+        public: true,
+        package_public: false,
+        generic_params: [MIRGenericParam]{},
+        derives: [MIRTraitID]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        cli: None,
+        serde: [MIRSerdeAttribute]{},
+        cli_bindings: [MIRCLIBinding]{},
+        ownership: MIROwnershipMode.Owned,
+        boxed_edges: [String]{},
+        compiler_builtin: None,
+        kind: MIRTypeDefKind.Struct{fields: fields, methods: [MIRFunctionID]{}},
+    }
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
 fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFunction]) {
     unions := JetCodegenUnionIndex{rows: [MIRType]{}, positions: [U64:Int]{}, canonical_keys: [String]{}}
@@ -2536,6 +2672,36 @@ fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MIRAssociate
     associated := [MIRAssociatedTypeDecl]{}
     loop value in names -> &associated.push(MIRAssociatedTypeDecl{name: value, span: Span{start: 0, end: 0}})
     associated
+}
+
+// Rust `ensure_builtin_debug_trait`: an automatic or written `Debug` derive
+// names the compiler-owned Debug trait, which no module declares. Its row
+// joins the program once (in the module of the first type deriving it), so
+// the Rust printer's derive lookup selects the structural `JetDebug` impl.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::ensure_builtin_debug_trait
+fn jet_codegen_ensure_builtin_debug_trait(traits: &[MIRTraitDef], types: [MIRTypeDef]) Never! {
+    debug_id :: mir_trait_id("Debug")
+    module_id := MIRModuleID?{None}
+    loop definition in types {
+        if module_id != None -> break
+        loop derived in definition.derives {
+            if derived == debug_id -> module_id = Val(definition.module_id)
+        }
+    }
+    owner :: module_id ?? return
+    loop definition in traits {
+        if definition.name == "Debug" -> return
+    }
+    &traits.push(MIRTraitDef{
+        id: debug_id,
+        module_id: owner,
+        key: "Debug",
+        name: "Debug",
+        span: Span{start: 0, end: 0},
+        visibility: MIRVisibility.Public,
+        associated_types: [MIRAssociatedTypeDecl]{},
+        methods: [MIRTraitMethod]{},
+    })
 }
 
 fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplDef], functions: [MIRFunction], types: [MIRTypeDef]) Never! {
@@ -2753,6 +2919,26 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/functions.rs::lower_trait_method_inner
+// lowers every trait-block method as a trait method. Sema checks a struct or
+// enum body's trait-block methods (derived ones included) as owner methods,
+// so the trait impl row that lists one supplies its trait form and codec.
+fn jet_codegen_bind_trait_impl_forms(functions: &[MIRFunction], impls: [MIRImplDef]) Never! {
+    rows := [U64:Int]{}
+    loop row in 0..<functions.len() {
+        if rows.get(functions[row].id.value) == None -> _ := &rows.add(functions[row].id.value, row)
+    }
+    loop implementation in impls {
+        trait_ref :: implementation.trait_ref ?? next
+        loop method in implementation.methods {
+            row :: rows.get(method.value) ?? next
+            if functions[row].form == .Method(owner, self_access) {
+                functions[row].form = MIRFunctionForm.TraitMethod{owner: owner, trait_ref: trait_ref, self_access: self_access, serde: implementation.serde}
+            }
+        }
+    }
+}
+
 fn jet_codegen_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
     keys := [U64]{}
     ties := [String]{}
@@ -2926,6 +3112,14 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         }
         loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, function_index, modules))
     }
+    // Rust `collect_items`: the compiler-owned `Range` record joins the
+    // program once, unless a declaration already owns its canonical key.
+    range_declared := false
+    loop definition in types {
+        if definition.key == JET_CODEGEN_RANGE_RECORD -> range_declared = true
+    }
+    if !range_declared && modules.len() > 0 -> &types.push(jet_codegen_range_record_definition(modules[0].module_identity))
+    jet_codegen_ensure_builtin_debug_trait(&traits, types)
     jet_codegen_register_synthetic_unions(&types, all_function_rows)
     jet_codegen_sort_type_definitions(&types)
     jet_codegen_sort_trait_definitions(&traits)
@@ -2938,7 +3132,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     impl_index_by_key := [String:Int]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
-            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, fields_by_name) ?? next
+            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, fields_by_name, top_ids) ?? next
             if impl_index_by_key.get(lowered.key) == .Val(index) {
                 loop method in lowered.methods {
                     method_key := jet_codegen_qualified_function_key(lowered.key, "{method.value}")
@@ -2955,6 +3149,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         }
     }
     jet_codegen_attach_orphan_methods(&impls, all_function_rows, functions)
+    jet_codegen_bind_trait_impl_forms(&lowered_functions, impls)
     jet_codegen_ensure_referenced_traits(&traits, impls, all_function_rows, types)
     jet_codegen_sort_trait_definitions(&traits)
 

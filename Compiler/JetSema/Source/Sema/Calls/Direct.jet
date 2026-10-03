@@ -375,6 +375,67 @@ fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaS
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
+// Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
+// fixed rows with no typed Source contract. `eprint` is variadic: every
+// printable argument joins, one per line, into the row's single stderr write
+// (Rust TIR `join_print_args`); `input` takes an optional String prompt and
+// returns `Result<String, IOError>`.
+fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if record.member == {
+        "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "input" -> sema_call_check_term_input(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> SemaDirectSpecialCheck{handled: false, value: None}
+    }
+}
+
+fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    complete := true
+    if args.len() == 0 {
+        &diagnostics.push(sema_error("E0103", span, "`eprint` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. io.eprint(\"warning\")"))
+        complete = false
+    }
+    unit :: Type.Named{name: "Unit"}
+    parts := [TStrPart]{}
+    loop argument in args {
+        checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        if !sema_expression_typed_literal_printable(checked.ty, environment) && checked.ty != unit {
+            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "{sema_type_show(checked.ty)} can't be printed yet", "`io.eprint` prints the same values as `print`, but writes to stderr", "print one of its fields, or make it a printable type"))
+            complete = false
+            next
+        }
+        if parts.len() > 0 -> &parts.push(TStrPart.Literal{text: "\n"})
+        &parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Display})
+    }
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    joined :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: parts}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, None, unit, TFailureCarrier.Infallible, expected, environment, &diagnostics)}
+}
+
+fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    complete := true
+    if args.len() > 1 {
+        &diagnostics.push(sema_error("E0104", span, "`input` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
+        complete = false
+    }
+    values := [TExpr]{}
+    if args.len() > 0 {
+        checked := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if checked == .Val(value) -> &values.push(value) else -> complete = false
+    }
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result :: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
+    failure :: sema_call_failure_carrier(Val(result))
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    widen_to_vec :: loop _ in values -> false
+    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, failure, None, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, context, &diagnostics)}
+}
+
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the TIR walk.
 fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -478,6 +539,9 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
         value := sema_compiler_services_lower_core_call(check, span, expected, environment, &scopes, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
+
+    term := sema_call_try_term_core_call(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if term.handled -> return term
 
     models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}

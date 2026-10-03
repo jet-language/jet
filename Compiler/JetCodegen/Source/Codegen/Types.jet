@@ -628,16 +628,45 @@ fn jet_codegen_field_symbol_index(modules: [SemaGraphModuleResult]) -> [String:[
     index
 }
 
+// A reference with a declared owner; an open owner resolves from the
+// receiver type instead (`jet_codegen_field_ref_id`).
 fn jet_codegen_resolve_field_by_symbol(field_symbols: [String:[JetCodegenFieldSymbolRow]], reference: TFieldRef) -> JetCodegenResolvedField Never! {
+    owner :: reference.owner ?? panic("checked TFieldRef has no declared owner")
     resolved := JetCodegenResolvedField?{None}
     rows :: field_symbols.get(reference.field.key) ?? [JetCodegenFieldSymbolRow]{}
     loop row in rows {
-        if reference.owner != None && row.owner_key != (reference.owner ?? SymbolID{key: ""}).key -> next
+        if row.owner_key != owner.key -> next
         if row.name != reference.name -> panic("checked field reference name disagrees with its registered symbol")
         if resolved != None -> panic("ambiguous checked field symbol in Codegen input")
         resolved = Val(row.resolved)
     }
     resolved ?? panic("checked TFieldRef has no registered nominal field")
+}
+
+// The compiler-owned `Range` record a range value constructs. It has no
+// source declaration; Codegen adds its row to every program
+// (`jet_codegen_range_record_definition`) under its bare canonical key.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
+JET_CODEGEN_RANGE_RECORD :: "Range"
+
+fn jet_codegen_range_record_fields() -> [TypeTupleField] Never! {
+    [TypeTupleField]{
+        TypeTupleField{name: "start", ty: Type.Int},
+        TypeTupleField{name: "end", ty: Type.Int},
+        TypeTupleField{name: "exclusive", ty: Type.Bool},
+    }
+}
+
+fn jet_codegen_range_record_field(member: String) -> TypeTupleField? {
+    loop field in jet_codegen_range_record_fields() {
+        if field.name == member -> return Val(field)
+    }
+    None
+}
+
+fn jet_codegen_range_record_field_id(member: String) -> MIRFieldID Never! {
+    field :: jet_codegen_range_record_field(member) ?? panic("compiler-owned Range record has no field `{member}`")
+    jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name})
 }
 
 fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField Never! {
@@ -647,6 +676,10 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
         else -> panic("checked field access owner is not a nominal type")
     }
     identity := jet_codegen_find_nominal_identity(modules, current_module_identity, owner_name, generic_names)
+    if identity == None && owner_name == JET_CODEGEN_RANGE_RECORD {
+        field :: jet_codegen_range_record_field(member) ?? panic("checked field access member has no registered field")
+        return JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name}
+    }
     nominal_identity :: identity ?? panic("checked field access owner has no registered nominal type")
     loop semantic_module in modules {
         if semantic_module.module_identity != nominal_identity.module_identity -> next

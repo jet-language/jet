@@ -618,7 +618,7 @@ fn jet_rust_emit_primitive_binary(ctx: &JetRustEmitContext, op: MIRBinaryOp, lef
     root :: ~ctx.config.root_prefix
     if op == {
         .Compare -> "match ({left}).cmp(&({right})) {{ std::cmp::Ordering::Less => {root}__jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => {root}__jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => {root}__jet_Ordering::__jet_Greater }}"
-        .FloorDiv -> "({left}).jet_floor_div({right})"
+        .FloorDiv -> "({left}).jet_floordiv({right})"
         .Mod -> "({left}).jet_mod({right})"
         .Rem -> "({left}).rem({right})"
         .Pow -> "({left}).jet_pow({right})"
@@ -1970,50 +1970,75 @@ fn jet_rust_emit_associated_dispatch(ctx: &JetRustEmitContext, id: MIRFunctionID
     "unreachable!(\"missing associated dispatch\")"
 }
 
-// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::method_call
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::method_call: an inherent
+// method is called on its receiver, a trait-impl method through its trait.
 fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRFunctionID, owner: MIRType, args: [MIRCallArg], type_args: [MIRType]) -> String Never! {
     if jet_rust_emit_function_index(ctx, id) == .Val(candidate_index) {
         if ctx.program.functions[candidate_index].id == id {
+            declared_owner := MIRType?{None}
+            self_access := MIRAccess?{None}
+            dispatch_trait := MIRTraitRef?{None}
             if ctx.program.functions[candidate_index].form == {
-                .Method(declared_owner, self_access) -> {
-                    if self_access == None || !mir_type_same_checked_type(declared_owner, owner) {
-                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access is invalid", "instance calls must preserve the checked inherent owner and receiver access", Val(function.span))
-                        return "unreachable!(\"invalid method dispatch\")"
-                    }
-                    if args.len() != ctx.program.functions[candidate_index].params.len() || args.len() == 0 {
-                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch arity is invalid", "instance calls must preserve the checked receiver and parameter ABI", Val(function.span))
-                        return "unreachable!(\"method dispatch arity\")"
-                    }
-                    access :: self_access ?? MIRAccess.Read
-                    if args[0].access != access {
-                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method receiver access is invalid", "instance calls must preserve checked read/write/move receiver ownership", Val(args[0].span))
-                        return "unreachable!(\"method receiver access\")"
-                    }
-                    receiver :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], access == MIRAccess.Read)
-                    rendered := [String]{}
-                    arg_index := 0
-                    loop parameter in ctx.program.functions[candidate_index].params {
-                        if parameter.index == 0 {
-                            arg_index += 1
-                            next
-                        }
-                        if arg_index >= args.len() -> break
-                        borrow :: parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))
-                        &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[arg_index], borrow))
-                        arg_index += 1
-                    }
-                    generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
-                    return "({receiver}).{jet_rust_emit_inherent_method_symbol(ctx.program.functions[candidate_index].name)}{generic}({rendered.join(", ")})"
+                .Method(method_owner, method_access) -> {
+                    declared_owner = Val(method_owner)
+                    self_access = method_access
                 }
-                .TraitMethod(_, _, _, _) -> {
-                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a trait-method function", "instance method calls must use the checked inherent method form", Val(function.span))
-                    return "unreachable!(\"trait method in inherent dispatch\")"
+                .TraitMethod(method_owner, method_trait, method_access, _) -> {
+                    declared_owner = Val(method_owner)
+                    self_access = method_access
+                    dispatch_trait = Val(method_trait)
                 }
                 .TopLevel -> {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a top-level function", "instance calls require a checked method function form", Val(function.span))
                     return "unreachable!(\"top-level method dispatch\")"
                 }
             }
+            expected_owner :: declared_owner ?? return "unreachable!(\"invalid method dispatch\")"
+            if self_access == None || !mir_type_same_checked_type(expected_owner, owner) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access is invalid", "instance calls must preserve the checked method owner and receiver access", Val(function.span))
+                return "unreachable!(\"invalid method dispatch\")"
+            }
+            if args.len() != ctx.program.functions[candidate_index].params.len() || args.len() == 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch arity is invalid", "instance calls must preserve the checked receiver and parameter ABI", Val(function.span))
+                return "unreachable!(\"method dispatch arity\")"
+            }
+            access :: self_access ?? MIRAccess.Read
+            if args[0].access != access {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method receiver access is invalid", "instance calls must preserve checked read/write/move receiver ownership", Val(args[0].span))
+                return "unreachable!(\"method receiver access\")"
+            }
+            // MIRRust arithmetic_trait_method: the runtime Add/Sub/Mul/Div
+            // traits take every operand by reference.
+            arithmetic := false
+            if dispatch_trait == .Val(arithmetic_trait) {
+                loop row in jet_rust_emit_trait_rows(ctx, arithmetic_trait.id) {
+                    if row.id == arithmetic_trait.id && (row.name == "Add" || row.name == "Sub" || row.name == "Mul" || row.name == "Div") -> arithmetic = true
+                }
+            }
+            receiver :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], access == MIRAccess.Read)
+            rendered := [String]{}
+            rhs_type := MIRType?{None}
+            arg_index := 0
+            loop parameter in ctx.program.functions[candidate_index].params {
+                if parameter.index == 0 {
+                    arg_index += 1
+                    next
+                }
+                if arg_index >= args.len() -> break
+                if rhs_type == None -> rhs_type = Val(parameter.ty)
+                borrow :: arithmetic || parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))
+                &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[arg_index], borrow))
+                arg_index += 1
+            }
+            generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
+            method_name :: ~ctx.program.functions[candidate_index].name
+            if dispatch_trait == .Val(trait_ref) {
+                trait_text := jet_rust_emit_trait_name(&ctx, trait_ref.id)
+                if arithmetic && rhs_type == .Val(rhs) -> trait_text = "{trait_text}<{jet_rust_emit_type(&ctx, rhs)}>"
+                separator :: if rendered.len() == 0 -> "" else -> ", "
+                return "<{jet_rust_emit_type(&ctx, owner)} as {trait_text}>::{jet_rust_emit_trait_impl_method_symbol(&ctx, trait_ref.id, method_name)}{generic}({receiver}{separator}{rendered.join(", ")})"
+            }
+            return "({receiver}).{jet_rust_emit_inherent_method_symbol(method_name)}{generic}({rendered.join(", ")})"
         }
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR method dispatch target is missing", "instance calls must resolve to one checked function identity", Val(function.span))
@@ -3239,11 +3264,18 @@ fn jet_rust_emit_ref_payload_reference(ctx: &JetRustEmitContext, function: MIRFu
     reference
 }
 
-// MIRRust rust_struct_literal: a native host record narrows Jet `Int` fields into
+// MIRRust rust_struct_literal: the compiler-owned default Err constructs through
+// the Prelude `jet_err`; a native host record narrows Jet `Int` fields into
 // its Rust slots, with the bespoke Range/DataError/AsyncPolicy/WebFormFieldSpec
-// host shapes, and the Core email Address keeps a native Option display.
+// host shapes, and the Core email Address keeps a native Option display. Both
+// the plain `.Struct` operation and the semantic `StructLiteral` emit here.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::rust_struct_literal
-fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fields: [MIRFieldValue]) -> String Never! {
+fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fields: [MIRFieldValue], boxed_fields: [MIRFieldID]) -> String Never! {
+    if jet_rust_emit_compiler_builtin_for_type(&ctx, type_id) == .Val(builtin) {
+        if builtin == {
+            .DefaultErr -> return jet_rust_emit_default_err_struct(&ctx, type_id, fields)
+        }
+    }
     rust_type_name :: jet_rust_emit_type_name(&ctx, type_id)
     key := ""
     if jet_rust_emit_type_index(ctx, type_id) == .Val(row_index) -> key = ctx.program.types[row_index].key
@@ -3275,7 +3307,9 @@ fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fi
         if async_policy && field_name == "capacity" -> value = jet_rust_emit_native_int_argument(&ctx, value, None)
         if form_field_spec && (field_name == "default" || field_name == "group") -> value = "({value}).ok()"
         // The declaration boxes every recursive edge (MIRRust rust_struct_literal).
-        if jet_rust_emit_field_boxed(&ctx, field.field) -> value = "Box::new({value})"
+        boxed := jet_rust_emit_field_boxed(&ctx, field.field)
+        loop listed in boxed_fields { if listed == field.field -> boxed = true }
+        if boxed -> value = "Box::new({value})"
         &rendered.push("{field_name}: {value}")
     }
     private_fields :: if form_field_spec -> ", parser: None" else -> ""
@@ -4381,6 +4415,29 @@ fn jet_rust_emit_list_aggregate_builder(ctx: &JetRustEmitContext, function: MIRF
     "unreachable!(\"MIR list aggregate shape\")"
 }
 
+// MIRRust map_aggregate_builder: the key/value constructor `Map.to_list`
+// uses to build each checked `(key, value)` element.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::map_aggregate_builder
+fn jet_rust_emit_map_aggregate_builder(ctx: &JetRustEmitContext, function: MIRFunction, result: MIRValueID?) -> String Never! {
+    value :: result ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR map aggregate route has no result", "aggregate routes build the checked result value", Val(function.span))
+        return "unreachable!(\"MIR map aggregate result\")"
+    }
+    if jet_rust_emit_value_type(ctx, function, value).kind == {
+        .List(element) -> {
+            if element.kind == {
+                .Tuple(fields) -> {
+                    if fields.len() == 2 && fields[0].name == "key" && fields[1].name == "value" -> return "|key, value| (key, value)"
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR map aggregate result is not the checked key/value shape", "Map.to_list produces a list of (key, value) tuples", Val(function.span))
+    "unreachable!(\"MIR map aggregate shape\")"
+}
+
 // MIRRust prelude_receiver_call: closure routes lend or move the receiver by
 // the route ABI and adapt each callback argument at the call site.
 fn jet_rust_emit_prelude_receiver_call(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRCallArg], result: MIRValueID?) -> String Never! {
@@ -4489,6 +4546,30 @@ fn jet_rust_emit_builtin_optional_result(ctx: &JetRustEmitContext, row: MIRPrelu
     emitted
 }
 
+// MIRRust prelude_values_with_receiver (`view_new` / `view_mut_new`): a
+// range window lends `&[T]` / `&mut [T]` over the receiver's storage through
+// the `Range` kernel, or the two-bound kernel; the enclosing function's source
+// line locates an out-of-bounds stop.
+fn jet_rust_emit_view_new(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, row: MIRPreludeCall, receiver_text: String, args: [MIRValueID]) -> String Never! {
+    file :: jet_rust_emit_source_path(&ctx, function.source_file)
+    line :: jet_rust_emit_coverage_function_line(&ctx, function)
+    symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
+    if args.len() == 1 {
+        range_symbol :: if row.member == "view_mut_new" -> symbol.replace("jet_view_mut_new", "jet_view_mut_new_range") else -> symbol.replace("jet_view_new", "jet_view_new_range")
+        return "{range_symbol}({receiver_text}, &({jet_rust_emit_value_owned(ctx, function, args[0])}), {file}, {line}u32)"
+    }
+    if args.len() == 2 {
+        bounds := [String]{}
+        loop bound in args {
+            owned :: jet_rust_emit_value_owned(ctx, function, bound)
+            if jet_rust_emit_value_type(ctx, function, bound).kind == .Int -> &bounds.push(jet_rust_emit_native_int_argument(&ctx, owned, None)) else -> &bounds.push(owned)
+        }
+        return "{symbol}({receiver_text}, {bounds[0]}, {bounds[1]}, {file}, {line}u32)"
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR view route has no range window", "a view route takes one Range or two bounds after its receiver", Val(function.span))
+    "unreachable!(\"MIR view route window\")"
+}
+
 // MIRRust BuiltinMethod / prelude_values_with_receiver: a mutating route
 // writes through its checked receiver place, a borrowing route lends the
 // receiver, and a native-word kernel result re-enters the exact Int carrier.
@@ -4496,7 +4577,10 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
-    if row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
+    // MIRRust prelude_values_with_receiver: a view route carries one range
+    // or two bounds; its source location is not a MIR operand.
+    view_new :: row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.builtin" && (row.member == "view_new" || row.member == "view_mut_new")
+    if !view_new && row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     // MIRRust prelude_values_with_receiver: `Int.to_radix(base)` is checked `String`; the exact Int kernel takes both owned Ints by reference and its invalid-radix failure stops the program like any other Int fault.
     if row.module_name == "core.builtin" && row.member == "int_to_radix" && args.len() == 1 {
         root :: ~ctx.config.root_prefix
@@ -4516,20 +4600,43 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     } else {
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
-    loop (index, value) in args {
-        borrowed :: row.signature.borrow_mask[index + 1]
-        if jet_rust_emit_builtin_native_int_arg(row, index, borrowed, jet_rust_emit_value_type(ctx, function, value)) {
-            consumed :: jet_rust_emit_value_consume(ctx, function, value)
-            &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
+    if view_new -> return jet_rust_emit_view_new(&ctx, function, call, row, rendered[0], args)
+    routed := ""
+    list_min_max :: row.module_name == "core.list" && row.member == "min_max"
+    if row.abi == MIRPreludeABI.Aggregate && (list_min_max || (row.module_name == "core.map" && row.member == "to_list")) {
+        // MIRRust prelude_values_with_receiver: a checked aggregate route
+        // takes the constructor of its result shape after the receiver.
+        if args.len() != 0 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR aggregate route has unexpected arguments", "List.min_max and Map.to_list take only their receiver", Val(function.span))
+            return "unreachable!(\"MIR aggregate route arguments\")"
+        }
+        symbol := jet_rust_emit_prelude_symbol(&ctx, call)
+        builder := ""
+        if list_min_max {
+            if jet_rust_emit_value_type(ctx, function, receiver).kind == .List(element) {
+                if element.kind == .Float -> symbol = "{ctx.config.root_prefix}jet_list_min_max_float"
+            }
+            builder = jet_rust_emit_list_aggregate_builder(&ctx, function, result)
         } else {
-            if {
-                jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
-                borrowed -> &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
-                else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
+            builder = jet_rust_emit_map_aggregate_builder(&ctx, function, result)
+        }
+        routed = "{symbol}({rendered[0]}, {builder})"
+    } else {
+        loop (index, value) in args {
+            borrowed :: row.signature.borrow_mask[index + 1]
+            if jet_rust_emit_builtin_native_int_arg(row, index, borrowed, jet_rust_emit_value_type(ctx, function, value)) {
+                consumed :: jet_rust_emit_value_consume(ctx, function, value)
+                &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
+            } else {
+                if {
+                    jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
+                    borrowed -> &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
+                    else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
+                }
             }
         }
+        routed = jet_rust_emit_route_call(&ctx, call, rendered)
     }
-    routed := jet_rust_emit_route_call(&ctx, call, rendered)
     emitted :: jet_rust_emit_builtin_optional_result(&ctx, row, ^routed)
     if result == .Val(value) {
         result_ty :: jet_rust_emit_value_type(ctx, function, value)
@@ -4824,19 +4931,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             if ok -> return "match {jet_rust_emit_value_move(subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}"
             return "match {jet_rust_emit_value_move(subject)} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
         }
-        .Struct(type_id, fields) -> {
-            builtin :: jet_rust_emit_compiler_builtin_for_type(&ctx, type_id)
-            if builtin == {
-                .Val(value) -> {
-                    if value == {
-                        .DefaultErr -> return jet_rust_emit_default_err_struct(&ctx, type_id, fields)
-                        else -> {}
-                    }
-                }
-                else -> {}
-            }
-            return jet_rust_emit_struct_literal(&ctx, type_id, fields)
-        }
+        .Struct(type_id, fields) -> return jet_rust_emit_struct_literal(&ctx, type_id, fields, [MIRFieldID]{})
         .PatternCapture(matched, index) -> return jet_rust_emit_pattern_capture(&ctx, function, matched, index, result)
         .ProjectMembers(base, members) -> {
             expression := jet_rust_emit_value_owned(ctx, function, base)
@@ -4945,15 +5040,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 .CCallback(_, callback, lambda) -> return jet_rust_emit_callback_handler(&ctx, function, callback, lambda)
                 .HostCall(call, args) -> return jet_rust_emit_prelude_call(&ctx, function, call, args, [MIRType]{})
                 .StructLiteral(type_id, fields, _, trait_coercion, boxed_fields) -> {
-                    rendered := [String]{}
-                    loop field in fields {
-                        value := jet_rust_emit_value_move(field.value)
-                        boxed := jet_rust_emit_field_boxed(&ctx, field.field)
-                        loop listed in boxed_fields { if listed == field.field -> boxed = true }
-                        if boxed -> value = "Box::new({value})"
-                        &rendered.push("{jet_rust_emit_field_name(&ctx, field.field)}: {value}")
-                    }
-                    value := "{jet_rust_emit_type_name(&ctx, type_id)} {{ {rendered.join(", ")} }}"
+                    value :: jet_rust_emit_struct_literal(&ctx, type_id, fields, boxed_fields)
                     if trait_coercion == .Val(trait_id) -> return "Box::new({value}) as {jet_rust_emit_trait_object_type(&ctx, trait_id)}"
                     return value
                 }

@@ -1020,8 +1020,12 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             return ctx
         }
         // MIRRust type_name/collect_type_fields: a Prelude carrier keeps its native
-        // Rust spelling and its raw field and variant names.
-        native :: jet_rust_emit_has_native_type_projection(definition.key) || jet_rust_emit_vault_host_record(definition.key)
+        // Rust spelling and its raw field and variant names. The compiler-owned
+        // default Err is the Prelude `JetErr` (Rust keys it `Err`, which the
+        // native projection resolves); its MIR key is module-qualified here, so
+        // the checked builtin fact selects it.
+        default_err :: definition.compiler_builtin == (Val(MIRCompilerBuiltin.DefaultErr))
+        native :: default_err || jet_rust_emit_has_native_type_projection(definition.key) || jet_rust_emit_vault_host_record(definition.key)
         if native -> native_type_keys[key] = true
         symbol :: if definition.compiler_builtin == {
             .Val(builtin) -> {

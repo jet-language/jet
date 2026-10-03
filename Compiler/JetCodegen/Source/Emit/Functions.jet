@@ -129,18 +129,28 @@ struct JetRustEmitLocalizedSlots {
 }
 
 // MIRRust localize_value_slots: `lines[values_start..values_end]` are the
-// value declarations (one per `function.values` row) and every later line is
-// the body. A localizable slot whose first body mention starts its
-// `slot = Some(..);` statement, and whose later mentions all stay in that
-// statement's lexical scope (no line between them is indented less), becomes
-// `let mut slot: Option<T> = Some(..);` there; a localizable slot the body
-// never mentions loses its declaration.
+// value declarations and every later line is the body. The declarations need
+// not follow `function.values` one to one (a reference-binding payload has
+// none), so each is matched by the slot id it declares. A localizable slot
+// declared once there, whose first body mention starts its `slot = Some(..);`
+// statement, and whose later mentions all stay in that statement's lexical
+// scope (no line between them is indented less), becomes
+// `let mut slot: Option<T> = Some(..);` there; a localizable declared slot the
+// body never mentions loses its declaration.
 fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFunction, lines: [String], values_start: Int, values_end: Int) -> JetRustEmitLocalizedSlots Never! {
     types := [String:String]{}
     loop value in function.values {
         if jet_rust_emit_value_slot_localizable(value.ty) -> &types.add("{value.id.value}", jet_rust_emit_type(&ctx, value.ty)).drop("value ids are unique")
     }
     if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
+    declared := [String:Int]{}
+    loop (index, entry) in lines {
+        if index < values_start -> next
+        if index >= values_end -> break
+        loop mention in jet_rust_emit_value_mentions(entry) {
+            if types.get(mention.id) != None -> &declared.add(mention.id, (declared.get(mention.id) ?? 0) + 1).drop("the count replaces the prior count")
+        }
+    }
     body := [String]{}
     loop (index, entry) in lines {
         if index >= values_end {
@@ -186,7 +196,7 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
     dropped := [String:Bool]{}
     loop value in function.values {
         id :: "{value.id.value}"
-        if types.get(id) == None -> next
+        if types.get(id) == None || (declared.get(id) ?? 0) != 1 -> next
         line :: first_line.get(id) ?? {
             &dropped.add(id, true).drop("value ids are unique")
             next
@@ -204,7 +214,11 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= values_end -> break
-        if index >= values_start && dropped.get("{function.values[index - values_start].id.value}") != None -> next
+        if index >= values_start {
+            if jet_rust_emit_declared_value_id(entry) == .Val(declared_id) {
+                if dropped.get(declared_id) != None -> next
+            }
+        }
         &rebuilt.push(entry)
     }
     body_start :: rebuilt.len()
@@ -221,6 +235,19 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         &rebuilt.push("{pad}let mut __jet_v_{id}: Option<{types.get(id) ?? ""}> = {tail}")
     }
     JetRustEmitLocalizedSlots{lines: rebuilt, body_start: body_start}
+}
+
+// The slot id a `    let mut __jet_v_<id>: ..` value declaration declares.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::localize_value_slots
+fn jet_rust_emit_declared_value_id(line: String) -> String? Never! {
+    prefix :: "    let mut __jet_v_"
+    if !line.starts_with(prefix) -> return None
+    bytes :: line.bytes()
+    start :: prefix.bytes().len()
+    end := start
+    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+    if end == start || end >= bytes.len() || Int.from_u8(bytes[end]) != 58 -> return None
+    Val(String.from_bytes(~(bytes[start..<end])) ?? "")
 }
 
 // MIRRust strip_enclosing_parens: `text` without parentheses enclosing all of it.

@@ -155,7 +155,7 @@ All operands of every semantic operation are defined (`value.typed`).
 | `CarrierFact{field}` | Field is declared. |
 | `BuiltinMethod{aggregate_fields}` | Every aggregate field is declared. |
 | `OptionLift2{function}` | Function is callable. |
-| `OverflowOption` | Result is an Option. |
+| `OverflowOption` | Result is an Option (`checked_*`) or an integer (wrapping, saturating, trapping, and rotate routes). |
 | `NumericMethod`, `NumericBinaryMethod` | Receiver is numeric. |
 | `HostBorrowCallback{callable}`, `CCallback{lambda}`, `HTTPRouterRegister{handler}` | The named value is callable. `ClosureMethod{receiver}` names the collection or carrier the closure route runs over, not the closure. |
 | `CoreClosureCall{closure}` | Closure, when present, is callable. |

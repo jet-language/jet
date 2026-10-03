@@ -866,29 +866,42 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
         if jet_rust_emit_type_instance(ctx, identity, false) == .Val(instance) -> ty = instance
     }
     if ty.kind == {
-        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+        .Int | .Bool | .String | .Char | .IntN(_, _) -> true
+        // A Rust float is only partially ordered (sema never derives
+        // Comparable over one), so it never derives `Ord`.
+        .Float | .Float32 | .Measure(_) -> trait_name != "Ord"
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
         // Only Clone, through the clone-box supertrait every trait used as a
         // single-bound object gets (jet_rust_emit_trait_definition).
         .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(jet_rust_emit_id_key(bounds[0].id.value)) != None
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
-            if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return true
+            if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return trait_name != "JetShow" && trait_name != "JetDebug"
             jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         }
-        .Map(key, value) | .Result(key, value) -> jet_rust_emit_type_derive_capability(&ctx, key, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(&ctx, value, trait_name, &visiting, bindings, generic_params)
+        // The runtime map carrier has no Rust `Ord` (sema never derives
+        // Comparable over a Map).
+        .Map(key, value) -> trait_name != "Ord" && jet_rust_emit_type_derive_capability(&ctx, key, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(&ctx, value, trait_name, &visiting, bindings, generic_params)
+        .Result(ok, err) -> jet_rust_emit_type_derive_capability(&ctx, ok, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(&ctx, err, trait_name, &visiting, bindings, generic_params)
+        // The runtime has no structural `JetShow`/`JetDebug` for tuples or
+        // the synthetic `__JetUnion_*` carriers (no auto-Printable fact, no
+        // derives), so a record holding one does not print structurally.
         .Tuple(fields) -> {
+            if trait_name == "JetShow" || trait_name == "JetDebug" -> return false
             loop field in fields { if !jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, bindings, generic_params) -> return false }
             true
         }
         // Union values are spelled as the synthetic `__JetUnion_*` carrier,
-        // which has no sema `Equatable` derive and so no Rust `PartialEq`.
+        // which has no sema `Equatable`/`Comparable` derive and so no Rust
+        // `PartialEq` or `Ord`.
         .Union(members) -> {
-            if trait_name == "PartialEq" -> return false
+            if trait_name == "PartialEq" || trait_name == "Ord" || trait_name == "JetShow" || trait_name == "JetDebug" -> return false
             loop member in members { if !jet_rust_emit_type_derive_capability(&ctx, member, trait_name, &visiting, bindings, generic_params) -> return false }
             true
         }
         .Apply(name, args) -> {
+            // A raw pointer or a view prints through no structural impl.
+            if (trait_name == "JetShow" || trait_name == "JetDebug") && (name.name == "Ptr" || name.name == "View" || name.name == "ViewMut") -> return false
             if name.name == "Ptr" -> return true
             if name.name == "View" {
                 if trait_name == "Clone" -> return true
@@ -903,19 +916,43 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return true
             definition := jet_rust_emit_structural_type_def(&ctx, ty)
             if definition == None {
+                // MIRRust auto_derive_type_ready: a runtime handle implements
+                // neither Printable nor Debug, so a record holding one does
+                // not print structurally.
+                if trait_name == "JetShow" || trait_name == "JetDebug" {
+                    loop handle in ctx.program.handles { if jet_rust_emit_same_handle_type(handle.ty, ty) -> return false }
+                }
+                // A runtime carrier answers for `Ord` only through a checked
+                // nominal row; none is assumed.
+                if trait_name == "Ord" -> return false
                 loop arg in args { if !jet_rust_emit_type_derive_capability(&ctx, arg, trait_name, &visiting, bindings, generic_params) -> return false }
                 return true
             }
             row :: definition ?? return false
             if trait_name == "Clone" && row.ownership == MIROwnershipMode.Move -> return false
-            if !jet_rust_emit_type_derives_allowed(row) -> return false
+            // MIRRust auto_derive_type_ready for the structural show impls:
+            // a nominal field prints through its own generated `JetShow` /
+            // `JetDebug` (its auto-Printable fact / Debug derive) or a
+            // selected user `Printable` / `Debug` impl.
+            if (trait_name == "JetShow" || trait_name == "JetDebug") && !(row.kind == .Alias(_)) {
+                if jet_rust_emit_selected_user_impl_named(&ctx, ty, if trait_name == "JetShow" -> "Printable" else -> "Debug") -> return true
+                selected :: if trait_name == "JetShow" -> row.auto_printable else -> jet_rust_emit_type_def_derives_trait(ctx, row, "Debug")
+                if !selected -> return false
+            } else if !jet_rust_emit_type_derives_allowed(row) {
+                return false
+            }
             // A nominal field compares through Rust `PartialEq` only when its
             // own row carries sema's structural `Equatable` derive (a user
-            // `Equatable` impl has no Rust `PartialEq`); an alias is
-            // transparent and answers for its target. A union row is spelled
-            // as its synthetic carrier (see `Union` above).
-            if trait_name == "PartialEq" && !(row.kind == .Alias(_)) {
+            // `Equatable` impl has no Rust `PartialEq`); it orders through
+            // Rust `Ord` only when the row also carries the structural
+            // `Comparable` derive. An alias is transparent and answers for its
+            // target. A union row is spelled as its synthetic carrier (see
+            // `Union` above).
+            if (trait_name == "PartialEq" || trait_name == "Ord") && !(row.kind == .Alias(_)) {
                 if !jet_rust_emit_type_def_derives_trait(ctx, row, "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || row.name.starts_with("__JetUnion_") -> return false
+            }
+            if trait_name == "Ord" && !(row.kind == .Alias(_)) {
+                if !jet_rust_emit_type_def_derives_trait(ctx, row, "Comparable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Comparable") -> return false
             }
             if visiting.contains(row.id) {
                 position := 0
@@ -1240,13 +1277,21 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
         if name == "Clone" && !clone_capable && !clone_user_impl {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
         }
-        if name == "Debug" && !debug_capable && !debug_user_impl {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Debug without a checked Rust Debug capability", "all stored fields and recursive nominal payloads must support Debug", Val(definition.span))
-        }
+        // An automatic Debug selection whose fields cannot all print is not
+        // derived (MIRRust auto_derive_type_ready); only Clone is a hard fact.
         capability := derives_allowed
         if name == "Clone" -> capability = clone_capable && !clone_user_impl
         if name == "Debug" -> capability = debug_capable && !debug_user_impl
         if capability && !derives.contains(name) -> &derives.push(name)
+    }
+    // Sema's structural `Comparable` derive (beside its structural
+    // `Equatable`) is the checked fact behind the native `Eq`/`PartialOrd`/
+    // `Ord` an ordered `JetMap` key needs. The derived Rust order is the
+    // structural one: fields in declaration order, enum variants by ordinal.
+    if derives_allowed && derives.contains("PartialEq") && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "Ord") {
+        if !derives.contains("Eq") -> &derives.push("Eq")
+        if !derives.contains("PartialOrd") -> &derives.push("PartialOrd")
+        if !derives.contains("Ord") -> &derives.push("Ord")
     }
     derives
 }
@@ -1503,7 +1548,9 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     loop trait_id in definition.derives {
         loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
     }
-    loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_derived}) -> &lines.push(line)
+    debug_derived = debug_derived && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetDebug")
+    printable :: definition.auto_printable && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetShow")
+    loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: printable, debug: debug_derived}) -> &lines.push(line)
     if definition.layout != None {
         layout :: definition.layout ?? MIRStructLayout.C
         if layout == {

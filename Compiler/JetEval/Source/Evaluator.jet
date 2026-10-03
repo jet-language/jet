@@ -732,25 +732,49 @@ pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args:
     jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: result_data}), true)
 }
 
-// A pure evaluation's data value and the program its machine ran on.
-pub struct JetEvalProgramData {
-    pub program: MIRProgram
-    pub value: TComptimeValue?
-}
-
-fn jet_eval_program_data(program: ^MIRProgram, value: TComptimeValue?) -> JetEvalProgramData Never! {
-    JetEvalProgramData{program: program, value: value}
-}
-
-// Run `function_id` with no arguments as one pure evaluation: read its value
-// as data, retire the session, and hand the program back. A caller that
-// evaluates many functions of one program (pure-call folding) moves the
-// program through every evaluation instead of copying it per call. The value
-// is None when the evaluation failed, stopped, printed, or left a resource
-// that did not retire cleanly.
-pub fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, config: ^JetEvalConfig) -> JetEvalProgramData {
+// Run each of `function_ids` with no arguments as one pure evaluation on ONE
+// machine (Rust PureFold `evaluate` over one borrowed program): the program
+// and its row index are built once, each evaluation starts from a fresh
+// session, and the program is handed back once. Value `i` is None when
+// evaluation `i` failed, stopped, printed, or left a resource that did not
+// retire cleanly. A machine per function copied the whole program twice per
+// evaluation (a field move clones), and the caller's recursion retained one
+// copy per evaluation.
+pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig, values: &[TComptimeValue?]) -> MIRProgram {
     span := jet_eval_empty_span()
-    machine := jet_eval_machine(^program, ^config)
+    first_config := config
+    machine := jet_eval_machine(^program, ^first_config)
+    loop (index, function_id) in function_ids {
+        if index > 0 {
+            session_config := config
+            jet_eval_reset_session(&machine, ^session_config)
+        }
+        &values.push(jet_eval_pure_session_value(&machine, function_id, span))
+    }
+    machine.program
+}
+
+// A fresh evaluation session on `machine`'s program: every field
+// jet_eval_machine starts empty is reset; program and rows are kept.
+fn jet_eval_reset_session(machine: &JetEvalMachine, config: ^JetEvalConfig) {
+    machine.config = jet_eval_new_session_config(^config)
+    machine.registry = jet_eval_registry_new()
+    machine.identity = jet_eval_registry_machine_identity(machine.registry)
+    machine.frames = [JetEvalFrame]{}
+    machine.callback_roots = [Int:JetEvalCallbackRoot]{}
+    machine.entry_access = None
+    machine.entry_shared_loans = [JetEvalSharedEntryLoan]{}
+    machine.steps = 0
+    machine.stdout = ""
+    machine.stderr = ""
+    machine.soft_stop = false
+    machine.exit_code = None
+    machine.failure = None
+    machine.internal_problem = None
+}
+
+// One pure evaluation of `function_id` in `machine`'s current session.
+fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctionID, span: Span) -> TComptimeValue? {
     data := TComptimeValue?{None}
     if jet_eval_find_function(machine, function_id) == .Val(function) {
         if function.target_applicability.interpreter {
@@ -762,7 +786,7 @@ pub fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, 
     }
     if !jet_eval_drain_callbacks(&machine, span) || !jet_eval_retire_machine(&machine, span) -> data = None
     if jet_eval_has_failure(machine) || machine.soft_stop || machine.stdout != "" || machine.stderr != "" -> data = None
-    jet_eval_program_data(^machine.program, data)
+    data
 }
 // Resume a suspended Source-MIR machine supplied by a native deoptimization
 // boundary. No frame or resource is reconstructed here: the returned session

@@ -155,6 +155,39 @@ fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
     names
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::lower_derive_names
+// / has_generated_equatable_block. The automatic Debug selection and sema's
+// structural Equatable and Comparable providers (compiler-generated blocks on
+// the type) reach MIR as derives, which the Rust printer lowers to `JetDebug`,
+// native `PartialEq`, and the native `Eq`/`PartialOrd`/`Ord` an ordered map key
+// needs.
+fn sema_checked_type_derive_names(derives: [NamedSpan], definition: Item, auto_debug: Bool) -> [String] Never! {
+    names := sema_checked_derive_names(derives)
+    if auto_debug && !sema_checked_has_name(names, "Debug") -> &names.push("Debug")
+    if sema_checked_has_generated_block(definition, "Equatable") && !sema_checked_has_name(names, "Equatable") -> &names.push("Equatable")
+    if sema_checked_has_generated_block(definition, "Comparable") && !sema_checked_has_name(names, "Comparable") -> &names.push("Comparable")
+    names
+}
+
+// Rust: tir_to_mir_types.rs::has_generated_equatable_block, for any builtin
+// structural provider sema attached to a struct or enum.
+fn sema_checked_has_generated_block(definition: Item, trait_name: String) -> Bool Never! {
+    if definition == {
+        .Struct(value) -> {
+            loop block in value.trait_impls {
+                if block.compiler_generated && block.trait_name == trait_name -> return true
+            }
+        }
+        .Enum(value) -> {
+            loop block in value.trait_impls {
+                if block.compiler_generated && block.trait_name == trait_name -> return true
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
 fn sema_checked_has_name(names: [String], expected: String) -> Bool Never! {
     loop name in names {
         if name == expected -> return true
@@ -2178,6 +2211,11 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
     boxed_edges := sema_checked_boxed_edges(graph, boxed, module_row.module_identity, definition)
     if nominal.compiler_owned -> boxed_edges = [String]{}
     derives := [String]{}
+    // Rust tir_to_mir_types lower_struct/lower_enum: the declaration's
+    // structural auto-derive selection (`TypeMetadata`) supplies the
+    // auto-Printable fact and the automatic Debug derive.
+    auto_derives :: sema_type_metadata_auto_derives(definition, module_row.declared_trait_impls)
+    auto_printable := false
     auto_derive_default := false
     published_schema := false
     single_use := false
@@ -2186,7 +2224,8 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
     kind := TTypeDefKind?{None}
     if definition == {
         .Struct(value) -> {
-            derives = sema_checked_derive_names(value.derives)
+            derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
+            auto_printable = auto_derives.printable
             auto_derive_default = value.auto_derive_default
             published_schema = value.is_published_schema || sema_checked_has_name(derives, "PublishedSchema")
             single_use = value.is_single_use
@@ -2200,7 +2239,8 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }
         .Enum(value) -> {
-            derives = sema_checked_derive_names(value.derives)
+            derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
+            auto_printable = auto_derives.printable
             auto_derive_default = value.auto_derive_default
             single_use = value.is_single_use
             must_use = value.is_must_use
@@ -2238,7 +2278,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
         generic_params: generic_params,
         derives: derives,
         auto_derive_default: auto_derive_default,
-        auto_printable: false,
+        auto_printable: auto_printable,
         published_schema: published_schema,
         single_use: single_use,
         must_use: must_use,

@@ -932,9 +932,16 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
     sema_scope_enter(&scopes, &fallback_state, "or.fallback@{span.start}")
     ambient_err := TLocal?{None}
     if subject_ty == .Result(_, error_type) {
-        error_name := BindName{name: "err", span: span, rename: None}
-        ambient_err = sema_stmt_destructure_local(error_name, error_type, false, environment, &scopes, &fallback_state, &diagnostics)
-        if ambient_err == None -> return None
+        // Rust `declare_in_scope(AMBIENT_ERR, …)`: the report is declared in
+        // this fallback's own frame with none of `declare`'s redefinition
+        // checks and no single-use duty, so a nested fallible `??` shadows an
+        // enclosing `err` (as the refutable fallback's `err` already does).
+        owner :: sema_scope_local_owner_key(scopes)
+        symbol :: Symbol{id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
+        frame :: scopes.current
+        sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        sema_ownership_declare_binding(&fallback_state, symbol, false)
+        ambient_err = Val(tir_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false
     enclosing_err_denial :: ~context.fallback_err_denial
@@ -1511,6 +1518,16 @@ fn sema_expression_if_continues_dispatch(else_value: Expr, name: String) -> Bool
     false
 }
 
+// D-FLOWTYPE1=A: whether a stable `x == None` level swaps into the presence
+// test. The last arm of an else-less table (`else_value` is `NoElse`) never
+// does: Rust checks the table as one switch, the swapped payload branch would
+// be the empty `NoElse`, and the table's E0307 coverage would then read the
+// `None` arm as `.Val` and report `None` missing.
+fn sema_expression_if_absent_test_swaps(else_value: Expr, name: String) -> Bool Never! {
+    if else_value == .NoElse(_) -> return false
+    !sema_expression_if_continues_dispatch(else_value, name)
+}
+
 fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     dispatch_subject :: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1518,7 +1535,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // with the branches swapped, so the other branch holds the payload (Rust
     // value `if`). Source order of evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
-        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && !sema_expression_if_continues_dispatch(else_value, test.name.name) -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain
     // proves coverage once, after every nested level has been checked.

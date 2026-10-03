@@ -1921,6 +1921,13 @@ fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String
     graph.module_rows.get(identity)
 }
 
+// The registered module NAME (`core.term`) of a module IDENTITY such as a
+// symbol's `module_name` (`<corelib>/Core/term::Core/term/term.jet`).
+fn sema_registration_module_name(graph: SemaRegistrationGraph, identity: String) -> String? {
+    index :: sema_registration_module_index(graph, identity) ?? return None
+    Val(graph.modules[index].module_name)
+}
+
 fn sema_registration_push_graph_diagnostic(graph: &SemaRegistrationGraph, module_index: Int, diagnostic: Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {

@@ -295,8 +295,8 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
     result
 }
 
-fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool, boxed: Bool) -> TPatternBindingFact Never! {
-    TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, boxed: boxed, symbol_id: None}
+fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool) -> TPatternBindingFact Never! {
+    TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, symbol_id: None}
 }
 
 fn sema_pattern_binding_shape(name: String, span: Span) -> TPatternBinding Never! {
@@ -307,14 +307,6 @@ fn sema_pattern_is_range_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Char | .InlineRange(_, _, _) -> true
         else -> false
-    }
-}
-
-fn sema_pattern_boxed_edge(env: SemaScopeEnvironment, owner: SymbolID?, edge: String) -> Bool Never! {
-    if edge == "" -> return false
-    if owner == {
-        Val(owner_id) -> sema_scope_environment_boxed_edge(env, owner_id, edge)
-        None -> false
     }
 }
 
@@ -353,26 +345,14 @@ fn sema_pattern_range_valid(ty: Type, lo: Int, hi: Int, span: Span, diagnostics:
     }
 }
 
-fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], owner: SymbolID?, variant: String, payload: VariantPayload?, range_forbidden: Bool, env: SemaScopeEnvironment, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, mutable: Bool, diagnostics: &[Diagnostic], facts: &[TPatternBindingFact], tir_bindings: &[TPatternBinding]) -> Bool {
+fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, range_forbidden: Bool, env: SemaScopeEnvironment, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, mutable: Bool, diagnostics: &[Diagnostic], facts: &[TPatternBindingFact], tir_bindings: &[TPatternBinding]) -> Bool {
     complete := true
     loop (index, slot) in slots {
         has_type :: index < expected.len()
         if slot == {
             .Bind(name, binding_span) -> {
                 if {
-                    has_type -> {
-                        ty :: expected[index]
-                        edge :: if payload == {
-                            Val(payload_value) -> if payload_value == {
-                                .Named(fields) -> if index < fields.len() -> "{variant}.{fields[index].name}" else -> variant
-                                .Unit -> ""
-                                .Single(_, _) -> variant
-                            }
-                            None -> ""
-                        }
-                        boxed :: sema_pattern_boxed_edge(env, owner, edge)
-                        &facts.push(sema_pattern_fact(name, binding_span, ty, mutable, boxed))
-                    }
+                    has_type -> &facts.push(sema_pattern_fact(name, binding_span, expected[index], mutable))
                     else -> {
                         complete = false
                     }
@@ -557,7 +537,7 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
             }
         }
         else -> {
-            if !sema_pattern_slot_facts(slots, payload.types, payload.owner, variant, payload.payload, payload.range_forbidden, env, &writes, &state, &tail_store, &context, span, mutable, &diagnostics, &facts, &tir_bindings) -> complete = false
+            if !sema_pattern_slot_facts(slots, payload.types, variant, payload.range_forbidden, env, &writes, &state, &tail_store, &context, span, mutable, &diagnostics, &facts, &tir_bindings) -> complete = false
         }
     }
     SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
@@ -617,8 +597,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
         if field_ty == .Val(resolved_ty) {
             if field == {
                 .Bind(_, _, local, local_span) -> {
-                    boxed :: sema_scope_environment_boxed_edge(env, nominal.symbol.id, field_name)
-                    &facts.push(sema_pattern_fact(local, local_span, resolved_ty, mutable, boxed))
+                    &facts.push(sema_pattern_fact(local, local_span, resolved_ty, mutable))
                     &tir_fields.push(TPatternField.Bind{field: field_name, local: local, span: local_span})
                 }
                 .Value(_, field_span, value) -> {
@@ -672,7 +651,7 @@ fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagno
                     hole_ty = Type.String
                 }
                 &typed_parts.push(TTextPatternPart.Hole{name: name, ty: hole_ty, span: hole_span})
-                &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable, false))
+                &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable))
             }
         }
     }
@@ -712,7 +691,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                         }
                         rest_ty :: Type.List{element: Type.IntN{signed: false, bits: 8}}
                         &typed_parts.push(TBinaryPatternPart.Rest{name: name, ty: rest_ty, span: hole_span})
-                        &facts.push(sema_pattern_fact(name, hole_span, rest_ty, mutable, false))
+                        &facts.push(sema_pattern_fact(name, hole_span, rest_ty, mutable))
                     }
                     .Bits(width, endian) -> {
                         if width <= 0 || width > 64 {
@@ -731,7 +710,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                         }
                         hole_ty :: Type.IntN{signed: false, bits: bits}
                         &typed_parts.push(TBinaryPatternPart.Bits{name: name, width: width, big_endian: endian == BinEndian.Big, ty: hole_ty, span: hole_span})
-                        &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable, false))
+                        &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable))
                         offset += width
                     }
                 }
@@ -830,7 +809,7 @@ fn sema_pattern_validate_carrier(kind: String, payload_ty: Type, binding: String
         return SemaPatternValidation{shape: sema_pattern_carrier_shape(kind, binding, binding_span, Val(TNestedPattern{shape: check.shape, enum_type: check.enum_type}), span), enum_type: None, bindings: check.bindings, complete: check.complete}
     }
     facts := [TPatternBindingFact]{}
-    if binding != "_" -> &facts.push(sema_pattern_fact(binding, binding_span, payload_ty, mutable, false))
+    if binding != "_" -> &facts.push(sema_pattern_fact(binding, binding_span, payload_ty, mutable))
     SemaPatternValidation{shape: sema_pattern_carrier_shape(kind, binding, binding_span, None, span), enum_type: None, bindings: facts, complete: true}
 }
 

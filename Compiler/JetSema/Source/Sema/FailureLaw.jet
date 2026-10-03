@@ -238,11 +238,19 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
 
 // D-FAIL-CONV2=A: the canonical Prelude conversion of one family member into
 // the default `Err`, identical to its Prelude/Errors.jet declaration. The
-// routine is anchored at the propagation site that demanded it.
-fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
-    name :: type_name(source)
-    parsed :: parse_source("impl {name} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
-    if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
+// declaration names the family leaf; the routine binds the exercised source
+// identity (`<corelib>/Core/files::Core/files/files.jet::IOError`), as the
+// Rust reference binds `from_ty` to the exercised source, so the routine key
+// is the one the propagation site recorded. The routine is anchored at the
+// propagation site that demanded it.
+fn sema_prelude_error_conversion(source: Type, site: Span, diagnostics: &[Diagnostic]) -> Func? {
+    leaf :: sema_error_conversion_leaf(type_name(source))
+    parsed :: parse_source("impl {leaf} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
+    if parsed.diagnostics.len() != 0 {
+        loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
+        return None
+    }
+    if parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
         .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, site, definition.to_ty, site, source, definition.body, site))
         else -> None
@@ -295,8 +303,9 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // Demand-driven injection (the Rust reference's
 // `inject_exercised_error_conversions`): only the conversions this module's
 // propagation sites exercised are checked into routines, and a module that
-// declares its own conversion for a pair keeps it.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool {
+// declares its own conversion for a pair keeps it. Every conversion that cannot
+// be injected names its cause in `reasons`.
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String]) -> Bool {
     demands := [SemaPreludeConversionDemand]{}
     loop function in functions {
         loop statement in function.body {
@@ -310,20 +319,40 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             if function.key == demand.key -> present = true
         }
         if present -> next
-        conversion :: sema_prelude_error_conversion(demand.source, demand.site) ?? {
+        label :: "prelude error conversion `impl {type_name(demand.source)} -> Err`"
+        conversion :: sema_prelude_error_conversion(demand.source, demand.site, &diagnostics) ?? {
             complete = false
+            &reasons.push("{label}: its Prelude declaration did not parse into one conversion")
             next
         }
         symbol :: sema_item_symbol(Item.Func{value: conversion}, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             complete = false
+            &reasons.push("{label}: its routine has no module symbol")
             next
         }
         if !sema_scope_add_module_symbol(&scopes, symbol) {
             complete = false
+            &diagnostics.push(sema_defined_twice(symbol.name, "module declarations share one name space with the error conversion routines", demand.site))
             next
         }
+        before :: diagnostics.len()
         checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
-        if !checked.complete || !sema_append_function(&functions, checked) -> complete = false
+        if !checked.complete {
+            complete = false
+            loop reason in checked.incomplete_reasons -> &reasons.push("{label}: {reason}")
+            if checked.incomplete_reasons.len() == 0 {
+                // A check that records no reason stopped on a report; name the
+                // reports it made so the stop is never silent.
+                reported := [String]{}
+                loop index in before..<diagnostics.len() -> &reported.push("{diagnostics[index].code} {diagnostics[index].what}")
+                if reported.len() == 0 -> &reasons.push("{label}: body checking is incomplete") else -> &reasons.push("{label}: body checking stopped on {reported.join("; ")}")
+            }
+            next
+        }
+        if !sema_append_function(&functions, checked) {
+            complete = false
+            &reasons.push("{label}: checked routine could not be recorded")
+        }
     }
     complete
 }

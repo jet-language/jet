@@ -1875,7 +1875,17 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
             item_index += 1
         }
         loop nominal in source_module.nominals {
+            // Registration also lists each `impl` block method on its nominal
+            // for lookup; the impl loop of the module declaring the block
+            // checks it once, with its trait (Rust checks every `Item::Impl`
+            // method as one body job, apart from the type's own methods and
+            // nested trait impls).
+            impl_method_keys := [String:Bool]{}
+            loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                loop method in graph.modules[impl_row.module_index].impls[impl_row.row].methods -> impl_method_keys[method.symbol.id.key] = true
+            }
             loop method in nominal.methods {
+                if impl_method_keys.get(method.symbol.id.key) != None -> next
                 if !method.declaration.compiler_generated {
                     if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons) -> complete = false
                     next
@@ -1892,10 +1902,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         }
         // D-FAIL-CONV2=A: the Core family conversions this module's bodies
         // exercised, checked once every body has recorded its routes.
-        if !sema_inject_prelude_error_conversions(source_module.module_identity, &environment, &scopes, &functions, &diagnostics, &call_facts, &comptime_requests, &name_references) {
-            complete = false
-            &incomplete_reasons.push("prelude error conversions could not be injected")
-        }
+        if !sema_inject_prelude_error_conversions(source_module.module_identity, &environment, &scopes, &functions, &diagnostics, &call_facts, &comptime_requests, &name_references, &incomplete_reasons) -> complete = false
     }
     foreign_diagnostic_count := diagnostics.len()
     foreign_provider_inputs := [SemaForeignProviderInput]{}
