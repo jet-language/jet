@@ -5,7 +5,7 @@
 // reads, or copies a signing secret. The production key ceremony remains an
 // operator action outside this repository.
 
-@TRUST_ROOT_MAX_PUBLIC_KEY_BYTES :: 4096
+TRUST_ROOT_MAX_PUBLIC_KEY_BYTES :: prep { 4096 }
 
 // The `export` options, each taking one path.
 enum TrustRootExportOption {
@@ -45,14 +45,14 @@ struct TrustRootExportRequest {
     cache_key: String?
     toolchain_key: String?
 
-    fn parse(args: [String]) -> TrustRootExportRequest CliToolError! {
-        if (args.get(0) ?? "") != "export" -> return Err(CliToolError.new(cli_trust_root_usage()))
+    fn parse(args: [String]) -> TrustRootExportRequest CLIToolError! {
+        if (args.get(0) ?? "") != "export" -> return Err(CLIToolError.new(cli_trust_root_usage()))
         request := TrustRootExportRequest{output: None, bootstrap: None, index_key: None, cache_key: None, toolchain_key: None}
         i := 1
         loop i < args.len() {
-            option :: TrustRootExportOption.parse(args[i]) ?? return Err(CliToolError.new("unknown option `{args[i]}`\n\n{cli_trust_root_usage()}"))
-            value :: args.get(i + 1) ?? return Err(CliToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
-            if value.starts_with("-") -> return Err(CliToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            option :: TrustRootExportOption.parse(args[i]) ?? return Err(CLIToolError.new("unknown option `{args[i]}`\n\n{cli_trust_root_usage()}"))
+            value :: args.get(i + 1) ?? return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            if value.starts_with("-") -> return Err(CLIToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
             if option == {
                 .Output -> request.output = Val(value)
                 .Bootstrap -> request.bootstrap = Val(value)
@@ -87,20 +87,20 @@ pub fn cli_trust_root_main(args: [String]) -[FS, IO]> Int {
     }
 }
 
-fn cli_trust_root_run(args: [String]) CliToolError! -[FS, IO]> {
+fn cli_trust_root_run(args: [String]) CLIToolError! -[FS, IO]> {
     request :: TrustRootExportRequest.parse(args)
-    output :: request.output ?? return Err(CliToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
+    output :: request.output ?? return Err(CLIToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
     keys := [PublicTrustKey]{}
     loop entry in request.key_paths() {
-        value :: cli_trust_root_read_public_key(entry.path) ?? return Err(CliToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
-        key :: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CliToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
+        value :: cli_trust_root_read_public_key(entry.path) ?? return Err(CLIToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
+        key :: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CLIToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
         &keys.push(key)
     }
     bootstrap :: if request.bootstrap == {
-        .Val(path) -> Val(RootBootstrap.load(path) ?? return Err(CliToolError.new("load trusted-root bootstrap: {err.message()}")))
+        .Val(path) -> Val(RootBootstrap.load(path) ?? return Err(CLIToolError.new("load trusted-root bootstrap: {err.message()}")))
         .None -> None
     }
-    manifest :: trust_public_trust_manifest("jet-lang.dev", bootstrap, keys) ?? return Err(CliToolError.new("render trust manifest: {err.message()}"))
+    manifest :: trust_public_trust_manifest("jet-lang.dev", bootstrap, keys) ?? return Err(CLIToolError.new("render trust manifest: {err.message()}"))
 
     cli_trust_root_write_immutable(files.join(output, "trust-manifest.json"), manifest.bytes())
     loop key in keys {
@@ -108,7 +108,6 @@ fn cli_trust_root_run(args: [String]) CliToolError! -[FS, IO]> {
     }
     cli_trust_root_write_immutable(files.join(output, "README.md"), cli_trust_root_readme(keys).bytes())
     print("prepared public trust root: {output} ({keys.len()} key(s)); production hosting remains pending")
-    Ok()
 }
 
 fn cli_trust_root_usage() -> String Never! {
@@ -116,35 +115,34 @@ fn cli_trust_root_usage() -> String Never! {
 }
 
 // The trimmed text of one regular, bounded, UTF-8 public-key file.
-fn cli_trust_root_read_public_key(path: String) -[FS]> String CliToolError! {
-    metadata :: files.stat(path) ?? return Err(CliToolError.new("{err}"))
-    if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("public trust key is not a regular file"))
-    if metadata.size > @TRUST_ROOT_MAX_PUBLIC_KEY_BYTES -> return Err(CliToolError.new("public trust key is too large"))
-    bytes :: files.read_bytes(path) ?? return Err(CliToolError.new("{err}"))
-    value :: String.from_bytes(bytes) ?? return Err(CliToolError.new("public trust key is not UTF-8"))
+fn cli_trust_root_read_public_key(path: String) -[FS]> String CLIToolError! {
+    metadata :: files.stat(path) ?? return Err(CLIToolError.new("{err}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("public trust key is not a regular file"))
+    if metadata.size > TRUST_ROOT_MAX_PUBLIC_KEY_BYTES -> return Err(CLIToolError.new("public trust key is too large"))
+    bytes :: files.read_bytes(path) ?? return Err(CLIToolError.new("{err}"))
+    value :: String.from_bytes(bytes) ?? return Err(CLIToolError.new("public trust key is not UTF-8"))
     Ok(value.trim())
 }
 
 // Publish `body` at `path` exactly once. An existing regular file with the
 // same bytes is accepted; any other existing entry is refused.
-fn cli_trust_root_write_immutable(path: String, body: [U8]) CliToolError! -[FS]> {
+fn cli_trust_root_write_immutable(path: String, body: [U8]) CLIToolError! -[FS]> {
     parent :: files.dirname(path)
     if parent != "" {
-        files.create_dir_all(parent) ?? return Err(CliToolError.new("create {parent}: {err}"))
+        files.create_dir_all(parent) ?? return Err(CLIToolError.new("create {parent}: {err}"))
     }
     if files.stat(path) == {
         .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("publication path is not a regular file: {path}"))
-            existing :: files.read_bytes(path) ?? return Err(CliToolError.new("read {path}: {err}"))
-            if existing == body -> return Ok()
-            return Err(CliToolError.new("immutable publication file changed: {path}"))
+            if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("publication path is not a regular file: {path}"))
+            existing :: files.read_bytes(path) ?? return Err(CLIToolError.new("read {path}: {err}"))
+            if existing == body -> return
+            return Err(CLIToolError.new("immutable publication file changed: {path}"))
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(CliToolError.new("inspect {path}: {error}"))
-            writer :: files.create(path, if_exists: .Refuse) ?? return Err(CliToolError.new("create {path}: {err}"))
-            writer.write_all(body) ?? return Err(CliToolError.new("write {path}: {err}"))
-            writer.fsync() ?? return Err(CliToolError.new("write {path}: {err}"))
-            Ok()
+            if !store_io_is_not_found(error) -> return Err(CLIToolError.new("inspect {path}: {error}"))
+            writer :: files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
+            writer.write_all(body) ?? return Err(CLIToolError.new("write {path}: {err}"))
+            writer.fsync() ?? return Err(CLIToolError.new("write {path}: {err}"))
         }
     }
 }

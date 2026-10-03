@@ -4,11 +4,11 @@
 // exact proposed set. Target sets are sorted, duplicate-free lists; root maps
 // are keyed by the root id text and always walked in sorted key order.
 
-@STORE_LIFECYCLE_MAX_ROOTS :: 4096
-@STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT :: 4096
-@STORE_LIFECYCLE_MAX_TOTAL_TARGETS :: 65536
-@STORE_LIFECYCLE_MAX_RECOVERY_WORK :: 1000000
-@STORE_LIFECYCLE_MAX_IDENTITY_BYTES :: 512
+STORE_LIFECYCLE_MAX_ROOTS :: prep { 4096 }
+STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT :: prep { 4096 }
+STORE_LIFECYCLE_MAX_TOTAL_TARGETS :: prep { 65536 }
+STORE_LIFECYCLE_MAX_RECOVERY_WORK :: prep { 1000000 }
+STORE_LIFECYCLE_MAX_IDENTITY_BYTES :: prep { 512 }
 
 pub enum RootKind {
     ProjectLock
@@ -40,12 +40,12 @@ pub enum RootKind {
 }
 
 // The stable identity of one root.
-pub struct RootId {
+pub struct RootID {
     value: String
 
-    fn new(value: String) -> RootId StoreError! {
+    fn new(value: String) -> RootID StoreError! {
         store_lifecycle_validate_identity("root id", value)
-        Ok(RootId{value})
+        Ok(RootID{value})
     }
 
     fn as_str(self) -> String Never! {
@@ -54,12 +54,12 @@ pub struct RootId {
 }
 
 // The producer that owns a root.
-pub struct ProducerId {
+pub struct ProducerID {
     value: String
 
-    fn new(value: String) -> ProducerId StoreError! {
+    fn new(value: String) -> ProducerID StoreError! {
         store_lifecycle_validate_identity("producer", value)
-        Ok(ProducerId{value})
+        Ok(ProducerID{value})
     }
 
     fn as_str(self) -> String Never! {
@@ -180,12 +180,12 @@ pub struct RootMetadata {
 // The typed identity a producer supplies for one root incarnation.
 pub struct RootIdentity {
     kind: RootKind
-    id: RootId
-    producer: ProducerId
+    id: RootID
+    producer: ProducerID
     incarnation: Incarnation
     witness: RootWitness
 
-    fn new(kind: RootKind, id: RootId, producer: ProducerId, incarnation: Incarnation, witness: RootWitness) -> RootIdentity Never! {
+    fn new(kind: RootKind, id: RootID, producer: ProducerID, incarnation: Incarnation, witness: RootWitness) -> RootIdentity Never! {
         RootIdentity{kind, id, producer, incarnation, witness}
     }
 }
@@ -296,8 +296,8 @@ pub struct LegacyRoot {
 // One lifecycle journal transaction.
 enum LifecycleJournalEntry {
     Prepare(identity: RootIdentity, proposed: [String], protected: [String], metadata: RootMetadata, revision: Int, at: LifecycleTimestamp)
-    Commit(id: RootId, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
-    Tombstone(id: RootId, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
+    Commit(id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
+    Tombstone(id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp)
     Legacy(identity: RootIdentity, targets: [String], at: LifecycleTimestamp)
 
     // Recovery work charged for this entry.
@@ -324,7 +324,7 @@ pub struct RootUpdate {
 // Rust `validate_identity`: 1..=512 bytes and no ASCII control byte.
 fn store_lifecycle_validate_identity(label: String, value: String) StoreError! {
     raw :: value.bytes()
-    if raw.len() == 0 || raw.len() > @STORE_LIFECYCLE_MAX_IDENTITY_BYTES -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
+    if raw.len() == 0 || raw.len() > STORE_LIFECYCLE_MAX_IDENTITY_BYTES -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
     loop byte in raw {
         code :: Int.from_u8(byte)
         if code < 32 || code == 127 -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))

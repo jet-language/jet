@@ -67,9 +67,9 @@ pub struct EnvReadyStats {
 // Seal every provider record against the final project lock after all
 // package publications; only this post-pass writes the digest that later
 // online and offline replays use.
-fn cli_seal_project_producer_records(roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) CliError! -[FS, Env, Time]> {
-    lock_digest :: provider_project_lock_digest(Val(project_root)) ?? return Err(CliError.Other(err.message()))
-    if lock_digest == "" -> return Ok()
+fn cli_seal_project_producer_records(verification: &StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) CLIError! -[FS, Env, Time]> {
+    lock_digest :: provider_project_lock_digest(Val(project_root)) ?? return Err(CLIError.Other(err.message()))
+    if lock_digest == "" -> return
     references := [String]{}
     loop selection in ready_stats.realized {
         if !references.contains(selection.reference) -> &references.push(selection.reference)
@@ -77,14 +77,13 @@ fn cli_seal_project_producer_records(roots: HangarRoots, project_root: String, r
     &references.sort()
     loop reference in references {
         entry :: store_find_by_reference_read_only(roots, reference) ?? next
-        producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(CliError.Other("could not decode `{reference}` producer record: {err.message()}"))
+        producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(CLIError.Other("could not decode `{reference}` producer record: {err.message()}"))
         if producer.provider != "nix" && producer.provider != "jetpackage" -> next
-        store_refresh_lock_digest(roots, entry, lock_digest) ?? return Err(CliError.Other("could not seal `{reference}` producer record: {err.message()}"))
+        store_refresh_lock_digest(&verification, roots, entry, lock_digest) ?? return Err(CLIError.Other("could not seal `{reference}` producer record: {err.message()}"))
     }
     // Checked listing completes any closure migration or compaction before
     // the caller records the environment-entry stamp for warm reuse.
-    store_list_checked(roots) ?? return Err(CliError.Other("could not finalize sealed closure state: {err.message()}"))
-    Ok()
+    store_list_checked(&verification, roots) ?? return Err(CLIError.Other("could not finalize sealed closure state: {err.message()}"))
 }
 
 // Warm verified realizations by their original reference.
@@ -141,18 +140,18 @@ pub struct NativeOutputFact {
     pub platform: NativeOutputPlatform
 }
 
-@CLI_NATIVE_OUTPUT_FACTS :: [NativeOutputFact]{
+CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
     NativeOutputFact{package: "tzdata", relative: "share/zoneinfo", variable: "TZDIR", platform: NativeOutputPlatform.Any},
     NativeOutputFact{package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux},
     NativeOutputFact{package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
-}
+} }
 
 // The two repo-local dev tools are native projections of the cargo-built
 // binaries, not realized packages, and get no generated shell wrapper.
-@CLI_NATIVE_DEV_TOOLS :: [NativeDevTool]{
+CLI_NATIVE_DEV_TOOLS :: prep { [NativeDevTool]{
     NativeDevTool{definition: "jetDev", command: "jet", relative_binary: "target/debug/jet"},
     NativeDevTool{definition: "jetpackDev", command: "jetpack", relative_binary: "target/debug/jetpack"}
-}
+} }
 
 pub enum NativeActivation {
     Disabled
@@ -178,9 +177,9 @@ pub struct NativeEnvironmentProjection {
             directory :: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
         }
-        tzdir := None
+        tzdir := String?{None}
         loader_paths := [String]{}
-        loop fact in @CLI_NATIVE_OUTPUT_FACTS {
+        loop fact in CLI_NATIVE_OUTPUT_FACTS {
             path :: cli_native_output_path(realized, fact) ?? next
             if fact.variable == {
                 "TZDIR" -> {
@@ -208,7 +207,7 @@ pub struct NativeEnvironmentProjection {
     fn env_vars(self) -[Env]> [String: String] Never! {
         vars := [String: String]{"JET_ROOT": self.project_root}
         if self.activation == {
-            .Disabled -> vars[@ENV_DISABLE_VAR] = "1"
+            .Disabled -> vars[ENV_DISABLE_VAR] = "1"
         }
         if self.nix_shell_scratch == {
             .NotCreated -> vars["JET_NIX_TMP_CLEANED"] = "1"
@@ -231,7 +230,7 @@ fn cli_native_output_path(realized: [(name: String, output: String)], fact: Nati
 
 fn cli_native_dev_tool_paths(project_root: String) -> [(command: String, binary: String)] Never! {
     tools := [(command: String, binary: String)]{}
-    loop tool in @CLI_NATIVE_DEV_TOOLS -> &tools.push((command: tool.command, binary: files.join(project_root, tool.relative_binary)))
+    loop tool in CLI_NATIVE_DEV_TOOLS -> &tools.push((command: tool.command, binary: files.join(project_root, tool.relative_binary)))
     tools
 }
 
@@ -243,19 +242,19 @@ fn cli_native_environment_projection(project_root: String, realized: [(name: Str
 
 // Realize every ref in `plan` and compose the shell env. A realization
 // failure is reported here and travels as `Reported(code)`.
-pub fn cli_compose_env(theme: Theme, roots: HangarRoots, flags: CliFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CliError! {
-    cli_compose_env_scoped(theme, roots, flags, plan, RealizeScope.Project, false)
+pub fn cli_compose_env(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+    cli_compose_env_scoped(&verification, theme, roots, flags, plan, RealizeScope.Project, false)
 }
 
 // A user tool installs into the user profile, so it is never reconciled
 // against the project the shell happens to stand in.
-pub fn cli_compose_env_scoped(theme: Theme, roots: HangarRoots, flags: CliFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CliError! {
-    composed :: cli_compose_env_scoped_with_stats(theme, roots, flags, plan, scope, confirm_download)
+pub fn cli_compose_env_scoped(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+    composed :: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
     Ok(composed.env)
 }
 
-pub fn cli_compose_env_scoped_with_stats(theme: Theme, roots: HangarRoots, flags: CliFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CliError! {
-    cli_compose_env_scoped_with_warm(theme, roots, flags, plan, scope, confirm_download, None, true)
+pub fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+    cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
 // Whether the warm realizations cover every ref and adapter of the plan.
@@ -277,7 +276,7 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags: CliFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CliError! {
+pub fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
     warm_realizations := if warm == {
         .Val(list) -> Val(cli_index_warm_realizations(list))
         .None -> None
@@ -285,25 +284,25 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
     warm_complete :: cli_warm_complete(warm_realizations, plan)
     project_scope :: scope == RealizeScope.Project
     needs_stats :: collect_stats || (project_scope && !warm_complete)
-    lock_diff := if project_scope && !warm_complete -> CliLockDiffGuard.new(theme, plan.project_root) else -> CliLockDiffGuard.inactive(theme)
+    lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
     defer close(^lock_diff)
     if confirm_download && !warm_complete {
-        download_plan :: cli_reject_unprompted_acquisition(theme, roots, flags, plan, scope)
+        download_plan :: cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope)
         &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
     }
     cli_enforce_required_sandbox_policy(theme, flags.json)
     if cli_validate_integration_facts(plan) == {
         .Err(error) -> {
             theme.error_coded("E1335", "environment integration facts are not executable", error.message(), "use the supported integration preset and keep its typed package, host, task, and grant facts intact")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         .Ok(_) -> {}
     }
     bin_dirs := [String]{}
     if project_scope {
-        profile_bin :: cli_dev_shell_projection(plan.project_root, plan.environment) ?? {
+        profile_bin :: cli_dev_shell_projection(&verification, plan.project_root, plan.environment) ?? {
             theme.error_coded("E1335", "the active package profile cannot project into the dev shell", err.message(), "build and switch the named package profile, then retry the shell")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         if profile_bin == .Val(path) -> &bin_dirs.push(path)
     }
@@ -348,7 +347,7 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
             .None -> {
                 step_started :: time.start()
                 slot := if live_tty -> Val(live) else -> None
-                outcome :: cli_realize_ref_outcome(theme, roots, flags, plan.table, spec, name_w, style, &slot, scope)
+                outcome :: cli_realize_ref_outcome(&verification, theme, roots, flags, plan.table, spec, name_w, style, &slot, scope)
                 if slot == .Val(updated) -> live = updated
                 if phase_timing -> term.eprint("TIMING step {spec.package}: {time.elapsed(step_started)}")
                 outcome
@@ -361,15 +360,15 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
                 if needs_stats -> &ready_stats.record(entry, state)
                 leased_output :: lease.stable_path(entry.out) ?? {
                     &live.clear()
-                    theme.error_coded("E1335", "the realized package output could not be confined to its executable lease", err.message(), "re-realize the package so Jetpack can hand only its verified lease to the child")
+                    theme.error_coded("E1335", "the realized package output could not be confined to its executable lease", "{err}", "re-realize the package so Jetpack can hand only its verified lease to the child")
                     failed = true
                     next
                 }
                 // A `library` package realizes with an empty `bin` (U10) and
                 // contributes nothing to PATH.
                 if lease.projected_bin_dir_after_validation() == .Val(bin) -> &bin_dirs.push(bin)
-                invalid_metadata := None
-                loop meta in @CLI_PROVIDER_METADATA_FILES {
+                invalid_metadata := String?{None}
+                loop meta in CLI_PROVIDER_METADATA_FILES {
                     raw :: files.read(files.join(leased_output, meta.file)) ?? next
                     value :: raw.trim()
                     if value == "" -> next
@@ -419,7 +418,7 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
                 parts :: ^realized.into_parts()
                 Val((entry: parts.entry, state: parts.source_state, lease: parts.lease))
             }
-            .None -> cli_realize_adapter(theme, roots, flags, adapter, plan.table, true)
+            .None -> cli_realize_adapter(&verification, theme, roots, flags, adapter, plan.table, true)
         }
         if adapter_outcome == {
             .Val(realized) -> {
@@ -434,10 +433,10 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
     if holes.len() > 0 {
         &live.clear()
         cli_report_nix_bridge_required(theme, flags, holes, realized_refs)
-        return Err(CliError.Reported(@EXIT_USAGE))
+        return Err(CLIError.Reported(EXIT_USAGE))
     }
-    if unavailable -> return Err(CliError.Reported(@EXIT_USAGE))
-    if failed -> return Err(CliError.Reported(@EXIT_USER_ERROR))
+    if unavailable -> return Err(CLIError.Reported(EXIT_USAGE))
+    if failed -> return Err(CLIError.Reported(EXIT_USER_ERROR))
     missing_language_tools := [String]{}
     loop pack in plan.environment.language_packs {
         loop tool in pack.required_tools {
@@ -452,7 +451,7 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
     if missing_language_tools.len() > 0 {
         &live.clear()
         theme.error_coded("E1333", "a language pack tool is missing from the realized environment", "missing required language tools: {missing_language_tools.join(", ")}", "realize the pack's declared packages again, or remove the language selection until its tools are available")
-        return Err(CliError.Reported(@EXIT_USAGE))
+        return Err(CLIError.Reported(EXIT_USAGE))
     }
     native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, sys.get("LD_LIBRARY_PATH"))) else -> None
     if native_projection == .Val(projection) {
@@ -481,7 +480,7 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
         values :: cli_read_dotenv_snapshot(plan.project_root, dotenv.file, dotenv.allow) ?? {
             &live.clear()
             theme.error("couldn't load dotenv file", "{dotenv.file}: {err.message()}", "fix the dotenv path and keep each assignment in KEY=value form.")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         loop entry in values -> composed_vars[entry.key] = entry.value
     }
@@ -490,13 +489,13 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
             if name == "GIT_CONFIG_COUNT" || name == "GIT_CONFIG_KEY_0" || name == "GIT_CONFIG_VALUE_0" {
                 &live.clear()
                 theme.error_coded("E1333", "the environment Git hook configuration conflicts with `unset`", "Git cannot receive core.hooksPath when its configuration environment is removed", "remove the Git configuration names from `unset`, or remove `git_hooks_path`")
-                return Err(CliError.Reported(@EXIT_USAGE))
+                return Err(CLIError.Reported(EXIT_USAGE))
             }
         }
         hooks :: env_hook_git_hooks_environment(plan.project_root, relative) ?? {
             &live.clear()
             theme.error_coded("E1333", "the environment Git hook path is not usable", err.message(), "create an in-project hook directory and set `git_hooks_path` to its project-relative path")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         loop entry in hooks -> composed_vars[entry.key] = entry.value
     }
@@ -506,11 +505,11 @@ pub fn cli_compose_env_scoped_with_warm(theme: Theme, roots: HangarRoots, flags:
         loop entry in projection.env_vars() -> composed_vars[entry.key] = entry.value
     }
     if project_scope && !warm_complete {
-        if cli_seal_project_producer_records(roots, plan.project_root, ready_stats) == {
+        if cli_seal_project_producer_records(&verification, roots, plan.project_root, ready_stats) == {
             .Err(error) -> {
                 &live.clear()
                 theme.error_coded("E1335", "the project lock could not seal provider records", error.message(), "retry the environment entry so every producer uses the final project lock")
-                return Err(CliError.Reported(@EXIT_USER_ERROR))
+                return Err(CLIError.Reported(EXIT_USER_ERROR))
             }
             .Ok(_) -> {}
         }
@@ -537,7 +536,7 @@ pub struct ProviderMetadataFile {
     pub variable: String
 }
 
-@CLI_PROVIDER_METADATA_FILES :: [ProviderMetadataFile]{
+CLI_PROVIDER_METADATA_FILES :: prep { [ProviderMetadataFile]{
     ProviderMetadataFile{file: "lua-path", variable: "LUA_PATH"},
     ProviderMetadataFile{file: "lua-cpath", variable: "LUA_CPATH"},
     ProviderMetadataFile{file: "gem-home", variable: "GEM_HOME"},
@@ -545,12 +544,12 @@ pub struct ProviderMetadataFile {
     ProviderMetadataFile{file: "ruby-lib", variable: "RUBYLIB"},
     ProviderMetadataFile{file: "perl5lib", variable: "PERL5LIB"},
     ProviderMetadataFile{file: "composer-autoload", variable: "COMPOSER_AUTOLOAD"}
-}
+} }
 
 // A piped `jetpack env`/`use` must not start realization without an explicit
 // `-y`. Existing Hangar entries pass so fully cached environments stay
 // silent; every missing package is refused before acquisition.
-fn cli_reject_unprompted_acquisition(theme: Theme, roots: HangarRoots, flags: CliFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CliError! {
+fn cli_reject_unprompted_acquisition(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     specs := [RefSpec]{}
     loop spec in plan.refs {
         if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> &specs.push(spec)
@@ -572,7 +571,7 @@ fn cli_reject_unprompted_acquisition(theme: Theme, roots: HangarRoots, flags: Cl
         else -> {}
     }
     progress :: if planning_live -> Val(live.progress_handle()) else -> None
-    planned :: cli_plan_downloads(theme, roots, flags, plan.table, specs, scope, progress) ?? {
+    planned :: cli_plan_downloads(&verification, theme, roots, flags, plan.table, specs, scope, progress) ?? {
         &live.clear()
         return Err(err)
     }
@@ -583,27 +582,27 @@ fn cli_reject_unprompted_acquisition(theme: Theme, roots: HangarRoots, flags: Cl
     }
     if download.items.len() == 0 -> return Ok(download)
     if theme.confirm_download(label, download, flags.explain_plan, flags.assume_yes) -> return Ok(download)
-    Err(CliError.Reported(@EXIT_USAGE))
+    Err(CLIError.Reported(EXIT_USAGE))
 }
 
 // Every integration fact must still be executable: disclosed tasks keep their
 // packages, secrets, providers, grants, and host checks.
-pub fn cli_validate_integration_facts(plan: RunPlan) CliError! -[Env]> {
+pub fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
     facts :: plan.environment.integration_facts
     if facts.validate() == {
-        .Err(error) -> return Err(CliError.InvalidData(error.message))
+        .Err(error) -> return Err(CLIError.InvalidData(error.message))
         .Ok(_) -> {}
     }
     os :: if sys.name() == "macos" -> "darwin" else -> sys.name()
     target :: sys.get("JET_TARGET") ?? "{sys.arch()}-{os}"
     loop fact in facts.task_facts {
-        if !facts.tasks.contains(fact.name) -> return Err(CliError.InvalidData("integration task `{fact.name}` is not disclosed by its fact projection"))
+        if !facts.tasks.contains(fact.name) -> return Err(CLIError.InvalidData("integration task `{fact.name}` is not disclosed by its fact projection"))
         loop package in fact.packages {
             kept := false
             loop reference in plan.refs {
                 if reference.raw == package || reference.short_name() == package -> kept = true
             }
-            if !kept -> return Err(CliError.InvalidData("integration task `{fact.name}` lost package `{package}` before realization"))
+            if !kept -> return Err(CLIError.InvalidData("integration task `{fact.name}` lost package `{package}` before realization"))
         }
         loop secret in fact.secrets -> cli_validate_task_secret_allowlist(fact.name, secret, plan.secrets)
         expected_provider :: if fact.integration == {
@@ -613,55 +612,54 @@ pub fn cli_validate_integration_facts(plan: RunPlan) CliError! -[Env]> {
             .Hosts -> "host-binding"
             .CodexAgent -> "mcp"
         }
-        if !fact.providers.contains(expected_provider) -> return Err(CliError.InvalidData("integration task `{fact.name}` has no executable `{expected_provider}` provider"))
+        if !fact.providers.contains(expected_provider) -> return Err(CLIError.InvalidData("integration task `{fact.name}` has no executable `{expected_provider}` provider"))
         loop provider in fact.providers {
             if provider == {
                 "nixpkgs" | "vault" | "credential-store" | "host-binding" | "mcp" -> {}
-                else -> return Err(CliError.InvalidData("integration task `{fact.name}` names an unsupported provider"))
+                else -> return Err(CLIError.InvalidData("integration task `{fact.name}` names an unsupported provider"))
             }
         }
         loop provider in fact.providers {
-            if !facts.providers.contains(provider) -> return Err(CliError.InvalidData("integration task `{fact.name}` lost provider `{provider}` before realization"))
+            if !facts.providers.contains(provider) -> return Err(CLIError.InvalidData("integration task `{fact.name}` lost provider `{provider}` before realization"))
         }
         loop grant in fact.grants {
-            if !facts.grants.contains(grant) -> return Err(CliError.InvalidData("integration task `{fact.name}` lost grant `{grant}` before realization"))
+            if !facts.grants.contains(grant) -> return Err(CLIError.InvalidData("integration task `{fact.name}` lost grant `{grant}` before realization"))
         }
         loop check in fact.host_checks {
             if cli_validate_integration_host_check(check, target) == {
-                .Err(error) -> return Err(CliError.InvalidData("{fact.integration.as_str()} integration `{fact.name}` failed: {error.message()}"))
+                .Err(error) -> return Err(CLIError.InvalidData("{fact.integration.as_str()} integration `{fact.name}` failed: {error.message()}"))
                 .Ok(_) -> {}
             }
         }
     }
     loop provider in facts.providers {
-        if provider.trim() == "" -> return Err(CliError.InvalidData("integration provider authority cannot be empty"))
+        if provider.trim() == "" -> return Err(CLIError.InvalidData("integration provider authority cannot be empty"))
     }
     loop check in facts.host_checks {
-        if check.trim() == "" -> return Err(CliError.InvalidData("integration host checks cannot be empty"))
+        if check.trim() == "" -> return Err(CLIError.InvalidData("integration host checks cannot be empty"))
     }
-    Ok()
 }
 
-fn cli_validate_task_secret_allowlist(task_name: String, secret: String, declared: [SecretSpec]) CliError! {
+fn cli_validate_task_secret_allowlist(task_name: String, secret: String, declared: [SecretSpec]) CLIError! {
     loop spec in declared {
-        if spec.name == secret -> return Ok()
+        if spec.name == secret -> return
     }
-    Err(CliError.InvalidData("integration task `{task_name}` lost secret `{secret}` before activation"))
+    Err(CLIError.InvalidData("integration task `{task_name}` lost secret `{secret}` before activation"))
 }
 
-fn cli_validate_integration_host_check(check: String, target: String) CliError! {
-    if !check.starts_with("target:") -> return Ok()
+fn cli_validate_integration_host_check(check: String, target: String) CLIError! {
+    if !check.starts_with("target:") -> return
     expected :: check.removeprefix("target:")
     lowered :: target.to_lower()
     loop candidate in expected.split("-or-") {
-        if lowered.contains(candidate.to_lower()) -> return Ok()
+        if lowered.contains(candidate.to_lower()) -> return
     }
-    Err(CliError.InvalidData("integration host check `{check}` failed for target `{lowered}`"))
+    Err(CLIError.InvalidData("integration host check `{check}` failed for target `{lowered}`"))
 }
 
 // A checked dotenv snapshot, narrowed to `allow` when it names keys.
-fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS]> [String: String] CliError! {
-    bytes :: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CliError.InvalidData(err.message))
+fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS]> [String: String] CLIError! {
+    bytes :: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
     values :: cli_read_dotenv(bytes)
     if allow.len() == 0 -> return Ok(values)
     kept := [String: String]{}
@@ -673,17 +671,17 @@ fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[F
 
 // `KEY=value` lines; `#` comments and blank lines are skipped, a matched
 // pair of surrounding quotes is removed.
-fn cli_read_dotenv(bytes: [U8]) -> [String: String] CliError! {
-    text :: String.from_bytes(bytes) ?? return Err(CliError.InvalidData("invalid utf-8 sequence"))
+fn cli_read_dotenv(bytes: [U8]) -> [String: String] CLIError! {
+    text :: String.from_bytes(bytes) ?? return Err(CLIError.InvalidData("invalid utf-8 sequence"))
     values := [String: String]{}
     lines :: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         // Rust `str::lines` drops a trailing `\r`; `trim` removes it too.
         line :: lines[index].trim()
         if line == "" || line.starts_with("#") -> next
-        pair :: line.split_once("=") ?? return Err(CliError.InvalidData("line {index + 1} has no '='"))
+        pair :: line.split_once("=") ?? return Err(CLIError.InvalidData("line {index + 1} has no '='"))
         name :: pair.before.trim()
-        if !cli_dotenv_valid_name(name) -> return Err(CliError.InvalidData("line {index + 1} has an invalid variable name"))
+        if !cli_dotenv_valid_name(name) -> return Err(CLIError.InvalidData("line {index + 1} has an invalid variable name"))
         value := pair.after.trim()
         if value.len() >= 2 && ((value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))) {
             value = String.from_bytes(value.bytes()[1..<(value.len() - 1)]) ?? value
@@ -731,7 +729,7 @@ pub fn cli_resolve_provider_paths(entry_out: String, file: String, value: String
 }
 
 fn cli_is_provider_metadata_file(file: String) -> Bool Never! {
-    loop meta in @CLI_PROVIDER_METADATA_FILES {
+    loop meta in CLI_PROVIDER_METADATA_FILES {
         if meta.file == file -> return true
     }
     false
@@ -749,8 +747,7 @@ fn cli_name_column_width(refs: [RefSpec]) -> Int Never! {
 
 // The `config sandbox require` policy refuses composition when no native
 // sandbox is available.
-fn cli_enforce_required_sandbox_policy(theme: Theme, json_output: Bool) CliError! -[IO, FS, Env, Exec, Time.Wait]> {
-    if env_read_sandbox_policy() != SandboxPolicy.Require -> return Ok()
-    if env_enforce_sandbox_policy(theme, json_output) == .Val(code) -> return Err(CliError.Reported(code))
-    Ok()
+fn cli_enforce_required_sandbox_policy(theme: Theme, json_output: Bool) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
+    if env_read_sandbox_policy() != SandboxPolicy.Require -> return
+    if env_enforce_sandbox_policy(theme, json_output) == .Val(code) -> return Err(CLIError.Reported(code))
 }

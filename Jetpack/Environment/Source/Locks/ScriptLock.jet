@@ -16,9 +16,9 @@
 // script makes the lock stale); `content_hash` is each dep's realized-source
 // tree hash.
 
-@SCRIPT_LOCK_VERSION :: 1
-@SCRIPT_LOCK_DEP_HEADER :: "[[dep]]"
-@SCRIPT_LOCK_U32_MAX :: 4294967295
+SCRIPT_LOCK_VERSION :: prep { 1 }
+SCRIPT_LOCK_DEP_HEADER :: prep { "[[dep]]" }
+SCRIPT_LOCK_U32_MAX :: prep { 4294967295 }
 
 pub struct LockedInlineDep {
     pub name: String
@@ -50,7 +50,7 @@ pub fn env_script_lock_write(script_path: String, lock: ScriptLockFile) IOError!
 pub fn env_script_lock_render(lock: ScriptLockFile) -> String Never! {
     out := [String]{"version = {lock.version}\n", "script_hash = \"{lock.script_hash}\"\n"}
     loop dep in lock.deps {
-        &out.push("\n{@SCRIPT_LOCK_DEP_HEADER}\n")
+        &out.push("\n{SCRIPT_LOCK_DEP_HEADER}\n")
         &out.push("name = \"{dep.name}\"\n")
         &out.push("selector = \"{dep.selector}\"\n")
         &out.push("resolved = \"{dep.resolved}\"\n")
@@ -66,7 +66,7 @@ pub fn env_script_lock_load(script_path: String) -[FS]> ScriptLockFile? Never! {
 }
 
 pub fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
-    version := @SCRIPT_LOCK_VERSION
+    version := SCRIPT_LOCK_VERSION
     script_hash := ""
     deps := [LockedInlineDep]{}
     // The `[[dep]]` block under construction; `in_dep` once one has opened.
@@ -75,7 +75,7 @@ pub fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
     loop raw_line in raw.split("\n") {
         line :: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
-        if line == @SCRIPT_LOCK_DEP_HEADER {
+        if line == SCRIPT_LOCK_DEP_HEADER {
             if in_dep -> &deps.push(current)
             current = LockedInlineDep.empty()
             in_dep = true
@@ -112,6 +112,6 @@ fn env_script_lock_parse_version(text: String) -> Int? Never! {
         if byte < 48 || byte > 57 -> return None
     }
     value :: Int.parse(digits) ?? return None
-    if value > @SCRIPT_LOCK_U32_MAX -> return None
+    if value > SCRIPT_LOCK_U32_MAX -> return None
     Val(value)
 }

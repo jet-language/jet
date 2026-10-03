@@ -44,7 +44,7 @@ pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
     tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
     ranges := [EditSpan]{}
     loop index in 0..<tokens.len() {
-        if !pkg_token_is_ident(tokens[index], @MANIFEST_BLOCK_PACKAGES) || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
+        if !pkg_token_is_ident(tokens[index], MANIFEST_BLOCK_PACKAGES) || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
         open := index + 2
         if pkg_token_kind_at(tokens, open) == TOKEN_DOT -> open += 1
         if pkg_token_kind_at(tokens, open) != TOKEN_LBRACE -> next
@@ -63,7 +63,7 @@ pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
     }
     edits := [SourceEdit]{}
     loop index in 0..<tokens.len() {
-        if !pkg_token_is_ident(tokens[index], @RETIRED_TARGET_PLUGIN) -> next
+        if !pkg_token_is_ident(tokens[index], RETIRED_TARGET_PLUGIN) -> next
         in_packages := false
         loop range in ranges {
             if range.start <= index && index < range.end -> in_packages = true
@@ -71,7 +71,7 @@ pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
         previous :: pkg_token_kind_at(tokens, index - 1)
         package_value :: in_packages && index > 0 && (previous == TOKEN_COLON || previous == TOKEN_COMMA || previous == TOKEN_LBRACKET)
         target_field :: index >= 2 && previous == TOKEN_COLON && pkg_token_is_ident(tokens[index - 2], "target")
-        if package_value || target_field -> &edits.push(SourceEdit{start: tokens[index].span.start, end: tokens[index].span.end, replacement: @TARGET_SANDBOX})
+        if package_value || target_field -> &edits.push(SourceEdit{start: tokens[index].span.start, end: tokens[index].span.end, replacement: TARGET_SANDBOX})
     }
     RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
 }
@@ -267,7 +267,7 @@ fn pkg_package_top_level_comma(value: String) -> Int? Never! {
     depth := 0
     quoted := false
     escaped := false
-    comma := None
+    comma := Int?{None}
     loop index in 0..<raw.len() {
         code :: Int.from_u8(raw[index])
         if quoted {

@@ -1,0 +1,250 @@
+// Added boundary regressions for Rust etc_boot_facts.rs byte predicates and
+// exact ordered boot facts. The Rust file has no embedded tests.
+#Test("JetOS Linux kernel prefixes and complete MZ HdrS windows") {
+    assert(jetos_is_linux_kernel_image_bytes([U8]{127, 69, 76, 70}))
+    assert(jetos_is_linux_kernel_image_bytes([U8]{127, 69, 76, 70, 0}))
+    assert(jetos_is_linux_kernel_image_bytes("MZHdrS".bytes()))
+    assert(jetos_is_linux_kernel_image_bytes("MZ...HdrS".bytes()))
+    assert(jetos_is_linux_kernel_image_bytes("MZHdrS...".bytes()))
+    assert(!jetos_is_linux_kernel_image_bytes([U8]{}))
+    assert(!jetos_is_linux_kernel_image_bytes([U8]{127, 69, 76}))
+    assert(!jetos_is_linux_kernel_image_bytes("ELF".bytes()))
+    assert(!jetos_is_linux_kernel_image_bytes("xMZHdrS".bytes()))
+    assert(!jetos_is_linux_kernel_image_bytes("MZHdr".bytes()))
+    assert(!jetos_is_linux_kernel_image_bytes("MZhdrS".bytes()))
+    assert(!jetos_is_linux_kernel_image_bytes("HdrS".bytes()))
+}
+
+#Test("JetOS initrd gzip and cpio prefixes are byte exact") {
+    assert(jetos_is_initrd_image_bytes([U8]{31, 139}))
+    assert(jetos_is_initrd_image_bytes([U8]{31, 139, 0}))
+    assert(jetos_is_initrd_image_bytes("070701".bytes()))
+    assert(jetos_is_initrd_image_bytes("070702payload".bytes()))
+    assert(!jetos_is_initrd_image_bytes([U8]{}))
+    assert(!jetos_is_initrd_image_bytes([U8]{31}))
+    assert(!jetos_is_initrd_image_bytes([U8]{31, 138}))
+    assert(!jetos_is_initrd_image_bytes("07070".bytes()))
+    assert(!jetos_is_initrd_image_bytes("070703".bytes()))
+    assert(!jetos_is_initrd_image_bytes("x070701".bytes()))
+}
+
+#Test("JetOS boot facts preserve exact field order and null package") {
+    boot :: JetOSBootProfile{loader: "Limine", kernel: "CachyOS", init: "/sbin/init", initrd_modules: [String]{"virtio_blk", "ext4"}}
+    assert_eq(jetos_render_boot_facts_parts(boot, "null"), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
+    escaped :: JetOSBootProfile{loader: "\"\\\n", kernel: "雪", init: "\t", initrd_modules: [String]{"a\"", "b\\", "c\n"}}
+    assert_eq(jetos_render_boot_facts_parts(escaped, "null"), "{{\"loader\":\"\\\"\\\\\\n\",\"kernel\":\"雪\",\"init\":\"\\t\",\"initrd_modules\":[\"a\\\"\",\"b\\\\\",\"c\\n\"],\"kernel_package\":null}}")
+    empty :: JetOSBootProfile{loader: "", kernel: "", init: "", initrd_modules: [String]{}}
+    assert_eq(jetos_render_boot_facts_parts(empty, "null"), "{{\"loader\":\"\",\"kernel\":\"\",\"init\":\"\",\"initrd_modules\":[],\"kernel_package\":null}}")
+}
+
+fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+// Actual SystemPlan/option resolution is mandatory; borrowed trim ABI #4303
+// is not bypassed by providing a made-up boot profile to this claim.
+#Test("JetOS real SystemPlan boot defaults and option projections") {
+    defaults :: jetos_boot_profile(jetos_identity_test_system([OptionPlan]{}))
+    assert_eq(jetos_render_boot_facts_parts(defaults, "null"), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
+    system :: jetos_identity_test_system([OptionPlan]{
+        OptionPlan{key: "boot.loader", value: ".Grub"},
+        OptionPlan{key: "boot.kernel", value: "\"/kernel\""},
+        OptionPlan{key: "init.path", value: "\"/init\""},
+        OptionPlan{key: "boot.initrd.modules", value: "[\"zfs\", \"nvme\"]"}
+    })
+    assert_eq(jetos_render_boot_facts_parts(jetos_boot_profile(system), "null"), "{{\"loader\":\"Grub\",\"kernel\":\"/kernel\",\"init\":\"/init\",\"initrd_modules\":[\"zfs\",\"nvme\"],\"kernel_package\":null}}")
+}
+
+#Test("JetOS native etc tree preserves root accounts PAM and both identity files") {
+    root :: files.tmpdir("jetos-identity-etc-") ?? panic("identity scratch")
+    system :: jetos_identity_test_system([OptionPlan]{})
+    jetos_write_etc_tree(root, system) ?? panic("write etc tree")
+    assert_eq(files.read(files.join(root, "etc/hostname")) ?? panic("hostname"), "halcyon\n")
+    assert_eq(files.read(files.join(root, "etc/fstab")) ?? panic("fstab"), "LABEL=jetos-root\t/\text4\tdefaults\t0\t1\n")
+    assert_eq(files.read(files.join(root, "etc/passwd")) ?? panic("passwd"), "root:x:0:0:root:/root:/bin/sh\nmessagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\ngdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n")
+    assert_eq(files.read(files.join(root, "etc/shadow")) ?? panic("shadow"), "root:!:1::::::\n")
+    assert_eq(files.read(files.join(root, "etc/group")) ?? panic("group"), "root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\n")
+    assert_eq(files.read(files.join(root, "etc/sysusers.d/jetos.conf")) ?? panic("sysusers"), "")
+    assert_eq(files.read(files.join(root, "etc/os-release")) ?? panic("os release"), jetos_render_jetos_os_release(false))
+    assert_eq(files.read(files.join(root, "usr/lib/os-release")) ?? panic("usr os release"), jetos_render_jetos_os_release(false))
+    assert_eq(files.read(files.join(root, "share/backgrounds/jetos/apex.svg")) ?? panic("wallpaper"), JETOS_WALLPAPER_SVG)
+    assert_eq(files.read(files.join(root, "etc/nsswitch.conf")) ?? panic("nsswitch"), "passwd: files\ngroup: files\nshadow: files\nhosts: files dns\nservices: files\n")
+    pam_names :: [String]{"login", "gdm", "gdm-password", "gdm-launch-environment", "polkit-1", "system-local-login"}
+    loop name in pam_names -> assert_eq(files.read(files.join(root, "etc/pam.d/{name}")) ?? panic("pam"), "auth sufficient pam_unix.so nullok\naccount sufficient pam_unix.so\npassword sufficient pam_unix.so nullok\nsession required pam_unix.so\nsession optional pam_systemd.so\n")
+    assert_eq(files.read(files.join(root, "etc/machine-id")) ?? panic("machine id"), "8c38706cbc8462ab8b17983c64795207\n")
+    assert(!files.exists(files.join(root, "etc/timezone")))
+    files.remove_all(root) ?? panic("remove identity scratch")
+}
+
+#Test("JetOS native etc option aliases sorted accounts and swap policies") {
+    root :: files.tmpdir("jetos-identity-users-") ?? panic("identity scratch")
+    system :: jetos_identity_test_system([OptionPlan]{
+        OptionPlan{key: "network.hostname", value: "\"fallback-host\""},
+        OptionPlan{key: "network.hostName", value: "\"preferred-host\""},
+        OptionPlan{key: "filesystem.timezone", value: "\"UTC\""},
+        OptionPlan{key: "filesystem.root.device", value: "\"/dev/root\""},
+        OptionPlan{key: "filesystem.root.type", value: ".BTRFS"},
+        OptionPlan{key: "filesystem.swap.z.device", value: "\"/dev/swap\""},
+        OptionPlan{key: "filesystem.swap.z.priority", value: "7"},
+        OptionPlan{key: "filesystem.swap.a.enabled", value: "true"},
+        OptionPlan{key: "users.zoe.enable", value: "true"},
+        OptionPlan{key: "users.ada.home", value: "\"/srv/ada\""},
+        OptionPlan{key: "users.ada.shell", value: "\"/bin/bash\""},
+        OptionPlan{key: "groups.wheel.members", value: "[\"ada\", \"zoe\"]"},
+        OptionPlan{key: "groups.empty.enable", value: "true"}
+    })
+    jetos_write_etc_tree(root, system) ?? panic("write etc")
+    assert_eq(files.read(files.join(root, "etc/hostname")) ?? panic("hostname"), "preferred-host\n")
+    assert_eq(files.read(files.join(root, "etc/timezone")) ?? panic("timezone"), "UTC\n")
+    assert_eq(files.read(files.join(root, "etc/fstab")) ?? panic("fstab"), "/dev/root\t/\tbtrfs\tdefaults\t0\t1\nLABEL=jetos-swap-a\tnone\tswap\tdefaults\t0\t0\n/dev/swap\tnone\tswap\tpri=7\t0\t0\n")
+    assert_eq(files.read(files.join(root, "etc/passwd")) ?? panic("passwd"), "root:x:0:0:root:/root:/bin/sh\nmessagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\ngdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\nada:x:1000:1000:ada:/srv/ada:/bin/bash\nzoe:x:1001:1001:zoe:/home/zoe:/run/current-system/sw/bin/sh\n")
+    assert_eq(files.read(files.join(root, "etc/sysusers.d/jetos.conf")) ?? panic("sysusers"), "u ada 1000 \"ada\" /srv/ada /bin/bash\nu zoe 1001 \"zoe\" /home/zoe /run/current-system/sw/bin/sh\ng empty 2000\ng wheel 2001\nm ada zoe wheel\n")
+    assert_eq(files.read(files.join(root, "etc/shadow")) ?? panic("shadow"), "root:!:1::::::\nada:!:1::::::\nzoe:!:1::::::\n")
+    assert_eq(files.read(files.join(root, "etc/group")) ?? panic("group"), "root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\nada:x:1000:ada\nzoe:x:1001:zoe\nempty:x:2000:\nwheel:x:2001:ada,zoe\n")
+    files.remove_all(root) ?? panic("remove identity scratch")
+}
+
+#Test("JetOS path image probes refuse unreadable sources and use actual bytes") {
+    root :: files.tmpdir("jetos-identity-image-") ?? panic("identity scratch")
+    path :: files.join(root, "image")
+    assert(!jetos_is_linux_kernel_image(path))
+    assert(!jetos_is_initrd_image(path))
+    files.write_bytes(path, [U8]{127, 69, 76, 70}) ?? panic("kernel bytes")
+    assert(jetos_is_linux_kernel_image(path))
+    assert(!jetos_is_initrd_image(path))
+    files.write(path, "070701") ?? panic("initrd bytes")
+    assert(!jetos_is_linux_kernel_image(path))
+    assert(jetos_is_initrd_image(path))
+    files.remove_all(root) ?? panic("remove image scratch")
+}
+
+// The lease is created by Store's real snapshot path; no test lease/carrier
+// replaces the production ownership, identity, or validation mechanism.
+fn jetos_identity_test_realized(verification: &StoreVerification, root: String, name: String, original: String, projection: String?) -[FS, Env, Exec, Rand, Time.Wait]> JetOSRealizedPackage Never! {
+    entry :: StoreEntry{id: "identity-fixture", name: name, version: "1", reference: "kernel@jetpack", out: files.join(root, "missing-output"), bin: "", rlib: "", envelope: Envelope.empty(), cache_identity: CacheIdentity.empty(), references: [String]{}, named_outputs: [String: String]{}, platform_artifact_kind: "", producer_record: "", receipt: "", realized_at: 0, last_used_at: 0}
+    lease :: store_snapshot_lease(&verification, HangarRoots.at(root), entry) ?? panic("create real snapshot lease")
+    JetOSRealizedPackage{entry: entry, lease: lease, original_out: original, original_reference_text: "original@jetpack", consumption_override: projection}
+}
+
+#Test("JetOS kernel source provenance uses durable output and exact missing policy") {
+    verification := StoreVerification.new()
+    root :: files.tmpdir("jetos-kernel-provenance-") ?? panic("kernel scratch")
+    original :: files.join(root, "durable")
+    projection :: files.join(root, "projection")
+    files.create_dir_all(files.join(original, "source")) ?? panic("durable source")
+    files.create_dir_all(files.join(projection, "source")) ?? panic("projected source")
+    files.write(files.join(original, "source/recipe.jet"), "abc") ?? panic("durable recipe")
+    files.write(files.join(projection, "source/recipe.jet"), "not the durable recipe") ?? panic("projected recipe")
+    package := jetos_identity_test_realized(&verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, original, Val(projection))
+    assert_eq(package.original_output(), original)
+    assert_eq(package.original_reference(), "original@jetpack")
+    expected :: "{{\"mode\":\"source-built\",\"files\":[{{\n  \"name\": \"recipe\",\n  \"path\": \"{original}/source/recipe.jet\",\n  \"sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n}},{{\n  \"name\": \"builder\",\n  \"path\": \"{original}/source/build.sh\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"config\",\n  \"path\": \"{original}/source/config\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"patches\",\n  \"path\": \"{original}/source/patches.manifest\",\n  \"sha256\": \"<missing>\"\n}},{{\n  \"name\": \"initrd_inputs\",\n  \"path\": \"{original}/source/initrd-inputs.manifest\",\n  \"sha256\": \"<missing>\"\n}}]}}"
+    assert_eq(jetos_kernel_source_json(package), expected)
+    expected_package :: "{{\"name\":\"cachyos-kernel\",\"reference\":\"kernel@jetpack\",\"out\":\"{package.entry.out}\",\"output_hash\":\"\",\"provenance\":\"\",\"bootstrap\":\"source-built\",\"source_recipe\":{expected}}}"
+    assert_eq(jetos_kernel_package_json(package), expected_package)
+    packages := [JetOSRealizedPackage]{package}
+    assert_eq(jetos_render_boot_facts(jetos_identity_test_system([OptionPlan]{}), packages), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":{expected_package}}}")
+    ^packages[0].lease.release()
+    files.remove_all(root) ?? panic("remove provenance scratch")
+}
+
+#Test("JetOS kernel artifact consumption respects override candidate and missing source order") {
+    verification := StoreVerification.new()
+    root :: files.tmpdir("jetos-kernel-consumption-") ?? panic("kernel scratch")
+    projection :: files.join(root, "projection")
+    files.create_dir_all(files.join(projection, "boot")) ?? panic("projected boot")
+    files.create_dir_all(files.join(projection, "source")) ?? panic("projected source")
+    files.write(files.join(projection, "vmlinuz"), "last") ?? panic("last candidate")
+    files.write(files.join(projection, "bzImage"), "second") ?? panic("second candidate")
+    files.write(files.join(projection, "boot/vmlinuz-cachyos"), "first") ?? panic("first candidate")
+    package := jetos_identity_test_realized(&verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, "/durable", Val(projection))
+    assert_eq(package.consumption_path(package.entry.out) ?? panic("projected consumption"), projection)
+    assert_eq(package.consumption_path(files.join(package.entry.out, "boot")) ?? panic("projected member"), files.join(projection, "boot"))
+    if package.consumption_path("{package.entry.out}-other/boot") == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("escape accepted")
+    }
+    assert_eq(jetos_boot_artifact(package, [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}), Val(files.join(projection, "boot/vmlinuz-cachyos")))
+    files.remove(files.join(projection, "boot/vmlinuz-cachyos")) ?? panic("remove first")
+    assert_eq(jetos_boot_artifact(package, [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}), Val(files.join(projection, "bzImage")))
+    files.remove(files.join(projection, "bzImage")) ?? panic("remove second")
+    assert_eq(jetos_boot_artifact(package, [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}), Val(files.join(projection, "vmlinuz")))
+    assert_eq(jetos_boot_artifact(package, [String]{"missing", "boot"}), None)
+    relatives :: [String]{"source/recipe.jet", "source/build.sh", "source/config", "source/patches.manifest", "source/initrd-inputs.manifest"}
+    loop relative in relatives {
+        assert_eq(jetos_missing_kernel_source_files(package), Val(relative))
+        files.write(files.join(projection, relative), "") ?? panic("source input")
+    }
+    assert_eq(jetos_missing_kernel_source_files(package), None)
+    packages := [JetOSRealizedPackage]{package}
+    selected :: jetos_cachyos_kernel_entry(packages) ?? panic("selected CachyOS")
+    assert_eq(selected.entry.reference, "kernel@jetpack")
+    if jetos_cachyos_kernel_entry([JetOSRealizedPackage]{}) == {
+        .None -> {}
+        .Val(_) -> panic("empty realization has no CachyOS entry")
+    }
+    unprojected := jetos_identity_test_realized(&verification, root, "not-a-kernel", "/durable", None)
+    if unprojected.consumption_path(unprojected.entry.out) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("non-consumable package accepted")
+    }
+    assert_eq(jetos_boot_artifact(unprojected, [String]{"vmlinuz"}), None)
+    assert_eq(jetos_missing_kernel_source_files(unprojected), None)
+    unprojected_packages := [JetOSRealizedPackage]{unprojected}
+    if jetos_cachyos_kernel_entry(unprojected_packages) == {
+        .None -> {}
+        .Val(_) -> panic("other package is not the CachyOS kernel")
+    }
+    ^unprojected_packages[0].lease.release()
+    ^packages[0].lease.release()
+    files.remove_all(root) ?? panic("remove consumption scratch")
+}
+
+#Test("JetOS native boot fallback bytes and exact Limine identity") {
+    root :: files.tmpdir("jetos-boot-fallback-") ?? panic("boot scratch")
+    absent_kernel :: files.join(root, "missing-kernel")
+    system :: jetos_identity_test_system([OptionPlan]{OptionPlan{key: "boot.kernel", value: absent_kernel}})
+    jetos_write_boot_facts(root, system, [JetOSRealizedPackage]{}) ?? panic("boot facts")
+    assert_eq(files.read(files.join(root, "boot/kernel")) ?? panic("fallback kernel"), "{absent_kernel}\n")
+    assert_eq(files.read(files.join(root, "boot/initrd")) ?? panic("fallback initrd"), "modules=virtio_blk,ext4\n")
+    assert_eq(files.read(files.join(root, "boot/limine.conf")) ?? panic("limine"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/jetos 26.10 (Apex) — halcyon\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init=/sbin/init\n")
+    assert_eq(files.read(files.join(root, "boot/facts.json")) ?? panic("boot facts wire"), "{{\"loader\":\"Limine\",\"kernel\":\"{absent_kernel}\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
+    files.remove_all(root) ?? panic("remove boot scratch")
+}
+
+// Mandatory native copy contract #3593: replace existing destinations, preserve
+// executable bits, set readonly(false), do NOT create nonexistent parents.
+#Test("JetOS native projected kernel initrd and every boot module are copied") {
+    verification := StoreVerification.new()
+    root :: files.tmpdir("jetos-boot-copy-") ?? panic("boot scratch")
+    projection :: files.join(root, "projection")
+    generation :: files.join(root, "generation")
+    files.create_dir_all(files.join(projection, "boot/modules")) ?? panic("boot modules source")
+    files.create_dir_all(files.join(generation, "boot")) ?? panic("boot destination")
+    kernel :: files.join(projection, "boot/vmlinuz-cachyos")
+    initrd :: files.join(projection, "boot/initrd-cachyos")
+    files.write_bytes(kernel, [U8]{127, 69, 76, 70, 0}) ?? panic("kernel source")
+    files.write_bytes(initrd, [U8]{31, 139, 0}) ?? panic("initrd source")
+    files.set_mode(kernel, 292) ?? panic("readonly kernel mode")
+    files.set_mode(initrd, 493) ?? panic("executable initrd mode")
+    files.write(files.join(generation, "boot/kernel"), "old") ?? panic("old destination")
+    modules :: [String]{"isofs.ko.xz", "bochs.ko.xz", "fat.ko.xz", "vfat.ko.xz", "nls_ascii.ko.xz", "nls_cp437.ko.xz", "serio.ko.xz", "i8042.ko.xz", "libps2.ko.xz", "atkbd.ko.xz", "hid-generic.ko.xz", "usbhid.ko.xz", "uhci-hcd.ko.xz", "ehci-hcd.ko.xz", "xhci-hcd.ko.xz"}
+    loop module_name in modules -> files.write(files.join(projection, "boot/modules/{module_name}"), module_name) ?? panic("module source")
+    package := jetos_identity_test_realized(&verification, root, JETOS_CACHYOS_KERNEL_PACKAGE, files.join(root, "durable"), Val(projection))
+    packages := [JetOSRealizedPackage]{package}
+    jetos_write_boot_facts(generation, jetos_identity_test_system([OptionPlan]{}), packages) ?? panic("boot projected copy")
+    assert_eq(files.read_bytes(files.join(generation, "boot/kernel")) ?? panic("kernel copy"), [U8]{127, 69, 76, 70, 0})
+    assert_eq(files.read_bytes(files.join(generation, "boot/initrd")) ?? panic("initrd copy"), [U8]{31, 139, 0})
+    if sys.family() != "windows" {
+        assert_eq((files.stat(files.join(generation, "boot/kernel")) ?? panic("kernel permissions")).mode & 511, 438)
+        assert_eq((files.stat(files.join(generation, "boot/initrd")) ?? panic("initrd permissions")).mode & 511, 511)
+    }
+    loop module_name in modules -> assert_eq(files.read(files.join(generation, "boot/modules/{module_name}")) ?? panic("copied module"), module_name)
+    if jetos_copy_file_replace(kernel, files.join(root, "no-parent/kernel")) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("copy created nonexistent parent")
+    }
+    assert(!files.exists(files.join(root, "no-parent")))
+    ^packages[0].lease.release()
+    files.remove_all(root) ?? panic("remove copy scratch")
+}

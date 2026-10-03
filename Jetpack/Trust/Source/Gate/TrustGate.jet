@@ -5,7 +5,7 @@
 // a terminal gets a summary and a y/N prompt whose "yes" persists a grant.
 // `--trust` never persists anything.
 
-@TRUST_GATE_REFUSED :: 2
+TRUST_GATE_REFUSED :: prep { 2 }
 
 // Rust `gate`: a declared env keyed by `trust_env_definition_hash`.
 pub fn trust_gate(theme: Theme, store: String, project_dir: String, refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
@@ -21,7 +21,7 @@ pub fn trust_gate_with_environment(theme: Theme, store: String, project_dir: Str
 pub fn trust_gate_with_environment_and_snapshot(theme: Theme, store: String, project_dir: String, refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, source_snapshot: String?, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
     if trust_missing_integration_grant(store, facts) == .Val(subject) {
         theme.error_coded("E1335", "environment integration authority is not granted", "the environment requests integration authority `{subject}`, but no persisted grant authorizes it", "review the integration, then run `jet trust grant integration:{subject} --scope user`")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     hash :: trust_environment_definition_hash_with_snapshot(refs, table, secrets, facts, source_snapshot)
     lifecycle :: facts.lifecycle
@@ -37,31 +37,31 @@ pub fn trust_gate_build_identity(theme: Theme, store: String, identity: String, 
     ci :: sys.get("CI") != None
     if ci && bypass {
         theme.error_coded("E1255", "CI cannot bypass build-hook approval", "a build hook must use its exact package, provider/source, staged source, platform, recipe, and ability identity", "add the exact repository grant: `jet trust grant build:{identity} --scope repo`.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     loop record in trust_list_records(store) {
         grant :: trust_record_grant(record) ?? next
-        exact :: grant.subject == identity || grant.subject == trust_record_line_text(@TRUST_HASH_PREFIX, identity)
-        if grant.is(TrustAuthority.Build) && (!ci || grant.scope == @TRUST_SCOPE_REPO) && exact -> return None
+        exact :: grant.subject == identity || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, identity)
+        if grant.is(TrustAuthority.Build) && (!ci || grant.scope == TRUST_SCOPE_REPO) && exact -> return None
     }
     if bypass -> return None
     if ci {
         theme.error_coded("E1255", "this build hook is not approved for CI", "CI accepts only an exact repository-scoped grant for the complete package, provider/source, staged source, platform, recipe, and ability identity", "add the exact repository grant: `jet trust grant build:{identity} --scope repo`.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     if !term.stdin().is_terminal() {
         theme.error_coded("E1255", "this build hook is not trusted yet", "the build action graph has a new source, recipe, platform, or ability identity and stdin is not a terminal to ask interactively", "pass `--trust` for this build, or pre-authorize the exact build identity with `jet trust grant`.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     theme.note("first build for this exact action graph:")
     theme.detail("build identity: {identity}")
     trust_gate_prompt("  Trust this build? [y/N] ")
-    answer :: term.readline() ?? return Val(@TRUST_GATE_REFUSED)
+    answer :: term.readline() ?? return Val(TRUST_GATE_REFUSED)
     if !trust_gate_is_yes(answer) {
         theme.status("not trusted — exiting.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
-    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Build.label(), subject: identity, scope: @TRUST_SCOPE_USER})
+    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Build.label(), subject: identity, scope: TRUST_SCOPE_USER})
     None
 }
 
@@ -74,12 +74,12 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
     if trust_project_policy_decision(project_dir) == .Val(decision) {
         if decision == TrustDecision.Deny {
             theme.error_coded("E1255", "this project's trust policy denies the environment grant", "`authority.trust` is source-reviewed and told Jet not to prompt for this authority", "change `authority.trust` to `prompt`/`allow`, pass `--trust` for this one run, or remove the trust-sensitive env facts.")
-            return Val(@TRUST_GATE_REFUSED)
+            return Val(TRUST_GATE_REFUSED)
         }
     }
     if !term.stdin().is_terminal() {
         theme.error_coded("E1255", "this project's environment isn't trusted yet", "entering this project realizes {refs.len()} package(s) it declares; a first entry needs a trust decision, and stdin isn't a terminal to ask interactively", "pass `--trust` for this one run, or pre-authorize with `jetpack config trust add <pattern>`.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     theme.note("first entry to this project — it declares {refs.len()} package(s) and {secrets.len()} secret(s):")
     // One aligned row per ref: bold package, gray source. The supply-chain
@@ -96,10 +96,10 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
     loop secret in secrets -> theme.detail("secret:{secret.name}")
     trust_gate_prompt("\n  {theme.gray("a yes is remembered for this exact env; any change asks again.")}\n")
     trust_gate_prompt("  Trust this environment? [y/N] ")
-    answer :: term.readline() ?? return Val(@TRUST_GATE_REFUSED)
+    answer :: term.readline() ?? return Val(TRUST_GATE_REFUSED)
     if !trust_gate_is_yes(answer) {
         theme.status("not trusted — exiting.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     trust_grant_hash(store, hash)
     None
@@ -124,21 +124,21 @@ pub fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_
     if bypass || trust_is_trusted(store, project_dir, hash) -> return None
     if !term.stdin().is_terminal() {
         theme.error_coded("E1255", "this project's environment isn't trusted yet", "entering `{flake_path}` evaluates a foreign flake this project didn't declare through `env.*`; a first entry needs a trust decision, and stdin isn't a terminal to ask interactively", "pass `--trust` for this one run, or pre-authorize with `jetpack config trust add <pattern>`.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     theme.note("first entry to this project's foreign flake: {flake_path}")
     trust_gate_prompt("  Trust this flake? [y/N] ")
-    answer :: term.readline() ?? return Val(@TRUST_GATE_REFUSED)
+    answer :: term.readline() ?? return Val(TRUST_GATE_REFUSED)
     if !trust_gate_is_yes(answer) {
         theme.status("not trusted — exiting.")
-        return Val(@TRUST_GATE_REFUSED)
+        return Val(TRUST_GATE_REFUSED)
     }
     trust_grant_hash(store, hash)
     None
 }
 
 // Prompt text on stderr without a newline.
-fn trust_gate_prompt(text: String) Never! -[IO]> {
+fn trust_gate_prompt(text: String) Never! -[IO, Time.Wait]> {
     err_stream :: term.stderr()
     err_stream.write(text).drop("the trust prompt is best-effort output")
     err_stream.flush().drop("the trust prompt is best-effort output")

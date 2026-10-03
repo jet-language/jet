@@ -14,7 +14,6 @@ pub enum PackageOutputKind {
     Bundle
     System
     Fleet
-    Model
 
     fn is_runnable(self) -> Bool Never! {
         if self == {
@@ -35,7 +34,6 @@ pub enum PackageOutputKind {
             "Bundle" -> Ok(PackageOutputKind.Bundle)
             "System" -> Ok(PackageOutputKind.System)
             "Fleet" -> Ok(PackageOutputKind.Fleet)
-            "Model" -> Ok(PackageOutputKind.Model)
             else -> Err(PackageParseError.UnknownOutputKind(name))
         }
     }
@@ -52,7 +50,6 @@ pub enum PackageOutputKind {
             .Bundle -> "Bundle"
             .System -> "System"
             .Fleet -> "Fleet"
-            .Model -> "Model"
         }
     }
 }
@@ -77,12 +74,12 @@ pub struct OutputFact {
 
     // D-LIB-NAME1=A: `Library{ loadable: true }` requests a `.jetlib`.
     fn is_loadable(self) -> Bool Never! {
-        self.kind == PackageOutputKind.Library && self.payload_bool(@OUTPUT_FIELD_LOADABLE)
+        self.kind == PackageOutputKind.Library && self.payload_bool(OUTPUT_FIELD_LOADABLE)
     }
 
     // D-LIB-EXPORT1=C: a native Library output.
     fn is_native(self) -> Bool Never! {
-        self.kind == PackageOutputKind.Library && self.payload_bool(@OUTPUT_FIELD_NATIVE)
+        self.kind == PackageOutputKind.Library && self.payload_bool(OUTPUT_FIELD_NATIVE)
     }
 
     // D-LIB-EXPORT1=C: the checked binding language names of this output.
@@ -94,7 +91,7 @@ pub struct OutputFact {
                 return out
             }
         }
-        bindings :: fields.get(@OUTPUT_FIELD_BINDINGS) ?? return out
+        bindings :: fields.get(OUTPUT_FIELD_BINDINGS) ?? return out
         values :: if bindings == {
             .Array(values) -> values
             else -> {
@@ -424,10 +421,10 @@ pub struct PackageFacts {
     pub license: String?
     pub repository: String?
     // D-ALLOC-PROGRAM1=A: the hosted whole-program allocator.
-    pub allocator: MirAllocatorPolicy
+    pub allocator: MIRAllocatorPolicy
     pub targets: PackageTargets
     // D-RINGLAYER1=A: optional runtime ceiling.
-    pub layer: MirRuntimeLayer?
+    pub layer: MIRRuntimeLayer?
     pub deps: [String: DepSource]
     // D-LIVE1: package-level development mode.
     pub dev: DevPolicy
@@ -468,7 +465,7 @@ pub struct PackageFacts {
             description: None,
             license: None,
             repository: None,
-            allocator: MirAllocatorPolicy.HostedDefault,
+            allocator: MIRAllocatorPolicy.HostedDefault,
             targets: PackageTargets.empty(),
             layer: None,
             deps: [String: DepSource]{},

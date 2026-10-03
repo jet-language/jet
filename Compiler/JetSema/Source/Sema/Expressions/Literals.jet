@@ -28,6 +28,7 @@ use jet_foundation.[
     symbol_id,
     type_identity_equal,
     type_name,
+    type_tuple_fields_canonical,
 ]
 
 fn sema_expression_unit_literal_type_name(name: String) -> String Never! {
@@ -566,7 +567,7 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
     }
     values := [TExpr]{}
     types := [TypeTupleField]{}
-    loop (index, field) in fields {
+    loop field in fields {
         duplicate :: loop previous in types {
             if previous.name == field.name -> break true
         } ?? false
@@ -574,13 +575,20 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
             &diagnostics.push(sema_error("E0105", span, "tuple field `{field.name}` is supplied more than once", "tuple field names must be unique", "remove the duplicate tuple field"))
             return None
         }
+        // S73: members match the expected tuple by name, in any order (Rust
+        // `infer_tuple_lit`).
         field_expected := Type?{None}
         if expected_fields == .Val(rows) {
-            if index >= rows.len() || rows[index].name != field.name {
-                &diagnostics.push(sema_error("E0108", span, "tuple fields do not match the expected tuple type", "tuple names and positions are part of the tuple type", "use the declared tuple field names and order"))
+            loop row in rows {
+                if row.name == field.name {
+                    field_expected = Val(row.ty)
+                    break
+                }
+            }
+            if field_expected == None {
+                &diagnostics.push(sema_error("E0108", span, "tuple fields do not match the expected tuple type", "tuple member names are part of the tuple type", "use the declared tuple field names"))
                 return None
             }
-            field_expected = Val(rows[index].ty)
         }
         value :: sema_check_expression(field.value, field_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         if field_expected == .Val(field_ty) {
@@ -594,8 +602,19 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0108", span, "tuple fields do not match the expected tuple type", "tuple arity is part of the tuple type", "provide every tuple field exactly once"))
         return None
     }
-    ty :: Type.Tuple{fields: types}
-    sema_expr_expected(sema_tir_expr(Type.Tuple{fields: types}, TExprKind.Tuple{values: values}, span), expected, environment, &diagnostics)
+    // S73: the tuple type and its values take the canonical member order, as
+    // the Rust reference types the literal and lowers each member by name.
+    canonical :: type_tuple_fields_canonical(types)
+    ordered := [TExpr]{}
+    loop member in canonical {
+        loop (index, written) in types {
+            if written.name == member.name {
+                &ordered.push(values[index])
+                break
+            }
+        }
+    }
+    sema_expr_expected(sema_tir_expr(Type.Tuple{fields: canonical}, TExprKind.Tuple{values: ordered}, span), expected, environment, &diagnostics)
 }
 
 fn sema_expression_range(start: Expr, end: Expr, exclusive: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

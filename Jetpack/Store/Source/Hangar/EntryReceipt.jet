@@ -3,7 +3,7 @@
 // publish it exactly once under `receipts/<digest>`, and sweep interrupted
 // publications.
 
-@STORE_RECEIPT_PARTIAL_SUFFIX :: ".partial"
+STORE_RECEIPT_PARTIAL_SUFFIX :: prep { ".partial" }
 
 store_receipt_sequence := 0
 
@@ -33,7 +33,7 @@ pub fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (dige
     if entry.receipt != "" && entry.receipt != digest {
         return Err(StoreError.InvalidData("Hangar receipt projection for `{entry.id}` names `{entry.receipt}`, expected `{digest}`"))
     }
-    receipts :: files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+    receipts :: files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR)
     store_ensure_real_directory(receipts, "Hangar receipt directory")
     path :: files.join(receipts, digest)
     if files.stat(path) == {
@@ -46,12 +46,12 @@ pub fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (dige
             }
             return Ok((digest: digest, wrote: false))
         }
-        .Err(error) -> if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+        .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
     }
 
     sequence :: store_receipt_sequence
     store_receipt_sequence = store_receipt_sequence + 1
-    partial :: files.join(receipts, ".{digest}-{process.current_pid()}-{sequence}{@STORE_RECEIPT_PARTIAL_SUFFIX}")
+    partial :: files.join(receipts, ".{digest}-{process.current_pid()}-{sequence}{STORE_RECEIPT_PARTIAL_SUFFIX}")
     store_receipt_write_new(partial, bytes) ?? {
         files.remove(partial).drop("the failed receipt partial may never have been created")
         return Err(err)
@@ -65,7 +65,7 @@ pub fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (dige
                 }
                 return Ok((digest: digest, wrote: false))
             }
-            else -> return Err(StoreError.Io(err))
+            else -> return Err(StoreError.IO(err))
         }
     }
     store_sync_store_directory(receipts)
@@ -81,14 +81,14 @@ fn store_receipt_write_new(path: String, bytes: [U8]) StoreError! {
 
 // Sweep interrupted receipt publications; returns how many were removed.
 pub fn store_recover_receipt_staging(roots: HangarRoots) -> Int StoreError! {
-    receipts :: files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+    receipts :: files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR)
     metadata :: files.stat(receipts) ?? return Ok(0)
     if metadata.is_symlink || !metadata.is_dir {
         return Err(StoreError.InvalidData("Hangar receipt directory is not a real directory; repair the path before recovery"))
     }
     recovered := 0
     loop item in files.list_dir(receipts) {
-        if !item.name.starts_with(".") || !item.name.ends_with(@STORE_RECEIPT_PARTIAL_SUFFIX) -> next
+        if !item.name.starts_with(".") || !item.name.ends_with(STORE_RECEIPT_PARTIAL_SUFFIX) -> next
         node :: files.stat(item.path)
         if !node.is_symlink && !node.is_file {
             return Err(StoreError.InvalidData("Hangar receipt staging path `{item.path}` is not removable"))

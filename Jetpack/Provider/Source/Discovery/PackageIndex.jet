@@ -5,8 +5,8 @@
 // project lock. Nothing here fetches; missing data stays missing until a
 // normal resolver or update path records it.
 
-@DISCOVERY_INDEX_DIR :: "discovery"
-@DISCOVERY_INDEX_FILE :: "index.jsonl"
+DISCOVERY_INDEX_DIR :: prep { "discovery" }
+DISCOVERY_INDEX_FILE :: prep { "index.jsonl" }
 
 // One documented configuration field of an indexed package.
 pub struct PackageOptionField {
@@ -137,7 +137,7 @@ pub struct PackageIndex {
     // The closest package (edit distance at most 3, then display ref).
     fn nearest(self, query: String) -> String? Never! {
         name :: env_discovery_split_query(query).name
-        best := None
+        best := String?{None}
         best_distance := 0
         loop record in self.packages {
             distance :: pkg_edit_distance(name, record.name)
@@ -175,7 +175,7 @@ fn env_discovery_score(record: PackageIndexEntry, q: String) -> Int? Never! {
 
 // `.jet/discovery/index.jsonl`.
 pub fn env_discovery_index_path(project_dir: String) -> String Never! {
-    files.join(files.join(pkg_managed_dir(project_dir), @DISCOVERY_INDEX_DIR), @DISCOVERY_INDEX_FILE)
+    files.join(files.join(pkg_managed_dir(project_dir), DISCOVERY_INDEX_DIR), DISCOVERY_INDEX_FILE)
 }
 
 // The project index, or None when it does not exist. A malformed line is an
@@ -232,10 +232,10 @@ pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [S
         source := ""
         name := ""
         reference := ""
-        if canonical.cut_last(@REF_PROVIDER_AT) == {
+        if canonical.cut_last(REF_PROVIDER_AT) == {
             .Val(halves) -> {
                 source_with_selector :: halves.after
-                raw_source :: source_with_selector.split_once(@REF_CHANNEL_MARKER)?.before ?? source_with_selector
+                raw_source :: source_with_selector.split_once(REF_CHANNEL_MARKER)?.before ?? source_with_selector
                 source = env_discovery_published_source(raw_source)
                 name = halves.before
                 reference = canonical
@@ -243,10 +243,10 @@ pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [S
             .None -> {
                 // Pre-D-JPK-REF1 hangar metadata: publish its canonical
                 // Jetpack source spelling.
-                pair :: entry.reference.split_once(@REF_SEPARATOR) ?? next
+                pair :: entry.reference.split_once(REF_SEPARATOR) ?? next
                 source = env_discovery_published_source(pair.before)
                 name = pair.after
-                reference = "{name}{@REF_PROVIDER_AT}{source}"
+                reference = "{name}{REF_PROVIDER_AT}{source}"
             }
         }
         &index.add_package(PackageIndexEntry{
@@ -254,7 +254,7 @@ pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [S
             name,
             reference,
             version: entry.version,
-            platforms: @TIER_ONE_OSES,
+            platforms: TIER_ONE_OSES,
             docs: "{entry.reference} from hangar metadata",
             provenance: "hangar:{entry.id}",
             tier: "not-registry",
@@ -272,7 +272,7 @@ pub fn env_discovery_merge_adapters(index: &PackageIndex, adapters: [AdapterPlan
             name: adapter.name,
             reference: "adapt:{adapter.name}",
             version: "",
-            platforms: @TIER_ONE_OSES,
+            platforms: TIER_ONE_OSES,
             docs: "adapter package from {adapter.source}",
             provenance: "env:Pkg.adapt",
             tier: "not-registry",
@@ -294,7 +294,7 @@ pub fn env_discovery_merge_lock(index: &PackageIndex, lock: LockFile) Never! {
                     name: package.name,
                     reference,
                     version: package.version,
-                    platforms: @TIER_ONE_OSES,
+                    platforms: TIER_ONE_OSES,
                     docs: "package resolved from the Jet registry",
                     provenance: "registry:{authority}",
                     tier,
@@ -339,7 +339,7 @@ fn env_discovery_record_for_ref(spec: RefSpec, version: String, provenance: Stri
         name: spec.package,
         reference,
         version,
-        platforms: @TIER_ONE_OSES,
+        platforms: TIER_ONE_OSES,
         docs: "{reference} from local Jetpack metadata",
         provenance,
         tier: "not-registry",
@@ -350,7 +350,7 @@ fn env_discovery_record_for_ref(spec: RefSpec, version: String, provenance: Stri
 
 // The retired `nixpkgs` source is published as `jetpack`.
 fn env_discovery_published_source(source: String) -> String Never! {
-    if source == @REF_SOURCE_NIXPKGS -> @REF_SOURCE_JETPACK else -> source
+    if source == REF_SOURCE_NIXPKGS -> REF_SOURCE_JETPACK else -> source
 }
 
 // A version read from the ref's offline provider fixture.
@@ -391,8 +391,8 @@ fn env_discovery_store_path_version(out: String, name: String) -> String Never! 
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     base :: trimmed.cut_last("/")?.after ?? trimmed
     raw :: base.bytes()
-    if raw.len() >= @PROVIDER_NIX_HASH_LEN {
-        rest := pkg_bytes_text(raw, @PROVIDER_NIX_HASH_LEN, raw.len())
+    if raw.len() >= PROVIDER_NIX_HASH_LEN {
+        rest := pkg_bytes_text(raw, PROVIDER_NIX_HASH_LEN, raw.len())
         if rest.starts_with("-") -> rest = rest.removeprefix("-")
         if env_discovery_version_after_name(rest, name) == {
             .Val(version) -> return version
@@ -415,7 +415,7 @@ fn env_discovery_store_path_version(out: String, name: String) -> String Never! 
 fn env_discovery_version_after_name(rest: String, name: String) -> String? Never! {
     if !rest.starts_with("{name}-") -> return None
     version := rest.removeprefix("{name}-")
-    loop suffix in @PROVIDER_NIX_OUTPUT_SUFFIXES {
+    loop suffix in PROVIDER_NIX_OUTPUT_SUFFIXES {
         if version.ends_with(suffix) {
             version = version.removesuffix(suffix)
             break
@@ -428,11 +428,11 @@ fn env_discovery_version_after_name(rest: String, name: String) -> String? Never
 
 // A query's optional source and its package name.
 fn env_discovery_split_query(query: String) -> (source: String?, name: String) Never! {
-    if query.cut_last(@REF_PROVIDER_AT) == {
+    if query.cut_last(REF_PROVIDER_AT) == {
         .Val(halves) -> return (source: Val(halves.after), name: halves.before)
         .None -> {}
     }
-    if query.split_once(@REF_SEPARATOR) == {
+    if query.split_once(REF_SEPARATOR) == {
         .Val(halves) -> return (source: Val(halves.before), name: halves.after)
         .None -> {}
     }

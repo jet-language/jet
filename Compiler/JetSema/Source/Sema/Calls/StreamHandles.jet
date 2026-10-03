@@ -280,7 +280,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         .Val(expr) -> {
             convention := receiver_convention
             if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() == 0 -> convention = AccessConvention.Read
-            sema_ownership_check_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
+            sema_ownership_check_handle_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
         }
         .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
     }

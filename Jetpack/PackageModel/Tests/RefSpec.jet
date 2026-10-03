@@ -166,7 +166,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("package ref keeps version after source") {
-    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "vendor", upstream: "acme/helpers@github", via: ProviderKind.Core}})
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "vendor", upstream: "acme/helpers@github", via: ProviderKind.Core}})
     spec :: pkg_test_classify_in("textkit@vendor#1.2.0", table)
     assert_eq(spec.package, "textkit#1.2.0")
     assert_eq(spec.source, RefSource.Named("vendor"))
@@ -180,7 +180,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("classifies declared named source") {
-    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "stable", upstream: "github:NixOS/nixpkgs/nixos-24.05", via: ProviderKind.Nix}})
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "stable", upstream: "github:NixOS/nixpkgs/nixos-24.05", via: ProviderKind.Nix}})
     spec :: pkg_test_classify_in("ripgrep@stable", table)
     assert_eq(spec.source, RefSource.Named("stable"))
     assert_eq(spec.package, "ripgrep")
@@ -188,9 +188,9 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("named source unknown lists declared") {
-    table :: SourceTable.from_decls([SourceDecl]{
-        SourceDecl{name: "stable", upstream: "u1", via: ProviderKind.Nix},
-        SourceDecl{name: "unstable", upstream: "u2", via: ProviderKind.Core}
+    table :: SourceTable.from_decls([NamedSourceDecl]{
+        NamedSourceDecl{name: "stable", upstream: "u1", via: ProviderKind.Nix},
+        NamedSourceDecl{name: "unstable", upstream: "u2", via: ProviderKind.Core}
     })
     if RefSpec.classify_in("neovim@beta", table) == {
         .Ok(_) -> panic("expected UnknownSource")
@@ -262,7 +262,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 #Test("source form wins over index") {
     // An explicit `package@source` is never shadowed by the index.
-    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "nixpkgs", upstream: "u", via: ProviderKind.Nix}})
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "nixpkgs", upstream: "u", via: ProviderKind.Nix}})
     spec :: pkg_test_classify_workspace("logging@jetpack", table, pkg_test_ws_index())
     assert_eq(spec.source, RefSource.Jetpack)
     assert_eq(spec.package, "logging")
@@ -305,7 +305,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     assert_eq(automatic.target, "omp")
     assert_eq(automatic.channel, Val(ChannelRef.Latest))
 
-    retired :: "omp#auto{@REF_PROVIDER_AT}jetpack"
+    retired :: "omp#auto{REF_PROVIDER_AT}jetpack"
     if pkg_test_provider_ref_error(retired) == {
         .NonCanonical(_, replacement) -> assert_eq(replacement, "omp@jetpack#auto")
         else -> panic("expected NonCanonical")

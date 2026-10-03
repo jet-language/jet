@@ -33,7 +33,7 @@ fn store_optimize_hangar_plan(hangar: String) -[FS]> CleanReport StoreError! {
 // `optimize_objects_cas_pool`, honest for Store-v2 objects even when there
 // are no legacy package directories. A pooled file must match exactly.
 fn store_optimize_objects_cas_pool_plan(roots: HangarRoots) -[FS, Env]> CleanReport StoreError! {
-    objects :: files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)
+    objects :: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     found :: store_node_stat(objects)
     pool :: found ?? return Ok(CleanReport.empty())
     if pool.is_symlink || !pool.is_dir -> return Err(StoreError.InvalidData("Hangar object pool is not a real directory: {objects}"))
@@ -85,7 +85,7 @@ fn store_optimize_object_dirs(objects: String) -[FS]> [String] StoreError! {
     loop item in items {
         metadata :: files.stat(item.path)
         if metadata.is_symlink -> next
-        if metadata.is_dir && !item.name.ends_with(@STORE_PARTIAL_SUFFIX) -> &object_dirs.push(item.path)
+        if metadata.is_dir && !item.name.ends_with(STORE_PARTIAL_SUFFIX) -> &object_dirs.push(item.path)
     }
     Ok(object_dirs)
 }
@@ -134,7 +134,7 @@ fn store_optimize_package_tree_hardlinks(hangar: String) -[FS, Env]> CleanReport
 // machine CAS pool under the shared-CAS lock, then sync the object pool.
 fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar :: roots.hangar_dir()
-    objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+    objects :: files.join(hangar, STORE_OBJECTS_DIR)
     store_ensure_real_directory(hangar, "Hangar root")
     store_ensure_real_directory(objects, "Hangar object pool")
     object_dirs :: store_optimize_object_dirs(objects)
@@ -173,7 +173,7 @@ pub fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport
 // links a temporary name and renames it over `file`; Windows moves `file`
 // aside first and restores it when linking fails.
 fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
-    if first == file -> return Ok()
+    if first == file -> return
     sequence :: store_optimize_sequence
     store_optimize_sequence += 1
     temporary :: files.with_suffix(file, ".jet-dedup-{sys.pid()}-{sequence}")
@@ -182,38 +182,38 @@ fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
         if files.hard_link(first, file) == {
             .Ok(_) -> {
                 files.remove(temporary).drop("a leftover dedup temporary holds duplicate bytes only")
-                return Ok()
+                return
             }
             .Err(error) -> {
                 files.rename(temporary, file).drop("the original failure is the one reported")
-                return Err(StoreError.Io(error))
+                return Err(StoreError.IO(error))
             }
         }
     }
     files.hard_link(first, temporary)
     if files.rename(temporary, file) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the original failure is the one reported")
-            Err(StoreError.Io(error))
+            Err(StoreError.IO(error))
         }
     }
 }
 
 // Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
 // with the CAS-peer hardlink law (Hangar-internal peers are accepted).
-pub fn store_verify_hangar_object(roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+pub fn store_verify_hangar_object(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar_lock :: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
-    store_verify_hangar_object_unlocked(roots, entry)
+    store_verify_hangar_object_unlocked(&verification, roots, entry)
 }
 
 // Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
 // record's primary, action key, references and output map; every named
 // output must re-hash to its recorded digest; every reference must exist.
-pub fn store_verify_hangar_object_unlocked(roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+pub fn store_verify_hangar_object_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar :: roots.hangar_dir()
     allow :: entry.platform_artifact_kind != ""
-    graph :: store_lifecycle_closure_graph_unlocked(roots) ?? return Err(IngestError.Invalid(err.message()))
+    graph :: store_lifecycle_closure_graph_unlocked(&verification, roots) ?? return Err(IngestError.Invalid(err.message()))
     record :: graph.records.get(entry.id) ?? return Err(IngestError.Invalid("closure graph has no record `{entry.id}`"))
     if record.primary != entry.envelope.output_hash || record.action_key != store_entry_action_key(entry) || record.references != store_lifecycle_sorted_set(entry.references) {
         return Err(IngestError.Invalid("closure graph disagrees with record `{entry.id}`"))
@@ -226,11 +226,10 @@ pub fn store_verify_hangar_object_unlocked(roots: HangarRoots, entry: StoreEntry
     loop name in names {
         expected :: expected_outputs[name]
         object :: graph.objects.get(expected) ?? return Err(IngestError.Invalid("closure graph output `{name}` is missing `{expected}`"))
-        digest :: store_full_verified_output_hash(object.path, hangar, allow) ?? return Err(IngestError.Invalid(err.message()))
+        digest :: store_full_verified_output_hash(&verification, object.path, hangar, allow) ?? return Err(IngestError.Invalid(err.message()))
         if digest != expected -> return Err(IngestError.Invalid("output `{name}` records `{expected}`, re-hash produced `{digest}`"))
     }
     loop reference in record.references {
         if !graph.objects.has_key(reference) -> return Err(IngestError.Invalid("closure record `{entry.id}` references missing object `{reference}`"))
     }
-    Ok()
 }

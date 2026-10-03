@@ -4,34 +4,34 @@
 // builds list their keys in byte order, as the reference's BTreeMap does;
 // caller-supplied params, results, and capability values keep their order.
 
-impl McpCodec {
+impl MCPCodec {
     // Encode one protocol message using this revision profile.
-    fn encode_message(self, message: McpMessage, limits: McpLimits) -> String McpCodecError! {
+    fn encode_message(self, message: MCPMessage, limits: MCPLimits) -> String MCPCodecError! {
         limits.validate()
         value :: message.to_json_tree()
         pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
         pkg_mcp_ensure_encodable(value)
         text :: pkg_json_render(value)
-        if text.bytes().len() > limits.max_message_bytes -> return Err(McpCodecError.MessageTooLarge{actual: text.bytes().len(), maximum: limits.max_message_bytes})
+        if text.bytes().len() > limits.max_message_bytes -> return Err(MCPCodecError.MessageTooLarge{actual: text.bytes().len(), maximum: limits.max_message_bytes})
         Ok(text)
     }
 
     // Decode one bounded protocol message using this revision profile.
-    fn decode_message(self, text: String, limits: McpLimits) -> McpMessage McpCodecError! {
+    fn decode_message(self, text: String, limits: MCPLimits) -> MCPMessage MCPCodecError! {
         limits.validate()
-        if text.bytes().len() > limits.max_message_bytes -> return Err(McpCodecError.MessageTooLarge{actual: text.bytes().len(), maximum: limits.max_message_bytes})
+        if text.bytes().len() > limits.max_message_bytes -> return Err(MCPCodecError.MessageTooLarge{actual: text.bytes().len(), maximum: limits.max_message_bytes})
         if pkg_json_parse_bounded(text, limits.max_message_bytes) == {
             .Parsed(value) -> {
                 pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
-                return McpMessage.from_json_tree(value, limits)
+                return MCPMessage.from_json_tree(value, limits)
             }
-            .Failed(_) -> return Err(McpCodecError.InvalidJson)
+            .Failed(_) -> return Err(MCPCodecError.InvalidJSON)
         }
     }
 }
 
 // JSON-RPC request identifier. Fractional and null IDs are rejected.
-pub enum McpRequestId {
+pub enum MCPRequestID {
     Number(Int)
     Text(String)
 
@@ -42,60 +42,60 @@ pub enum McpRequestId {
         }
     }
 
-    fn from_json_tree(value: DataTree) -> McpRequestId McpCodecError! {
+    fn from_json_tree(value: DataTree) -> MCPRequestID MCPCodecError! {
         if value == {
-            .Int(number) -> Ok(McpRequestId.Number(number))
-            .Text(text) -> Ok(McpRequestId.Text(text))
-            else -> Err(McpCodecError.InvalidMessage("request id must be an integer or string"))
+            .Int(number) -> Ok(MCPRequestID.Number(number))
+            .Text(text) -> Ok(MCPRequestID.Text(text))
+            else -> Err(MCPCodecError.InvalidMessage("request id must be an integer or string"))
         }
     }
 }
 
 // JSON-RPC request.
-pub struct McpRequest {
-    pub id: McpRequestId
+pub struct MCPRequest {
+    pub id: MCPRequestID
     pub method: String
     pub params: DataTree?
 
     // A request with an optional object or array params value.
-    fn new(id: McpRequestId, method: String, params: DataTree?) -> McpRequest McpCodecError! {
-        request :: McpRequest{id: id, method: method, params: params}
+    fn new(id: MCPRequestID, method: String, params: DataTree?) -> MCPRequest MCPCodecError! {
+        request :: MCPRequest{id: id, method: method, params: params}
         request.validate()
         Ok(request)
     }
 
-    fn validate(self) McpCodecError! {
+    fn validate(self) MCPCodecError! {
         pkg_mcp_validate_method(self.method)
         pkg_mcp_validate_params(self.params)
     }
 }
 
 // JSON-RPC notification.
-pub struct McpNotification {
+pub struct MCPNotification {
     pub method: String
     pub params: DataTree?
 
     // A notification with an optional object or array params value.
-    fn new(method: String, params: DataTree?) -> McpNotification McpCodecError! {
-        notification :: McpNotification{method: method, params: params}
+    fn new(method: String, params: DataTree?) -> MCPNotification MCPCodecError! {
+        notification :: MCPNotification{method: method, params: params}
         notification.validate()
         Ok(notification)
     }
 
-    fn validate(self) McpCodecError! {
+    fn validate(self) MCPCodecError! {
         pkg_mcp_validate_method(self.method)
         pkg_mcp_validate_params(self.params)
     }
 }
 
 // JSON-RPC protocol error payload.
-pub struct McpRpcError {
+pub struct MCPRPCError {
     pub code: Int
     pub message: String
     pub data: DataTree?
 
-    fn new(code: Int, message: String, data: DataTree?) -> McpRpcError Never! {
-        McpRpcError{code: code, message: message, data: data}
+    fn new(code: Int, message: String, data: DataTree?) -> MCPRPCError Never! {
+        MCPRPCError{code: code, message: message, data: data}
     }
 
     fn to_json_tree(self) -> DataTree Never! {
@@ -105,58 +105,66 @@ pub struct McpRpcError {
             .Val(data) -> object["data"] = data
             .None -> {}
         }
-        object["message"] = DataTree.Text(self.message)
+        object["message"] = DataTree.Text(~self.message)
         DataTree.Object(object)
     }
 
-    fn from_json_tree(value: DataTree) -> McpRpcError McpCodecError! {
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("response error must be a JSON object"))
+    fn from_json_tree(value: DataTree) -> MCPRPCError MCPCodecError! {
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("response error must be a JSON object"))
         raw_code :: object.get("code") ?? DataTree.Null
         if raw_code == {
-            .Int(code) -> return Ok(McpRpcError{code: code, message: pkg_mcp_required_string(object, "message"), data: object.get("data")})
-            else -> return Err(McpCodecError.InvalidMessage("response error code must be an integer"))
+            .Int(code) -> return Ok(MCPRPCError{code: code, message: pkg_mcp_required_string(object, "message"), data: object.get("data")})
+            else -> return Err(MCPCodecError.InvalidMessage("response error code must be an integer"))
         }
     }
 }
 
 // JSON-RPC response, carrying exactly one result or error. A `None` id is
 // the JSON-RPC null response id.
-pub struct McpResponse {
-    pub id: McpRequestId?
+pub struct MCPResponse {
+    pub id: MCPRequestID?
     pub result: DataTree?
-    pub error: McpRpcError?
+    pub error: MCPRPCError?
 
-    fn success(id: McpRequestId, result: DataTree) -> McpResponse Never! {
-        McpResponse{id: Val(id), result: Val(result), error: None}
+    fn success(id: MCPRequestID, result: DataTree) -> MCPResponse Never! {
+        MCPResponse{id: Val(id), result: Val(result), error: None}
     }
 
     // An error response; a null id is allowed for an unknown id.
-    fn failure(id: McpRequestId?, error: McpRpcError) -> McpResponse Never! {
-        McpResponse{id: id, result: None, error: Val(error)}
+    fn failure(id: MCPRequestID?, error: MCPRPCError) -> MCPResponse Never! {
+        MCPResponse{id: id, result: None, error: Val(error)}
     }
 
-    fn validate(self) McpCodecError! {
-        if (self.result != None) == (self.error != None) -> return Err(McpCodecError.InvalidMessage("response must contain exactly one result or error"))
+    fn validate(self) MCPCodecError! {
+        has_result :: if self.result == {
+            .Val(_) -> true
+            .None -> false
+        }
+        has_error :: if self.error == {
+            .Val(_) -> true
+            .None -> false
+        }
+        if has_result == has_error -> return Err(MCPCodecError.InvalidMessage("response must contain exactly one result or error"))
     }
 }
 
 // One JSON-RPC message in the MCP protocol core.
-pub enum McpMessage {
-    Request(McpRequest)
-    Notification(McpNotification)
-    Response(McpResponse)
+pub enum MCPMessage {
+    Request(MCPRequest)
+    Notification(MCPNotification)
+    Response(MCPResponse)
 
     // Encode this message through a selected revision codec.
-    fn encode_with(self, codec: McpCodec, limits: McpLimits) -> String McpCodecError! {
+    fn encode_with(self, codec: MCPCodec, limits: MCPLimits) -> String MCPCodecError! {
         codec.encode_message(self, limits)
     }
 
     // Decode a message through a selected revision codec.
-    fn decode_with(codec: McpCodec, text: String, limits: McpLimits) -> McpMessage McpCodecError! {
+    fn decode_with(codec: MCPCodec, text: String, limits: MCPLimits) -> MCPMessage MCPCodecError! {
         codec.decode_message(text, limits)
     }
 
-    fn to_json_tree(self) -> DataTree McpCodecError! {
+    fn to_json_tree(self) -> DataTree MCPCodecError! {
         object := [String: DataTree]{}
         if self == {
             .Request(request) -> {
@@ -198,52 +206,52 @@ pub enum McpMessage {
         Ok(DataTree.Object(object))
     }
 
-    fn from_json_tree(value: DataTree, limits: McpLimits) -> McpMessage McpCodecError! {
+    fn from_json_tree(value: DataTree, limits: MCPLimits) -> MCPMessage MCPCodecError! {
         limits.validate()
         pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("message must be a JSON object"))
-        if object.get("jsonrpc") != Val(DataTree.Text("2.0")) -> return Err(McpCodecError.InvalidMessage("jsonrpc must be \"2.0\""))
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("message must be a JSON object"))
+        if pkg_json_text(object.get("jsonrpc") ?? DataTree.Null) != Val("2.0") -> return Err(MCPCodecError.InvalidMessage("jsonrpc must be \"2.0\""))
         method :: object.get("method")
-        if method != None && (object.has_key("result") || object.has_key("error")) {
-            return Err(McpCodecError.InvalidMessage("request or notification cannot contain result or error"))
+        if object.has_key("method") && (object.has_key("result") || object.has_key("error")) {
+            return Err(MCPCodecError.InvalidMessage("request or notification cannot contain result or error"))
         }
         params :: object.get("params")
         pkg_mcp_validate_params(params)
         if method == {
             .Val(raw_method) -> {
-                name :: pkg_json_text(raw_method) ?? return Err(McpCodecError.InvalidMessage("method must be a string"))
+                name :: pkg_json_text(raw_method) ?? return Err(MCPCodecError.InvalidMessage("method must be a string"))
                 pkg_mcp_validate_method(name)
                 if object.get("id") == {
-                    .Val(id) -> return Ok(McpMessage.Request(McpRequest{id: McpRequestId.from_json_tree(id), method: name, params: params}))
-                    .None -> return Ok(McpMessage.Notification(McpNotification{method: name, params: params}))
+                    .Val(id) -> return Ok(MCPMessage.Request(MCPRequest{id: MCPRequestID.from_json_tree(id), method: name, params: params}))
+                    .None -> return Ok(MCPMessage.Notification(MCPNotification{method: name, params: params}))
                 }
             }
             .None -> {}
         }
-        raw_id :: object.get("id") ?? return Err(McpCodecError.InvalidMessage("response is missing id"))
+        raw_id :: object.get("id") ?? return Err(MCPCodecError.InvalidMessage("response is missing id"))
         id :: if raw_id == {
             .Null -> None
-            else -> Val(McpRequestId.from_json_tree(raw_id))
+            else -> Val(MCPRequestID.from_json_tree(raw_id))
         }
         error :: if object.get("error") == {
-            .Val(raw_error) -> Val(McpRpcError.from_json_tree(raw_error))
+            .Val(raw_error) -> Val(MCPRPCError.from_json_tree(raw_error))
             .None -> None
         }
-        response :: McpResponse{id: id, result: object.get("result"), error: error}
+        response :: MCPResponse{id: id, result: object.get("result"), error: error}
         response.validate()
-        if object.has_key("params") -> return Err(McpCodecError.InvalidMessage("response cannot contain params"))
-        if object.has_key("result") && object.has_key("error") -> return Err(McpCodecError.InvalidMessage("response cannot contain both result and error"))
-        Ok(McpMessage.Response(response))
+        if object.has_key("params") -> return Err(MCPCodecError.InvalidMessage("response cannot contain params"))
+        if object.has_key("result") && object.has_key("error") -> return Err(MCPCodecError.InvalidMessage("response cannot contain both result and error"))
+        Ok(MCPMessage.Response(response))
     }
 }
 
 // Capabilities exchanged by initialize. Unknown capability objects are
 // retained so peers can extend the protocol without changing this core.
-pub struct McpCapabilities {
+pub struct MCPCapabilities {
     pub values: [String: DataTree]
 
-    fn empty() -> McpCapabilities Never! {
-        McpCapabilities{values: [String: DataTree]{}}
+    fn empty() -> MCPCapabilities Never! {
+        MCPCapabilities{values: [String: DataTree]{}}
     }
 
     // Add or replace one capability entry.
@@ -255,9 +263,9 @@ pub struct McpCapabilities {
         self.values.get(name)
     }
 
-    fn to_json_tree(self, limits: McpLimits) -> DataTree McpCodecError! {
+    fn to_json_tree(self, limits: MCPLimits) -> DataTree MCPCodecError! {
         limits.validate()
-        if self.values.len() > limits.max_capability_entries -> return Err(McpCodecError.CapabilityLimitExceeded{actual: self.values.len(), maximum: limits.max_capability_entries})
+        if self.values.len() > limits.max_capability_entries -> return Err(MCPCodecError.CapabilityLimitExceeded{actual: self.values.len(), maximum: limits.max_capability_entries})
         object := [String: DataTree]{}
         loop name in pkg_mcp_sorted(self.values.keys().to_list()) -> object[name] = self.values[name]
         value :: DataTree.Object(object)
@@ -265,35 +273,35 @@ pub struct McpCapabilities {
         Ok(value)
     }
 
-    fn from_json_tree(value: DataTree, limits: McpLimits) -> McpCapabilities McpCodecError! {
+    fn from_json_tree(value: DataTree, limits: MCPLimits) -> MCPCapabilities MCPCodecError! {
         limits.validate()
         pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("capabilities must be a JSON object"))
-        if object.len() > limits.max_capability_entries -> return Err(McpCodecError.CapabilityLimitExceeded{actual: object.len(), maximum: limits.max_capability_entries})
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("capabilities must be a JSON object"))
+        if object.len() > limits.max_capability_entries -> return Err(MCPCodecError.CapabilityLimitExceeded{actual: object.len(), maximum: limits.max_capability_entries})
         values := [String: DataTree]{}
         loop name in pkg_mcp_sorted(object.keys().to_list()) -> values[name] = object[name]
-        Ok(McpCapabilities{values: values})
+        Ok(MCPCapabilities{values: values})
     }
 }
 
 // Parameters carried by the stable `initialize` request.
-pub struct McpInitializeParams {
+pub struct MCPInitializeParams {
     pub protocol_version: String
-    pub capabilities: McpCapabilities
-    pub client_info: McpImplementation?
+    pub capabilities: MCPCapabilities
+    pub client_info: MCPImplementation?
 
-    fn new(protocol_version: McpRevision, capabilities: McpCapabilities, client_info: McpImplementation?) -> McpInitializeParams Never! {
-        McpInitializeParams{protocol_version: protocol_version.as_str(), capabilities: capabilities, client_info: client_info}
+    fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, client_info: MCPImplementation?) -> MCPInitializeParams Never! {
+        MCPInitializeParams{protocol_version: protocol_version.as_str(), capabilities: capabilities, client_info: client_info}
     }
 
     // The `initialize` request carrying these parameters.
-    fn into_request(self, id: McpRequestId) -> McpRequest McpCodecError! {
-        McpRequest.new(id, "initialize", Val(self.to_json_tree(McpLimits.defaults())))
+    fn into_request(self, id: MCPRequestID) -> MCPRequest MCPCodecError! {
+        MCPRequest.new(id, "initialize", Val(self.to_json_tree(MCPLimits.defaults())))
     }
 
-    fn to_json_tree(self, limits: McpLimits) -> DataTree McpCodecError! {
+    fn to_json_tree(self, limits: MCPLimits) -> DataTree MCPCodecError! {
         limits.validate()
-        revision :: McpRevision.parse(self.protocol_version) ?? return Err(McpCodecError.InvalidMessage("unknown initialize protocol version"))
+        revision :: MCPRevision.parse(self.protocol_version) ?? return Err(MCPCodecError.InvalidMessage("unknown initialize protocol version"))
         object := [String: DataTree]{}
         object["capabilities"] = self.capabilities.to_json_tree(limits)
         if self.client_info == {
@@ -306,38 +314,38 @@ pub struct McpInitializeParams {
         Ok(value)
     }
 
-    fn from_json_tree(value: DataTree, limits: McpLimits) -> McpInitializeParams McpCodecError! {
+    fn from_json_tree(value: DataTree, limits: MCPLimits) -> MCPInitializeParams MCPCodecError! {
         limits.validate()
         pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("initialize params must be a JSON object"))
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("initialize params must be a JSON object"))
         protocol_version :: pkg_mcp_required_string(object, "protocolVersion")
-        if McpRevision.parse(protocol_version) == None -> return Err(McpCodecError.InvalidMessage("unknown initialize protocol version"))
-        raw_capabilities :: object.get("capabilities") ?? return Err(McpCodecError.InvalidMessage("initialize params missing capabilities"))
-        capabilities :: McpCapabilities.from_json_tree(raw_capabilities, limits)
+        if MCPRevision.parse(protocol_version) == None -> return Err(MCPCodecError.InvalidMessage("unknown initialize protocol version"))
+        raw_capabilities :: object.get("capabilities") ?? return Err(MCPCodecError.InvalidMessage("initialize params missing capabilities"))
+        capabilities :: MCPCapabilities.from_json_tree(raw_capabilities, limits)
         client_info :: if object.get("clientInfo") == {
-            .Val(raw_info) -> Val(McpImplementation.from_json_tree(raw_info))
+            .Val(raw_info) -> Val(MCPImplementation.from_json_tree(raw_info))
             .None -> None
         }
-        Ok(McpInitializeParams{protocol_version: protocol_version, capabilities: capabilities, client_info: client_info})
+        Ok(MCPInitializeParams{protocol_version: protocol_version, capabilities: capabilities, client_info: client_info})
     }
 }
 
 // Result carried by the stable `initialize` response.
-pub struct McpInitializeResult {
-    pub protocol_version: McpRevision
-    pub capabilities: McpCapabilities
-    pub server_info: McpImplementation
+pub struct MCPInitializeResult {
+    pub protocol_version: MCPRevision
+    pub capabilities: MCPCapabilities
+    pub server_info: MCPImplementation
 
-    fn new(protocol_version: McpRevision, capabilities: McpCapabilities, server_info: McpImplementation) -> McpInitializeResult Never! {
-        McpInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: server_info}
+    fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, server_info: MCPImplementation) -> MCPInitializeResult Never! {
+        MCPInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: server_info}
     }
 
     // The `initialize` response carrying this result.
-    fn into_response(self, id: McpRequestId) -> McpResponse McpCodecError! {
-        Ok(McpResponse.success(id, self.to_json_tree(McpLimits.defaults())))
+    fn into_response(self, id: MCPRequestID) -> MCPResponse MCPCodecError! {
+        Ok(MCPResponse.success(id, self.to_json_tree(MCPLimits.defaults())))
     }
 
-    fn to_json_tree(self, limits: McpLimits) -> DataTree McpCodecError! {
+    fn to_json_tree(self, limits: MCPLimits) -> DataTree MCPCodecError! {
         limits.validate()
         object := [String: DataTree]{}
         object["capabilities"] = self.capabilities.to_json_tree(limits)
@@ -348,58 +356,58 @@ pub struct McpInitializeResult {
         Ok(value)
     }
 
-    fn from_json_tree(value: DataTree, limits: McpLimits) -> McpInitializeResult McpCodecError! {
+    fn from_json_tree(value: DataTree, limits: MCPLimits) -> MCPInitializeResult MCPCodecError! {
         limits.validate()
         pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("initialize result must be a JSON object"))
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("initialize result must be a JSON object"))
         raw_version :: pkg_mcp_required_string(object, "protocolVersion")
-        protocol_version :: McpRevision.parse(raw_version) ?? return Err(McpCodecError.InvalidMessage("unknown initialize protocol version"))
-        raw_capabilities :: object.get("capabilities") ?? return Err(McpCodecError.InvalidMessage("initialize result missing capabilities"))
-        capabilities :: McpCapabilities.from_json_tree(raw_capabilities, limits)
-        raw_info :: object.get("serverInfo") ?? return Err(McpCodecError.InvalidMessage("initialize result missing serverInfo"))
-        Ok(McpInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: McpImplementation.from_json_tree(raw_info)})
+        protocol_version :: MCPRevision.parse(raw_version) ?? return Err(MCPCodecError.InvalidMessage("unknown initialize protocol version"))
+        raw_capabilities :: object.get("capabilities") ?? return Err(MCPCodecError.InvalidMessage("initialize result missing capabilities"))
+        capabilities :: MCPCapabilities.from_json_tree(raw_capabilities, limits)
+        raw_info :: object.get("serverInfo") ?? return Err(MCPCodecError.InvalidMessage("initialize result missing serverInfo"))
+        Ok(MCPInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: MCPImplementation.from_json_tree(raw_info)})
     }
 }
 
-impl McpImplementation {
-    fn to_json_tree(self) -> DataTree McpCodecError! {
+impl MCPImplementation {
+    fn to_json_tree(self) -> DataTree MCPCodecError! {
         self.validate()
         object := [String: DataTree]{}
-        object["name"] = DataTree.Text(self.name)
-        object["version"] = DataTree.Text(self.version)
+        object["name"] = DataTree.Text(~self.name)
+        object["version"] = DataTree.Text(~self.version)
         Ok(DataTree.Object(object))
     }
 
-    fn from_json_tree(value: DataTree) -> McpImplementation McpCodecError! {
-        object :: pkg_json_object(value) ?? return Err(McpCodecError.InvalidMessage("implementation must be a JSON object"))
-        McpImplementation.new(pkg_mcp_required_string(object, "name"), pkg_mcp_required_string(object, "version"))
+    fn from_json_tree(value: DataTree) -> MCPImplementation MCPCodecError! {
+        object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("implementation must be a JSON object"))
+        MCPImplementation.new(pkg_mcp_required_string(object, "name"), pkg_mcp_required_string(object, "version"))
     }
 }
 
-fn pkg_mcp_validate_method(method: String) McpCodecError! {
+fn pkg_mcp_validate_method(method: String) MCPCodecError! {
     if method == "" || method.bytes().len() > 256 || pkg_text_has_control(method) {
-        return Err(McpCodecError.InvalidMessage("method must be 1..=256 non-control bytes"))
+        return Err(MCPCodecError.InvalidMessage("method must be 1..=256 non-control bytes"))
     }
 }
 
-fn pkg_mcp_validate_params(params: DataTree?) McpCodecError! {
+fn pkg_mcp_validate_params(params: DataTree?) MCPCodecError! {
     value :: params ?? return
     if value == {
         .Array(_) -> {}
         .Object(_) -> {}
-        else -> return Err(McpCodecError.InvalidMessage("params must be an object or array"))
+        else -> return Err(MCPCodecError.InvalidMessage("params must be an object or array"))
     }
 }
 
-fn pkg_mcp_required_string(object: [String: DataTree], name: String) -> String McpCodecError! {
-    value :: object.get(name) ?? return Err(McpCodecError.InvalidMessage("{name} must be a string"))
-    text :: pkg_json_text(value) ?? return Err(McpCodecError.InvalidMessage("{name} must be a string"))
+fn pkg_mcp_required_string(object: [String: DataTree], name: String) -> String MCPCodecError! {
+    value :: object.get(name) ?? return Err(MCPCodecError.InvalidMessage("{name} must be a string"))
+    text :: pkg_json_text(value) ?? return Err(MCPCodecError.InvalidMessage("{name} must be a string"))
     Ok(text)
 }
 
 // Nesting at `depth` and below stays within `maximum`.
-fn pkg_mcp_ensure_depth(value: DataTree, depth: Int, maximum: Int) McpCodecError! {
-    if depth > maximum -> return Err(McpCodecError.SchemaTooDeep(maximum))
+fn pkg_mcp_ensure_depth(value: DataTree, depth: Int, maximum: Int) MCPCodecError! {
+    if depth > maximum -> return Err(MCPCodecError.SchemaTooDeep(maximum))
     if value == {
         .Array(items) -> {
             loop item in items -> pkg_mcp_ensure_depth(item, depth + 1, maximum)
@@ -412,13 +420,13 @@ fn pkg_mcp_ensure_depth(value: DataTree, depth: Int, maximum: Int) McpCodecError
 }
 
 // Every number is finite and every lexical number is valid JSON.
-fn pkg_mcp_ensure_encodable(value: DataTree) McpCodecError! {
+fn pkg_mcp_ensure_encodable(value: DataTree) MCPCodecError! {
     if value == {
         .Float(number) -> {
-            if number - number != 0.0 -> return Err(McpCodecError.InvalidMessage("JSON numbers must be finite"))
+            if number - number != 0.0 -> return Err(MCPCodecError.InvalidMessage("JSON numbers must be finite"))
         }
         .Number(text) -> {
-            if !pkg_mcp_valid_json_number(text) -> return Err(McpCodecError.InvalidMessage("JSON number is invalid"))
+            if !pkg_mcp_valid_json_number(text) -> return Err(MCPCodecError.InvalidMessage("JSON number is invalid"))
         }
         .Array(items) -> {
             loop item in items -> pkg_mcp_ensure_encodable(item)
@@ -430,7 +438,8 @@ fn pkg_mcp_ensure_encodable(value: DataTree) McpCodecError! {
     }
 }
 
-// RFC 8259 number grammar; an integer must fit Int and a float be finite.
+// RFC 8259 number grammar; an integer must fit Rust `i64` and a float be
+// finite (MCP.rs valid_json_number).
 fn pkg_mcp_valid_json_number(value: String) -> Bool Never! {
     bytes :: value.bytes()
     index := 0
@@ -471,10 +480,7 @@ fn pkg_mcp_valid_json_number(value: String) -> Bool Never! {
             .Err(_) -> return false
         }
     }
-    if Int.parse(value) == {
-        .Ok(_) -> true
-        .Err(_) -> false
-    }
+    pkg_parse_i64(value) != None
 }
 
 fn pkg_mcp_is_digit(code: Int) -> Bool Never! {
@@ -489,13 +495,13 @@ fn pkg_mcp_sorted(values: [String]) -> [String] Never! {
 
 // A peer revision spelling safe for diagnostics.
 fn pkg_mcp_redacted_revision(value: String) -> String Never! {
-    if McpRevision.parse(value) == {
+    if MCPRevision.parse(value) == {
         .Val(revision) -> return revision.as_str()
         .None -> {}
     }
     if {
         value == "" -> "<empty>"
-        value.bytes().len() > @MCP_MAX_REVISION_BYTES -> "<oversized>"
+        value.bytes().len() > MCP_MAX_REVISION_BYTES -> "<oversized>"
         else -> "<unknown>"
     }
 }

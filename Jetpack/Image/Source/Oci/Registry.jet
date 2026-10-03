@@ -5,8 +5,8 @@
 // credentials stay host-owned through curl's optional netrc lookup and never
 // enter Jet source, argv, logs, or receipts.
 
-@IMAGE_MAX_REGISTRY_RESPONSE_BYTES :: 65536
-@IMAGE_MAX_REGISTRY_DETAIL_BYTES :: 4096
+IMAGE_MAX_REGISTRY_RESPONSE_BYTES :: prep { 65536 }
+IMAGE_MAX_REGISTRY_DETAIL_BYTES :: prep { 4096 }
 
 // The result of one successful push.
 pub struct RegistryPushReport {
@@ -69,7 +69,7 @@ pub fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, T
     response :: image_registry_request(RegistryRequest{
         method: "PUT",
         url: "{registry.api_root}/manifests/{registry.reference}",
-        headers: [String]{"Content-Type: {@IMAGE_MEDIA_TYPE_MANIFEST}"},
+        headers: [String]{"Content-Type: {IMAGE_MEDIA_TYPE_MANIFEST}"},
         body: Val(manifest.raw),
         include_headers: false
     })
@@ -146,7 +146,6 @@ fn image_validate_registry_component(value: String, label: String) ImageError! {
         code :: Int.from_u8(byte)
         if !trust_text_is_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(image_invalid("{label} is unsafe"))
     }
-    Ok()
 }
 
 fn image_validate_oci_tag(value: String) ImageError! {
@@ -157,13 +156,11 @@ fn image_validate_oci_tag(value: String) ImageError! {
         allowed :: trust_text_is_alphanumeric(code) || code == 95 || (index > 0 && (code == 46 || code == 45))
         if !allowed -> return Err(image_invalid("OCI registry tag is unsafe"))
     }
-    Ok()
 }
 
 fn image_validate_oci_digest(digest: String) ImageError! {
     if !digest.starts_with("sha256:") -> return Err(image_invalid("OCI registry digest must be sha256"))
     _ :: image_digest_hex(digest)
-    Ok()
 }
 
 fn image_is_ascii_control(code: Int) -> Bool Never! {
@@ -228,7 +225,6 @@ fn image_upload_registry_blob(registry: RegistryReference, blob: RegistryBlob) I
     if response.status < 200 || response.status >= 300 {
         return Err(image_invalid("registry rejected blob upload with HTTP {response.status}: {image_bounded_text(response.stderr)}"))
     }
-    Ok()
 }
 
 // One bounded `curl` exchange. The HTTP status arrives as the final stdout
@@ -260,14 +256,14 @@ fn image_registry_request(request: RegistryRequest) -[Env, Exec, Time.Wait]> Reg
     if request.body == .Val(body) {
         if &child.stdin.write_all(body) == .Err(error) {
             image_abandon_registry_child(&child)
-            return Err(ImageError.Io(error))
+            return Err(ImageError.IO(error))
         }
         &child.stdin.close()
     }
     stdout := [U8]{}
     loop chunk in child.stdout.chunks(65536) {
         &stdout.extend(chunk)
-        if stdout.len() > @IMAGE_MAX_REGISTRY_RESPONSE_BYTES {
+        if stdout.len() > IMAGE_MAX_REGISTRY_RESPONSE_BYTES {
             image_abandon_registry_child(&child)
             return Err(image_invalid("OCI registry response exceeded its bound"))
         }
@@ -339,7 +335,7 @@ fn image_bounded_text(text: String) -> String Never! {
 
 // Rust `bounded_text`: at most 4096 bytes, lossily decoded and trimmed.
 fn image_bounded_bytes_text(bytes: [U8]) -> String Never! {
-    end :: if bytes.len() < @IMAGE_MAX_REGISTRY_DETAIL_BYTES -> bytes.len() else -> @IMAGE_MAX_REGISTRY_DETAIL_BYTES
+    end :: if bytes.len() < IMAGE_MAX_REGISTRY_DETAIL_BYTES -> bytes.len() else -> IMAGE_MAX_REGISTRY_DETAIL_BYTES
     String.from_bytes_lossy(bytes[0..<end]).trim()
 }
 

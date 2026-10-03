@@ -173,7 +173,8 @@ fn sema_stmt_tir_block_can_fall_through(statements: [TStmt]) -> Bool Never! {
                 return false
             }
             .Loop(label, body, _) -> return sema_stmt_tir_loop_body_has_break(body, label, true)
-            .Inline(body, _) -> return sema_stmt_tir_block_can_fall_through(body)
+            // Rust flow facts: a wrapper block's own exit leaves the block.
+            .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tir_block_can_fall_through(body)
             else -> return true
         }
     }
@@ -569,7 +570,11 @@ fn sema_stmt_check_subject_switch(subject: Expr, arms: [SwitchArm], else_body: [
     owner :: sema_scope_local_owner_key(scopes)
     id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "it")
     symbol :: Symbol{id: id, kind: SymbolKind.Local, name: "it", module_name: environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
-    _ := sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, init.integer_bounds, false)
+    // Rust `check_switch` declares `it` in its own scope with
+    // `declare_in_scope`, so a nested subject table shadows the enclosing
+    // table's `it` instead of reading it.
+    it_frame :: scopes.current
+    sema_scope_push_binding(&scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: init.integer_bounds, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(&state, symbol, false)
     it_local := tir_symbol_local("it", subject_span, id)
     it_local.generated = true
@@ -2928,7 +2933,8 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span}, scopes, &state, &context, &diagnostics) -> return None
     required :: binding.symbol.ty ?? Type.Named{name: "Unit"}
     expected := Type?{None}
-    if op == None -> expected = Val(required)
+    plain_self_typed :: op == None && sema_stmt_numeric_slot_self_typed(expr, required)
+    if op == None && !plain_self_typed -> expected = Val(required)
     // Rust CheckerCore/statements.rs `Stmt::Assign` feeds the place type into
     // the RHS for compound updates too, so `price *= 2.0` with `price: Float`
     // reads the literal as Float rather than exact Decimal.
@@ -2941,6 +2947,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, &diagnostics) ?? return None
     }
+    if plain_self_typed -> checked = sema_stmt_numeric_slot_value(checked, required, environment, &diagnostics) ?? return None
     if op == None && sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
     // D-UNINIT-SENTINEL2: a plain `name = …` gives a `Type{ uninit }`
     // binding its value; a compound update reads it first (E0420).
@@ -3026,6 +3033,31 @@ fn sema_stmt_compound_widens(source: Type, target: Type) -> Bool {
     widening :: sema_expr_numeric_widening_to(source, target)
     if sema_expr_integer_range_for_type(source) != None && sema_expr_integer_range_for_type(target) != None -> return widening == (Val(true))
     widening != None
+}
+
+// Rust `Stmt::Assign` and call arguments infer the value with the slot type
+// only as a hint, then widen a narrower numeric value into the slot
+// (`n = bytes[i]` with `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
+// field, or index read has its own type whatever the hint, so it checks
+// without one and `sema_stmt_numeric_slot_value` fits it into the slot.
+pub fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! {
+    if !sema_expr_is_numeric(required) -> return false
+    if expr == {
+        .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) -> return true
+        .Paren(inner, _) -> return sema_stmt_numeric_slot_self_typed(inner, required)
+        else -> return false
+    }
+}
+
+// A self-typed value in a numeric slot: widened (Rust `widen_numeric_expr`)
+// when its numeric type widens into the slot, else the ordinary expected-type
+// check.
+pub fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value.ty, required) {
+        line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+        return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
+    }
+    sema_expr_expected(value, Val(required), environment, &diagnostics)
 }
 
 fn sema_stmt_transaction_expr_root(expr: Expr) -> String? {
@@ -3641,10 +3673,17 @@ fn sema_stmt_check_shared_field_assignment(target: LValue, op: BinOp?, op_span: 
     }
 }
 
-fn sema_stmt_check_assignment_place(target: LValue, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if target == {
         .Field(base, member, span) -> {
-            checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            // Rust `check_stmt` (LValue::Field): a plain assignment writes the
+            // field, so its base answers only for a move of the whole name
+            // (`env.graph = None` after `^env.graph`).
+            previous_root_read :: context.suppress_partial_move_root_read
+            if !compound -> context.suppress_partial_move_root_read = true
+            checked_base_value :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            context.suppress_partial_move_root_read = previous_root_read
+            checked_base :: checked_base_value ?? return None
             return sema_expression_field_checked(checked_base, member, span, None, environment, &scopes, &context, &diagnostics)
         }
         .Index(base, index, span, kind) -> sema_expression_index(base, index, kind, span, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3672,7 +3711,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
             return None
         }
     }
-    place := sema_stmt_check_assignment_place(target, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    place := sema_stmt_check_assignment_place(target, op != None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if target == .Index(index_base, _, index_span, _) && place.kind == .Index(checked_base, _, _, _, _, _) {
         if sema_columnar_list_element(environment, checked_base.ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", index_span, "writing through `[ ]` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred", "drop `#Layout(columnar)` from `{element}` to assign through `[ ]`, or rebuild the list with `push`"))
@@ -3683,7 +3722,8 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
     }
     expected := Type?{None}
-    if op == None -> expected = Val(place.ty)
+    plain_self_typed :: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty)
+    if op == None && !plain_self_typed -> expected = Val(place.ty)
     // Same compound contract as `sema_stmt_check_local_assignment`.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)
     checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -3692,6 +3732,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, &diagnostics) ?? return None
     }
+    if plain_self_typed -> checked = sema_stmt_numeric_slot_value(checked, place.ty, environment, &diagnostics) ?? return None
     if op == None && sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
     tir_op := TBinaryOp?{None}
     if op != None {
@@ -3836,9 +3877,12 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
         // Rust `check_return_expr` checks a value `if` against the whole
         // return type. A `T?` slot lifts each plain arm itself, so any value
         // `if` there is checked as the carrier (an arm may be a bound `T?`
-        // local, a `Val(x)`, a `None`, or a plain `x`). A `T !E` slot keeps
-        // the payload route unless every arm builds the carrier.
-        .If(_, _, then_value, _, else_value, _) -> return normalized == .Option(_) || (sema_stmt_return_expr_is_carrier(then_value, return_type, scopes) && sema_stmt_return_expr_is_carrier(else_value, return_type, scopes))
+        // local, a `Val(x)`, a `None`, or a plain `x`). A `T !E` slot checks
+        // the carrier when some decision level builds it and every other arm
+        // already has the carrier's type (Rust lifts that table into the
+        // carrier, so it is this body's own failure source); a table of plain
+        // arms and calls takes the payload route, where each call propagates.
+        .If(_, _, _, _, _, _) -> return normalized == .Option(_) || (sema_stmt_return_if_builds_carrier(value, return_type, scopes) && sema_stmt_return_if_arms_fit_carrier(value, return_type, scopes))
         else -> {}
     }
     if normalized == {
@@ -3892,6 +3936,29 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
     }
     known_type :: sema_stmt_return_known_type(value, scopes) ?? return false
     sema_stmt_return_types_are_carriers(known_type, required)
+}
+// A value `if` that builds the `T !E` carrier on some arm, through nested
+// decision levels and grouping.
+fn sema_stmt_return_if_builds_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
+    if value == {
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_builds_carrier(inner, return_type, scopes)
+        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_builds_carrier(then_value, return_type, scopes) || sema_stmt_return_if_builds_carrier(else_value, return_type, scopes)
+        else -> {}
+    }
+    sema_stmt_return_expr_is_carrier(value, return_type, scopes)
+}
+// Every arm of a value `if`, through nested decision levels and grouping, is
+// a carrier or a direct call whose own result already is the carrier.
+fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, scopes: SemaScopeTable) -> Bool {
+    if value == {
+        .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_if_arms_fit_carrier(inner, return_type, scopes)
+        .If(_, _, then_value, _, else_value, _) -> return sema_stmt_return_if_arms_fit_carrier(then_value, return_type, scopes) && sema_stmt_return_if_arms_fit_carrier(else_value, return_type, scopes)
+        else -> {}
+    }
+    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) -> return true
+    if !sema_expression_propagating_call(value) -> return false
+    known_type :: sema_stmt_return_known_type(value, scopes) ?? return false
+    sema_stmt_return_types_are_carriers(known_type, sema_stmt_return_required_type(return_type))
 }
 fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     diagnostic_start :: diagnostics.len()
@@ -3957,18 +4024,29 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
 
 // Rust `check_return_expr` infers the value against the whole return type,
 // so a value whose own type already is the carrier (`list[i]` of `[T?]`,
-// `row.field` of `T !E`) returns as-is. The syntactic carrier test above
-// cannot see such a value's type, so it is inferred here on its own.
+// `row.field` of `T !E`, `map.get(key)` or `list.pop() ?? None` of `T?`)
+// returns as-is. The syntactic carrier test above cannot see such a value's
+// type, so it is inferred here on its own. A `T !E` slot keeps method and
+// value calls on the payload route, where their failure propagates.
 fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
     if sema_stmt_return_known_type(value, scopes) != None -> return false
-    if value == {
-        .Index(_, _, _, _) | .Field(_, _, _) -> {}
-        else -> return false
-    }
+    required :: sema_stmt_return_required_type(return_type)
+    if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) -> return false
     probe_diagnostics := [Diagnostic]{}
     probed :: sema_probe_expression(value, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return false
-    sema_stmt_return_types_are_carriers(probed.ty, sema_stmt_return_required_type(return_type))
+    sema_stmt_return_types_are_carriers(probed.ty, required)
+}
+
+// The value shapes whose own type the return check infers before choosing
+// the carrier or the payload route.
+fn sema_stmt_return_probe_shape(value: Expr, optional_slot: Bool) -> Bool Never! {
+    if value == {
+        .Paren(inner, _) | .Place(inner, _, _) -> return optional_slot && sema_stmt_return_probe_shape(inner, optional_slot)
+        .Index(_, _, _, _) | .Field(_, _, _) -> return true
+        .MethodCall(_, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .OrFallback(_, _, _, _) | .CallValue(_, _, _) -> return optional_slot
+        else -> return false
+    }
 }
 
 fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4209,7 +4287,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             index += 1
             next
         }
-        sema_pin_release_dead(&state, statement, scopes, &tail_store, &context)
+        sema_ownership_release_dead_views(&state, statement, &tail_store, &context)
         output_start := output.len()
         // #3708: these statements own a failure route of their own (task
         // groups, transactions, reactive scopes, generators, deferred closes).
@@ -4276,13 +4354,19 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                                             // D-DISCARD1=A: the last line of a function with no
                                             // written return type; its value goes nowhere.
                                             lost_tail :: context.lost_tail_span == (Val(expr_span(expr)))
+                                            // Any other discarded value lowers like an explicit
+                                            // `.drop("reason")`; the solved effect phase reports
+                                            // E0433 when its callee turns out pure.
                                             if {
                                                 lost_tail -> {
                                                     if diagnostics.len() == discard_diagnostic_start -> &diagnostics.push(sema_stmt_lost_tail_diagnostic(context.function_name, type_name(checked.ty), expr_span(expr)))
+                                                    complete = false
                                                 }
-                                                else -> sema_stmt_mark_discarded_result(checked, discard_fact_start, &context)
+                                                else -> {
+                                                    sema_stmt_mark_discarded_result(checked, discard_fact_start, &context)
+                                                    &output.push(TStmt.ExprStmt{value: checked, span: expr_span(expr)})
+                                                }
                                             }
-                                            complete = false
                                         }
                                     }
                                 }
@@ -5012,7 +5096,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             .Switch(_, _, _, _) | .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
                 if sema_stmt_refutable_statement_exits(statement) -> reachable = false
             }
-            .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
                 if sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .ScopeMember(name, _, _, _, body, _, _, _) -> {

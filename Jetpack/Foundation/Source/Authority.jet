@@ -8,22 +8,22 @@
 // Policy/EffectProjection.jet); this file stays compiler-free.
 
 // jet_foundation::Effects::EFFECT_ROOTS: the thirteen grantable roots.
-@AUTHORITY_EFFECT_ROOTS :: [String]{
+AUTHORITY_EFFECT_ROOTS :: prep { [String]{
     "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"
-}
+} }
 
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
-@AUTHORITY_EXEC_ARGS_LEAF :: "Exec.Args"
+AUTHORITY_EXEC_ARGS_LEAF :: prep { "Exec.Args" }
 // ApplicationAuthority::AMBIENT_BASIC_EFFECTS (D-AUTH-AMBIENT1=A): print,
 // allocate, and read arguments. Never the `Exec` root.
-@AUTHORITY_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", @AUTHORITY_EXEC_ARGS_LEAF}
+AUTHORITY_AMBIENT_BASIC_EFFECTS :: prep { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
-@AUTHORITY_APPLICATION_DEFAULT :: "application default"
+AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
 // ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
-@AUTHORITY_PACKAGE_DEFAULT :: "package.jet default"
+AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
 // The deny-only stop root (D-PANICROOT1).
-@AUTHORITY_PANIC_ROOT :: "Panic"
+AUTHORITY_PANIC_ROOT :: prep { "Panic" }
 
 // The one verdict every checkpoint answers.
 pub enum AuthorityVerdict {
@@ -54,7 +54,7 @@ pub fn authority_holds_insert(holds: &[String], right: String) {
 // Root segment of a dotted right (`FS.Read` -> `FS`).
 pub fn authority_root(right: String) -> String Never! {
     parts :: right.split(".").to_list()
-    if parts.len() == 0 -> return right
+    if parts.len() == 0 -> return ~right
     parts[0]
 }
 
@@ -73,11 +73,11 @@ fn authority_ascii_lower(value: String) -> String Never! {
 pub fn authority_parse_root(right: String) -> String? Never! {
     folded :: authority_ascii_lower(authority_root(right))
     if folded == {
-        "panic" -> return Val(@AUTHORITY_PANIC_ROOT)
+        "panic" -> return Val(AUTHORITY_PANIC_ROOT)
         "mem" -> return Val("Mem")
         else -> {}
     }
-    loop known in @AUTHORITY_EFFECT_ROOTS {
+    loop known in AUTHORITY_EFFECT_ROOTS {
         if authority_ascii_lower(known) == folded -> return Val(known)
     }
     None
@@ -87,7 +87,7 @@ pub fn authority_parse_root(right: String) -> String? Never! {
 pub fn authority_parse_right(right: String) -> String? Never! {
     trimmed :: right.trim()
     root :: authority_parse_root(trimmed) ?? return None
-    if root == @AUTHORITY_PANIC_ROOT && trimmed != @AUTHORITY_PANIC_ROOT -> return None
+    if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
     raw :: trimmed.bytes()
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == 46 {
@@ -164,12 +164,13 @@ pub struct AuthorityTightenError {
 
 // The canonical authority value (Rust `Authority`) projected to runtime
 // adapters. Sandbox wrappers must not keep a second grant set.
+// Shared consumers use this same public constructor and read-only holds field.
 pub struct CanonicalAuthority {
-    holds: [String]
+    pub holds: [String]
 
     // Unknown spellings are retained for the caller's diagnostic; policy
     // checks still fail closed because no known hold covers them.
-    fn from_rights(rights: [String]) -> CanonicalAuthority Never! {
+    pub fn from_rights(rights: [String]) -> CanonicalAuthority Never! {
         holds := [String]{}
         loop right in rights -> &holds.push(authority_parse_right(right) ?? right)
         CanonicalAuthority{holds: authority_holds(holds)}
@@ -177,10 +178,6 @@ pub struct CanonicalAuthority {
 
     fn from_holds(holds: [String]) -> CanonicalAuthority Never! {
         CanonicalAuthority{holds: authority_holds(holds)}
-    }
-
-    fn holds(self) -> [String] Never! {
-        self.holds
     }
 
     fn allows(self, right: String) -> Bool Never! {
@@ -216,18 +213,18 @@ pub struct ApplicationAuthority {
 
     // D-AUTH-AMBIENT1=A: the manifest-less beginner basics.
     fn ambient_basics() -> ApplicationAuthority Never! {
-        ApplicationAuthority.beginner_floor(@AUTHORITY_APPLICATION_DEFAULT)
+        ApplicationAuthority.beginner_floor(AUTHORITY_APPLICATION_DEFAULT)
     }
 
     // #3718: the same floor for a package.jet that writes no `authority.holds`.
     fn package_default() -> ApplicationAuthority Never! {
-        ApplicationAuthority.beginner_floor(@AUTHORITY_PACKAGE_DEFAULT)
+        ApplicationAuthority.beginner_floor(AUTHORITY_PACKAGE_DEFAULT)
     }
 
     fn beginner_floor(authority: String) -> ApplicationAuthority Never! {
         ApplicationAuthority{
             required_effects: [String]{},
-            granted_effects: authority_holds(@AUTHORITY_AMBIENT_BASIC_EFFECTS),
+            granted_effects: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS),
             denied_effects: [String]{},
             authority: authority
         }
@@ -246,13 +243,13 @@ pub struct ApplicationAuthority {
     // The policy source is the manifest-less default, alone or widened by
     // invocation flags (D-ECO-INLINEPACKAGE1).
     fn is_application_default(self) -> Bool Never! {
-        self.authority.starts_with(@AUTHORITY_APPLICATION_DEFAULT)
+        self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
     }
 
     // A beginner floor (manifest-less or a manifest with no holds). A written
     // grant replaces the floor, so it must name every required effect.
     fn is_beginner_floor(self) -> Bool Never! {
-        self.is_application_default() || self.authority.starts_with(@AUTHORITY_PACKAGE_DEFAULT)
+        self.is_application_default() || self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT)
     }
 
     // The complete `allow:` row a manifest-less program must declare; `Panic`
@@ -260,7 +257,7 @@ pub struct ApplicationAuthority {
     fn inline_allow_row(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) != @AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
+            if authority_root(effect_name) != AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
         }
         authority_holds(out)
     }
@@ -270,7 +267,7 @@ pub struct ApplicationAuthority {
     fn undecided_effects(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) == @AUTHORITY_PANIC_ROOT -> next
+            if authority_root(effect_name) == AUTHORITY_PANIC_ROOT -> next
             if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
         }
         authority_holds(out)
@@ -327,7 +324,7 @@ pub struct ApplicationAuthority {
     fn policy_owner(self) -> String Never! {
         if {
             self.is_application_default() -> "the default for a file with no package block"
-            self.authority.starts_with(@AUTHORITY_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
+            self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
             self.authority.starts_with("package.jet") -> "package.jet"
             self.authority.starts_with("inline Package") -> "this file's package block"
             else -> "`{self.authority}`"
@@ -362,7 +359,7 @@ pub fn authority_effect_action(right: String) -> String Never! {
         "Rand.Draw" -> return "draws random numbers"
         else -> {}
     }
-    if canonical == @AUTHORITY_EXEC_ARGS_LEAF -> return "reads its arguments"
+    if canonical == AUTHORITY_EXEC_ARGS_LEAF -> return "reads its arguments"
     if authority_root(canonical) == {
         "IO" -> "prints text or reads input"
         "FS" -> "reads and writes files"

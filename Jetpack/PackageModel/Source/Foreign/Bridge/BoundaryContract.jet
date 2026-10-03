@@ -5,9 +5,9 @@
 // Evidence (jet_foundation::Evidence) and comparison records
 // (jet_foundation::TestingComparison) are referenced by their Rust-derived
 // names: EvidenceIdentity, EvidenceRecord, EvidenceOutcome, ComparisonRecord,
-// @TEST_COMPARISON_SCHEMA_VERSION.
+// TEST_COMPARISON_SCHEMA_VERSION.
 
-@FOREIGN_SOURCE_RECEIPT_SCHEMA :: "jet-ffi-source-receipt-v1"
+FOREIGN_SOURCE_RECEIPT_SCHEMA :: prep { "jet-ffi-source-receipt-v1" }
 
 // Whether a foreign family has a checked replacement path or only a binder.
 pub enum ForeignBoundaryDisposition {
@@ -39,7 +39,7 @@ pub enum ForeignSourceAuthority {
 }
 
 // The comparison API's outcome vocabulary.
-@FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"}
+FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: prep { [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"} }
 
 // One raw case from the comparison/evidence machinery. The boundary keeps the
 // input and both raw observations; it runs no relation of its own.
@@ -56,7 +56,8 @@ pub struct ForeignBoundaryObservation {
         ForeignBoundaryObservation{case_id: case_id, input: input, foreign: foreign, replacement: replacement, outcome: outcome, assumptions: [String]{}, evidence: None}
     }
 
-    fn with_assumptions(self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
+    // Builders consume the observation (Rust `mut self`), never copying it.
+    fn with_assumptions(^self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
@@ -67,7 +68,7 @@ pub struct ForeignBoundaryObservation {
         out
     }
 
-    fn with_evidence(self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
+    fn with_evidence(^self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
         out := self
         out.evidence = Val(evidence)
         out
@@ -76,8 +77,7 @@ pub struct ForeignBoundaryObservation {
     fn validate(self) ForeignBridgeError! {
         if self.case_id.trim() == "" || self.input.trim() == "" -> return Err(pkg_bridge_error("foreign boundary comparison cases need an id and input"))
         if self.foreign.trim() == "" || self.replacement.trim() == "" -> return Err(pkg_bridge_error("foreign boundary comparison cases retain both raw foreign and replacement observations"))
-        if !@FOREIGN_BOUNDARY_COMPARISON_OUTCOMES.contains(self.outcome) -> return Err(pkg_bridge_error("unknown foreign boundary comparison outcome `{self.outcome}`"))
-        Ok(())
+        if !FOREIGN_BOUNDARY_COMPARISON_OUTCOMES.contains(self.outcome) -> return Err(pkg_bridge_error("unknown foreign boundary comparison outcome `{self.outcome}`"))
     }
 }
 
@@ -162,10 +162,10 @@ pub struct ForeignSourceReceipt {
     pub source_identity: String
     pub replacement_identity: String
     pub source_authority: ForeignSourceAuthority
-    pub derivation: MirDerivationRef
+    pub derivation: MIRDerivationRef
     pub evidence: [EvidenceIdentity]
     pub comparison_artifact_id: String
-    pub comparison_schema_version: Int
+    pub comparison_schema_version: U16
     pub comparison_status: String
     pub comparison_relation: String
     pub compared_samples: Int
@@ -175,9 +175,9 @@ pub struct ForeignSourceReceipt {
 
     fn from_contract(contract: ForeignBoundaryContract, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt ForeignBridgeError! {
         derivation :: contract.derivation ?? return Err(pkg_bridge_error("accepted foreign replacement is missing its derivation reference"))
-        comparison_artifact_id :: comparison.artifact_id() ?? return Err(pkg_bridge_error("{err}"))
+        comparison_artifact_id :: comparison_record_artifact_id(comparison) ?? return Err(pkg_bridge_error(err.message))
         receipt :: ForeignSourceReceipt{
-            schema: @FOREIGN_SOURCE_RECEIPT_SCHEMA,
+            schema: FOREIGN_SOURCE_RECEIPT_SCHEMA,
             boundary_digest: contract.digest(),
             boundary_identity: contract.identity,
             artifact_coverage_digest: contract.artifact_coverage.digest(),
@@ -185,11 +185,11 @@ pub struct ForeignSourceReceipt {
             replacement_identity: replacement_identity,
             source_authority: contract.source_authority,
             derivation: derivation,
-            evidence: contract.evidence,
+            evidence: ~contract.evidence,
             comparison_artifact_id: comparison_artifact_id,
             comparison_schema_version: comparison.schema_version,
-            comparison_status: comparison.status.as_str(),
-            comparison_relation: comparison.relation.as_str(),
+            comparison_status: comparison_status_as_str(comparison.status),
+            comparison_relation: observation_relation_as_str(comparison.relation),
             compared_samples: comparison.samples.len(),
             discarded_cases: comparison.discarded_cases,
             first_difference: comparison.first_difference,
@@ -200,12 +200,11 @@ pub struct ForeignSourceReceipt {
     }
 
     fn validate(self) ForeignBridgeError! {
-        if self.schema != @FOREIGN_SOURCE_RECEIPT_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign source receipt schema `{self.schema}`"))
+        if self.schema != FOREIGN_SOURCE_RECEIPT_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign source receipt schema `{self.schema}`"))
         if self.boundary_digest.trim() == "" || !self.boundary_identity.is_complete() || self.artifact_coverage_digest.trim() == "" || self.source_identity.trim() == "" || self.replacement_identity.trim() == "" || self.comparison_artifact_id.trim() == "" || !pkg_bridge_is_lower_hex64(self.comparison_artifact_id) -> return Err(pkg_bridge_error("foreign source receipt has incomplete identity or coverage"))
         if self.source_authority != ForeignSourceAuthority.ReplacementAccepted -> return Err(pkg_bridge_error("foreign source receipt requires replacement-accepted source authority"))
         if self.derivation.id.trim() == "" || self.evidence.len() == 0 -> return Err(pkg_bridge_error("foreign source receipt requires checked derivation and evidence references"))
-        if self.comparison_schema_version != @TEST_COMPARISON_SCHEMA_VERSION || self.comparison_status != "matched" || self.comparison_relation.trim() == "" || self.compared_samples == 0 || self.discarded_cases != 0 || self.first_difference != None -> return Err(pkg_bridge_error("foreign source receipt requires a non-empty matched comparison without discarded cases"))
-        Ok(())
+        if self.comparison_schema_version != TEST_COMPARISON_SCHEMA_VERSION || self.comparison_status != "matched" || self.comparison_relation.trim() == "" || self.compared_samples == 0 || self.discarded_cases != 0 || self.first_difference != None -> return Err(pkg_bridge_error("foreign source receipt requires a non-empty matched comparison without discarded cases"))
     }
 
     // Queryable fields for the existing provenance/receipt channels.
@@ -236,7 +235,7 @@ pub struct ForeignSourceReceipt {
         output := ""
         loop field in self.provenance_fields() -> pkg_bridge_append_line(&output, field.name, field.value)
         identity :: self.boundary_identity
-        output = output + "source-receipt-boundary-source={identity.source}\nsource-receipt-boundary-overlay={identity.overlay}\nsource-receipt-boundary-generator={identity.generator}\nsource-receipt-boundary-implementation={identity.implementation}\nsource-receipt-boundary-toolchain={identity.toolchain}\nsource-receipt-boundary-target={identity.target}\n"
+        output = "{output}source-receipt-boundary-source={identity.source}\nsource-receipt-boundary-overlay={identity.overlay}\nsource-receipt-boundary-generator={identity.generator}\nsource-receipt-boundary-implementation={identity.implementation}\nsource-receipt-boundary-toolchain={identity.toolchain}\nsource-receipt-boundary-target={identity.target}\n"
         Ok(output)
     }
 }
@@ -258,7 +257,7 @@ pub struct ForeignBoundaryContract {
     pub language: ForeignLanguage
     pub library: String
     pub descriptor: String
-    pub abi: ForeignAbiContract
+    pub abi: ForeignABIContract
     pub scalar_widths: [String: String]
     pub alignment: String
     pub ownership: String
@@ -282,7 +281,7 @@ pub struct ForeignBoundaryContract {
     pub source_authority: ForeignSourceAuthority
     // Receipt of the checked comparison that made a replacement selectable.
     pub source_receipt: ForeignSourceReceipt?
-    pub derivation: MirDerivationRef?
+    pub derivation: MIRDerivationRef?
     pub evidence: [EvidenceIdentity]
     pub assumptions: [String]
     pub observations: [ForeignBoundaryObservation]
@@ -303,8 +302,8 @@ pub struct ForeignBoundaryContract {
         artifact_coverage :: ForeignArtifactCoverage.new("not-recorded", identity.target, identity.generator)
         coverage_digest :: artifact_coverage.digest()
         obligations := [ForeignObligationEvidence]{}
-        loop obligation in @FOREIGN_BOUNDARY_OBLIGATIONS {
-            &obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FfiEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
+        loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
+            &obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
         }
         alignment :: if {
             is_cpp -> "opaque-handle; native class layout intentionally unclaimed"
@@ -312,7 +311,7 @@ pub struct ForeignBoundaryContract {
             else -> "adapter-declared; no native aggregate layout is claimed"
         }
         ForeignBoundaryContract{
-            schema: @FOREIGN_BOUNDARY_SCHEMA,
+            schema: FOREIGN_BOUNDARY_SCHEMA,
             language: descriptor.language,
             library: library,
             descriptor: descriptor.stamp(),
@@ -346,18 +345,18 @@ pub struct ForeignBoundaryContract {
     }
 
     fn validate(self) ForeignBridgeError! {
-        if self.schema != @FOREIGN_BOUNDARY_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign boundary schema `{self.schema}`"))
+        if self.schema != FOREIGN_BOUNDARY_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign boundary schema `{self.schema}`"))
         if self.library.trim() == "" || self.descriptor.trim() == "" -> return Err(pkg_bridge_error("foreign boundary requires a library and descriptor"))
         if !self.identity.is_complete() -> return Err(pkg_bridge_error("foreign boundary identity is incomplete"))
         if self.effect_root.trim() == "" || !self.effects.split(";").to_list().contains(self.effect_root) -> return Err(pkg_bridge_error("foreign effects cannot be narrowed below the descriptor effect root"))
-        if self.obligations.len() < @FOREIGN_BOUNDARY_OBLIGATIONS.len() -> return Err(pkg_bridge_error("foreign boundary is missing canonical obligation rows"))
+        if self.obligations.len() < FOREIGN_BOUNDARY_OBLIGATIONS.len() -> return Err(pkg_bridge_error("foreign boundary is missing canonical obligation rows"))
         names := [String]{}
         loop obligation in self.obligations {
             obligation.validate(self.artifact_coverage)
             if names.contains(obligation.obligation) -> return Err(pkg_bridge_error("foreign boundary repeats obligation `{obligation.obligation}`"))
             &names.push(obligation.obligation)
         }
-        loop name in @FOREIGN_BOUNDARY_OBLIGATIONS {
+        loop name in FOREIGN_BOUNDARY_OBLIGATIONS {
             if !names.contains(name) -> return Err(pkg_bridge_error("foreign boundary omitted a canonical obligation row"))
         }
         if self.evidence.len() > 0 && self.derivation == None -> return Err(pkg_bridge_error("foreign boundary evidence requires a checked derivation reference"))
@@ -380,7 +379,6 @@ pub struct ForeignBoundaryContract {
                 if observation.outcome != "matched" -> return Err(pkg_bridge_error("a foreign replacement requires non-empty matched comparison observations"))
             }
         }
-        Ok(())
     }
 
     fn with_assumptions(self, assumptions: [String]) -> ForeignBoundaryContract Never! {
@@ -417,12 +415,11 @@ pub struct ForeignBoundaryContract {
         }
         if !replaced -> &self.obligations.push(obligation)
         &self.obligations.sort_by(row -> row.obligation)
-        Ok(())
     }
 
     // Record one basis/checker/assumption row against this contract's exact
     // loaded artifact coverage.
-    fn set_obligation(&self, name: String, basis: FfiEvidenceBasis, checker: String, assumptions: [String]) ForeignBridgeError! {
+    fn set_obligation(&self, name: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String]) ForeignBridgeError! {
         &self.record_obligation(ForeignObligationEvidence.new(name, basis, checker, assumptions, self.artifact_coverage))
     }
 
@@ -443,7 +440,7 @@ pub struct ForeignBoundaryContract {
 
     fn has_unknown_obligations(self) -> Bool Never! {
         loop obligation in self.obligations {
-            if obligation.basis == FfiEvidenceBasis.Unknown -> return true
+            if obligation.basis == FFIEvidenceBasis.Unknown -> return true
         }
         false
     }
@@ -454,12 +451,12 @@ pub struct ForeignBoundaryContract {
 
     // Project the canonical row into the lower-layer carrier used by sema,
     // TIR, and execution tiers.
-    fn carrier_facts(self) -> FfiBoundaryFacts Never! {
-        obligations := [FfiBoundaryObligation]{}
+    fn carrier_facts(self) -> FFIBoundaryFacts Never! {
+        obligations := [FFIBoundaryObligation]{}
         loop obligation in self.obligations {
-            &obligations.push(FfiBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
+            &obligations.push(FFIBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
         }
-        FfiBoundaryFacts{
+        FFIBoundaryFacts{
             schema: self.schema,
             digest: self.digest(),
             language: self.language.root(),
@@ -478,7 +475,8 @@ pub struct ForeignBoundaryContract {
         }
     }
 
-    fn attach_derivation(self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+    // Rust takes `mut self` by value: consume, never copy, the contract.
+    fn attach_derivation(^self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
         if !derivation_record_validate(record) -> return Err(pkg_bridge_error("derivation {record.id} has a non-canonical identity"))
         if record.identity != self.identity.derivation_identity() -> return Err(pkg_bridge_error("foreign boundary derivation identity does not match its source/build/run/target inputs"))
         out := self
@@ -486,14 +484,16 @@ pub struct ForeignBoundaryContract {
         Ok(out)
     }
 
-    fn attach_evidence(self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
-        record.validate() ?? return Err(pkg_bridge_error("foreign boundary evidence is invalid: {err}"))
+    fn attach_evidence(^self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+        evidence_record_validate(record) ?? return Err(pkg_bridge_error("foreign boundary evidence is invalid: {evidence_expectation_error_text(err)}"))
         derivation :: record.derivation ?? return Err(pkg_bridge_error("foreign boundary evidence must reference a checked derivation"))
         if self.derivation != Val(derivation) -> return Err(pkg_bridge_error("foreign boundary evidence and derivation references disagree"))
         out := self
         if !out.evidence.contains(record.identity) {
             &out.evidence.push(record.identity)
-            &out.evidence.sort_by(row -> pkg_bridge_evidence_key(row))
+            // Rust derived EvidenceIdentity Ord: field tuple, not the joined
+            // "a/b/c" key (which misorders e.g. `a` vs `a-b` at the `/`).
+            &out.evidence.sort_by((left: EvidenceIdentity, right: EvidenceIdentity) -> (left.report_id <=> right.report_id).then(left.claim_id <=> right.claim_id).then(left.evidence_id <=> right.evidence_id))
         }
         Ok(out)
     }
@@ -507,32 +507,33 @@ pub struct ForeignBoundaryContract {
         if self.stale_against(current_identity) -> return Err(pkg_bridge_error("foreign replacement reasoning is stale against the current boundary identity"))
         if self.coverage_stale_against(current_coverage) -> return Err(pkg_bridge_error("foreign replacement reasoning is stale against current artifact coverage"))
         if replacement_identity.trim() == "" -> return Err(pkg_bridge_error("foreign replacement reasoning requires a replacement identity"))
-        if evidence.outcome.is_failure() || evidence.outcome.is_incomplete() || evidence.outcome == EvidenceOutcome.Unchecked -> return Err(pkg_bridge_error("foreign replacement evidence is not a complete successful observation: {evidence.outcome.as_str()}"))
-        comparison.assert_equal() ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {err}"))
-        candidate := self.attach_derivation(derivation)
-        candidate = candidate.attach_evidence(evidence)
+        if evidence_outcome_is_failure(evidence.outcome) || evidence_outcome_is_incomplete(evidence.outcome) || evidence.outcome == EvidenceOutcome.Unchecked -> return Err(pkg_bridge_error("foreign replacement evidence is not a complete successful observation: {evidence_outcome_name(evidence.outcome)}"))
+        comparison_record_assert_equal(comparison) ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {comparison_assertion_error_text(err)}"))
+        // Exactly one copy, Rust's `self.clone()`; the attach steps consume it.
+        candidate := ~self
+        candidate = ^candidate.attach_derivation(derivation)
+        candidate = ^candidate.attach_evidence(evidence)
         &candidate.record_comparison(comparison, Val(evidence.identity))
         &candidate.mark_replacement_accepted()
         receipt :: ForeignSourceReceipt.from_contract(candidate, comparison, replacement_identity)
-        candidate.source_receipt = Val(receipt)
+        candidate.source_receipt = Val(~receipt)
         candidate.validate()
         self = candidate
         Ok(receipt)
     }
 
-    fn record_observation(&self, observation: ForeignBoundaryObservation) ForeignBridgeError! {
+    fn record_observation(&self, observation: ^ForeignBoundaryObservation) ForeignBridgeError! {
         observation.validate()
         &self.observations.push(observation)
-        Ok(())
     }
 
     // Consume one canonical comparison record. Every sampled case keeps both
     // raw sides; terminal outcomes retain their status/reason as assumptions.
     fn record_comparison(&self, record: ComparisonRecord, evidence: EvidenceIdentity?) ForeignBridgeError! {
-        if record.schema_version != @TEST_COMPARISON_SCHEMA_VERSION -> return Err(pkg_bridge_error("unsupported comparison schema version {record.schema_version}"))
+        if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION -> return Err(pkg_bridge_error("unsupported comparison schema version {record.schema_version}"))
         if record.universal_proof -> return Err(pkg_bridge_error("foreign boundary comparison cannot claim universal proof"))
-        outcome :: record.status.as_str()
-        relation :: record.relation.as_str()
+        outcome :: comparison_status_as_str(record.status)
+        relation :: observation_relation_as_str(record.relation)
         if record.samples.len() == 0 {
             reason :: record.reason ?? "comparison produced no samples"
             assumptions := self.assumptions
@@ -544,17 +545,16 @@ pub struct ForeignBoundaryContract {
             }
             &rows.sort()
             self.assumptions = rows
-            return Ok(())
+            return
         }
         loop sample in record.samples {
             assumptions := [String]{"relation={relation}", "source={sample.identity.source}", "tool={sample.identity.tool}", "target={sample.identity.target}"}
             if sample.reference_replay == .Val(replay) -> &assumptions.push("reference-replay={replay.raw}")
             if sample.candidate_replay == .Val(replay) -> &assumptions.push("replacement-replay={replay.raw}")
             observation := ForeignBoundaryObservation.new(sample.identity.case_id, sample.identity.input_id, sample.reference.raw, sample.candidate.raw, outcome).with_assumptions(assumptions)
-            if evidence == .Val(identity) -> observation = observation.with_evidence(identity)
-            &self.record_observation(observation)
+            if evidence == .Val(identity) -> observation = ^observation.with_evidence(identity)
+            &self.record_observation(^observation)
         }
-        Ok(())
     }
 
     // Accept a replacement only after the checked workflow persisted its
@@ -572,7 +572,6 @@ pub struct ForeignBoundaryContract {
             if observation.outcome != "matched" || observation.evidence == None -> return Err(pkg_bridge_error("cannot accept a foreign replacement without all matched cases carrying evidence"))
         }
         self.source_authority = ForeignSourceAuthority.ReplacementAccepted
-        Ok(())
     }
 
     fn stale_against(self, current: ForeignBoundaryIdentity) -> Bool Never! {
@@ -581,7 +580,7 @@ pub struct ForeignBoundaryContract {
 
     // Stable digest for a complete boundary row; it only keys the row.
     fn digest(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         loop field in self.stable_fields() -> &identity.field(field.name, field.value.bytes())
         identity.finish()
     }

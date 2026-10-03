@@ -5,15 +5,15 @@
 // top-level separators while stepping over string literals and comments.
 // Offsets are UTF-8 byte offsets; every delimiter is ASCII.
 
-@OVERLAY_QUOTE :: 34
-@OVERLAY_BACKSLASH :: 92
-@OVERLAY_SLASH :: 47
-@OVERLAY_STAR :: 42
-@OVERLAY_NEWLINE :: 10
-@OVERLAY_COMMA :: 44
-@OVERLAY_COLON :: 58
-@OVERLAY_OPEN_BRACE :: 123
-@OVERLAY_CLOSE_BRACE :: 125
+OVERLAY_QUOTE :: prep { 34 }
+OVERLAY_BACKSLASH :: prep { 92 }
+OVERLAY_SLASH :: prep { 47 }
+OVERLAY_STAR :: prep { 42 }
+OVERLAY_NEWLINE :: prep { 10 }
+OVERLAY_COMMA :: prep { 44 }
+OVERLAY_COLON :: prep { 58 }
+OVERLAY_OPEN_BRACE :: prep { 123 }
+OVERLAY_CLOSE_BRACE :: prep { 125 }
 
 // `(`, `[`, `{`
 fn pkg_overlay_is_open(code: Int) -> Bool Never! {
@@ -34,8 +34,8 @@ fn pkg_overlay_skip_quoted(raw: [U8], at: Int) -> Int Never! {
         cursor += 1
         if {
             escaped -> escaped = false
-            code == @OVERLAY_BACKSLASH -> escaped = true
-            code == @OVERLAY_QUOTE -> return cursor
+            code == OVERLAY_BACKSLASH -> escaped = true
+            code == OVERLAY_QUOTE -> return cursor
             else -> {}
         }
     }
@@ -48,7 +48,7 @@ fn pkg_overlay_skip_line_comment(raw: [U8], at: Int) -> Int Never! {
     loop cursor < raw.len() {
         code :: Int.from_u8(raw[cursor])
         cursor += 1
-        if code == @OVERLAY_NEWLINE -> return cursor
+        if code == OVERLAY_NEWLINE -> return cursor
     }
     cursor
 }
@@ -60,7 +60,7 @@ fn pkg_overlay_skip_block_comment(raw: [U8], at: Int) -> Int Never! {
     loop cursor < raw.len() {
         code :: Int.from_u8(raw[cursor])
         cursor += 1
-        if previous == @OVERLAY_STAR && code == @OVERLAY_SLASH -> return cursor
+        if previous == OVERLAY_STAR && code == OVERLAY_SLASH -> return cursor
         previous = code
     }
     cursor
@@ -82,9 +82,9 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1
         if {
-            code == @OVERLAY_QUOTE -> cursor = pkg_overlay_skip_quoted(raw, cursor)
-            code == @OVERLAY_SLASH && peek == @OVERLAY_SLASH -> cursor = pkg_overlay_skip_line_comment(raw, at + 2)
-            code == @OVERLAY_SLASH && peek == @OVERLAY_STAR -> cursor = pkg_overlay_skip_block_comment(raw, at + 2)
+            code == OVERLAY_QUOTE -> cursor = pkg_overlay_skip_quoted(raw, cursor)
+            code == OVERLAY_SLASH && peek == OVERLAY_SLASH -> cursor = pkg_overlay_skip_line_comment(raw, at + 2)
+            code == OVERLAY_SLASH && peek == OVERLAY_STAR -> cursor = pkg_overlay_skip_block_comment(raw, at + 2)
             pkg_bytes_starts_with(raw, at, needle) && pkg_overlay_word_boundary_before(raw, at) && !pkg_bytes_is_word(pkg_bytes_code(raw, at + needle.len())) -> return Val(at)
             else -> {}
         }
@@ -102,9 +102,9 @@ fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1
         if {
-            code == @OVERLAY_QUOTE -> cursor = pkg_overlay_skip_quoted(raw, cursor)
-            code == @OVERLAY_SLASH && peek == @OVERLAY_SLASH -> cursor = pkg_overlay_skip_line_comment(raw, at + 2)
-            code == @OVERLAY_SLASH && peek == @OVERLAY_STAR -> cursor = pkg_overlay_skip_block_comment(raw, at + 2)
+            code == OVERLAY_QUOTE -> cursor = pkg_overlay_skip_quoted(raw, cursor)
+            code == OVERLAY_SLASH && peek == OVERLAY_SLASH -> cursor = pkg_overlay_skip_line_comment(raw, at + 2)
+            code == OVERLAY_SLASH && peek == OVERLAY_STAR -> cursor = pkg_overlay_skip_block_comment(raw, at + 2)
             code == wanted -> return Val(at)
             else -> {}
         }
@@ -131,12 +131,12 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
         cursor += 1
         if line_comment {
             &out.push(byte)
-            if code == @OVERLAY_NEWLINE -> line_comment = false
+            if code == OVERLAY_NEWLINE -> line_comment = false
             next
         }
         if block_comment {
             &out.push(byte)
-            if code == @OVERLAY_STAR && peek == @OVERLAY_SLASH {
+            if code == OVERLAY_STAR && peek == OVERLAY_SLASH {
                 &out.push(raw[cursor])
                 cursor += 1
                 block_comment = false
@@ -147,22 +147,22 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
             &out.push(byte)
             if {
                 escaped -> escaped = false
-                code == @OVERLAY_BACKSLASH -> escaped = true
-                code == @OVERLAY_QUOTE -> quoted = false
+                code == OVERLAY_BACKSLASH -> escaped = true
+                code == OVERLAY_QUOTE -> quoted = false
                 else -> {}
             }
             next
         }
-        if code == @OVERLAY_SLASH && (peek == @OVERLAY_SLASH || peek == @OVERLAY_STAR) {
+        if code == OVERLAY_SLASH && (peek == OVERLAY_SLASH || peek == OVERLAY_STAR) {
             &out.push(byte)
             &out.push(raw[cursor])
             cursor += 1
-            if peek == @OVERLAY_SLASH -> line_comment = true else -> block_comment = true
+            if peek == OVERLAY_SLASH -> line_comment = true else -> block_comment = true
             next
         }
-        if code == @OVERLAY_QUOTE -> quoted = true
-        if code == @OVERLAY_OPEN_BRACE -> depth += 1
-        if code == @OVERLAY_CLOSE_BRACE {
+        if code == OVERLAY_QUOTE -> quoted = true
+        if code == OVERLAY_OPEN_BRACE -> depth += 1
+        if code == OVERLAY_CLOSE_BRACE {
             depth -= 1
             if depth == 0 -> return (body: String.from_bytes(out) ?? "", consumed: cursor - start)
         }
@@ -189,21 +189,21 @@ fn pkg_overlay_code_depth_at(raw: [U8], stop: Int) -> Int? Never! {
         peek :: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if comment {
-            if code == @OVERLAY_NEWLINE -> comment = false
+            if code == OVERLAY_NEWLINE -> comment = false
             next
         }
         if quoted {
             if {
                 escaped -> escaped = false
-                code == @OVERLAY_BACKSLASH -> escaped = true
-                code == @OVERLAY_QUOTE -> quoted = false
+                code == OVERLAY_BACKSLASH -> escaped = true
+                code == OVERLAY_QUOTE -> quoted = false
                 else -> {}
             }
             next
         }
         if {
-            code == @OVERLAY_SLASH && peek == @OVERLAY_SLASH -> comment = true
-            code == @OVERLAY_QUOTE -> quoted = true
+            code == OVERLAY_SLASH && peek == OVERLAY_SLASH -> comment = true
+            code == OVERLAY_QUOTE -> quoted = true
             pkg_overlay_is_open(code) -> depth += 1
             pkg_overlay_is_close(code) -> depth -= 1
             else -> {}
@@ -224,17 +224,17 @@ fn pkg_overlay_split_colon(value: String) -> (before: String, after: String)? Ne
         if quoted {
             if {
                 escaped -> escaped = false
-                code == @OVERLAY_BACKSLASH -> escaped = true
-                code == @OVERLAY_QUOTE -> quoted = false
+                code == OVERLAY_BACKSLASH -> escaped = true
+                code == OVERLAY_QUOTE -> quoted = false
                 else -> {}
             }
             next
         }
         if {
-            code == @OVERLAY_QUOTE -> quoted = true
+            code == OVERLAY_QUOTE -> quoted = true
             pkg_overlay_is_open(code) -> depth += 1
             pkg_overlay_is_close(code) -> depth -= 1
-            code == @OVERLAY_COLON && depth == 0 -> return Val((before: pkg_bytes_text(raw, 0, index), after: pkg_bytes_text(raw, index + 1, raw.len())))
+            code == OVERLAY_COLON && depth == 0 -> return Val((before: pkg_bytes_text(raw, 0, index), after: pkg_bytes_text(raw, index + 1, raw.len())))
             else -> {}
         }
     }
@@ -261,24 +261,24 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
         cursor += 1
         if line_comment {
             &current.push(byte)
-            if code == @OVERLAY_NEWLINE -> line_comment = false
+            if code == OVERLAY_NEWLINE -> line_comment = false
             next
         }
         if block_depth > 0 {
             if {
-                code == @OVERLAY_SLASH && peek == @OVERLAY_STAR -> {
+                code == OVERLAY_SLASH && peek == OVERLAY_STAR -> {
                     cursor += 1
                     block_depth += 1
                     &current.push(U8{32})
                     &current.push(U8{32})
                 }
-                code == @OVERLAY_STAR && peek == @OVERLAY_SLASH -> {
+                code == OVERLAY_STAR && peek == OVERLAY_SLASH -> {
                     cursor += 1
                     block_depth -= 1
                     &current.push(U8{32})
                     &current.push(U8{32})
                 }
-                code == @OVERLAY_NEWLINE -> &current.push(byte)
+                code == OVERLAY_NEWLINE -> &current.push(byte)
                 // One space per scalar: UTF-8 continuation bytes add nothing.
                 code >= 128 && code < 192 -> {}
                 else -> &current.push(U8{32})
@@ -289,21 +289,21 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
             &current.push(byte)
             if {
                 escaped -> escaped = false
-                code == @OVERLAY_BACKSLASH -> escaped = true
-                code == @OVERLAY_QUOTE -> quoted = false
+                code == OVERLAY_BACKSLASH -> escaped = true
+                code == OVERLAY_QUOTE -> quoted = false
                 else -> {}
             }
             next
         }
-        if code == @OVERLAY_SLASH && (peek == @OVERLAY_SLASH || peek == @OVERLAY_STAR) {
+        if code == OVERLAY_SLASH && (peek == OVERLAY_SLASH || peek == OVERLAY_STAR) {
             cursor += 1
-            if peek == @OVERLAY_SLASH -> line_comment = true else -> block_depth = 1
+            if peek == OVERLAY_SLASH -> line_comment = true else -> block_depth = 1
             &current.push(U8{32})
             &current.push(U8{32})
             next
         }
         if {
-            code == @OVERLAY_QUOTE -> {
+            code == OVERLAY_QUOTE -> {
                 quoted = true
                 &current.push(byte)
             }
@@ -315,7 +315,7 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
                 depth -= 1
                 &current.push(byte)
             }
-            code == @OVERLAY_COMMA && depth == 0 -> {
+            code == OVERLAY_COMMA && depth == 0 -> {
                 piece :: String.from_bytes(current) ?? ""
                 if piece.trim() != "" {
                     &out.push(piece)
@@ -348,7 +348,7 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] Never! {
         peek :: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
-            if code == @OVERLAY_NEWLINE {
+            if code == OVERLAY_NEWLINE {
                 line_comment = false
                 piece :: String.from_bytes(current) ?? ""
                 if depth == 0 && piece.trim() != "" {
@@ -359,7 +359,7 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] Never! {
             next
         }
         if block_comment {
-            if code == @OVERLAY_STAR && peek == @OVERLAY_SLASH {
+            if code == OVERLAY_STAR && peek == OVERLAY_SLASH {
                 cursor += 1
                 block_comment = false
             }
@@ -369,19 +369,19 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] Never! {
             &current.push(byte)
             if {
                 escaped -> escaped = false
-                code == @OVERLAY_BACKSLASH -> escaped = true
-                code == @OVERLAY_QUOTE -> quoted = false
+                code == OVERLAY_BACKSLASH -> escaped = true
+                code == OVERLAY_QUOTE -> quoted = false
                 else -> {}
             }
             next
         }
-        if code == @OVERLAY_SLASH && (peek == @OVERLAY_SLASH || peek == @OVERLAY_STAR) {
+        if code == OVERLAY_SLASH && (peek == OVERLAY_SLASH || peek == OVERLAY_STAR) {
             cursor += 1
-            if peek == @OVERLAY_SLASH -> line_comment = true else -> block_comment = true
+            if peek == OVERLAY_SLASH -> line_comment = true else -> block_comment = true
             next
         }
         if {
-            code == @OVERLAY_QUOTE -> {
+            code == OVERLAY_QUOTE -> {
                 quoted = true
                 &current.push(byte)
             }
@@ -393,7 +393,7 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] Never! {
                 depth -= 1
                 &current.push(byte)
             }
-            (code == @OVERLAY_NEWLINE || code == @OVERLAY_COMMA) && depth == 0 -> {
+            (code == OVERLAY_NEWLINE || code == OVERLAY_COMMA) && depth == 0 -> {
                 piece :: String.from_bytes(current) ?? ""
                 if piece.trim() != "" {
                     &out.push(piece)
@@ -454,15 +454,15 @@ fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> St
 // Locate the `{` that opens the `module workspace { … }` body.
 pub fn pkg_overlay_find_workspace_body_start(src: String) -> Int? Never! {
     raw :: src.bytes()
-    namespace :: @NS_WORKSPACE.bytes()
+    namespace :: NS_WORKSPACE.bytes()
     search := 0
     loop {
-        at :: pkg_overlay_find_word(raw, @KW_MODULE, search) ?? return None
-        cursor :: pkg_bytes_skip_space(raw, at + @KW_MODULE.bytes().len())
+        at :: pkg_overlay_find_word(raw, KW_MODULE, search) ?? return None
+        cursor :: pkg_bytes_skip_space(raw, at + KW_MODULE.bytes().len())
         if pkg_bytes_starts_with(raw, cursor, namespace) && !pkg_bytes_is_word(pkg_bytes_code(raw, cursor + namespace.len())) {
-            return pkg_overlay_find_char(raw, cursor + namespace.len(), @OVERLAY_OPEN_BRACE)
+            return pkg_overlay_find_char(raw, cursor + namespace.len(), OVERLAY_OPEN_BRACE)
         }
-        search = at + @KW_MODULE.bytes().len()
+        search = at + KW_MODULE.bytes().len()
     }
 }
 

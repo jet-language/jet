@@ -5,13 +5,13 @@
 // never activate the bridge; the compiler itself stays dependency-free (I6).
 
 // The bridge for the host target (`JET_BUILD_TARGET` or rustc's host).
-pub fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+pub fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     pkg_ffi_prepare_for_target(program, pkg_ffi_host_target())
 }
 
 // The bridge for the driver's selected target. Native source, inline asm,
 // cache identity, Cargo, and the final rustc link agree on this exact triple.
-pub fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+pub fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     record_defs :: pkg_ffi_collect_c_record_definitions(program)
     collected :: pkg_ffi_collect_externs(program)
     // Stale or cross-target assembly contracts are refused before any
@@ -33,7 +33,7 @@ pub fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[
     // reports E3201 when the provider is absent.
     c_link_args := [String]{}
     if program.cffi.links_c() {
-        entry_path := None
+        entry_path := String?{None}
         if program.entry >= 0 && program.entry < program.modules.len() -> entry_path = Val(program.modules[program.entry].path)
         c_link_args = pkg_cffi_rustc_link_args_for_target_with_entry(program.cffi, program.project_root, target, entry_path) ?? return Err(RustBridgeError{diagnostics: err.diagnostics})
     }

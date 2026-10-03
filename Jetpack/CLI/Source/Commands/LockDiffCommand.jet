@@ -24,7 +24,7 @@ pub fn cli_sizes_from_bytes(download: Int?, disk: Int?) -> DiffSizes Never! {
 // Print one diff when a command mutates the unified lock. Closing the guard
 // renders the diff on every exit path, so a partial lock update is still
 // visible (Rust `LockDiffGuard` Drop).
-pub struct CliLockDiffGuard {
+pub struct CLILockDiffGuard {
     pub theme: Theme
     pub root: String
     pub before: LockFile?
@@ -33,12 +33,12 @@ pub struct CliLockDiffGuard {
     // `Option<LockDiffGuard>`); it renders nothing.
     pub active: Bool
 
-    fn new(theme: Theme, root: String) -[FS]> CliLockDiffGuard Never! {
-        CliLockDiffGuard{theme, root, before: pkg_lock_load(root), sizes: DiffSizes.empty(), active: true}
+    fn new(theme: Theme, root: String) -[FS]> CLILockDiffGuard Never! {
+        CLILockDiffGuard{theme, root, before: pkg_lock_load(root), sizes: DiffSizes.empty(), active: true}
     }
 
-    fn inactive(theme: Theme) -> CliLockDiffGuard Never! {
-        CliLockDiffGuard{theme, root: "", before: None, sizes: DiffSizes.empty(), active: false}
+    fn inactive(theme: Theme) -> CLILockDiffGuard Never! {
+        CLILockDiffGuard{theme, root: "", before: None, sizes: DiffSizes.empty(), active: false}
     }
 
     fn set_sizes(&self, sizes: DiffSizes) Never! {
@@ -46,7 +46,7 @@ pub struct CliLockDiffGuard {
     }
 }
 
-impl CliLockDiffGuard.Close {
+impl CLILockDiffGuard.Close {
     fn close(^self) {
         if !self.active -> return
         after :: pkg_lock_load(self.root)
@@ -56,21 +56,22 @@ impl CliLockDiffGuard.Close {
 }
 
 // `jetpack lock diff [--against rev]`; the default revision is `HEAD`.
-pub fn cli_cmd_lock(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    if parsed.positional.len() != 1 || parsed.positional[0] != @LOCK_DIFF_VERB || parsed.command != None {
+pub fn cli_cmd_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
+    if parsed.positional.len() != 1 || parsed.positional[0] != LOCK_DIFF_VERB || parsed.command != None {
         theme.error("`jetpack lock` needs the `diff` subcommand", "the unified `.jet/lock` is inspected through one read-only diff surface", "run `jetpack lock diff [--against <rev>]`")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    root :: cli_project_root(cli_current_dir())
+    root :: cli_project_root(&cache, cli_current_dir())
     current :: cli_read_lock(root) ?? {
         theme.error("could not read the current lock", err.message(), "restore a valid `.jet/lock` and run the diff again")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     requested :: parsed.flags.lock_against ?? ""
     revision :: if requested == "" -> "HEAD" else -> requested
     against :: cli_read_lock_at_revision(root, revision) ?? {
         theme.error("could not read the lock at the requested revision", err.message(), "use a commit, tag, or revision that contains `.jet/lock`")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     diff :: LockDiff.between(Val(against), Val(current))
     sizes :: DiffSizes{download: None, disk: cli_measured_disk_delta(diff)}
@@ -79,10 +80,10 @@ pub fn cli_cmd_lock(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, T
     } else {
         cli_render_lock_diff(theme, diff, sizes)
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-pub fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS]> {
+pub fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS, Time.Wait]> {
     theme.status("Lock changes")
     loop line in cli_render_lock_diff_lines(diff, sizes) -> theme.detail(line)
 }
@@ -180,12 +181,12 @@ fn cli_output_size(path: String?) -[FS]> Int? Never! {
     Val(store_dir_size(output))
 }
 
-fn cli_read_lock(root: String) -[FS]> LockFile CliError! {
-    path :: files.join(root, @UNIFIED_LOCK_FILE)
-    raw :: files.read(path) ?? return Err(CliError.Other("`{path}`: {err}"))
+fn cli_read_lock(root: String) -[FS]> LockFile CLIError! {
+    path :: files.join(root, UNIFIED_LOCK_FILE)
+    raw :: files.read(path) ?? return Err(CLIError.Other("`{path}`: {err}"))
     if pkg_lock_parse(raw) == {
         .Ok(lock) -> Ok(lock)
-        .Err(error) -> Err(CliError.Other("`{path}`: {error.message()}"))
+        .Err(error) -> Err(CLIError.Other("`{path}`: {error.message()}"))
     }
 }
 
@@ -199,16 +200,16 @@ fn cli_valid_revision(revision: String) -> Bool Never! {
     true
 }
 
-fn cli_read_lock_at_revision(root: String, revision: String) -[FS, Env, Exec, Time.Wait]> LockFile CliError! {
-    if !cli_valid_revision(revision) -> return Err(CliError.Other("invalid git revision `{revision}`"))
-    commit_receipt :: process.cmd([String]{"git", "-C", root, "rev-parse", "--verify", "--end-of-options", "{revision}^{{commit}}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CliError.Other("could not run git: {err}"))
-    if !commit_receipt.success -> return Err(CliError.Other(cli_command_error("git rev-parse", commit_receipt)))
+fn cli_read_lock_at_revision(root: String, revision: String) -[FS, Env, Exec, Time.Wait]> LockFile CLIError! {
+    if !cli_valid_revision(revision) -> return Err(CLIError.Other("invalid git revision `{revision}`"))
+    commit_receipt :: process.cmd([String]{"git", "-C", root, "rev-parse", "--verify", "--end-of-options", "{revision}^{{commit}}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CLIError.Other("could not run git: {err}"))
+    if !commit_receipt.success -> return Err(CLIError.Other(cli_command_error("git rev-parse", commit_receipt)))
     commit :: commit_receipt.output.trim()
-    lock_receipt :: process.cmd([String]{"git", "-C", root, "show", "--format=", "--no-ext-diff", "{commit}:{@UNIFIED_LOCK_FILE}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CliError.Other("could not run git: {err}"))
-    if !lock_receipt.success -> return Err(CliError.Other(cli_command_error("git show", lock_receipt)))
+    lock_receipt :: process.cmd([String]{"git", "-C", root, "show", "--format=", "--no-ext-diff", "{commit}:{UNIFIED_LOCK_FILE}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CLIError.Other("could not run git: {err}"))
+    if !lock_receipt.success -> return Err(CLIError.Other(cli_command_error("git show", lock_receipt)))
     if pkg_lock_parse(lock_receipt.output) == {
         .Ok(lock) -> Ok(lock)
-        .Err(error) -> Err(CliError.Other("lock at `{revision}`: {error.message()}"))
+        .Err(error) -> Err(CLIError.Other("lock at `{revision}`: {error.message()}"))
     }
 }
 

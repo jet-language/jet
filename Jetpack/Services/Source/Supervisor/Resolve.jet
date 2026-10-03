@@ -3,8 +3,8 @@
 // the ports, and the on-disk layout, plus the port and socket reservations
 // held until the service spawns.
 
-@SERVICES_MAX_RESTARTS :: 100
-@SERVICES_MAX_BACKOFF_MS :: 60000
+SERVICES_MAX_RESTARTS :: prep { 100 }
+SERVICES_MAX_BACKOFF_MS :: prep { 60000 }
 
 // A `services:` entry resolved to what actually runs.
 struct ServiceResolved {
@@ -57,7 +57,7 @@ fn services_resolve(project_dir: String, plan: DevServicePlan) -[FS, Env]> Servi
 // Ephemeral (`0`) ports resolve to the ports the running generation
 // published, when that record has the declared shape.
 fn services_published_ports(dir: String, declared: [Int]) -[FS]> [Int] Never! {
-    raw :: services_read_text_bounded(services_ports_path(dir), @SERVICES_MAX_STATE_BYTES) ?? return declared
+    raw :: services_read_text_bounded(services_ports_path(dir), SERVICES_MAX_STATE_BYTES) ?? return declared
     published := [Int]{}
     lines :: services_lines(raw)
     loop line in lines {
@@ -80,7 +80,6 @@ fn services_validate_foreground_run(run: [String], name: String) ServicesError! 
         }
         if argument.trim() == "&" || argument.trim_end().ends_with(" &") -> return Err(services_daemonizing_error(name))
     }
-    Ok()
 }
 
 fn services_daemonizing_error(name: String) -> ServicesError Never! {
@@ -106,19 +105,17 @@ fn services_command_words(argument: String) -> [String] Never! {
 
 // A path that must stay inside the project: relative, non-empty, no `..`.
 fn services_validate_project_relative(field: String, value: String?) ServicesError! {
-    text :: value ?? return Ok()
+    text :: value ?? return
     if text == "" || files.is_abs(text) || files.split_slash(text).contains("..") {
         return Err(ServicesError.new("service {field} path `{text}` must stay inside the project"))
     }
-    Ok()
 }
 
 fn services_validate_watch_path(value: String) ServicesError! {
     services_validate_project_relative("watch", Val(value))
     if services_first_real_component(value) == .Val(first) {
-        if first == @CONFIG_DEFAULT_DIR -> return Err(ServicesError.new("service watch path `{value}` cannot watch Jet's internal state"))
+        if first == CONFIG_DEFAULT_DIR -> return Err(ServicesError.new("service watch path `{value}` cannot watch Jet's internal state"))
     }
-    Ok()
 }
 
 // The first path component that is not `.`.
@@ -160,34 +157,31 @@ fn services_ensure_project_path(project_dir: String, path: String, field: String
             return Err(ServicesError.new("service {field} path `{path}` escapes the project through a symlink"))
         }
     }
-    Ok()
 }
 
 // A service name is one safe state-directory component.
 fn services_validate_service_name(name: String) ServicesError! {
-    if name == "" || name == "." || name == ".." || name.bytes().len() > @SERVICES_MAX_SERVICE_NAME_BYTES || pkg_text_has_control(name) || name.contains("/") || name.contains("\\") {
+    if name == "" || name == "." || name == ".." || name.bytes().len() > SERVICES_MAX_SERVICE_NAME_BYTES || pkg_text_has_control(name) || name.contains("/") || name.contains("\\") {
         return Err(ServicesError.new("service name `{name}` is not a safe state-directory name"))
     }
-    Ok()
 }
 
 fn services_validate_restart_policy(plan: DevServicePlan) ServicesError! {
-    policy :: plan.restart ?? return Ok()
+    policy :: plan.restart ?? return
     if policy == {
         .OnFailure(max, backoff_ms, _) -> services_validate_restart_budget(plan.name, max, backoff_ms)
         .Always(max, backoff_ms, _) -> services_validate_restart_budget(plan.name, max, backoff_ms)
-        .Never -> Ok()
+        .Never -> {}
     }
 }
 
 fn services_validate_restart_budget(name: String, max: Int, backoff_ms: Int) ServicesError! {
-    if max > @SERVICES_MAX_RESTARTS {
-        return Err(ServicesError.new("service `{name}` restart max {max} exceeds the bounded limit of {@SERVICES_MAX_RESTARTS}"))
+    if max > SERVICES_MAX_RESTARTS {
+        return Err(ServicesError.new("service `{name}` restart max {max} exceeds the bounded limit of {SERVICES_MAX_RESTARTS}"))
     }
-    if backoff_ms > @SERVICES_MAX_BACKOFF_MS {
-        return Err(ServicesError.new("service `{name}` restart backoff {backoff_ms}ms exceeds the bounded limit of {@SERVICES_MAX_BACKOFF_MS}ms"))
+    if backoff_ms > SERVICES_MAX_BACKOFF_MS {
+        return Err(ServicesError.new("service `{name}` restart backoff {backoff_ms}ms exceeds the bounded limit of {SERVICES_MAX_BACKOFF_MS}ms"))
     }
-    Ok()
 }
 
 fn services_validate_ports(ports: [Int]) ServicesError! {
@@ -197,7 +191,6 @@ fn services_validate_ports(ports: [Int]) ServicesError! {
         if seen.contains(port) -> return Err(ServicesError.new("service declares port `{port}` more than once"))
         &seen.push(port)
     }
-    Ok()
 }
 
 fn services_validate_socket_names(sockets: [String]) ServicesError! {
@@ -209,7 +202,6 @@ fn services_validate_socket_names(sockets: [String]) ServicesError! {
         if seen.contains(socket) -> return Err(ServicesError.new("service socket `{socket}` is declared more than once"))
         &seen.push(socket)
     }
-    Ok()
 }
 
 // Loopback listeners that hold the service's ports until spawn. Port 0 asks
@@ -247,7 +239,7 @@ struct ServiceSocketReservation {
     listeners: [UnixListener]
 
     fn release(^self) ServicesError! -[FS]> {
-        first_error := None
+        first_error := String?{None}
         loop path in self.paths {
             if files.remove(path) == .Err(error) {
                 if !services_is_not_found(error) && first_error == None {
@@ -256,7 +248,6 @@ struct ServiceSocketReservation {
             }
         }
         if first_error == .Val(message) -> return Err(ServicesError.new(message))
-        Ok()
     }
 
     // Rust `Drop`: remove every reserved path.
@@ -296,7 +287,6 @@ fn services_reserve_socket(project_dir: String, socket: String, reservation: &Se
     listener :: net.unix_listen(path) ?? return Err(ServicesError.new("couldn't reserve service socket `{path}`: {err}"))
     &reservation.listeners.push(listener)
     &reservation.paths.push(path)
-    Ok()
 }
 
 // Component-wise `Path::starts_with`.

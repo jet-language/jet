@@ -9,9 +9,9 @@
 // random suffix beside the process id, so concurrent writers still never
 // share a staging name.
 
-@BUILD_DEBUG_LOG_ROOT :: "build-logs"
-@BUILD_DEBUG_SCRATCH_ROOT :: "failed-scratch"
-@BUILD_DEBUG_STAGE_PREFIX :: ".jet-build-stage-"
+BUILD_DEBUG_LOG_ROOT :: prep { "build-logs" }
+BUILD_DEBUG_SCRATCH_ROOT :: prep { "failed-scratch" }
+BUILD_DEBUG_STAGE_PREFIX :: prep { ".jet-build-stage-" }
 
 // One logged recipe step.
 pub struct StepLog {
@@ -113,14 +113,13 @@ pub struct BuildAttempt {
     // A symlinked output or any error leaves no recorded scratch path.
     fn preserve_scratch(&self, hangar_dir: String, source: String, output: String) StoreError! -[FS, Env, Rand]> {
         recipe_debug_validate_id(self.id)
-        root :: files.join(hangar_dir, @BUILD_DEBUG_SCRATCH_ROOT)
+        root :: files.join(hangar_dir, BUILD_DEBUG_SCRATCH_ROOT)
         recipe_debug_ensure_real_directory(root, "failed-build scratch root")
-        stage :: files.join(root, "{@BUILD_DEBUG_STAGE_PREFIX}{self.id}-{recipe_debug_unique_suffix()}")
+        stage :: files.join(root, "{BUILD_DEBUG_STAGE_PREFIX}{self.id}-{recipe_debug_unique_suffix()}")
         dir :: files.join(root, self.id)
         if recipe_debug_stage_scratch(stage, dir, source, output) == {
             .Ok(_) -> {
                 self.scratch_dir = dir
-                Ok()
             }
             .Err(error) -> {
                 recipe_debug_remove_tree(stage).drop("failed scratch staging is private")
@@ -162,7 +161,7 @@ fn recipe_debug_stage_scratch(stage: String, dir: String, source: String, output
             recipe_debug_copy_tree(output, files.join(stage, "output"))
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+            if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
         }
     }
     recipe_debug_ensure_absent(dir, "failed-build scratch destination")
@@ -172,19 +171,19 @@ fn recipe_debug_stage_scratch(stage: String, dir: String, source: String, output
 // Remove only failed-build scratch staging directories a crashed snapshot
 // publication left behind. Published scratch directories stay visible.
 pub fn recipe_recover_build_scratch(hangar_dir: String) -[FS]> Int StoreError! {
-    root :: files.join(hangar_dir, @BUILD_DEBUG_SCRATCH_ROOT)
+    root :: files.join(hangar_dir, BUILD_DEBUG_SCRATCH_ROOT)
     info :: if files.stat(root) == {
         .Ok(info) -> info
         .Err(error) -> {
             if store_io_is_not_found(error) -> return Ok(0)
-            return Err(StoreError.Io(error))
+            return Err(StoreError.IO(error))
         }
     }
     if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("failed-build scratch root is not a real directory"))
     recovered := 0
     entries :: files.list_dir(root)
     loop entry in entries {
-        if !entry.name.starts_with(@BUILD_DEBUG_STAGE_PREFIX) -> next
+        if !entry.name.starts_with(BUILD_DEBUG_STAGE_PREFIX) -> next
         path :: files.join(root, entry.name)
         entry_info :: files.stat(path)
         if entry_info.is_symlink -> return Err(StoreError.InvalidData("failed-build scratch stage is a symlink: {path}"))
@@ -208,7 +207,7 @@ pub fn recipe_debug_latest_json(hangar_dir: String, package: String) -[FS]> Stri
         .Ok(info) -> info
         .Err(error) -> {
             if store_io_is_not_found(error) -> return Ok(None)
-            return Err(StoreError.Io(error))
+            return Err(StoreError.IO(error))
         }
     }
     if info.is_symlink || !info.is_file -> return Err(StoreError.InvalidData("latest build log is not a regular file"))
@@ -223,16 +222,16 @@ pub fn recipe_promote_failed_attempt(source_hangar: String, target_hangar: Strin
     attempt := found ?? return Ok(false)
     if attempt.scratch_dir == "" -> return Ok(false)
     recipe_debug_validate_id(attempt.id)
-    source_root :: files.canonicalize(files.join(source_hangar, @BUILD_DEBUG_SCRATCH_ROOT))
+    source_root :: files.canonicalize(files.join(source_hangar, BUILD_DEBUG_SCRATCH_ROOT))
     source_scratch :: files.canonicalize(attempt.scratch_dir)
     if source_scratch == source_root || !store_path_starts_with(source_scratch, source_root) {
         return Err(StoreError.InvalidData("failed-build scratch path escapes its private Hangar"))
     }
-    target_root :: files.join(target_hangar, @BUILD_DEBUG_SCRATCH_ROOT)
+    target_root :: files.join(target_hangar, BUILD_DEBUG_SCRATCH_ROOT)
     recipe_debug_ensure_real_directory(target_root, "failed-build scratch root")
     target_scratch :: files.join(target_root, attempt.id)
     recipe_debug_ensure_absent(target_scratch, "promoted failed-build scratch")
-    stage :: files.join(target_root, "{@BUILD_DEBUG_STAGE_PREFIX}promote-{attempt.id}-{recipe_debug_unique_suffix()}")
+    stage :: files.join(target_root, "{BUILD_DEBUG_STAGE_PREFIX}promote-{attempt.id}-{recipe_debug_unique_suffix()}")
     if recipe_debug_promote_stage(stage, source_scratch, target_scratch, target_hangar, &attempt) == {
         .Ok(_) -> Ok(true)
         .Err(error) -> {
@@ -289,7 +288,7 @@ pub fn recipe_debug_safe_name(value: String) -> String Never! {
 }
 
 fn recipe_debug_log_dir(hangar_dir: String, package: String) -> String Never! {
-    files.join(files.join(hangar_dir, @BUILD_DEBUG_LOG_ROOT), recipe_debug_safe_name(package))
+    files.join(files.join(hangar_dir, BUILD_DEBUG_LOG_ROOT), recipe_debug_safe_name(package))
 }
 
 fn recipe_debug_validate_id(id: String) StoreError! {
@@ -391,7 +390,7 @@ fn recipe_debug_ensure_real_directory(path: String, label: String) StoreError! -
             if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory"))
         }
         .Err(error) -> {
-            if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+            if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
             files.create_dir_all(path)
             recipe_debug_ensure_real_directory(path, label)
         }
@@ -402,8 +401,8 @@ fn recipe_debug_ensure_absent(path: String, label: String) StoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(_) -> Err(StoreError.AlreadyExists("{label} already exists: {path}"))
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Ok()
-            Err(StoreError.Io(error))
+            if store_io_is_not_found(error) -> return
+            Err(StoreError.IO(error))
         }
     }
 }
@@ -413,8 +412,8 @@ fn recipe_debug_remove_tree(path: String) StoreError! -[FS]> {
     info :: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Ok()
-            return Err(StoreError.Io(error))
+            if store_io_is_not_found(error) -> return
+            return Err(StoreError.IO(error))
         }
     }
     if info.is_symlink || !info.is_dir -> return files.remove(path)
@@ -439,7 +438,7 @@ fn recipe_debug_write_atomic(path: String, bytes: [U8]) StoreError! -[FS, Env, R
     if name == "" -> return Err(StoreError.Other("build log path has no file name"))
     partial :: files.join(parent, ".{name}.partial-{recipe_debug_unique_suffix()}")
     if recipe_debug_publish_partial(partial, path, bytes) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(partial).drop("the partial log file is private")
             Err(error)

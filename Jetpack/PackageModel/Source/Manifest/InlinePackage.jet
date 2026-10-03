@@ -4,10 +4,10 @@
 // endings stay, so later compiler diagnostics still point at the user's file.
 
 // The manifest blocks masked out of `package.jet` before looking for `fn build`.
-@PKG_MANIFEST_BLOCKS :: [String]{"deps", "packages", "services", "outputs", "environments", "defaults", "settings", @MANIFEST_BLOCK_BUILD, @MANIFEST_BLOCK_EFFECTS, @MANIFEST_BLOCK_GRANTS, @MANIFEST_BLOCK_AUTHORITY, @MANIFEST_BLOCK_POLICY, @MANIFEST_BLOCK_BOUNDARIES, "dev_deps", "patch", "workspace"}
+PKG_MANIFEST_BLOCKS :: prep { [String]{"deps", "packages", "services", "outputs", "environments", "defaults", "settings", MANIFEST_BLOCK_BUILD, MANIFEST_BLOCK_EFFECTS, MANIFEST_BLOCK_GRANTS, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_POLICY, MANIFEST_BLOCK_BOUNDARIES, "dev_deps", "patch", "workspace"} }
 
 // D-CONF-NAME1: bare top-level identity/metadata fields with no `{ … }` body.
-@PKG_MANIFEST_SCALAR_FIELDS :: [String]{@MANIFEST_FIELD_NAME, @MANIFEST_FIELD_VERSION, "jet", "source", "edition", "description", "license", "repository", "target", "runtime", "allocator", "members", "configs"}
+PKG_MANIFEST_SCALAR_FIELDS :: prep { [String]{MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, "jet", "source", "edition", "description", "license", "repository", "target", "runtime", "allocator", "members", "configs"} }
 
 // The Jet declarations beside the manifest blocks in `package.jet`, with every
 // manifest block blanked, or None when no top-level `fn build` remains.
@@ -107,7 +107,7 @@ fn pkg_key_at(bytes: [U8], at: Int, key: String) -> Int? Never! {
 
 // `key:` (optionally `.`) followed by `{`: the key start and the brace.
 fn pkg_manifest_block_start(bytes: [U8], at: Int) -> EditSpan? Never! {
-    loop key in @PKG_MANIFEST_BLOCKS {
+    loop key in PKG_MANIFEST_BLOCKS {
         end :: pkg_key_at(bytes, at, key) ?? next
         cursor := pkg_skip_ascii_space(bytes, end)
         if pkg_bytes_code(bytes, cursor) != 58 -> next
@@ -120,7 +120,7 @@ fn pkg_manifest_block_start(bytes: [U8], at: Int) -> EditSpan? Never! {
 
 // A bare `field: value` entry: its start and the next top-level `,`/newline.
 fn pkg_manifest_scalar_start(bytes: [U8], at: Int) -> EditSpan? Never! {
-    loop key in @PKG_MANIFEST_SCALAR_FIELDS {
+    loop key in PKG_MANIFEST_SCALAR_FIELDS {
         end :: pkg_key_at(bytes, at, key) ?? next
         cursor :: pkg_skip_ascii_space(bytes, end)
         if pkg_bytes_code(bytes, cursor) != 58 -> next
@@ -265,7 +265,7 @@ fn pkg_has_top_level_build_function(bytes: [U8]) -> Bool Never! {
         }
         if depth == 0 && pkg_key_at(bytes, i, "fn") != None {
             cursor :: pkg_skip_ascii_space(bytes, i + 2)
-            if pkg_key_at(bytes, cursor, @BUILD_ENTRY_FN) != None -> return true
+            if pkg_key_at(bytes, cursor, BUILD_ENTRY_FN) != None -> return true
         }
         if code == 123 {
             depth += 1
@@ -364,7 +364,7 @@ pub fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlineP
     bytes :: source.bytes()
     first :: pkg_skip_inline_trivia(bytes, 0)
     if pkg_inline_package_start(bytes, first) == .Val(start) {
-        end :: pkg_balanced_block_end(bytes, start.end) ?? return Err(InlinePackageError.Unbalanced(Span{start: start.start, end: bytes.len()}))
+        end :: pkg_balanced_block_end(bytes, start.end) ?? return Err(InlinePackageError.Unbalanced{span: Span{start: start.start, end: bytes.len()}})
         block :: pkg_inline_package_block(start.start, start.end, end)
         if pkg_find_top_level_inline_package(bytes, end) == .Val(duplicate) {
             duplicate_end :: pkg_balanced_block_end(bytes, duplicate.end) ?? bytes.len()
@@ -374,7 +374,7 @@ pub fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlineP
     }
     if pkg_find_top_level_inline_package(bytes, first) == .Val(found) {
         end :: pkg_balanced_block_end(bytes, found.end) ?? bytes.len()
-        return Err(InlinePackageError.NotFirst(Span{start: found.start, end: end}))
+        return Err(InlinePackageError.NotFirst{span: Span{start: found.start, end: end}})
     }
     Ok(None)
 }
@@ -425,7 +425,7 @@ fn pkg_inline_package_block(keyword: Int, open: Int, end: Int) -> InlinePackageB
     close :: if end > 0 -> end - 1 else -> 0
     InlinePackageBlock{
         span: Span{start: keyword, end: end},
-        keyword_span: Span{start: keyword, end: keyword + @INLINE_PACKAGE_DECL.bytes().len()},
+        keyword_span: Span{start: keyword, end: keyword + INLINE_PACKAGE_DECL.bytes().len()},
         open_span: Span{start: open, end: open + 1},
         body_span: Span{start: open + 1, end: close},
         close_span: Span{start: close, end: end},
@@ -434,7 +434,7 @@ fn pkg_inline_package_block(keyword: Int, open: Int, end: Int) -> InlinePackageB
 
 // `package` at `at`, then trivia, then `{`: the keyword and the brace.
 fn pkg_inline_package_start(bytes: [U8], at: Int) -> EditSpan? Never! {
-    end :: pkg_key_at(bytes, at, @INLINE_PACKAGE_DECL) ?? return None
+    end :: pkg_key_at(bytes, at, INLINE_PACKAGE_DECL) ?? return None
     cursor :: pkg_skip_inline_trivia(bytes, end)
     if pkg_bytes_code(bytes, cursor) != 123 -> return None
     Val(EditSpan{start: at, end: cursor})

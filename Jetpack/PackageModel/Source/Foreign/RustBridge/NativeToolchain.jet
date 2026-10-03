@@ -66,9 +66,9 @@ fn pkg_ffi_inline_native_toolchain(entries: [ExternEntry], target: String) -[FS,
     }
     if !has_c && !has_cpp -> return Ok(None)
     host :: pkg_ffi_host_target()
-    cc := None
+    cc := NativeTool?{None}
     if has_c -> cc = Val(pkg_ffi_resolve_native_tool("CC", target, host, "clang"))
-    cxx := None
+    cxx := NativeTool?{None}
     if has_cpp -> cxx = Val(pkg_ffi_resolve_native_tool("CXX", target, host, "clang++"))
     archiver :: if target == host -> "ar" else -> "llvm-ar"
     ar :: pkg_ffi_resolve_native_tool("AR", target, host, archiver)
@@ -86,7 +86,7 @@ fn pkg_ffi_resolve_native_tool(variable: String, target: String, host: String, f
     receipt :: process.cmd([String]{path, "--version"}).run() ?? return Err(pkg_ffi_tool_error("couldn't inspect native tool `{path}`: {err}"))
     if !receipt.success -> return Err(pkg_ffi_tool_error("selected native tool `{path}` rejected `--version`"))
     version :: "{receipt.output}{receipt.errors}"
-    target_arg := None
+    target_arg := String?{None}
     if variable != "AR" && pkg_ascii_lower(version).contains("clang") -> target_arg = Val("--target={target}")
     Ok(NativeTool{path: path, identity: "{path}\n{version}", target_arg: target_arg})
 }

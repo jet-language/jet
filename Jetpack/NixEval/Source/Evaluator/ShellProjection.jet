@@ -1,6 +1,6 @@
 // devShell resolution and the typed, non-executing package projection.
 
-@NIXEVAL_MAX_DEV_SHELL_PACKAGES :: 256
+NIXEVAL_MAX_DEV_SHELL_PACKAGES :: prep { 256 }
 
 fn nixeval_shell_package_fields() -> [String] Never! {
     [String]{"packages", "buildInputs", "nativeBuildInputs"}
@@ -92,7 +92,7 @@ impl NixEvaluator {
         value := start
         loop field in path {
             if value.is_function() -> value = &self.apply_flake_arguments(value)
-            selected :: self.select(value, field)
+            selected :: &self.select(value, field)
             value = &self.force(selected)
         }
         Ok(value)
@@ -108,8 +108,8 @@ impl NixEvaluator {
             binding :: found ?? next
             items :: &self.package_list(binding, field)
             loop item in items {
-                if packages.len() + cross_packages.len() >= @NIXEVAL_MAX_DEV_SHELL_PACKAGES {
-                    return Err(NixEvalError.ResourceLimit("devShell has more than {@NIXEVAL_MAX_DEV_SHELL_PACKAGES} packages"))
+                if packages.len() + cross_packages.len() >= NIXEVAL_MAX_DEV_SHELL_PACKAGES {
+                    return Err(NixEvalError.ResourceLimit("devShell has more than {NIXEVAL_MAX_DEV_SHELL_PACKAGES} packages"))
                 }
                 forced :: &self.force(item)
                 raw :: forced.package_text()

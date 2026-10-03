@@ -4,45 +4,83 @@ title: Owner scratch
 
 "Error messages are the user interface of your compiler." Jonathan Blow https://youtu.be/e6crOMC9WCE?si=AFgqGl_HUBQ_0cRO
 
-Want to find the video that talks about framing functions as honest/dishonest vs deterministic/nondeterministic. Want to incorporate that idea/philosophy into jet.
+>
+>
+>
+You are resuming the Jetpack-in-Jet port as lead orchestrator (Tower umbrella #3590, milestone e5-m11-jetpack-in-jet) in
+/home/nate/Projects/Github/jet. Read AGENTS.md first. Other streams have worked since 2026-09-30, so probe everything before
+acting: git log, Tower cards, the current compiler binary.
 
-Consider allowing or requiring wrapping of a ctor around a factory function to make it clear/explicit when a constructor factory is used and what the output type is so users dont have to inspect the function signature. Meaning,instead of: 
-```jet
-myVar := Task{priority: 2, status: closed}
-myConst :: create_task(2, closed)
-```
+GOAL (owner order): port Jetpack (Rust; JetOS excluded) to idiomatic Jet under Jetpack/.
+1. Build-out: done (~174k lines, 587 files).
+2. Stabilization: in progress. Type-check, run on every tier, fix, then a parity harness against Rust Jetpack.
+3. Optimization: Jet/Rust ≤1.05 on warm env, store verification, hashing and graph-load cells.
+4. Then ask the owner for a cutover decision.
 
-```jet
-myVar := Task{priority: 2, status: closed}
-myConst :: Task{create_task(2, closed)}
-```
-I want a jet-native tool that functions like convexdb as an excellent, world class sync engine https://youtu.be/pRf8_40EDtM?si=f809dRgc4BAv-gfj
+CONSTRAINTS:
+- Style: ponytail + caveman, terse replies, also for subagents.
+- At most 3 subagents, all Opus (agent: opus-worker); never fall back to another model.
+- No OOM risk. Every jet/cargo run goes under `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p
+RuntimeMaxSec=…`, plus `timeout`.
+- Runs above 6G are allowed with monitoring and safe recovery. Check for orphaned scopes after any tool timeout.
+- Scratch goes in ~/.cache/jet-luna, never /tmp.
+- Commit only Jetpack/ and your own fix files, using pathspec or index-only commits. Never stage other streams' uncommitted
+work.
+- If master won't build because of others' edits, build in .agent-worktrees/icefix with the shared target/.
+- Owner approved targeted Rust-compiler crash/perf fixes. Close each fix's card with tier evidence (check, jet run,
+--interpret, AOT, plus a golden example).
+- Update spec/reference docs when a contract changes. Never edit Docs/audits, Docs/research or site/dist.
+- No workarounds for compiler defects: file a card with a minimal repro instead.
 
-BMP Errors:
- Errors the file still has: the one jet check I ran, plus the probes, turned up these, and I haven't fixed them:
- 1. BLACK :: Rgb{...}: a top-level constant can't be a struct (E0109). It needs to be a function or inlined.
- 2. Int.from_radix(...) ?? fatal(...): from_radix can't fail as far as the checker is concerned, so the ?? has to go.
- 3. fatal calls process.exit, which the checker treats as fallible (E0403), and it depends on the broken core.process import.
-    Printing with the built-in eprint and then panicking or returning an error would avoid that import.
- 4. term.stdout().write_bytes(...) doesn't exist (E0102), and core.term doesn't type-check in this tree anyway. simple needs
-    another way to write bytes to stdout.
- 5. It also needs an inline package { authority: { holds: { allow: [FS, IO, ...] } } } block, or writing files fails with
-    E1803.
- 6. Printing to stdout wasn't really available. Jet's print writes text strings, not raw bytes. The byte-writing method I tried
-   (term.stdout().write_bytes) doesn't exist, and core.term doesn't type-check in this tree. Two of the three scripts also
-   write to a file, so the bytes have to be built as a value somewhere.
+STATE AS OF 2026-09-30 (verify each item first):
+- Read ~/.cache/jet-luna/jetpack-port/pause-resume.md (latest section) and buildout-mode.md. Per-worker reports are in
+~/.cache/jet-luna/reports/. Shared names are in ~/.cache/jet-luna/jetpack-port/NAMES.md.
+- Harness: `JETPACK_WORKER=<name> Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh [--syntax] [--area X]`.
+  - --syntax uses `jet inspect compiler parse`; the whole unit was SYNTAX OK, apart from the #3744 lines in
+known-syntax-defects.list.
+  - Full checks: env JETPACK_CHECK_MEM / JETPACK_CHECK_SECS. Area graph is Jetpack/Bootstrap/areas.list.
+- TOP PRIORITY: #3871 is reopened.
+  - Commit dee9a5fe4 sped up small programs, but `jet run` of the 108k-line unit at
+~/.cache/jet-luna/IceFix/3676/unit/run/project hits 24G in 18 s. The pre-fix binary held ~3.9G.
+  - Compare ~/.cache/jet-luna/IceFix/jet-base against jet-perf (likely the dense drop-flag/dominator storage in
+crates/jet-foundation/src/MIROptimization.rs and MIR.rs).
+  - The owner was doing "devloop speed-up" work meanwhile. Check whether it superseded or fixed this.
+- Then:
+  - #3676 verdict.
+  - A Foundation area type check: it never finished. Check speed is #3661.
+  - #3951: AOT rustc time on large derived enums.
+  - #3952: JIT, 30-variant enum ~21 s.
+  - #3863, #3864, #3865.
+  - Then type-check and run each Jetpack area bottom-up: Foundation, TrustRoot, NixEval, PackageModel, EnvModel, Nix, Store,
+Trust, Recipe, Provider, Environment, Services/Image, CLI.
+- Owner-gated items:
+  - Core ballots ready: D-CORE-PROCFILE1, TERMRAW1, HANDLEFD1, DELREBOOT1. Older open ballots: MODELDESC1, SECRETSTORE1,
+NETPUBLIC1, FILEERROR1, ZSTDSOURCE1.
+  - #3674 is frozen (already fixed at HEAD); only the owner can close it.
+  - Many ratified Core APIs Jetpack calls are not yet implemented (FILEDIR1, FILESTAT1, FILEOPEN1, FILEXATTR1, …). Compiler
+entry points are #3599.
+- Known parity items: recipe identity byte parity (#3637), and Core vs Rust JSON escaping of DEL/C1 controls and \b/\f.
 
-Every jet entry point should probably be fallible, isn't every program in every language ever written? The fn run just has implicit default return error type that requires implementation of error trait?
+FIRST STEPS:
+1. Run git log since dee9a5fe4.
+2. `node Tools/tower/tower.mjs card show '#3871'`, then the same for #3661 and #3590.
+3. Rebuild jet under a cap, or confirm target/debug/jet is current.
+4. Rerun the 108k-unit memory probe.
+5. Report status to the owner briefly before dispatching workers.
+>
+>
+>
 
-Have allow by default with a prompt that just asks to confirm the used permissions if none are specified in the package/script/file/CLI command
+Unison
+> Should absolutely research for effects, distributed programming/code, hash addressable items/types/functions, incremental compilation, etc.
 
+ReScript
+> Pattern matching on dictionaries
 
--> FastAPI Video
-> I like the potential idea of nested namespaces for markers like python decorators, where to make a rest api app, you can use @app.get(...), @app.post(...), etc. which is imported, then you can create the api with something like FastAPI(app, ...). Seems like overall very nice ux. 
+Jai does NOT do incremental rebuilds because there can be associated bugs -> yet STILL complete compile time for 300k LOC is under 2 seconds. That is our goal
 
-Building A Programming Language Playlist -> Mine entire playlist
-https://youtube.com/playlist?list=PLET80Nvdg3mg&si=we8LZwmFSPfQnOkA
-> What can we learn from this playlist & apply to jet? What strengths, weaknesses, opportunities, and threats do we have. What can we adopt from these videos at a strategic, operational, and tactical level? What features,functions/methods, ideas, structures, components, libraries, keywords, facets, etc. can we learn from this playlist & the experience of building a language from scratch?
+Lua does MECHANISMS over policies -> give you the features you need at a base level but not 5 keywords to learn
+Neovim as inspiration for hooks -> application for data structures/types, accessing compiler internals for metaprogramming, etc
+Lua for simplicity?
 
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Have Astra research videos/articles/blog posts/forum posts/etc. to find perspectives about why learning to code is hard for people. Use this to funnel into a discussion about how to address these issues from the language level. How can these issues be prevented or minimized by jet? What language level support can we provide to make learning easier (not by literally teaching, but making the experience of coding easier & less frustrating). Similarly, research content about reading, writing, and REASONING about code, aggregate & discuss ways to apply to jet to make it easy to reason about code, then how to make it easier to read code, then how to make it easier to write code. Those are three of our main goals in order from most critical. We also need to audit against current jet in ADDITION to proposing improvements/enhancements/additions/simplifications to jet. 
+pip --resume 01a0e554-cd74-7386-bdaa-ddceb2293fbd

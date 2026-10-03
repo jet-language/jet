@@ -2,7 +2,7 @@
 
 fn env_browser_test_root(label: String) -[FS]> String {
     root :: files.tmpdir("jet-browser-lock-{label}-") ?? panic("browser lock scratch")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("managed dir")
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     root
 }
 
@@ -29,7 +29,7 @@ fn env_browser_test_drifted(result: LockedBrowser BrowserLockError!) -> Bool {
 #Test("browser lock resolve and hash drift") {
     root :: env_browser_test_root("ok")
     bin :: env_browser_test_fake(root, "#!/bin/sh\necho Chromium 131.0\n")
-    locked :: env_browser_lock_binary(root, "chromium", bin, "131.0", @BROWSER_DEFAULT_PROTOCOL, "test fixture") ?? panic("lock the fake browser")
+    locked :: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, "test fixture") ?? panic("lock the fake browser")
     assert_eq(locked.engine, "chromium")
     resolved :: env_browser_resolve(root, "chromium") ?? panic("resolve the locked browser")
     assert_eq(resolved.binary, locked.binary)

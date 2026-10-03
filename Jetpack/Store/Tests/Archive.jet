@@ -54,7 +54,7 @@ fn store_archive_test_cleanup(root: String) Never! {
     root :: store_archive_test_root("generated-key")
     roots :: HangarRoots.at(root)
     key :: store_archive_signing_key(roots, None, true) ?? panic("generate signer key")
-    path :: files.join(files.join(root, "trust"), @STORE_ARCHIVE_KEY)
+    path :: files.join(files.join(root, "trust"), STORE_ARCHIVE_KEY)
     info :: files.stat(path) ?? panic("stat signer key")
     assert_eq(info.mode & 0o7777, 0o600)
     assert_eq(key.secret.len(), 32)

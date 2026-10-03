@@ -3,11 +3,11 @@
 // The generated runtime block of a program whose Prelude carries a target
 // dossier line naming its layer, provider, and closure.
 fn store_runtime_test_dossier_source(layer: String, provider: String, closure: String) -> String {
-    "{@STORE_RUNTIME_BEGIN}// jet:target-dossier layer={layer} provider={provider} closure={closure} artifact=fixture\nfn runtime_entry() {{}}\n{@STORE_RUNTIME_END}"
+    "{STORE_RUNTIME_BEGIN}// jet:target-dossier layer={layer} provider={provider} closure={closure} artifact=fixture\nfn runtime_entry() {{}}\n{STORE_RUNTIME_END}"
 }
 
-fn store_runtime_test_key(crate_name: String, crate_prefix: String, dependency_key: String?, source: String) -> String {
-    store_runtime_cache_key_with_schema(@STORE_RUNTIME_CACHE_SCHEMA.bytes(), crate_name, source, "fixed-exported-runtime", crate_prefix, dependency_key, "rustc", "rustc-test", [String]{}, [NativeRuntimeEnvVar]{})
+fn store_runtime_test_key(source: String) -> String {
+    store_runtime_cache_key(source, "fixed-exported-runtime", "rustc", "rustc-test", [String]{}, [NativeRuntimeEnvVar]{})
 }
 
 // One source variant and the identity field it changes.
@@ -16,7 +16,7 @@ struct StoreRuntimeTestVariant {
     source: String
 }
 
-#Test("native runtime target dossier source invalidates runtime and core keys") {
+#Test("native runtime target dossier source invalidates the runtime key") {
     provider :: "target-providers-v1:sha256:provider-a"
     closure :: "prelude-hosted-v1:sha256:closure-a"
     base :: store_runtime_test_dossier_source("hosted", provider, closure)
@@ -25,14 +25,29 @@ struct StoreRuntimeTestVariant {
         StoreRuntimeTestVariant{field: "provider digest/identity", source: store_runtime_test_dossier_source("hosted", "target-providers-v1:sha256:provider-b", closure)},
         StoreRuntimeTestVariant{field: "Prelude closure", source: store_runtime_test_dossier_source("hosted", provider, "prelude-hosted-v1:sha256:closure-b")},
     }
-    runtime_base :: store_runtime_test_key(@STORE_RUNTIME_CRATE_NAME, @STORE_RUNTIME_CRATE_PREFIX, None, base)
-    core_base :: store_runtime_test_key(@STORE_RUNTIME_CORE_CRATE_NAME, @STORE_RUNTIME_CORE_CRATE_PREFIX, Val("runtime-key"), base)
-    assert_eq(runtime_base, store_runtime_test_key(@STORE_RUNTIME_CRATE_NAME, @STORE_RUNTIME_CRATE_PREFIX, None, base))
-    assert_eq(core_base, store_runtime_test_key(@STORE_RUNTIME_CORE_CRATE_NAME, @STORE_RUNTIME_CORE_CRATE_PREFIX, Val("runtime-key"), base))
+    runtime_base :: store_runtime_test_key(base)
+    assert_eq(runtime_base, store_runtime_test_key(base))
     loop variant in variants {
-        runtime_changed :: store_runtime_test_key(@STORE_RUNTIME_CRATE_NAME, @STORE_RUNTIME_CRATE_PREFIX, None, variant.source)
-        core_changed :: store_runtime_test_key(@STORE_RUNTIME_CORE_CRATE_NAME, @STORE_RUNTIME_CORE_CRATE_PREFIX, Val("runtime-key"), variant.source)
-        assert(runtime_base != runtime_changed, "{variant.field} source identity must invalidate the runtime rlib key")
-        assert(core_base != core_changed, "{variant.field} source identity must invalidate the Core rlib key")
+        assert(runtime_base != store_runtime_test_key(variant.source), "{variant.field} source identity must invalidate the runtime rlib key")
     }
+}
+
+// The runtime and Core blocks reference each other, so the split puts both
+// into the one `jet_runtime` crate and the program imports only that crate.
+#Test("native runtime split puts runtime and core into one crate") {
+    generated :: "#![allow(warnings)]\n{STORE_RUNTIME_BEGIN}fn runtime_item() {{ core_item() }}\n{STORE_RUNTIME_END}{STORE_RUNTIME_CORE_BEGIN}fn core_item() {{}}\n{STORE_RUNTIME_CORE_END}fn main() {{ runtime_item() }}\n"
+    found :: store_runtime_split_generated(generated) ?? panic("valid runtime markers")
+    split :: found ?? panic("a marked program splits")
+    assert_eq(split.runtime, "fn runtime_item() {{ core_item() }}\nfn core_item() {{}}\n")
+    assert_eq(split.program, "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\nfn main() {{ runtime_item() }}\n")
+}
+
+// The program crate names items a runtime `macro_rules!` generates (the
+// fixed-width `jet_u64_trap_shl` kernels, `trait JetHistoryFn1`), invokes root
+// macros itself (`jet_history_callable!`), and reads thread-local runtime
+// state. Trait impl members stay untouched.
+#Test("native runtime export opens macro and thread local runtime items") {
+    source :: "macro_rules! kernels {{\n    ($name:ident, $t:ty) => {{\n        pub(crate) fn $name(value: $t) -> $t {{ value }}\n        trait Callable {{}}\n        impl Marker for $t {{\n            fn mark(&self) {{}}\n        }}\n    }};\n}}\n#[macro_export]\nmacro_rules! exported {{\n    () => {{}};\n}}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {{\n    static STATE: u8 = const {{ 0 }};\n}}\n"
+    expected :: "#[macro_export]\nmacro_rules! kernels {{\n    ($name:ident, $t:ty) => {{\n        pub fn $name(value: $t) -> $t {{ value }}\n        pub trait Callable {{}}\n        impl Marker for $t {{\n            fn mark(&self) {{}}\n        }}\n    }};\n}}\n#[macro_export]\nmacro_rules! exported {{\n    () => {{}};\n}}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {{\n    pub static STATE: u8 = const {{ 0 }};\n}}\n"
+    assert_eq(store_runtime_export_source(source), expected)
 }

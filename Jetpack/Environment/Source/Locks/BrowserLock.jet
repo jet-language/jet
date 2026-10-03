@@ -4,7 +4,7 @@
 // install, never a host PATH scrape.
 
 // The WebDriver BiDi client profiles a locked browser may declare.
-@BROWSER_PROTOCOLS :: [String]{"bidi-2025.5", "bidi-2024.11"}
+BROWSER_PROTOCOLS :: prep { [String]{"bidi-2025.5", "bidi-2024.11"} }
 
 #Error
 pub enum BrowserLockError {
@@ -13,17 +13,17 @@ pub enum BrowserLockError {
     MissingLock(String)
     HashMismatch(engine: String, expected: String, actual: String)
     SizeMismatch(engine: String, expected: Int, actual: Int)
-    Io(String)
+    IO(String)
     InvalidProtocol(String)
 
     fn message(self) -> String Never! {
         if self == {
-            .UnknownEngine(engine) -> "browser engine `{engine}` is not supported (use {@BROWSER_ENGINES.join(", ")})"
+            .UnknownEngine(engine) -> "browser engine `{engine}` is not supported (use {BROWSER_ENGINES.join(", ")})"
             .MissingBinary(path) -> "browser binary `{path}` was not found"
-            .MissingLock(engine) -> "no locked browser for `{engine}` in {@UNIFIED_LOCK_FILE}"
+            .MissingLock(engine) -> "no locked browser for `{engine}` in {UNIFIED_LOCK_FILE}"
             .HashMismatch(engine, expected, actual) -> "locked browser `{engine}` hash drifted (expected {expected}, found {actual})"
             .SizeMismatch(engine, expected, actual) -> "locked browser `{engine}` size drifted (expected {expected}, found {actual})"
-            .Io(text) -> text
+            .IO(text) -> text
             .InvalidProtocol(protocol) -> "browser protocol `{protocol}` is not a BiDi profile"
         }
     }
@@ -32,26 +32,26 @@ pub enum BrowserLockError {
 // The canonical engine spelling (ASCII case-insensitive).
 pub fn env_browser_normalize_engine(raw: String) -> String BrowserLockError! {
     lower :: raw.to_lower()
-    if !@BROWSER_ENGINES.contains(lower) -> return Err(BrowserLockError.UnknownEngine(raw))
+    if !BROWSER_ENGINES.contains(lower) -> return Err(BrowserLockError.UnknownEngine(raw))
     Ok(lower)
 }
 
 pub fn env_browser_validate_protocol(protocol: String) BrowserLockError! {
-    if !@BROWSER_PROTOCOLS.contains(protocol) -> return Err(BrowserLockError.InvalidProtocol(protocol))
+    if !BROWSER_PROTOCOLS.contains(protocol) -> return Err(BrowserLockError.InvalidProtocol(protocol))
 }
 
 // `sha256-<hex>` and the byte size of the file at `path`.
 fn env_browser_hash_file(path: String) -[FS]> (digest: String, size: Int) BrowserLockError! {
-    bytes :: files.read_bytes(path) ?? return Err(BrowserLockError.Io("could not read {path}: {err}"))
+    bytes :: files.read_bytes(path) ?? return Err(BrowserLockError.IO("could not read {path}: {err}"))
     Ok((digest: "sha256-{pkg_sha256_hex(bytes)}", size: bytes.len()))
 }
 
 // Lock a local browser binary into the project lock (a deterministic pin).
-pub fn env_browser_lock_binary(project_root: String, engine_input: String, binary: String, version: String, protocol: String, provenance: String) -[FS, Env, Exec, Time, Time.Wait]> LockedBrowser BrowserLockError! {
+pub fn env_browser_lock_binary(project_root: String, engine_input: String, binary: String, version: String, protocol: String, provenance: String) -[IO, FS, Env, Exec, Time, Time.Wait]> LockedBrowser BrowserLockError! {
     engine :: env_browser_normalize_engine(engine_input)
     env_browser_validate_protocol(protocol)
     if !files.is_file(binary) -> return Err(BrowserLockError.MissingBinary(binary))
-    absolute :: files.canonicalize(binary) ?? return Err(BrowserLockError.Io("could not resolve {binary}: {err}"))
+    absolute :: files.canonicalize(binary) ?? return Err(BrowserLockError.IO("could not resolve {binary}: {err}"))
     hashed :: env_browser_hash_file(absolute)
     locked :: LockedBrowser{
         engine,
@@ -87,7 +87,7 @@ pub fn env_browser_list(project_root: String) -[FS]> [LockedBrowser] Never! {
 pub fn env_browser_verify(locked: LockedBrowser) BrowserLockError! -[FS]> {
     path :: locked.binary
     if !files.is_file(path) -> return Err(BrowserLockError.MissingBinary(path))
-    info :: files.stat(path) ?? return Err(BrowserLockError.Io("could not stat {path}: {err}"))
+    info :: files.stat(path) ?? return Err(BrowserLockError.IO("could not stat {path}: {err}"))
     if info.size != locked.size {
         return Err(BrowserLockError.SizeMismatch{engine: locked.engine, expected: locked.size, actual: info.size})
     }

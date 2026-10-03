@@ -26,7 +26,7 @@ pub fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! 
 
 // The one top-level function named `wanted`, or None when absent or repeated.
 pub fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? Never! {
-    found := None
+    found := Func?{None}
     loop item in program.items {
         if item == .Func(function) {
             if function.name != wanted -> next
@@ -68,8 +68,8 @@ pub fn pkg_path_file_name(path: String) -> String Never! {
 }
 
 pub fn pkg_path_join(base: String, tail: String) -> String Never! {
-    if tail.starts_with("/") -> return tail
-    if base == "" -> return tail
+    if tail.starts_with("/") -> return ~tail
+    if base == "" -> return ~tail
     if base.ends_with("/") -> return "{base}{tail}"
     "{base}/{tail}"
 }
@@ -130,7 +130,7 @@ fn pkg_import_target_paths(root: String, importer: String, kind: ImportKind) -> 
 pub fn pkg_path_without_extension(path: String) -> String Never! {
     name :: pkg_path_file_name(path)
     dot :: name.cut_last(".") ?? return path
-    if dot.before == "" -> return path
+    if dot.before == "" -> return ~path
     stem :: pkg_binder_slice(path, 0, path.bytes().len() - name.bytes().len())
     "{stem}{dot.before}"
 }
@@ -159,7 +159,7 @@ pub fn pkg_reachable_import_module_targets(root: String, wanted: String, sources
     visited := [String]{}
     targets := [String]{}
     loop pending.len() > 0 {
-        path :: pending[pending.len() - 1]
+        path :: ~pending[pending.len() - 1]
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
@@ -194,7 +194,7 @@ pub fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [P
     visited := [String]{}
     imported := [String]{}
     loop pending.len() > 0 {
-        path :: pending[pending.len() - 1]
+        path :: ~pending[pending.len() - 1]
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
@@ -317,7 +317,7 @@ fn pkg_scalar_width(raw: [U8], at: Int) -> Int Never! {
 
 // `Sema::is_build_entry`: `fn build(b: BuildContext)`.
 fn pkg_is_build_entry(function: Func) -> Bool Never! {
-    function.name == @BUILD_ENTRY_FN && function.params.len() == 1 && function.params[0].ty == Type.Named(@TYPE_BUILD_CONTEXT)
+    function.name == BUILD_ENTRY_FN && function.params.len() == 1 && function.params[0].ty == Type.Named{name: TYPE_BUILD_CONTEXT}
 }
 
 // Narrow structural `build` candidates to the compiler-owned build-entry

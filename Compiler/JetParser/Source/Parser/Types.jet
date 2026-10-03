@@ -13,6 +13,7 @@ use jet_foundation.[
     TypeTupleField,
     diagnostic_from_registry,
     diagnostic_with_edit,
+    type_tuple_fields_canonical,
 ]
 use jet_lexer.[
     TOKEN_BANG,
@@ -416,7 +417,9 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the tuple type")
     if fields.len() == 1 && fields[0].name == "" -> return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
-    ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
+    // S73: a named tuple type stores its members sorted by name, so its
+    // identity ignores source order (Rust `canonicalize_tuple_fields`).
+    ParsedType{ty: Type.Tuple{fields: type_tuple_fields_canonical(fields)}, span: parser_cover(open.span, close.span)}
 }
 
 // A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It

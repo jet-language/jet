@@ -33,7 +33,7 @@ fn env_hook_test_fingerprint(root: String) -> String {
     root :: files.join(base, "proj")
     deep :: files.join(files.join(root, "src"), "inner")
     files.create_dir_all(deep) ?? panic("create deep dir")
-    files.write(files.join(root, @ENV_FILE), "// env\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "// env\n") ?? panic("write env.jet")
     assert_eq(env_hook_find_env_root(deep), Val(root))
     assert_eq(env_hook_find_env_root(root), Val(root))
     // A sibling tree with no env.jet above it resolves to None.
@@ -105,7 +105,7 @@ fn env_hook_test_fingerprint(root: String) -> String {
 
 #Test("definition fingerprint tracks explicit reload paths") {
     root :: env_hook_test_root("jpk-envhook-watch-")
-    files.write(files.join(root, @ENV_FILE), "module env.dev {{ reload: .Watch{{ watch: [\"tracked.txt\"], debounce: 250 }} }}\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "module env.dev {{ reload: .Watch{{ watch: [\"tracked.txt\"], debounce: 250 }} }}\n") ?? panic("write env.jet")
     files.write(files.join(root, "tracked.txt"), "one\n") ?? panic("write tracked")
     first :: env_hook_test_fingerprint(root)
     files.write(files.join(root, "untracked.txt"), "one\n") ?? panic("write untracked")
@@ -117,10 +117,10 @@ fn env_hook_test_fingerprint(root: String) -> String {
 
 #Test("definition fingerprint tracks unified lock") {
     root :: env_hook_test_root("jpk-envhook-lock-")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("create .jet")
-    files.write(files.join(root, @ENV_FILE), "module env.dev {{ packages: [] }}\n") ?? panic("write env.jet")
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("create .jet")
+    files.write(files.join(root, ENV_FILE), "module env.dev {{ packages: [] }}\n") ?? panic("write env.jet")
     before_lock :: env_hook_test_fingerprint(root)
-    lock :: files.join(root, @UNIFIED_LOCK_FILE)
+    lock :: files.join(root, UNIFIED_LOCK_FILE)
     files.write(lock, "version = 1\n") ?? panic("write lock")
     first_lock :: env_hook_test_fingerprint(root)
     files.write(lock, "version = 1\n\n[root]\ndependencies = []\n") ?? panic("rewrite lock")
@@ -134,7 +134,7 @@ fn env_hook_test_fingerprint(root: String) -> String {
     if !sys.is_unix() -> return
     root :: env_hook_test_root("jpk-envhook-symlink-")
     files.create_dir_all(files.join(root, "nested")) ?? panic("create nested")
-    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
     files.write(files.join(root, "nested/input.jet"), "// input\n") ?? panic("write input")
     files.symlink("..", files.join(root, "nested/loop")) ?? panic("create loop link")
     assert(env_hook_definition_fingerprint(root, None) != None)
@@ -143,9 +143,9 @@ fn env_hook_test_fingerprint(root: String) -> String {
 
 #Test("malformed env fingerprint fails closed on deep tree") {
     root :: env_hook_test_root("jpk-envhook-deep-")
-    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
     current := root
-    loop index in 0..<(@MAX_TREE_DEPTH + 2) {
+    loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir(current) ?? panic("create deep dir")
     }
@@ -156,16 +156,16 @@ fn env_hook_test_fingerprint(root: String) -> String {
 
 #Test("malformed env fingerprint rejects oversized input at eof") {
     root :: env_hook_test_root("jpk-envhook-oversized-")
-    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
     // A sparse file one byte past the bound.
-    files.write_at(files.join(root, "oversized.jet"), @MAX_TREE_FILE_BYTES, [U8]{U8{0}}) ?? panic("extend oversized file")
+    files.write_at(files.join(root, "oversized.jet"), MAX_TREE_FILE_BYTES, [U8]{U8{0}}) ?? panic("extend oversized file")
     assert_eq(env_hook_definition_fingerprint(root, None), None)
     files.remove_all(root).drop("temp root cleanup")
 }
 
 #Test("definition fingerprint tracks environment module selection") {
     root :: env_hook_test_root("jpk-envhook-profile-")
-    files.write(files.join(root, @ENV_FILE), "module profile.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.full {{ packages: [nixpkgs.fd] }}\n") ?? panic("write env.jet")
+    files.write(files.join(root, ENV_FILE), "module profile.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.full {{ packages: [nixpkgs.fd] }}\n") ?? panic("write env.jet")
     current :: files.join(root, ".jet/profiles/dev")
     files.create_dir_all(current) ?? panic("create profile dir")
     files.write(files.join(current, "current"), "generation-1\n") ?? panic("write generation")

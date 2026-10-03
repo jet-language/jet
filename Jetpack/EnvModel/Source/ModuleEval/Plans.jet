@@ -1,6 +1,6 @@
 // Captured plans (derive-only data) produced by module evaluation: the
-// per-module `EvaluatedModule`, the OCI `ImagePlan`, the dev-supervised
-// `DevServicePlan`, the typed secret declarations, and the runnable `EnvPlan`.
+// per-module `EvaluatedModule`, system and image plans, dev-supervised
+// services, typed secret declarations, and the runnable `EnvPlan`.
 
 // One `$NAME` read captured from a config surface. Environment variables are
 // always text, so the type is explicit in the plan instead of being inferred
@@ -188,6 +188,8 @@ pub struct ModuleEntry {
 pub struct EvaluatedModule {
     pub name: String
     pub entries: [ModuleEntry]
+    // U11: ordered system contributions for the shared JetOS engine.
+    pub systems: [SystemPlan]{[SystemPlan]{}}
     // U14: `image.<name>:` contributions.
     pub images: [ImagePlan]
     // Environment-scoped facts. Source evaluation selects one name before
@@ -218,6 +220,35 @@ pub enum AdapterRecipe {
     Prebuilt(bin: String, as_name: String)
     // `Recipe.build(steps: […])`: a finite, digestable executable action graph.
     Build(recipe: BuildRecipe)
+}
+
+// Rust ModuleEval/Types.rs::SystemPlan: the checked system contribution.
+// Realization belongs to JetOS; these carriers preserve the evaluator's
+// source-qualified packages, ordered services, and ordered option facts.
+pub struct SystemPlan {
+    pub name: String
+    pub target: String
+    pub packages: [Pkg]
+    pub services: [ServicePlan]
+    pub options: [OptionPlan]
+}
+
+// Rust ServicePlan: open service fields retain their source order and text.
+pub struct ServicePlan {
+    pub name: String
+    pub enable: Bool
+    pub extra: [ServicePlanExtra]
+}
+
+pub struct ServicePlanExtra {
+    pub key: String
+    pub value: String
+}
+
+// Rust OptionPlan: one dotted option key and its rendered display value.
+pub struct OptionPlan {
+    pub key: String
+    pub value: String
 }
 
 // U12: one captured dev-supervised `Service` record under an `env.<name>`
@@ -274,9 +305,9 @@ pub struct DevServiceExtra {
 
 pub enum ReadyProbe {
     Exec(command: String)
-    Http(url: String, status: Int?)
+    HTTP(url: String, status: Int?)
     Notify(path: String)
-    Tcp(host: String, port: Int)
+    TCP(host: String, port: Int)
 }
 
 pub enum RestartPolicy {
@@ -292,30 +323,30 @@ pub enum ShutdownPolicy {
     Kill
 }
 
-// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`
-// names, and so which realize tier owns it. `Oci` is the container tier,
-// built natively from a `Package` or an `Environment`.
+// D-JPK-IMAGE1: the referent selects the realization tier. ISO disk images
+// inherit system facts; OCI images project a package or environment.
 pub enum ImageKind {
-    Oci
+    Iso
+    OCI
 }
 
-// U14/D-JPK-IMAGE1: a field-checked `image.<name>: { … }` contribution, built
-// natively from the referenced `Package` or `Environment`'s realized Hangar
-// output plus `expose`/`env_vars`/`files`/`base`.
+// U14/D-JPK-IMAGE1: one checked image contribution. ISO inherits its
+// system's packages/services/options; OCI supplies container projection facts.
 pub struct ImagePlan {
     // The contribution path — the `<name>` in `image.<name>`.
     pub name: String
     // Which referent `from:` names, and which tier realizes this image.
     pub kind: ImageKind
-    // The source package's name (`from: packages.<name>`) or environment's
-    // name (`from: env.<name>`).
+    // The source system, package, or environment's contribution name.
     pub from: String
+    // ISO disk-image format; empty for an OCI projection.
+    pub format: String{""}
     // D-ENV-IMAGE1: true when `from:` projects an `env.<name>` into an OCI
     // shell image. The source kind stays explicit in the plan so realization
     // cannot confuse an environment with an executable package.
     pub from_environment: Bool
-    // An explicit target platform, if any. Only environment images may carry
-    // one; OCI records it for the image realization path.
+    // An explicit target platform; ISO inherits it through its system,
+    // while an OCI environment records it for the image realization path.
     pub target: String?
     // `expose: [Int]` — TCP ports recorded as `ExposedPorts` in the OCI image
     // config. Sorted + deduped for reproducibility.
@@ -346,9 +377,8 @@ pub struct ImageEnvVar {
     pub value: String
 }
 
-// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
-// the named-source table, the package refs to realize (`package@source`),
-// and the prompt label. Only the `env` namespace and OCI images are consulted.
+// The runnable environment plan, sharing captured system/image declarations
+// with the JetOS tier rather than maintaining another evaluator model.
 pub struct EnvPlan {
     pub table: SourceTable
     // The source files that contributed to this graph, relative to the
@@ -364,11 +394,13 @@ pub struct EnvPlan {
     // U20 adapter packages declared in `packages:`. Kept separate from refs
     // because they have inline build identity and no provider selector.
     pub adapters: [AdapterPlan]
+    // U11: checked system contributions, in source/discovery order.
+    pub systems: [SystemPlan]{[SystemPlan]{}}
     pub prompt: String?
     pub prompt_path: PromptPathMode
     pub prompt_strip: PromptStripMode
-    // U14: every captured `Image`, validated so each `from` names a known
-    // executable package or declared environment.
+    // U14: captured images, with source-referent validation owned by
+    // the shared evaluator before the selected tier realizes them.
     pub images: [ImagePlan]
     // U12: every captured dev-supervised `Service` in the selected environment,
     // in source order. `jetpack services <verb>`'s health gate is the only

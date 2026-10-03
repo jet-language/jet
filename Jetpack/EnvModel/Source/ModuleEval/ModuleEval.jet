@@ -21,7 +21,7 @@ fn envmodel_first_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
 
 // The last error-severity diagnostic in `diagnostics`, if any.
 fn envmodel_last_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
-    found := None
+    found := Diagnostic?{None}
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> found = Val(diagnostic)
     }
@@ -69,7 +69,7 @@ fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentR
             loop read in reads {
                 if read.name == name -> seen = true
             }
-            if !seen { &reads.push(EnvironmentRead{name: name, ty: @TYPE_STRING}) }
+            if !seen { &reads.push(EnvironmentRead{name: name, ty: TYPE_STRING}) }
         }
         if token.kind == TOKEN_STRING {
             loop part in token.payload.string_parts {
@@ -84,7 +84,7 @@ fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtVal
     globals := [String: CtValue]{}
     loop read in reads {
         name :: read.name.removeprefix("$")
-        globals[read.name] = CtValue.Str(sys.get(name) ?? "")
+        globals[read.name] = CtValue.Str{value: sys.get(name) ?? ""}
     }
     globals
 }
@@ -128,7 +128,7 @@ fn envmodel_collect_comptime_globals(items: [Item], scope: ModuleEvalScope, envi
         if item == {
             .Const(definition) -> {
                 if definition.is_comptime {
-                    definitions[definition.name.removeprefix(@COMPTIME_MARK)] = NamedFieldExpr{span: definition.name_span, expr: definition.value}
+                    definitions[definition.name.removeprefix(COMPTIME_MARK)] = NamedFieldExpr{span: definition.name_span, expr: definition.value}
                 }
             }
             else -> {}
@@ -173,7 +173,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
             // The system/fleet/vmtest tiers belong to the JetOS evaluator and
             // performance budgets to the performance gate; none of them
             // carries an environment fact.
-            .System(_) | .Fleet(_) | .VmTest(_) | .Perf(_) -> {}
+            .System(_) | .Fleet(_) | .VMTest(_) | .Perf(_) -> {}
         }
     }
     Ok(EvaluatedModule{
@@ -232,7 +232,7 @@ pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -
 // Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
 // sugar's empty source) resolves against the conventional `default` source.
 pub fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
-    if pkg.source == "" && pkg.name.contains(@REF_PROVIDER_AT) -> return pkg.name
-    source :: if pkg.source == "" -> @DEFAULT_SOURCE else -> pkg.source
-    "{pkg.name}{@REF_PROVIDER_AT}{source}"
+    if pkg.source == "" && pkg.name.contains(REF_PROVIDER_AT) -> return pkg.name
+    source :: if pkg.source == "" -> DEFAULT_SOURCE else -> pkg.source
+    "{pkg.name}{REF_PROVIDER_AT}{source}"
 }

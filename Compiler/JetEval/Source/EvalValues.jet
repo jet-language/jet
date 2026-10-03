@@ -692,6 +692,24 @@ struct JetEvalProgramRows {
     // Rows of program.core_owners per nominal id value and per owner id value.
     pub core_owners_by_nominal: [U64:[Int]]
     pub core_owners_by_id: [U64:[Int]]
+    // Per-function id rows, parallel to program.functions; each entry is
+    // filled on the function's first lookup (jet_eval_function_rows_ready).
+    pub function_rows: [JetEvalFunctionRows]
+}
+
+// Row positions in one function's id tables, so evaluator lookups for a
+// block, place, SSA value, or local probe a map instead of scanning the
+// function on every instruction. Maps hold the first row per id value; the
+// `*_next` lists chain each row to the next row with the same id (-1 ends a
+// chain), so first-, last-, and every-match lookups keep their meaning.
+struct JetEvalFunctionRows {
+    pub built: Bool
+    pub blocks: [U64:Int]
+    pub places: [U64:Int]
+    pub values: [U64:Int]
+    pub values_next: [Int]
+    pub locals: [U64:Int]
+    pub locals_next: [Int]
 }
 
 fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
@@ -776,6 +794,10 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         &id_rows.push(index)
         core_owners_by_id[id] = id_rows
     }
+    function_rows := [JetEvalFunctionRows]{}
+    loop _ in 0..<program.functions.len() {
+        &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
+    }
     JetEvalProgramRows{
         functions: functions,
         fields: fields,
@@ -792,6 +814,7 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         impls_by_trait: impls_by_trait,
         core_owners_by_nominal: core_owners_by_nominal,
         core_owners_by_id: core_owners_by_id,
+        function_rows: function_rows,
     }
 }
 

@@ -2259,15 +2259,9 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
     }
     if result == .Val(value) {
         result_ty :: jet_rust_emit_value_type(ctx, function, value)
-        // MIRRust: a Core result crosses by the registry's raw-machine-word
-        // fact; a Prelude route's declared Rust slot picks its own shape.
+        // MIRRust: a Prelude/Core kernel result re-enters the exact Int carrier.
         if callee == {
-            .Core(id) -> {
-                native_int_result := false
-                loop row in jet_rust_emit_core_rows(ctx, id) { if row.id == id -> native_int_result = row.native_int_result }
-                return jet_rust_emit_core_int_result(&ctx, native_int_result, call, result_ty)
-            }
-            .Prelude(_) -> return jet_rust_emit_native_int_result(&ctx, call, result_ty) ?? call
+            .Core(_) | .Prelude(_) -> return jet_rust_emit_native_int_result(&ctx, call, result_ty) ?? call
             else -> {}
         }
         failure := jet_rust_emit_call_failure(&ctx, callee)
@@ -2529,13 +2523,11 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     core_found := false
     module_name := ""
     member := ""
-    native_int_result := false
     loop row in jet_rust_emit_core_rows(ctx, call) {
         if row.id == call {
             core_found = true
             module_name = row.module_name
             member = row.member
-            native_int_result = row.native_int_result
             if args.len() < row.arity || args.len() > row.max_arity || row.borrow_mask.len() < row.arity {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core call arity does not match its checked ABI", "the checked Core route and operation payload must agree exactly", Val(function.span))
             }
@@ -2592,9 +2584,9 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     if special == .Val(adapter) {
         expression = adapter
     } else if result == .Val(result_value) {
-        // MIRRust core_call: a raw-machine-word kernel result re-enters the Jet carrier.
+        // MIRRust core_call: a native-word kernel result re-enters the Jet carrier.
         result_ty :: jet_rust_emit_value_type(ctx, function, result_value)
-        expression = jet_rust_emit_core_int_result(&ctx, native_int_result, expression, result_ty)
+        if jet_rust_emit_native_int_result(&ctx, expression, result_ty) == .Val(widened) -> expression = widened
     }
     if module_name == "core.crypto.vault" && member == "current" -> expression = "({expression}).map(|value| match value {{ Some(value) => Ok(value), None => Err({ctx.config.root_prefix}JetAbsent) }})"
     if fallibility == {
@@ -3823,13 +3815,7 @@ fn jet_rust_emit_scope_enter(ctx: &JetRustEmitContext, function: MIRFunction, id
     scope_value :: jet_rust_emit_scope_row(&ctx, function, id)
     if scope_value == .Val(scope) {
         if scope.kind == MIRScopeKind.Shield -> return "jet_scheduler_shield_enter()"
-        if scope.kind == MIRScopeKind.Context && scope.deadline == .Val(deadline) {
-            // MIRRust scope_operation_expression: the deadline leaf takes a
-            // machine word, so the checked `Int` narrows once.
-            value := jet_rust_emit_value_transfer(ctx, function, deadline)
-            if jet_rust_emit_value_type(ctx, function, deadline).kind == MIRTypeKind.Int -> value = jet_rust_emit_native_int_argument(&ctx, value, None)
-            return "__jet_deadline_scopes.push(jet_ctx_push_deadline({value}))"
-        }
+        if scope.kind == MIRScopeKind.Context && scope.deadline != None -> return "__jet_deadline_scopes.push(jet_ctx_push_deadline({jet_rust_emit_value_transfer(ctx, function, scope.deadline ?? MIRValueID{value: 0})}))"
         if scope.kind == MIRScopeKind.Unsafe {
             file := ""
             file_fact := jet_rust_emit_scope_fact(scope, "sentry_file")
@@ -4653,47 +4639,24 @@ fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MI
     jet_rust_emit_value_copy(ctx, function, value, fact)
 }
 
-// MIRRust NativeIntSource: a Core row's native Int shape is the registry's
-// raw-machine-word fact; a native host slot's is its declared Rust type.
-enum JetRustNativeIntSource {
-    MachineWord
-    DeclaredSlot
-}
-
-// MIRRust core_int_result: a raw-machine-word Core row widens each Int leaf;
-// every other row already returns the owned exact carrier.
-fn jet_rust_emit_core_int_result(ctx: &JetRustEmitContext, native_int_result: Bool, value: String, ty: MIRType) -> String Never! {
-    if !native_int_result -> return ~value
-    jet_rust_emit_native_int_widening(&ctx, value, ty, JetRustNativeIntSource.MachineWord) ?? ~value
-}
-
-// MIRRust native_int_result: a native host slot's Int result re-enters the
-// exact Int carrier, through refinements, carriers, tuples, lists and count maps.
+// MIRRust native_int_result: a native-word kernel result re-enters the exact
+// Int carrier, through refinements, carriers, tuples, lists and count maps.
 fn jet_rust_emit_native_int_result(ctx: &JetRustEmitContext, value: String, ty: MIRType) -> String? {
-    jet_rust_emit_native_int_widening(&ctx, value, ty, JetRustNativeIntSource.DeclaredSlot)
-}
-
-fn jet_rust_emit_native_int_widening(ctx: &JetRustEmitContext, value: String, ty: MIRType, source: JetRustNativeIntSource) -> String? {
     root :: ~ctx.config.root_prefix
     if ty.kind == {
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return None
-            return jet_rust_emit_native_int_widening(&ctx, value, inner, source)
+            return jet_rust_emit_native_int_result(&ctx, value, inner)
         }
-        .Int -> {
-            if source == {
-                .MachineWord -> return Val("{root}jet_std::jet_int_owned_from_i64({value})")
-                .DeclaredSlot -> return Val("{root}jet_std::jet_int_owned_from_native_result({value})")
-            }
-        }
-        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_native_int_widening(&ctx, value, base, source)
+        .Int -> return Val("{root}jet_std::jet_int_owned_from_native_result({value})")
+        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_native_int_result(&ctx, value, base)
         .Option(inner) -> {
-            converted :: jet_rust_emit_native_int_widening(&ctx, "__jet_value", inner, source) ?? return None
+            converted :: jet_rust_emit_native_int_result(&ctx, "__jet_value", inner) ?? return None
             return Val("({value}).map(|__jet_value| {converted})")
         }
         .Result(ok, err) -> {
-            ok_text :: jet_rust_emit_native_int_widening(&ctx, "__jet_value", ok, source)
-            err_text :: jet_rust_emit_native_int_widening(&ctx, "__jet_error", err, source)
+            ok_text :: jet_rust_emit_native_int_result(&ctx, "__jet_value", ok)
+            err_text :: jet_rust_emit_native_int_result(&ctx, "__jet_error", err)
             if ok_text == .Val(ok_converted) {
                 if err_text == .Val(err_converted) -> return Val("({value}).map(|__jet_value| {ok_converted}).map_err(|__jet_error| {err_converted})")
                 return Val("({value}).map(|__jet_value| {ok_converted})")
@@ -4706,7 +4669,7 @@ fn jet_rust_emit_native_int_widening(ctx: &JetRustEmitContext, value: String, ty
             values := [String]{}
             loop (index, field) in fields {
                 original :: "__jet_value.{index}"
-                if jet_rust_emit_native_int_widening(&ctx, original, field.ty, source) == .Val(converted) {
+                if jet_rust_emit_native_int_result(&ctx, original, field.ty) == .Val(converted) {
                     converted_any = true
                     &values.push(converted)
                 } else {
@@ -4718,16 +4681,10 @@ fn jet_rust_emit_native_int_widening(ctx: &JetRustEmitContext, value: String, ty
             return Val("{{ let __jet_value = {value}; ({rendered}) }}")
         }
         .List(inner) -> {
-            converted :: jet_rust_emit_native_int_widening(&ctx, "__jet_value", inner, source) ?? return None
+            converted :: jet_rust_emit_native_int_result(&ctx, "__jet_value", inner) ?? return None
             return Val("({value}).into_iter().map(|__jet_value| {converted}).collect::<Vec<_>>()")
         }
         .Map(_, inner) -> {
-            // No registry row returns a count map as a raw machine word; the
-            // declared Rust slot alone selects this conversion.
-            if source == {
-                .MachineWord -> return None
-                .DeclaredSlot -> {}
-            }
             if inner.kind == MIRTypeKind.Int -> return Val("{root}jet_std::jet_int_map_owned_from_native_result({value})")
             return None
         }

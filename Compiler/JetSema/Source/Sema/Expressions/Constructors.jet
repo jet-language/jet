@@ -574,7 +574,9 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                     return None
                 }
             }
-            payload_ty :: sema_inference_substitute_type(ty, generic_names, generic_args)
+            // As a struct field: the payload type names types as the enum's
+            // module sees them (Rust `owner_type_for_reader`).
+            payload_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner.module_name, ty, generic_names), generic_names, generic_args)
             sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
             checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment) ?? return None
@@ -621,7 +623,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                     return None
                 }
                 supplied[found] = true
-                field_ty :: sema_inference_substitute_type(fields[found].ty, generic_names, generic_args)
+                field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
                 sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
                 checked :: sema_check_expression(payload_expr, Val(field_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None

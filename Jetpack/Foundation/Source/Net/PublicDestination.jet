@@ -1,0 +1,53 @@
+// crates/jet-net/src/lib.rs:674-713: strict outbound public-space policy.
+// This is deliberately NOT Core ip.is_global (#4413): the outbound meaning
+// refuses CGNAT, documentation, benchmarking, and 192.0.0.0/24 as well.
+// Core owns parsing; these functions consume its already-decoded octets/words.
+// No formatting/re-parsing bridge from IPAddr, no DNS helper or socket fallback.
+
+pub fn foundation_public_destination_ipv4(a: Int, b: Int, c: Int, d: Int) -> Bool Never! {
+    !(a == 0
+        || a == 10
+        || (a == 100 && (b & 192) == 64)
+        || a == 127
+        || (a == 169 && b == 254)
+        || (a == 172 && b >= 16 && b <= 31)
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 192 && b == 0 && c == 2)
+        || (a == 192 && b == 168)
+        || (a == 198 && b >= 18 && b <= 19)
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+        || a >= 224)
+}
+pub fn foundation_public_destination_ipv6(words: [Int]) -> Bool Never! {
+    // A Core-decoded IPv6 has exactly eight 16-bit words. The mapped family
+    // shares the IPv4 policy, rather than being rejected by the v6 prefix rule.
+    if words[0] == 0 && words[1] == 0 && words[2] == 0 && words[3] == 0 && words[4] == 0 && words[5] == 65535 {
+        return foundation_public_destination_ipv4(words[6] /% 256, words[6] %% 256, words[7] /% 256, words[7] %% 256)
+    }
+    first :: words[0]
+    second :: words[1]
+    // The 2000::/3 rule already excludes unspecified, loopback, multicast,
+    // ULA and link-local space. Preserve Rust's documentation exception.
+    (first & 57344) == 8192 && !(first == 8193 && second == 3512)
+}
+
+// #3595 REQUIRED native bridges, intentionally not guessed Core APIs:
+// Rust is_public_ip(IPAddr): allocation-free v4 octets / v6 segments projection
+// into the above single policy (including mapped-v4 handling).
+// Rust addresses_are_public(&[SocketAddr]): false when empty; ALL answers must
+// pass is_public_ip. Never filter a mixed public/private set into an allowed set.
+// Rust resolve_public_addresses(host, u16): strip paired outer brackets, format
+// [IPv6]:port or host:port, use ToSocketAddrs-equivalent OS ordering (including
+// numeric literals), collect the complete answer set, reject empty/non-public
+// with "provider destination resolves to a non-public address", and return the
+// SAME validated set. Resolver errors: "could not resolve provider destination:
+// {error}". Core dns_a + dns_aaaa is not that ordered OS resolver contract.
+// Rust restricted_resolver(netloc): use that same complete answer policy;
+// return PermissionDenied("compile-time network destination is not public").
+// Rust get_stream_pinned(url, addresses, timeout) (:738-755): an empty set is
+// FoundationFetchError.IO("pinned network transport has no resolved addresses");
+// otherwise disable redirects and force every connection to the supplied set,
+// with NO second DNS lookup. Full StreamResponse/Fetch remains #3595/#4262.
+// These bridges cannot be implemented using the current Core IPAddr accessors,
+// DNS APIs or HTTP client. Their original composed acceptance tests are retained.

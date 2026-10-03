@@ -447,6 +447,10 @@ pub struct SemaRegistrationModule {
     pub foreign_functions: [SemaRegistrationForeignFunction]
     pub nominals: [SemaRegistrationNominal]
     pub constants: [SemaRegistrationConstant]
+    // Symbol keys of the `#Persist`, mutable, and `#Static` constants
+    // (sema_ownership_is_static_root), collected once at registration so a
+    // function check reads them without walking the constant ASTs.
+    pub static_roots: [String]{[String]{}}
     pub imports: [SemaRegistrationImport]
     pub exports: [SemaRegistrationExport]
     // Local import name -> its binding (Rust `Checker::imports`). Import
@@ -1514,6 +1518,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     if nominal == .Val(value) -> &module_row.nominals.push(value)
     if item == {
         .Const(value) -> {
+            if sema_ownership_is_static_root(value) -> &module_row.static_roots.push(symbol.id.key)
             &module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, identity_key: "{module_row.module_identity}:{value.name}"})
         }
         else -> {}

@@ -1,6 +1,6 @@
 // Claims ported from jet_pkg_model::ComBind tests.
 
-@COM_TEST_OFFICE_METADATA :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n"
+COM_TEST_OFFICE_METADATA :: prep { "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n" }
 
 #Test("com contextual result names project as foreign identifiers") {
     assert_eq(pkg_com_project("Ok") ?? panic("Ok projects"), "Ok")
@@ -8,7 +8,7 @@
 }
 
 #Test("com schema generates typed stub and real windows automation") {
-    schema :: pkg_com_parse_schema(@COM_TEST_OFFICE_METADATA.bytes()) ?? panic("the fixture schema parses")
+    schema :: pkg_com_parse_schema(COM_TEST_OFFICE_METADATA.bytes()) ?? panic("the fixture schema parses")
     jet :: pkg_com_render_jet("office", schema)
     assert(jet.contains("pub fn open() -[FFI.Com]> Application ComError!"))
     assert(jet.contains("impl Application.Close"))
@@ -44,9 +44,9 @@
 }
 
 #Test("com discovery covers dual automation interfaces") {
-    assert(@COM_DISCOVERY_C.contains("TKIND_INTERFACE"))
-    assert(@COM_DISCOVERY_C.contains("TYPEFLAG_FDUAL"))
-    assert(@COM_DISCOVERY_C.contains("TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED"))
+    assert(COM_DISCOVERY_C.contains("TKIND_INTERFACE"))
+    assert(COM_DISCOVERY_C.contains("TYPEFLAG_FDUAL"))
+    assert(COM_DISCOVERY_C.contains("TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED"))
 }
 
 #Test("com schema rejects duplicate projected parameter names") {
@@ -59,7 +59,7 @@
 }
 
 #Test("com generated windows sources cross compile with winegcc") {
-    if BinderHostOs.current() == BinderHostOs.Windows -> return
+    if BinderHostOS.current() == BinderHostOS.Windows -> return
     probe :: if process.cmd([String]{"winegcc", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> receipt
         .Err(error) -> {
@@ -78,7 +78,7 @@
     scratch :: files.temp_dir("jet-com-cross") ?? panic("scratch directory")
     inspector :: files.join(scratch.path, "inspect.c")
     runtime :: files.join(scratch.path, "runtime.c")
-    files.write(inspector, @COM_DISCOVERY_C) ?? panic("write inspector")
+    files.write(inspector, COM_DISCOVERY_C) ?? panic("write inspector")
     files.write(runtime, pkg_com_render_c("office", schema)) ?? panic("write runtime")
     sources :: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
     loop entry in sources {
@@ -88,7 +88,7 @@
 }
 
 #Test("com non windows host is rejected before tool or file access") {
-    if BinderHostOs.current() == BinderHostOs.Windows -> return
+    if BinderHostOS.current() == BinderHostOS.Windows -> return
     error :: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {
         .Ok(_) -> panic("a non-Windows host bound a COM type library")
         .Err(error) -> error

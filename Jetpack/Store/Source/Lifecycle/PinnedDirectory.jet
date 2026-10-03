@@ -10,8 +10,8 @@
 // identity is the ratified Stat identity (D-CORE-FILESTAT1); the per-platform
 // flags and the unsupported-platform fallback are Core's responsibility.
 
-@STORE_PINNED_PRIVATE_MODE :: 0o700
-@STORE_PINNED_FILE_MODE :: 0o600
+STORE_PINNED_PRIVATE_MODE :: prep { 0o700 }
+STORE_PINNED_FILE_MODE :: prep { 0o600 }
 
 pub struct PinnedLifecycleDirectory {
     directory: Directory
@@ -28,11 +28,11 @@ pub struct PinnedLifecycleDirectory {
             if directory.open_directory(name) == {
                 .Ok(child) -> directory = child
                 .Err(error) -> {
-                    if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
-                    if directory.create_directory(name, mode: @STORE_PINNED_PRIVATE_MODE) == {
+                    if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
+                    if directory.create_directory(name, mode: STORE_PINNED_PRIVATE_MODE) == {
                         .Ok(_) -> directory.fsync()
                         .Err(create_error) -> {
-                            if !store_io_is_already_exists(create_error) -> return Err(StoreError.Io(create_error))
+                            if !store_io_is_already_exists(create_error) -> return Err(StoreError.IO(create_error))
                         }
                     }
                     directory = directory.open_directory(name)
@@ -71,7 +71,7 @@ pub struct PinnedLifecycleDirectory {
     // Exclusively create a private regular-file member.
     fn create_new(self, name: String) -[FS]> FileWriter StoreError! {
         store_pinned_valid_name(name)
-        Ok(self.directory.create(name, if_exists: .Refuse, mode: @STORE_PINNED_FILE_MODE))
+        Ok(self.directory.create(name, if_exists: .Refuse, mode: STORE_PINNED_FILE_MODE))
     }
 
     // Rename the member `old_name`, which must still be the file behind

@@ -6,8 +6,8 @@
 
 // List every zip entry as `<hex file type>\t<name>`, refusing more entries,
 // larger entries, a larger total, or longer names than the argument limits.
-@PACKAGIST_ZIP_LIST :: `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),"\t",$name,"\n"; }`
-@PACKAGIST_ZIP_EXTRACT :: `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); if(!$z->extractTo($argv[2])) exit(3);`
+PACKAGIST_ZIP_LIST :: prep { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),"\t",$name,"\n"; }` }
+PACKAGIST_ZIP_EXTRACT :: prep { `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); if(!$z->extractTo($argv[2])) exit(3);` }
 
 fn provider_packagist_fetch(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
     repository :: authority.registry()
@@ -24,9 +24,9 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
         .Failed(reason) -> { return Err(RegistryError.Reason("invalid Packagist metadata JSON: {reason}")) }
     }
     packages_value :: provider_script_json_get(value, "packages") ?? return Err(RegistryError.Reason("invalid Packagist packages: {err.message()}"))
-    packages :: pkg_json_object(packages_value) ?? return Err(RegistryError.Reason("invalid Packagist packages: {@PKG_JSON_NOT_OBJECT}"))
+    packages :: pkg_json_object(packages_value) ?? return Err(RegistryError.Reason("invalid Packagist packages: {PKG_JSON_NOT_OBJECT}"))
     listed :: packages.get(name) ?? return Err(RegistryError.Reason("Packagist has no package `{name}`"))
-    releases :: pkg_json_array(listed) ?? return Err(RegistryError.Reason("invalid Packagist releases: {@PKG_JSON_NOT_ARRAY}"))
+    releases :: pkg_json_array(listed) ?? return Err(RegistryError.Reason("invalid Packagist releases: {PKG_JSON_NOT_ARRAY}"))
     expanded :: provider_packagist_expand_releases(value, releases)
     out := [RegistryPackage]{}
     loop release in expanded {
@@ -44,8 +44,8 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
         url :: provider_script_json_string(dist, "url")
         shasum :: provider_script_json_string(dist, "shasum")
         integrity :: if {
-            shasum.bytes().len() == 40 && provider_registry_valid_hex(shasum, 40) -> RegistryIntegrity.Sha1(pkg_ascii_lower(shasum))
-            shasum.bytes().len() == 64 && provider_registry_valid_hex(shasum, 64) -> RegistryIntegrity.Sha256(pkg_ascii_lower(shasum))
+            shasum.bytes().len() == 40 && provider_registry_valid_hex(shasum, 40) -> RegistryIntegrity.SHA1(pkg_ascii_lower(shasum))
+            shasum.bytes().len() == 64 && provider_registry_valid_hex(shasum, 64) -> RegistryIntegrity.SHA256(pkg_ascii_lower(shasum))
             shasum == "" -> {
                 reference :: provider_script_json_string(dist, "reference")
                 source_repository :: provider_packagist_verified_git_source(release, url, reference) ?? return Err(RegistryError.Reason("package `{name}` {version} has neither a digest nor a verified immutable GitHub source authority"))
@@ -131,7 +131,7 @@ fn provider_packagist_expand_releases(metadata: DataTree, releases: [DataTree]) 
     expanded := [DataTree]{}
     previous := [(key: String, value: DataTree)]{}
     loop release in releases {
-        changes :: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {@PKG_JSON_NOT_OBJECT}"))
+        changes :: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {PKG_JSON_NOT_OBJECT}"))
         loop change in changes {
             unset :: (pkg_json_text(change.value) ?? "") == "__unset"
             next_fields := [(key: String, value: DataTree)]{}
@@ -182,12 +182,12 @@ fn provider_packagist_verified_git_source(release: DataTree, dist_url: String, r
 fn provider_packagist_install(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
     provider_registry_ensure_download_budget(artifact.path)
     listing_spec :: process.cmd([String]{
-        "php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", @PACKAGIST_ZIP_LIST, "--",
+        "php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PACKAGIST_ZIP_LIST, "--",
         artifact.path,
-        "{@PROVIDER_MAX_ARCHIVE_ENTRIES}",
-        "{@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}",
-        "{@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES}",
-        "{@PROVIDER_MAX_ARCHIVE_PATH_BYTES}",
+        "{PROVIDER_MAX_ARCHIVE_ENTRIES}",
+        "{PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}",
+        "{PROVIDER_MAX_ARCHIVE_TOTAL_BYTES}",
+        "{PROVIDER_MAX_ARCHIVE_PATH_BYTES}",
     }).stdout(.Capture).stderr(.Capture)
     listing :: listing_spec.run() ?? return Err(RegistryError.Reason("could not inspect zip archive: {err}"))
     if !listing.success -> return Err(RegistryError.Reason("Packagist dist is not a readable zip archive"))
@@ -202,7 +202,7 @@ fn provider_packagist_install(artifact: RegistryArtifact, out: String, scratch: 
     }
     unpack :: files.join(scratch, "php-{provider_script_safe_filename(artifact.package.name)}")
     provider_registry_create_dir_all(unpack, "could not create zip scratch")
-    extract :: process.cmd([String]{"php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", @PACKAGIST_ZIP_EXTRACT, "--", artifact.path, unpack})
+    extract :: process.cmd([String]{"php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PACKAGIST_ZIP_EXTRACT, "--", artifact.path, unpack})
         .stdout(.Inherit)
         .stderr(.Inherit)
     action :: "unpack Packagist dist with provisioned PHP ZipArchive"

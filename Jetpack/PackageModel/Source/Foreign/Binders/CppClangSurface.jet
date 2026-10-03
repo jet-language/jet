@@ -151,7 +151,7 @@ fn pkg_cpp_parse_class(map: [String: DataTree], namespace: [String]) -> CppClass
     name :: pkg_cpp_string(map, "name") ?? ""
     if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("clang reported an unnamed C++ class"))
     public := (pkg_cpp_string(map, "tagUsed") ?? "") == "struct"
-    ctor := None
+    ctor := [CppParam]?{None}
     methods := [CppRoutine]{}
     loop raw_child in pkg_cpp_children(map) {
         child :: pkg_json_object(raw_child) ?? next
@@ -176,7 +176,7 @@ fn pkg_cpp_parse_class(map: [String: DataTree], namespace: [String]) -> CppClass
 fn pkg_cpp_parse_template(map: [String: DataTree], namespace: [String]) -> CppFunctionTemplate ForeignBindError! {
     name :: pkg_cpp_string(map, "name") ?? ""
     type_params := [String]{}
-    function := None
+    function := [String: DataTree]?{None}
     loop raw_child in pkg_cpp_children(map) {
         child :: pkg_json_object(raw_child) ?? next
         child_kind :: pkg_cpp_string(child, "kind") ?? ""
@@ -204,7 +204,7 @@ fn pkg_cpp_instantiate_templates(surface: CppSurface, requests: [CppTemplateInst
     loop request in requests {
         if names.contains(request.jet_name) -> return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
         &names.push(request.jet_name)
-        found := None
+        found := CppFunctionTemplate?{None}
         loop template in out.templates {
             if template.cpp_name == request.qualified_name {
                 found = Val(template)
@@ -304,7 +304,7 @@ fn pkg_cpp_namespace_selected(namespace: [String], selected: [String]) -> Bool N
 }
 
 fn pkg_cpp_qualified(namespace: [String], name: String) -> String Never! {
-    if namespace.len() == 0 -> return name
+    if namespace.len() == 0 -> return ~name
     "{namespace.join("::")}::{name}"
 }
 

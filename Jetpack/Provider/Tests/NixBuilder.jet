@@ -2,7 +2,7 @@
 // crates/jetpack/src/NixBuilder.rs. The builds need the native sandbox;
 // each claim works in its own scratch roots and removes them.
 
-@PROVIDER_TEST_NATIVE_FLAKE :: `{
+PROVIDER_TEST_NATIVE_FLAKE :: prep { `{
   packages.x86_64-linux.native = builtins.derivationStrict {
     name = "native-repository";
     system = "x86_64-linux";
@@ -10,7 +10,7 @@
     args = [ "-c" "printf native-repository > $out" ];
   };
 }
-`
+` }
 
 fn provider_test_nix_roots(label: String) -[FS]> HangarRoots {
     HangarRoots.at(files.tmpdir("jet-native-nix-builder-{label}-") ?? panic("scratch roots"))
@@ -25,18 +25,19 @@ fn provider_test_fixed_evaluation() -> NixNativeDerivation {
     nix_evaluate_derivation("builtins.derivationStrict {{ name = \"native-hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"{hash}\"; }}", "x86_64-linux") ?? panic("fixed derivation")
 }
 
-fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
+fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
     build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
-    provider_nix_admit_built_derivation(roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
+    provider_nix_admit_built_derivation(&verification, roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
 }
 
 #Test("provider native derivation build enters hangar with receipt") {
+    verification := StoreVerification.new()
     evaluation :: provider_test_fixed_evaluation()
     roots :: provider_test_nix_roots("admit")
     source :: provider_test_nix_source("admit")
     build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
     assert_eq((build.outputs.get("out") ?? panic("built out")).store_path, evaluation.output_path("out") ?? panic("evaluated out"))
-    entry :: provider_nix_admit_built_derivation(roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
+    entry :: provider_nix_admit_built_derivation(&verification, roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
     assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
     assert_eq(entry.envelope.output_hash, pkg_try_output_hash_of_in_hangar(entry.out, roots.hangar_dir(), false) ?? panic("hangar output hash"))
     assert(entry.receipt != "")
@@ -57,10 +58,11 @@ fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: Ni
 }
 
 #Test("provider native receipt contract is independent of source route") {
+    verification := StoreVerification.new()
     evaluation :: provider_test_fixed_evaluation()
     roots :: provider_test_nix_roots("receipt-route")
     source :: provider_test_nix_source("receipt-route")
-    native :: provider_test_native_entry(roots, source, evaluation)
+    native :: provider_test_native_entry(&verification, roots, source, evaluation)
     substituted_envelope := native.envelope
     substituted_envelope.provenance = "{native.reference} via nix"
     substituted :: Realized{
@@ -77,7 +79,7 @@ fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: Ni
         references: native.references,
         producer: ProducerRecord.decode(native.producer_record) ?? panic("producer record"),
     }
-    substituted_entry :: store_record_realized_mode(roots, substituted) ?? panic("substituted record")
+    substituted_entry :: store_record_realized_mode(&verification, roots, substituted) ?? panic("substituted record")
     assert_eq(native.receipt, substituted_entry.receipt)
     assert_eq(native.envelope.output_hash, substituted_entry.envelope.output_hash)
     assert(native.envelope.provenance != substituted_entry.envelope.provenance)
@@ -86,12 +88,13 @@ fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: Ni
 }
 
 #Test("provider native derivation rebuild reuses the same content identity") {
+    verification := StoreVerification.new()
     evaluation :: provider_test_fixed_evaluation()
     source :: provider_test_nix_source("repro")
     left_roots :: provider_test_nix_roots("repro-left")
     right_roots :: provider_test_nix_roots("repro-right")
-    left :: provider_test_native_entry(left_roots, source, evaluation)
-    right :: provider_test_native_entry(right_roots, source, evaluation)
+    left :: provider_test_native_entry(&verification, left_roots, source, evaluation)
+    right :: provider_test_native_entry(&verification, right_roots, source, evaluation)
     assert_eq(left.envelope.output_hash, right.envelope.output_hash)
     assert_eq(left.receipt, right.receipt)
     left_producer :: ProducerRecord.decode(left.producer_record) ?? panic("left producer")
@@ -105,11 +108,12 @@ fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: Ni
 // The Rust claim reads tests/fixtures/nix-compat/native-builder-flake.nix; the
 // same flake is written into a scratch project here.
 #Test("provider native repository derivation builds without nix realization") {
+    verification := StoreVerification.new()
     project :: provider_test_nix_source("repository-project")
     flake :: files.join(project, "native-builder-flake.nix")
-    files.write(flake, @PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")
+    files.write(flake, PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")
     roots :: provider_test_nix_roots("repository")
-    entry :: provider_nix_build_repository_output(roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build")
+    entry :: provider_nix_build_repository_output(&verification, roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build")
     assert_eq(entry.name, "native-repository")
     assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
     producer :: ProducerRecord.decode(entry.producer_record) ?? panic("producer record")

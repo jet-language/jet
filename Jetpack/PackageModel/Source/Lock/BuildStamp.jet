@@ -4,7 +4,7 @@
 
 // The toolchain identity a fresh stamp records: the Rust `BuildStamp`
 // default (`CARGO_PKG_VERSION` of jet-foundation).
-@PKG_BUILD_STAMP_TOOLCHAIN :: "0.1.0"
+PKG_BUILD_STAMP_TOOLCHAIN :: prep { "0.1.0" }
 
 pub struct BuildStamp {
     pub git: String?
@@ -13,7 +13,7 @@ pub struct BuildStamp {
     pub at: String
 
     fn default() -> BuildStamp Never! {
-        BuildStamp{git: None, dirty: false, toolchain: @PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
+        BuildStamp{git: None, dirty: false, toolchain: PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
     }
 }
 
@@ -28,7 +28,7 @@ pub fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time
         }
         .None -> {}
     }
-    if locked -> return Err(LockError.Invalid("locked build has no `[build.stamp]` in `{files.join(project_root, @UNIFIED_LOCK_FILE)}`"))
+    if locked -> return Err(LockError.Invalid("locked build has no `[build.stamp]` in `{files.join(project_root, UNIFIED_LOCK_FILE)}`"))
     Ok(pkg_lock_capture_build_stamp(project_root))
 }
 
@@ -62,7 +62,8 @@ fn pkg_lock_git_output(project_root: String, args: [String]) -[Exec, Time.Wait]>
 // (`2026-08-20T20:41:14.841770348Z`).
 fn pkg_lock_timestamp_now() -[Time]> String {
     now :: time.now()
-    "{pkg_lock_pad(now.year, 4)}-{pkg_lock_pad(now.month, 2)}-{pkg_lock_pad(now.day, 2)}T{pkg_lock_pad(now.hour, 2)}:{pkg_lock_pad(now.minute, 2)}:{pkg_lock_pad(now.second, 2)}.{pkg_lock_pad(now.nano, 9)}Z"
+    date :: now.date()
+    "{pkg_lock_pad(date.year(), 4)}-{pkg_lock_pad(date.month(), 2)}-{pkg_lock_pad(date.day(), 2)}T{pkg_lock_pad(now.hour(), 2)}:{pkg_lock_pad(now.minute(), 2)}:{pkg_lock_pad(now.second(), 2)}.{pkg_lock_pad(now.nanosecond(), 9)}Z"
 }
 
 // `value` in decimal, zero-padded to `width` digits.

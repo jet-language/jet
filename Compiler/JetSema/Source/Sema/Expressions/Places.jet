@@ -17,9 +17,11 @@ use jet_foundation.[
     TFieldRef,
     TGenericParam,
     TIndexKind,
+    THostCall,
     TagMarker,
     TextEdit,
     Type,
+    builtin_numeric_kind,
     core_record_field,
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
@@ -123,7 +125,14 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
         &diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
-    checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // Rust `Expr::Place`: the ownership walk opened this window on the
+    // complete place, so the place's own base reads answer only for a move
+    // of the whole name (`s` in `&s` would otherwise meet its own loan).
+    previous_root_read :: context.suppress_partial_move_root_read
+    context.suppress_partial_move_root_read = true
+    checked_value :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.suppress_partial_move_root_read = previous_root_read
+    checked :: checked_value ?? return None
     convention :: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
     // Rust `Expr::Place`: a list range is a `View`/`ViewMut` of its element,
     // a compute tensor range views `Float`, any other ranged value (a
@@ -314,12 +323,22 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     // Rust reports the E0220 owner read at the member name.
     member_span :: Span{start: span.end - member.len(), end: span.end}
+    // D-NUMOPS1 (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,
+    // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
+    // numeric type's own constants.
+    if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
+        bound :: sema_tir_expr(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
+        return sema_expr_expected(bound, expected, environment, &diagnostics)
+    }
     // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
     // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
     if sema_expression_enum_variant_path(base, member, environment, &scopes) == .Val(path) {
         return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
+    // Rust `infer_field`: the complete place answers for moves (a moved
+    // sibling leaves this field readable); the base is only its owner.
+    if !sema_ownership_check_moved_place_use(&state, Expr.Field{base: base, member: member, span: span}, scopes, &diagnostics) -> return None
     // The base is checked once, for real. When it is a shared handle, that
     // check is rolled back and the locked-read rewrite is checked instead.
     // (Probing the base before checking it re-checked every prefix of a field
@@ -329,7 +348,10 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     base_state :: ~state
     base_diagnostic_count :: diagnostics.len()
     base_tail_body_count :: tail_store.bodies.len()
+    previous_root_read :: context.suppress_partial_move_root_read
+    context.suppress_partial_move_root_read = true
     checked_base_value :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.suppress_partial_move_root_read = previous_root_read
     if checked_base_value == .Val(probe_value) {
         rewritten :: sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
         if rewritten == .Val(generated) {
@@ -346,6 +368,18 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     checked_base :: checked_base_value ?? return None
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
     sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
+}
+
+// Rust `numeric_type_from_name` + `numeric_const_type`: the type of
+// `Numeric.MEMBER`, or None when `base` is not a numeric type name or
+// `member` is not one of its constants.
+fn sema_expression_numeric_bound_type(base: Expr, member: String) -> Type? {
+    if base == .Ident(owner_name, _) {
+        kind :: builtin_numeric_kind(owner_name) ?? return None
+        if member == "MIN" || member == "MAX" -> return Val(kind.ty)
+        if !kind.integer && (member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON") -> return Val(kind.ty)
+    }
+    None
 }
 
 // D-CRYPTO-API1: reading a secret-bearing value's raw bytes is an exposure.

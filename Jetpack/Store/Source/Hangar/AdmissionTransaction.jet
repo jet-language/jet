@@ -80,6 +80,7 @@ struct PublishedObject {
 }
 
 pub struct AdmissionTransaction {
+    verification: StoreVerification
     roots: HangarRoots
     stage: String
     objects: [AdmissionObject]
@@ -87,19 +88,19 @@ pub struct AdmissionTransaction {
     receipts: [String]
     committed: Bool
 
-    fn new(roots: HangarRoots) -> AdmissionTransaction StoreError! {
+    fn new(verification: &StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar :: roots.hangar_dir()
         store_ensure_real_directory(hangar, "Hangar root")
-        stage_parent :: files.join(hangar, @STORE_STAGE_DIR)
+        stage_parent :: files.join(hangar, STORE_STAGE_DIR)
         store_ensure_real_directory(stage_parent, "Hangar admission staging")
         loop {
             sequence :: store_transaction_sequence
             store_transaction_sequence = store_transaction_sequence + 1
             candidate :: files.join(stage_parent, "admission-{process.current_pid()}-{sequence}")
             if files.create_dir(candidate) == {
-                .Ok(_) -> return Ok(AdmissionTransaction{roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
+                .Ok(_) -> return Ok(AdmissionTransaction{verification: ~verification, roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
                 .Err(error) -> {
-                    if !StoreError.Io(error).is_already_exists() -> return Err(StoreError.Io(error))
+                    if !StoreError.IO(error).is_already_exists() -> return Err(StoreError.IO(error))
                 }
             }
         }
@@ -111,20 +112,20 @@ pub struct AdmissionTransaction {
     fn recover_unlocked(roots: HangarRoots) -> Int StoreError! {
         hangar :: roots.hangar_dir()
         swept := store_recover_seals(hangar)
-        swept += store_sweep_abandoned_directory(files.join(hangar, @STORE_STAGE_DIR), "Hangar admission staging")
-        objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+        swept += store_sweep_abandoned_directory(files.join(hangar, STORE_STAGE_DIR), "Hangar admission staging")
+        objects :: files.join(hangar, STORE_OBJECTS_DIR)
         metadata :: if files.stat(objects) == {
             .Ok(metadata) -> metadata
             .Err(error) -> {
-                if StoreError.Io(error).is_not_found() -> return Ok(swept)
-                return Err(StoreError.Io(error))
+                if StoreError.IO(error).is_not_found() -> return Ok(swept)
+                return Err(StoreError.IO(error))
             }
         }
         if metadata.is_symlink || !metadata.is_dir {
             return Err(StoreError.InvalidData("Hangar object pool is not a real directory; repair the path before recovery"))
         }
         loop entry in files.list_dir(objects) {
-            if !entry.name.ends_with(@STORE_PARTIAL_SUFFIX) -> next
+            if !entry.name.ends_with(STORE_PARTIAL_SUFFIX) -> next
             node :: files.stat(entry.path)
             if {
                 node.is_symlink || node.is_file -> files.remove(entry.path)
@@ -140,8 +141,8 @@ pub struct AdmissionTransaction {
     // path. No bytes become visible until `commit`.
     fn stage_object(&self, object: AdmissionObject) -> String StoreError! {
         store_transaction_validate_digest(object.digest)
-        files.stat(object.source) ?? return Err(StoreError.Io(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.Io(err).message()}"))
-        destination :: files.join(files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR), object.digest)
+        files.stat(object.source) ?? return Err(StoreError.IO(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.IO(err).message()}"))
+        destination :: files.join(files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR), object.digest)
         &self.objects.push(object)
         Ok(destination)
     }
@@ -164,9 +165,10 @@ pub struct AdmissionTransaction {
     }
 
     fn commit_steps(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+        verification :: self.verification
         &self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
-        receipts_dir :: files.join(self.roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+        receipts_dir :: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
         loop receipt in extra_receipts {
             if self.publish_receipt(receipt) -> &self.receipts.push(files.join(receipts_dir, receipt.digest))
         }
@@ -177,7 +179,7 @@ pub struct AdmissionTransaction {
             if wrote -> &self.receipts.push(files.join(receipts_dir, entry.receipt))
         }
         store_injected_failure(AdmissionFailurePoint.AfterReceiptPublication)
-        registered :: store_register_entries_unlocked_with_mode(self.roots, entries, mode, fresh_action_key)
+        registered :: store_register_entries_unlocked_with_mode(&verification, self.roots, entries, mode, fresh_action_key)
         self.committed = true
         if !registered -> &self.remove_new_receipts()
         &self.finish()
@@ -199,7 +201,7 @@ pub struct AdmissionTransaction {
     fn commit_objects_steps(&self, excluded: String?) -> [String] StoreError! {
         &self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
-        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destinations := [String]{}
         loop object in self.objects -> &destinations.push(files.join(objects_dir, object.digest))
         self.committed = true
@@ -208,18 +210,19 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_objects(&self, excluded: String?) StoreError! {
-        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        verification :: self.verification
+        objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         store_ensure_real_directory(objects_dir, "Hangar object pool")
         incoming := 0
         already_counted := 0
         counted := [String: Bool]{}
         loop object in self.objects {
-            if object.repair_corrupt -> store_invalidate_verified_digest(files.join(objects_dir, object.digest))
+            if object.repair_corrupt -> store_invalidate_verified_digest(&verification, files.join(objects_dir, object.digest))
             if counted.has_key(object.digest) -> next
             counted[object.digest] = true
             destination :: files.join(objects_dir, object.digest)
             if !self.object_is_verified(destination, object) {
-                if incoming > @STORE_INT_MAX - object.bytes -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                if incoming > STORE_INT_MAX - object.bytes -> return Err(StoreError.Other("Hangar admission size overflowed"))
                 incoming += object.bytes
             }
             source_excluded :: if excluded == {
@@ -228,25 +231,26 @@ pub struct AdmissionTransaction {
             }
             if object.source != destination && self.source_is_internal(object.source) && !source_excluded {
                 size :: store_admission_size(object.source)
-                if already_counted > @STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                if already_counted > STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar admission size overflowed"))
                 already_counted += size
             }
         }
         incoming = if incoming > already_counted -> incoming - already_counted else -> 0
-        store_ensure_hangar_capacity(self.roots, store_admission_reservation(incoming), excluded)
+        store_ensure_hangar_capacity(&verification, self.roots, store_admission_reservation(incoming), excluded)
         loop index in 0..<self.objects.len() -> &self.publish_object(index)
         if self.published.len() > 0 -> store_sync_store_directory(objects_dir)
     }
 
     fn object_is_verified(self, destination: String, object: AdmissionObject) -> Bool StoreError! {
+        verification :: self.verification
         if files.stat(destination) == {
             .Ok(_) -> {
-                actual :: store_verified_output_hash_persistent(destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
+                actual :: store_verified_output_hash_persistent(&verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
                 Ok(actual == object.digest)
             }
             .Err(error) -> {
-                if StoreError.Io(error).is_not_found() -> return Ok(false)
-                Err(StoreError.Io(error))
+                if StoreError.IO(error).is_not_found() -> return Ok(false)
+                Err(StoreError.IO(error))
             }
         }
     }
@@ -262,20 +266,21 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_object(&self, index: Int) StoreError! {
+        verification :: self.verification
         object :: self.objects[index]
-        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destination :: files.join(objects_dir, object.digest)
         internal :: self.source_is_internal(object.source)
 
         if object.source == destination {
-            if self.object_is_verified(destination, object) -> return Ok()
+            if self.object_is_verified(destination, object) -> return
             return Err(StoreError.InvalidData("canonical Hangar object `{destination}` does not match its digest"))
         }
 
         existing :: if files.stat(destination) == {
             .Ok(_) -> true
             .Err(error) -> {
-                if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+                if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
                 false
             }
         }
@@ -288,7 +293,7 @@ pub struct AdmissionTransaction {
                 store_sync_store_directory(files.dirname(object.source))
                 &self.published.push(PublishedObject{destination: destination, original_source: Val(object.source), held_source: Val(held), backup: None, pending: None, created: false})
             }
-            return Ok()
+            return
         }
         if existing && !object.repair_corrupt {
             return Err(StoreError.InvalidData("existing Hangar object `{destination}` does not match its digest"))
@@ -300,7 +305,7 @@ pub struct AdmissionTransaction {
         &self.published.push(PublishedObject{destination: destination, original_source: original_source, held_source: None, backup: backup, pending: None, created: false})
         if backup != None -> store_sync_store_directory(objects_dir)
 
-        partial :: files.join(objects_dir, "{object.digest}{@STORE_PARTIAL_SUFFIX}")
+        partial :: files.join(objects_dir, "{object.digest}{STORE_PARTIAL_SUFFIX}")
         if files.lexists(partial) -> store_transaction_remove_node(partial)
         self.published[record_index].pending = Val(partial)
 
@@ -313,15 +318,15 @@ pub struct AdmissionTransaction {
             else -> store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
         }
         store_seal_node(partial)
-        actual :: store_verified_output_hash(partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
+        actual :: store_verified_output_hash(&verification, partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
         if actual != object.digest -> return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
         store_fsync_tree(partial)
         store_sync_store_directory(objects_dir)
         files.rename(partial, destination)
         self.published[record_index].pending = None
         self.published[record_index].created = true
-        store_write_seal(destination, self.roots.hangar_dir(), object.digest)
-        store_refresh_verified_digest(destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
+        store_write_seal(&verification, destination, self.roots.hangar_dir(), object.digest)
+        store_refresh_verified_digest(&verification, destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
         store_sync_store_directory(objects_dir)
     }
 
@@ -339,7 +344,7 @@ pub struct AdmissionTransaction {
         if expected != receipt.digest {
             return Err(StoreError.InvalidData("Hangar admission receipt digest is `{receipt.digest}`, expected `{expected}`"))
         }
-        receipts :: files.join(self.roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+        receipts :: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
         store_ensure_real_directory(receipts, "Hangar receipt directory")
         path :: files.join(receipts, receipt.digest)
         if files.stat(path) == {
@@ -349,7 +354,7 @@ pub struct AdmissionTransaction {
                 return Ok(false)
             }
             .Err(error) -> {
-                if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+                if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
             }
         }
         sequence :: store_transaction_sequence
@@ -385,10 +390,11 @@ pub struct AdmissionTransaction {
     // Undo every publication step in reverse order. Rust ran this from
     // `Drop` for an uncommitted transaction.
     fn rollback(&self) Never! {
+        verification :: self.verification
         if self.committed -> return
         index := self.published.len() - 1
         loop index >= 0 {
-            store_transaction_undo(self.roots.hangar_dir(), self.published[index])
+            store_transaction_undo(&verification, self.roots.hangar_dir(), self.published[index])
             index -= 1
         }
         self.published = [PublishedObject]{}
@@ -399,7 +405,7 @@ pub struct AdmissionTransaction {
 }
 
 // Reverse one publication step, best effort.
-fn store_transaction_undo(hangar: String, published: PublishedObject) Never! {
+fn store_transaction_undo(verification: &StoreVerification, hangar: String, published: PublishedObject) Never! {
     if published.pending == {
         .Val(pending) -> {
             if files.lexists(pending) {
@@ -412,7 +418,7 @@ fn store_transaction_undo(hangar: String, published: PublishedObject) Never! {
         .None -> {}
     }
     if published.created {
-        store_remove_seal(published.destination, hangar).drop("rollback restores what it can")
+        store_remove_seal(&verification, published.destination, hangar).drop("rollback restores what it can")
         restorable :: published.original_source != None && files.lexists(published.destination) && !files.lexists(published.original_source ?? "")
         if {
             restorable -> {
@@ -454,7 +460,7 @@ fn store_transaction_publish_receipt(partial: String, path: String, receipts: St
                 if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` changed during publication"))
                 return Ok(false)
             }
-            else -> return Err(StoreError.Io(err))
+            else -> return Err(StoreError.IO(err))
         }
     }
     store_sync_store_directory(receipts)
@@ -472,8 +478,8 @@ fn store_transaction_remove_node(path: String) StoreError! {
     metadata :: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
-            if StoreError.Io(error).is_not_found() -> return Ok()
-            return Err(StoreError.Io(error))
+            if StoreError.IO(error).is_not_found() -> return
+            return Err(StoreError.IO(error))
         }
     }
     if metadata.is_dir && !metadata.is_symlink {
@@ -490,8 +496,8 @@ pub fn store_sweep_abandoned_directory(path: String, label: String) -> Int Store
     metadata :: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
-            if StoreError.Io(error).is_not_found() -> return Ok(0)
-            return Err(StoreError.Io(error))
+            if StoreError.IO(error).is_not_found() -> return Ok(0)
+            return Err(StoreError.IO(error))
         }
     }
     if metadata.is_symlink || !metadata.is_dir {

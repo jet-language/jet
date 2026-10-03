@@ -6,21 +6,21 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 }
 
 #Test("cli usage doctor is in the canonical route registry and help") {
-    assert(@JETPACK_VERBS.contains("doctor"))
-    assert(@JETPACK_VERBS.contains("hangar"))
+    assert(JETPACK_VERBS.contains("doctor"))
+    assert(JETPACK_VERBS.contains("hangar"))
     assert(cli_usage_with_color(false).contains("jetpack doctor [--online]"))
     assert_eq(env_verb_policy("doctor").verb, "doctor")
 }
 
 #Test("cli usage import is in the canonical route registry and help") {
-    assert(@JETPACK_VERBS.contains(@JETPACK_IMPORT_VERB))
+    assert(JETPACK_VERBS.contains(JETPACK_IMPORT_VERB))
     assert(cli_usage_with_color(false).contains("jetpack import"))
-    assert_eq(env_verb_policy(@JETPACK_IMPORT_VERB).verb, @JETPACK_IMPORT_VERB)
+    assert_eq(env_verb_policy(JETPACK_IMPORT_VERB).verb, JETPACK_IMPORT_VERB)
 }
 
 #Test("cli usage lock diff accepts an optional git revision") {
-    parsed :: cli_parse_args_for(@JETPACK_LOCK_VERB, [String]{@LOCK_DIFF_VERB, @LOCK_DIFF_FLAG_AGAINST, "HEAD~1"})
-    assert_eq(parsed.positional, [String]{@LOCK_DIFF_VERB})
+    parsed :: cli_parse_args_for(JETPACK_LOCK_VERB, [String]{LOCK_DIFF_VERB, LOCK_DIFF_FLAG_AGAINST, "HEAD~1"})
+    assert_eq(parsed.positional, [String]{LOCK_DIFF_VERB})
     assert_eq(parsed.flags.lock_against, Val("HEAD~1"))
     assert(cli_usage_with_color(false).contains("jetpack lock diff [--against <rev>]"))
 }
@@ -43,30 +43,30 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 }
 
 #Test("cli usage tool is in the canonical route registry and help") {
-    assert(@JETPACK_VERBS.contains(@TOOL_SUBCOMMAND))
+    assert(JETPACK_VERBS.contains(TOOL_SUBCOMMAND))
     help :: cli_usage_with_color(false)
     assert(help.contains("tool install"))
     assert(help.contains("env <name>"))
     assert(help.contains("use <package>"))
-    assert_eq(env_verb_policy(@TOOL_SUBCOMMAND).verb, @TOOL_SUBCOMMAND)
+    assert_eq(env_verb_policy(TOOL_SUBCOMMAND).verb, TOOL_SUBCOMMAND)
 }
 
 #Test("cli usage package generation route is canonical and in help") {
-    assert(@JETPACK_VERBS.contains(@PROFILE_SUBCOMMAND))
+    assert(JETPACK_VERBS.contains(PROFILE_SUBCOMMAND))
     help :: cli_usage_with_color(false)
     assert(help.contains("profile plan"))
     assert(help.contains("profile build"))
     assert(help.contains("profile switch"))
     assert(help.contains("profile rollback"))
     assert(help.contains("profile generations"))
-    assert_eq(env_verb_policy(@PROFILE_SUBCOMMAND).verb, @PROFILE_SUBCOMMAND)
+    assert_eq(env_verb_policy(PROFILE_SUBCOMMAND).verb, PROFILE_SUBCOMMAND)
 }
 
 #Test("cli usage browser is in the canonical route registry and help") {
-    assert(@JETPACK_VERBS.contains(@BROWSER_SUBCOMMAND))
+    assert(JETPACK_VERBS.contains(BROWSER_SUBCOMMAND))
     assert(cli_usage_with_color(false).contains("browser lock"))
     assert(cli_usage_with_color(false).contains("browser provision"))
-    assert_eq(env_verb_policy(@BROWSER_SUBCOMMAND).verb, @BROWSER_SUBCOMMAND)
+    assert_eq(env_verb_policy(BROWSER_SUBCOMMAND).verb, BROWSER_SUBCOMMAND)
 }
 
 #Test("cli usage hangar recovery is in help") {
@@ -114,7 +114,7 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 }
 
 #Test("cli parse reads the prep flag") {
-    parsed :: cli_parse_args_for("env", [String]{@ENV_FLAG_PREP, @ENV_FLAG_EXPLAIN})
+    parsed :: cli_parse_args_for("env", [String]{ENV_FLAG_PREP, ENV_FLAG_EXPLAIN})
     assert(parsed.flags.prep)
     assert(parsed.flags.explain_plan)
     assert_eq(parsed.positional.len(), 0)
@@ -252,14 +252,14 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 
 #Test("cli project declares env is true for a typed module with packages") {
     dir :: cli_usage_test_scratch("typed_env")
-    files.write(files.join(dir, @ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
     assert(cli_project_declares_env(dir))
     files.remove_all(dir).drop("scratch cleanup")
 }
 
 #Test("cli project declares env is true for the phase one directive surface") {
     dir :: cli_usage_test_scratch("phase1_env")
-    files.write(files.join(dir, @ENV_FILE), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, ENV_FILE), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
     assert(cli_project_declares_env(dir))
     files.remove_all(dir).drop("scratch cleanup")
 }
@@ -269,7 +269,7 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     // foreign flake, even if one exists; only `--flake` forces that.
     dir :: cli_usage_test_scratch("ordering")
     files.write(files.join(dir, "flake.nix"), "{{ }}") ?? panic("write flake.nix")
-    files.write(files.join(dir, @ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
     has_foreign :: cli_foreign_flake_path(dir) != None
     declares_env :: cli_project_declares_env(dir)
     assert(has_foreign)

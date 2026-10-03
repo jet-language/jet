@@ -13,36 +13,36 @@ fn cli_print_raw(text: String) Never! -[IO]> {
 
 // `jet env hook <shell>` — pure text: installing the hook is a safe editor
 // action; the trust gate fires later, on the first activation.
-fn cli_cmd_env_hook(theme: Theme, parsed: CliParsed) -[IO, Env]> Int Never! {
+fn cli_cmd_env_hook(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int Never! {
     shell :: if parsed.positional.len() > 1 -> Val(parsed.positional[1]) else -> String?{None}
     kind :: ShellKind.parse(shell) ?? {
         theme.error(
             "unknown shell for `jet env hook`",
-            "the auto-activation hook is available for: {@ENV_HOOK_SHELLS.join(", ")}.",
+            "the auto-activation hook is available for: {ENV_HOOK_SHELLS.join(", ")}.",
             "try `jet env hook bash`, `jet env hook zsh`, or `jet env hook fish`."
         )
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     cli_print_raw(env_hook_render_hook(kind))
-    @EXIT_OK
+    EXIT_OK
 }
 
 // `jet env export <shell>` — the statements that load the nearest `env.jet`
 // into the current shell, or unload it once the shell leaves that tree.
-fn cli_cmd_env_export(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_env_export(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     shell :: if parsed.positional.len() > 1 -> Val(parsed.positional[1]) else -> String?{None}
     // An unknown shell from an installed hook is not worth a diagnostic on
     // every prompt: emit nothing and let the shell keep its environment.
-    kind :: ShellKind.parse(shell) ?? return @EXIT_OK
-    disabled :: (sys.get(@ENV_DISABLE_VAR) ?? "") != ""
+    kind :: ShellKind.parse(shell) ?? return EXIT_OK
+    disabled :: (sys.get(ENV_DISABLE_VAR) ?? "") != ""
     target :: if disabled -> String?{None} else -> env_hook_find_env_root(cli_current_dir())
-    active :: cli_nonempty_env(@ENV_HOOK_ACTIVE_DIR_VAR)
-    active_hash :: cli_nonempty_env(@ENV_HOOK_ACTIVE_HASH_VAR)
+    active :: cli_nonempty_env(ENV_HOOK_ACTIVE_DIR_VAR)
+    active_hash :: cli_nonempty_env(ENV_HOOK_ACTIVE_HASH_VAR)
     target_hash := String?{None}
     if target == .Val(root) -> target_hash = env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment)
     // Nothing changed since the last prompt: stay silent, so the hook is a
     // no-op on most prompts and never re-realizes.
-    if target == active && target_hash == active_hash -> return @EXIT_OK
+    if target == active && target_hash == active_hash -> return EXIT_OK
     // A changed definition does not always reload now. `Never` keeps the
     // current activation; `Watch` records the first changed hash and
     // coalesces prompt callbacks until its debounce window expires.
@@ -50,17 +50,17 @@ fn cli_cmd_env_export(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net,
     if target == active && target_hash != active_hash {
         if target == .Val(root) && target_hash == .Val(hash) {
             if env_hook_reload_policy_with_environment(root, parsed.flags.environment) == {
-                .Never -> return @EXIT_OK
+                .Never -> return EXIT_OK
                 .Prompt -> {}
                 .Watch(_, debounce_ms) -> {
                     if env_hook_watch_reload_ready(root, hash, debounce_ms) == {
                         .Ok(ready) -> {
-                            if !ready -> return @EXIT_OK
+                            if !ready -> return EXIT_OK
                             watched_reload_ready = true
                         }
                         .Err(error) -> {
                             theme.detail("environment reload is waiting: {error.message()}")
-                            return @EXIT_OK
+                            return EXIT_OK
                         }
                     }
                 }
@@ -70,18 +70,18 @@ fn cli_cmd_env_export(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net,
     // The PATH to restore on unload, or to build on when activating: the
     // saved pre-env PATH while an env is live, else the live PATH.
     live_path :: sys.get("PATH") ?? ""
-    base_path :: if active != None -> cli_nonempty_env(@ENV_HOOK_OLD_PATH_VAR) ?? live_path else -> live_path
+    base_path :: if active != None -> cli_nonempty_env(ENV_HOOK_OLD_PATH_VAR) ?? live_path else -> live_path
     // No unload is emitted until the replacement environment is fully
     // realized, trusted, composed, and entered: a failed reload leaves the
     // previous activation usable.
     script := ""
     if target == .Val(root) {
-        script = cli_env_export_activate(theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
+        script = cli_env_export_activate(&verification, &cache, theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
     } else if active != None {
         script = env_hook_render_unload(kind, base_path)
     }
     cli_print_raw(script)
-    @EXIT_OK
+    EXIT_OK
 }
 
 fn cli_nonempty_env(name: String) -[Env]> String? Never! {
@@ -100,15 +100,15 @@ struct EnvExportStop {
 // Realize, trust, compose, and render the activation of `root`. Every
 // refusal before the script is final returns exit 0 so the previous
 // activation stays live; a rejected activation render exits 2.
-fn cli_env_export_activate(theme: Theme, parsed: CliParsed, kind: ShellKind, root: String, target_hash: String?, active: Bool, base_path: String, watched_reload_ready: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> String EnvExportStop! {
-    keep :: EnvExportStop{code: @EXIT_OK}
+fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, kind: ShellKind, root: String, target_hash: String?, active: Bool, base_path: String, watched_reload_ready: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> String EnvExportStop! {
+    keep :: EnvExportStop{code: EXIT_OK}
     // Realize with `root` as cwd so the cwd-relative plan and realize path
     // composes it exactly like `jet env` would from inside it. This process
     // exits right after, so changing its cwd affects nothing else.
     sys.set_current_dir(root) ?? return Err(keep)
     roots :: pkg_resolve_roots()
     // A malformed or foreign-only env keeps the previous activation.
-    plan := cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
+    plan := cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
     cli_apply_locked_channels(theme, root, &plan.table, parsed.flags) ?? return Err(keep)
     // D-JPK-GRANTCMD1 trust law: the first activation of an untrusted,
     // trust-sensitive env prompts (interactive) or is refused with a hint
@@ -121,7 +121,7 @@ fn cli_env_export_activate(theme: Theme, parsed: CliParsed, kind: ShellKind, roo
         if term.stdin().is_terminal() || parsed.flags.trust {
             if trust_gate_with_environment(theme, store, root, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) != None -> return Err(keep)
         } else {
-            theme.detail("{@ENV_FILE} here is not trusted — run `jet env` to approve it once")
+            theme.detail("{ENV_FILE} here is not trusted — run `jet env` to approve it once")
             return Err(keep)
         }
     }
@@ -139,22 +139,22 @@ fn cli_env_export_activate(theme: Theme, parsed: CliParsed, kind: ShellKind, roo
     warm := [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt :: previous_receipt ?? panic("a matching receipt exists")
-        warm = store_reuse_verified_environment(roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) ?? None
+        warm = store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) ?? None
         if warm == None {
-            expectations :: cli_environment_member_expectations(roots, root, parsed.flags, plan)
-            warm = store_reuse_verified_environment_members(roots, receipt.packages, expectations, local_catalog) ?? None
+            expectations :: cli_environment_member_expectations(&verification, roots, root, parsed.flags, plan)
+            warm = store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) ?? None
         }
     }
     warm_reused :: cli_warm_realizations_complete(plan, warm)
     // A missing receipt still uses the canonical Store authority check and
     // retains its checked entries and leases for composition.
     if !warm_reused {
-        cli_replay_locked_nix(theme, roots, root, plan.refs, plan.table, parsed.flags.offline, local_catalog, &warm) ?? {
+        cli_replay_locked_nix(&verification, theme, roots, root, plan.refs, plan.table, parsed.flags.offline, local_catalog, &warm) ?? {
             theme.detail("locked Nix replay was unavailable: {err.message()}")
             return Err(keep)
         }
     }
-    composed :: cli_compose_env_scoped_with_warm(theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
+    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
     env :: composed.env
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
@@ -162,7 +162,7 @@ fn cli_env_export_activate(theme: Theme, parsed: CliParsed, kind: ShellKind, roo
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     plan_hash :: target_hash ?? ""
     entry :: cli_find_project_entry(root)
-    cli_run_lifecycle_hooks_silent(theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
+    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     script := ""
     if active -> script = env_hook_render_unload(kind, base_path)
@@ -181,7 +181,7 @@ fn cli_env_export_activate(theme: Theme, parsed: CliParsed, kind: ShellKind, roo
     }
     rendered :: activation.render_activate(kind) ?? {
         theme.detail("environment activation was rejected: {err.message()}")
-        return Err(EnvExportStop{code: @EXIT_USAGE})
+        return Err(EnvExportStop{code: EXIT_USAGE})
     }
     script = "{script}{rendered}"
     if !warm_reused {

@@ -6,14 +6,14 @@
 // owns dependency admission, so this host never runs predecessors itself.
 
 // `jet run <entry> -- <name> <job-args>`.
-pub fn cli_run_project_job(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cli_run_project_job_with_mode(theme, parsed, roots, project_dir, entry, job, false, false)
+pub fn cli_run_project_job(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cli_run_project_job_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, job, false, false)
 }
 
-pub fn cli_run_project_job_with_mode(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_run_project_job_with_mode(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     registry :: cli_checked_project_job_registry(entry) ?? {
         loop diagnostic in err.diagnostics -> theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     root_fact :: registry.find(job) ?? {
         theme.error_coded(
@@ -25,11 +25,11 @@ pub fn cli_run_project_job_with_mode(theme: Theme, parsed: CliParsed, roots: Han
         declared := [String]{}
         loop fact in registry.jobs() -> &declared.push(fact.name)
         if declared.len() > 0 -> theme.detail("declared jobs: {declared.join(", ")}")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     closure :: registry.dependency_closure(job) ?? {
         theme.error_coded("E1331", "job `{job}` has an invalid dependency graph", err.message, "correct the #Job `after` declarations, then rerun the job.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     metadata := root_fact.metadata()
     loop fact in closure {
@@ -37,37 +37,37 @@ pub fn cli_run_project_job_with_mode(theme: Theme, parsed: CliParsed, roots: Han
             if !metadata.packages.contains(package) -> &metadata.packages.push(package)
         }
     }
-    cli_run_project_job_leaf(theme, parsed, roots, project_dir, entry, job, clean, silent, metadata)
+    cli_run_project_job_leaf(&verification, &cache, theme, parsed, roots, project_dir, entry, job, clean, silent, metadata)
 }
 
 // Report a `CliError` from a helper as the command's exit code. A helper's
 // already-rendered refusal carries its code; any other failure is rendered
 // here as an operational error.
-pub fn cli_exit_for(theme: Theme, error: CliError) -[IO]> Int Never! {
+pub fn cli_exit_for(theme: Theme, error: CLIError) -[IO, Time.Wait]> Int Never! {
     if error == {
         .Reported(code) -> code
         else -> {
             theme.error("jetpack could not finish this command", error.message(), "")
-            @EXIT_USAGE
+            EXIT_USAGE
         }
     }
 }
 
-fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool, metadata: JobMetadata) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool, metadata: JobMetadata) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if cli_job_skip_reason(metadata.skip) == .Val(reason) {
         theme.status("skipping job {theme.bold(job)}: {reason}")
-        return @EXIT_OK
+        return EXIT_OK
     }
     // Env is optional for job-only projects. A job may still add package
     // metadata, composed through the same RunPlan path as `jet env`.
     has_env :: files.is_file(EnvFile.path_in(project_dir))
     plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
-    if has_env -> plan = cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    if has_env -> plan = cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_apply_locked_channels(theme, project_dir, &plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     loop raw in metadata.packages {
         spec :: RefSpec.classify_in(raw, plan.table) ?? {
             cli_ref_error(theme, err)
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         known := false
         loop existing in plan.refs {
@@ -78,7 +78,7 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     env := cli_empty_job_env()
-    if has_env || plan.refs.len() > 0 -> env = cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    if has_env || plan.refs.len() > 0 -> env = cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     loop limit in metadata.limits -> env.vars[cli_task_limit_env_name(limit.key)] = limit.value
     task_args := cli_tail(parsed.positional, 1)
     if parsed.command == .Val(command) {
@@ -86,11 +86,11 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
     }
     job_cwd :: cli_job_path(project_dir, metadata.cwd, "cwd", false) ?? {
         theme.error_coded("E1330", "job `{job}` has an unsafe cwd", err.message(), "use a project-relative path without `..`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     if !files.is_dir(job_cwd) {
         theme.error_coded("E1330", "job `{job}` has a non-directory cwd", "job cwd `{job_cwd}` is not a directory", "use a project-relative directory for `cwd`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     jet_binary := cli_find_jet_binary()
     cache_key := String?{None}
@@ -102,28 +102,28 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
                 "a cached job needs at least one declared output so a later run can prove that the result still exists.",
                 "add `outputs: [\"path\"]`, or use `cache: .Uncached`."
             )
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         cli_validate_cached_job_metadata(project_dir, metadata) ?? {
             theme.error_coded("E1330", "job `{job}` has unsafe cache declarations", err.message(), "declare every project input and keep cached outputs separate from inputs, or use `cache: .Uncached`.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         cli_validate_cached_job_environment(plan, env) ?? {
             theme.error_coded("E1330", "job `{job}` has an unsafe cached environment", err.message(), "remove secret-bearing environment inputs, or use `cache: .Uncached`.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         jet_binary = cli_resolve_job_jet_binary(env) ?? {
             theme.error_coded("E1330", "job `{job}` cannot resolve its compiler", err.message(), "make the compiler named by the job environment available, or use `cache: .Uncached`.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         environment_hash :: cli_task_environment_hash_with_env(plan.refs, plan.table, plan.secrets, plan.environment, env)
         key :: cli_task_cache_key(project_dir, entry, job, jet_binary, metadata, task_args, plan.refs, plan.table, environment_hash) ?? {
             theme.error_coded("E1330", "job `{job}` has invalid cache inputs or outputs", err.message(), "use existing project-relative input and output paths.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         if cli_task_cache_hit(project_dir, roots, metadata, key) {
             theme.status("job {theme.bold(job)} is up to date")
-            return @EXIT_OK
+            return EXIT_OK
         }
         cache_key = Val(key)
     }
@@ -141,7 +141,7 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
         // in the key rather than inheriting host variables.
         code = cli_run_job_with_access_trace(&env, argv, project_dir, true, silent, trace_path) ?? {
             theme.error_coded("E1330", "job `{job}` cannot prove strict cache access", err.message(), "run the cached job on a host with file-access tracing, or use `cache: .Uncached`.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
     } else {
         code = if {
@@ -161,11 +161,11 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
             files.remove(trace_path).drop("the trace is consumed by the access proof")
             accesses :: undeclared ?? {
                 theme.error_coded("E1330", "job `{job}` access proof failed", err.message(), "fix the trace file or use `cache: .Uncached` for jobs that cannot be proven.")
-                return @EXIT_USER_ERROR
+                return EXIT_USER_ERROR
             }
             if accesses.len() > 0 {
                 theme.error_coded("E1330", "job `{job}` read undeclared project files", accesses.join(", "), "declare every read path in `inputs`, or use `cache: .Uncached`.")
-                return @EXIT_USER_ERROR
+                return EXIT_USER_ERROR
             }
         }
         if !cli_job_outputs_exist(project_dir, metadata) {
@@ -175,48 +175,48 @@ fn cli_run_project_job_leaf(theme: Theme, parsed: CliParsed, roots: HangarRoots,
                 "a successful cached job must leave every declared output in place before its result can be recorded",
                 "write each declared output, or remove it from `outputs` and keep the job uncached"
             )
-            return @EXIT_USER_ERROR
+            return EXIT_USER_ERROR
         }
         cli_write_job_cache(project_dir, roots, metadata, key) ?? {
             theme.error("job completed but its cache record could not be written", err.message(), "fix permissions for `.jet/jobs` or the Jet state directory, then rerun the job.")
-            return @EXIT_USER_ERROR
+            return EXIT_USER_ERROR
         }
     }
-    cli_auto_clean_after_success(theme, roots)
+    cli_auto_clean_after_success(&verification, theme, roots)
     code
 }
 
 // The compiler a strict cached job runs: the lease-resolved executable when
 // the job environment provides `jet`, else the one on PATH.
-fn cli_resolve_job_jet_binary(env: ShellEnv) -[FS, Env]> String CliError! {
+fn cli_resolve_job_jet_binary(env: ShellEnv) -[FS, Env]> String CLIError! {
     requested :: cli_find_jet_binary()
     loop lease in env.cache_leases {
-        found :: lease.executable_for_command(requested) ?? return Err(CliError.Other(err.message()))
+        found :: lease.executable_for_command(requested) ?? return Err(CLIError.Other("{err}"))
         if found == .Val(stable) -> return Ok(stable)
     }
     cli_resolve_executable_path(requested)
 }
 
-fn cli_resolve_executable_path(program: String) -[FS, Env]> String CliError! {
-    search :: sys.get("PATH") ?? return Err(CliError.Other("couldn't resolve executable `{program}`: PATH is unavailable"))
+fn cli_resolve_executable_path(program: String) -[FS, Env]> String CLIError! {
+    search :: sys.get("PATH") ?? return Err(CLIError.Other("couldn't resolve executable `{program}`: PATH is unavailable"))
     cli_resolve_executable_path_in(program, search)
 }
 
 // An absolute or multi-component program is canonicalized; a bare name is
 // the first regular file along `search`.
-fn cli_resolve_executable_path_in(program: String, search: String) -[FS, Env]> String CliError! {
+fn cli_resolve_executable_path_in(program: String, search: String) -[FS, Env]> String CLIError! {
     if files.is_abs(program) || program.contains("/") {
-        resolved :: files.canonicalize(program) ?? return Err(CliError.Other("couldn't resolve executable `{program}`: {err}"))
+        resolved :: files.canonicalize(program) ?? return Err(CLIError.Other("couldn't resolve executable `{program}`: {err}"))
         return Ok(resolved)
     }
     loop directory in search.split(sys.pathsep()) {
         candidate :: files.join(directory, program)
         if files.is_file(candidate) {
-            resolved :: files.canonicalize(candidate) ?? return Err(CliError.Other("couldn't resolve executable `{program}`: {err}"))
+            resolved :: files.canonicalize(candidate) ?? return Err(CLIError.Other("couldn't resolve executable `{program}`: {err}"))
             return Ok(resolved)
         }
     }
-    Err(CliError.Other("couldn't resolve executable `{program}` through PATH"))
+    Err(CLIError.Other("couldn't resolve executable `{program}` through PATH"))
 }
 
 // A job with no env and no packages runs in an empty composed environment.
@@ -226,7 +226,7 @@ fn cli_empty_job_env() -> ShellEnv Never! {
         vars: [String: String]{},
         unset_vars: [String]{},
         refs: [String]{},
-        label: @JETPACK_PROMPT_LABEL,
+        label: JETPACK_PROMPT_LABEL,
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
         cache_leases: [CacheLease]{},
@@ -280,24 +280,24 @@ fn cli_matches_host_platform(expected: String, host: String) -> Bool Never! {
 // Absolute paths and `..` components are refused; the resolved path may not
 // escape the canonical project root. A missing path resolves through its
 // canonical parent when `allow_missing`.
-fn cli_job_path(project_dir: String, raw: String?, field: String, allow_missing: Bool) -[FS, Env]> String CliError! {
+fn cli_job_path(project_dir: String, raw: String?, field: String, allow_missing: Bool) -[FS, Env]> String CLIError! {
     relative :: raw ?? "."
     if files.is_abs(relative) || relative.split("/").to_list().contains("..") {
-        return Err(CliError.Other("job {field} `{relative}` must stay inside the project"))
+        return Err(CLIError.Other("job {field} `{relative}` must stay inside the project"))
     }
-    root :: files.canonicalize(project_dir) ?? return Err(CliError.Other("couldn't resolve project root: {err}"))
+    root :: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve project root: {err}"))
     candidate :: files.join(project_dir, relative)
     exists :: files.exists(candidate)
-    if !allow_missing && !exists -> return Err(CliError.Other("job {field} `{relative}` does not exist"))
+    if !allow_missing && !exists -> return Err(CLIError.Other("job {field} `{relative}` does not exist"))
     resolved := ""
     if exists {
-        resolved = files.canonicalize(candidate) ?? return Err(CliError.Other("couldn't resolve job {field} `{relative}`: {err}"))
+        resolved = files.canonicalize(candidate) ?? return Err(CLIError.Other("couldn't resolve job {field} `{relative}`: {err}"))
     } else {
         name :: files.basename(candidate)
-        if name == "" -> return Err(CliError.Other("job {field} `{relative}` has no file name"))
-        parent :: files.canonicalize(files.dirname(candidate)) ?? return Err(CliError.Other("couldn't resolve job {field} parent: {err}"))
+        if name == "" -> return Err(CLIError.Other("job {field} `{relative}` has no file name"))
+        parent :: files.canonicalize(files.dirname(candidate)) ?? return Err(CLIError.Other("couldn't resolve job {field} parent: {err}"))
         resolved = files.join(parent, name)
     }
-    if !cli_path_starts_with(resolved, root) -> return Err(CliError.Other("job {field} `{relative}` escapes the project"))
+    if !cli_path_starts_with(resolved, root) -> return Err(CLIError.Other("job {field} `{relative}` escapes the project"))
     Ok(resolved)
 }

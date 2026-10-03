@@ -6,9 +6,9 @@
 // its own laundering of the failing tool's output.
 
 // The per-stream capture limit the binders apply to foreign tool output.
-@BINDER_TOOL_CAPTURE_LIMIT :: 65536
-@BINDER_TOOL_TIMEOUT_DETAIL :: "the tool exceeded the 60 second limit"
-@BINDER_TOOL_FAILURE_DETAIL :: "the foreign tool returned a failure status"
+BINDER_TOOL_CAPTURE_LIMIT :: prep { 65536 }
+BINDER_TOOL_TIMEOUT_DETAIL :: prep { "the tool exceeded the 60 second limit" }
+BINDER_TOOL_FAILURE_DETAIL :: prep { "the foreign tool returned a failure status" }
 
 // Why a foreign binding could not be produced. `ToolFailed.action` carries
 // the binder's own verb phrase ("rejected the Ada binding source") so every
@@ -21,7 +21,7 @@ pub enum ForeignBindError {
     SelectedToolMissing(String)
     ToolFailed(tool: String, action: String, detail: String)
     ToolchainRejected(String)
-    AbiMismatch(String)
+    ABIMismatch(String)
     UnsupportedHost(String)
     // Python/JavaScript binders spell the tool without backticks.
     PlainToolMissing(String)
@@ -34,7 +34,7 @@ pub enum ForeignBindError {
             .SelectedToolMissing(tool) -> "the selected `{tool}` tool was not found"
             .ToolFailed(tool, action, detail) -> "`{tool}` {action}: {detail}"
             .ToolchainRejected(detail) -> "the C++ toolchain rejected the binding: {detail}"
-            .AbiMismatch(detail) -> "the generated COBOL C-ABI bridge failed its link proof: {detail}"
+            .ABIMismatch(detail) -> "the generated COBOL C-ABI bridge failed its link proof: {detail}"
             .PlainToolMissing(tool) -> "the provisioned {tool} tool was not found"
             .PlainToolFailed(tool, action, detail) -> "{tool} {action}: {detail}"
         }
@@ -97,8 +97,8 @@ pub fn pkg_binder_capture(argv: [String], cwd: String?, tool: String, action: St
 }
 
 pub fn pkg_binder_capture_env(argv: [String], cwd: String?, env: [(name: String, value: String)], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    output :: pkg_binder_supervise(argv, cwd, env, @BINDER_TOOL_CAPTURE_LIMIT, 60s, tool)
-    if output.timed_out -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: @BINDER_TOOL_TIMEOUT_DETAIL})
+    output :: pkg_binder_supervise(argv, cwd, env, BINDER_TOOL_CAPTURE_LIMIT, 60s, tool)
+    if output.timed_out -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: BINDER_TOOL_TIMEOUT_DETAIL})
     Ok(output)
 }
 
@@ -108,7 +108,7 @@ pub fn pkg_binder_launder_first_line(bytes: [U8]) -> String Never! {
         trimmed :: line.trim()
         if trimmed != "" -> return pkg_binder_take_chars(trimmed, 160)
     }
-    @BINDER_TOOL_FAILURE_DETAIL
+    BINDER_TOOL_FAILURE_DETAIL
 }
 
 // An ASCII identifier: a letter or `_`, then letters, digits, or `_`.
@@ -136,35 +136,35 @@ pub fn pkg_binder_is_ascii_digit(code: Int) -> Bool Never! {
 pub fn pkg_binder_canonicalize(path: String, context: String) -[FS, Env]> String ForeignBindError! {
     if files.canonicalize(path) == {
         .Ok(resolved) -> Ok(resolved)
-        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+        .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_create_dir_all(path: String, context: String) ForeignBindError! -[FS]> {
     if files.create_dir_all(path) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_write(path: String, text: String, context: String) ForeignBindError! -[FS]> {
     if files.write(path, text) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_read_bytes(path: String, context: String) -[FS]> [U8] ForeignBindError! {
     if files.read_bytes(path) == {
         .Ok(bytes) -> Ok(bytes)
-        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+        .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_copy(from: String, to: String, context: String) ForeignBindError! -[FS]> {
     if files.copy2(from, to) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
@@ -287,7 +287,7 @@ pub fn pkg_binder_u64_le(value: Int) -> [U8] Never! {
     rest := value
     loop index in 0..<8 {
         &out.push(U8.from_int(rest % 256) ?? U8{0})
-        rest = rest / 256
+        rest = rest /% 256
     }
     out
 }

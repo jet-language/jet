@@ -3,20 +3,20 @@
 // action records, and append durable checksummed transactions that compact
 // into one snapshot.
 
-@STORE_JOURNAL_DIR :: "journal"
-@STORE_JOURNAL_COMPACT_AFTER :: 64
+STORE_JOURNAL_DIR :: prep { "journal" }
+STORE_JOURNAL_COMPACT_AFTER :: prep { 64 }
 // Compact on size as well as count: replay cost is bytes parsed, not file
 // count. A 59-transaction journal reached 57 MiB and made every graph load
 // re-parse and re-hash all of it.
-@STORE_JOURNAL_COMPACT_AFTER_BYTES :: 4194304
-@STORE_MAX_CLOSURE_OBJECTS :: 1000000
-@STORE_MAX_CLOSURE_RECORDS :: 1000000
-@STORE_MAX_CLOSURE_DELETIONS :: 1000000
-@STORE_MAX_CLOSURE_TRANSACTIONS :: 100000
-@STORE_CLOSURE_DB_DIR :: "closure-db"
-@STORE_JOURNAL_PARTIAL_SUFFIX :: ".partial"
-@STORE_JOURNAL_TXN_SUFFIX :: ".txn"
-@STORE_JOURNAL_HEADER :: "jet-closure-journal-v1"
+STORE_JOURNAL_COMPACT_AFTER_BYTES :: prep { 4194304 }
+STORE_MAX_CLOSURE_OBJECTS :: prep { 1000000 }
+STORE_MAX_CLOSURE_RECORDS :: prep { 1000000 }
+STORE_MAX_CLOSURE_DELETIONS :: prep { 1000000 }
+STORE_MAX_CLOSURE_TRANSACTIONS :: prep { 100000 }
+STORE_CLOSURE_DB_DIR :: prep { "closure-db" }
+STORE_JOURNAL_PARTIAL_SUFFIX :: prep { ".partial" }
+STORE_JOURNAL_TXN_SUFFIX :: prep { ".txn" }
+STORE_JOURNAL_HEADER :: prep { "jet-closure-journal-v1" }
 
 pub enum ClosureJournalKind {
     Delta
@@ -30,8 +30,8 @@ pub struct ClosureJournalEntry {
     pub deleted_records: [String]
 }
 
-pub fn store_load_graph(roots: HangarRoots) -> ClosureGraph StoreError! {
-    store_load_graph_mode(roots, false)
+pub fn store_load_graph(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+    store_load_graph_mode(&verification, roots, false)
 }
 
 // Refuse a journal that still holds an incomplete transaction.
@@ -39,12 +39,12 @@ fn store_journal_refuse_partial(roots: HangarRoots) -> Bool StoreError! {
     entries :: if files.list_dir(store_journal_dir(roots)) == {
         .Ok(entries) -> entries
         .Err(error) -> {
-            if StoreError.Io(error).is_not_found() -> return Ok(false)
-            return Err(StoreError.Io(error))
+            if StoreError.IO(error).is_not_found() -> return Ok(false)
+            return Err(StoreError.IO(error))
         }
     }
     loop entry in entries {
-        if entry.name.ends_with(@STORE_JOURNAL_PARTIAL_SUFFIX) {
+        if entry.name.ends_with(STORE_JOURNAL_PARTIAL_SUFFIX) {
             return Err(StoreError.InvalidData("closure journal contains an incomplete transaction"))
         }
     }
@@ -53,25 +53,25 @@ fn store_journal_refuse_partial(roots: HangarRoots) -> Bool StoreError! {
 
 // Validate committed closure state without locking, replaying, compacting,
 // or repairing its package projection.
-pub fn store_closure_graph_read_only(roots: HangarRoots) -> ClosureGraph StoreError! {
+pub fn store_closure_graph_read_only(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     if !store_journal_refuse_partial(roots) -> return Ok(ClosureGraph.empty())
-    store_load_graph_mode(roots, true)
+    store_load_graph_mode(&verification, roots, true)
 }
 
 // Read the closure structure without taking a lock or replaying a journal.
 // Store proofs may be unavailable, but an explanation must never repair the
 // projection merely to describe that loss.
-pub fn store_closure_graph_structure_read_only(roots: HangarRoots) -> ClosureGraph StoreError! {
+pub fn store_closure_graph_structure_read_only(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     if !store_journal_refuse_partial(roots) -> return Ok(ClosureGraph.empty())
-    store_load_graph_structure_mode(roots, true)
+    store_load_graph_structure_mode(&verification, roots, true)
 }
 
 // The cleanup/lifecycle inputs: every closure object digest and the closure
 // head (a digest over every journal transaction). Rust memoized this per
 // process on the WAL identity stamp; each call here recomputes it.
-pub fn store_lifecycle_inputs_unlocked(roots: HangarRoots) -> (known: [String], closure_head: String) StoreError! {
-    _ :: store_recover_closure_journal_unlocked(roots)
-    graph :: store_load_graph_mode(roots, true)
+pub fn store_lifecycle_inputs_unlocked(verification: &StoreVerification, roots: HangarRoots) -> (known: [String], closure_head: String) StoreError! {
+    _ :: store_recover_closure_journal_unlocked(&verification, roots)
+    graph :: store_load_graph_mode(&verification, roots, true)
     paths := store_journal_transaction_paths(store_journal_dir(roots))
     &paths.sort()
     canonical := "jet-closure-head-v1".bytes()
@@ -87,22 +87,22 @@ pub fn store_lifecycle_inputs_unlocked(roots: HangarRoots) -> (known: [String], 
     Ok((known: known, closure_head: "sha256-{store_sha256_hex(canonical)}"))
 }
 
-pub fn store_load_graph_mode(roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
-    store_load_graph_mode_with_proofs(roots, allow_legacy, true)
+pub fn store_load_graph_mode(verification: &StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
+    store_load_graph_mode_with_proofs(&verification, roots, allow_legacy, true)
 }
 
-pub fn store_load_graph_structure_mode(roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
-    store_load_graph_mode_with_proofs(roots, allow_legacy, false)
+pub fn store_load_graph_structure_mode(verification: &StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {
+    store_load_graph_mode_with_proofs(&verification, roots, allow_legacy, false)
 }
 
-fn store_load_graph_mode_with_proofs(roots: HangarRoots, allow_legacy: Bool, validate_store_proofs: Bool) -> ClosureGraph StoreError! {
+fn store_load_graph_mode_with_proofs(verification: &StoreVerification, roots: HangarRoots, allow_legacy: Bool, validate_store_proofs: Bool) -> ClosureGraph StoreError! {
     journal :: store_journal_dir(roots)
     entries :: files.list_dir(journal) ?? return Ok(ClosureGraph.empty())
     paths := [String]{}
     loop entry in entries {
-        if !entry.name.ends_with(@STORE_JOURNAL_TXN_SUFFIX) -> next
-        if paths.len() >= @STORE_MAX_CLOSURE_TRANSACTIONS {
-            return Err(StoreError.InvalidData("closure journal exceeds {@STORE_MAX_CLOSURE_TRANSACTIONS} transactions"))
+        if !entry.name.ends_with(STORE_JOURNAL_TXN_SUFFIX) -> next
+        if paths.len() >= STORE_MAX_CLOSURE_TRANSACTIONS {
+            return Err(StoreError.InvalidData("closure journal exceeds {STORE_MAX_CLOSURE_TRANSACTIONS} transactions"))
         }
         &paths.push(entry.path)
     }
@@ -115,21 +115,21 @@ fn store_load_graph_mode_with_proofs(roots: HangarRoots, allow_legacy: Bool, val
     }
     store_validate_graph_structure_mode(roots, graph, allow_legacy) ?? return Err(StoreError.InvalidData(err.message()))
     if validate_store_proofs {
-        store_validate_graph_store_proofs(roots, graph, allow_legacy) ?? return Err(StoreError.InvalidData(err.message()))
+        store_validate_graph_store_proofs(&verification, roots, graph, allow_legacy) ?? return Err(StoreError.InvalidData(err.message()))
     }
     Ok(graph)
 }
 
 pub fn store_apply_entry(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreError! {
-    if entry.objects.len() > @STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_OBJECTS} objects"))
-    if entry.records.len() > @STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_RECORDS} records"))
-    if entry.deleted_records.len() > @STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+    if entry.objects.len() > STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
+    if entry.records.len() > STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+    if entry.deleted_records.len() > STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
     if entry.kind != ClosureJournalKind.Snapshot {
         new_objects := 0
         loop object in entry.objects {
             if !graph.objects.has_key(object.digest) -> new_objects += 1
         }
-        if graph.objects.len() + new_objects > @STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure graph exceeds {@STORE_MAX_CLOSURE_OBJECTS} objects"))
+        if graph.objects.len() + new_objects > STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
         deleted_count := 0
         loop id in entry.deleted_records {
             if graph.records.has_key(id) -> deleted_count += 1
@@ -139,9 +139,9 @@ pub fn store_apply_entry(graph: &ClosureGraph, entry: ClosureJournalEntry) Store
         loop record in entry.records {
             if !graph.records.has_key(record.id) || entry.deleted_records.contains(record.id) -> record_count += 1
         }
-        if record_count > @STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure graph exceeds {@STORE_MAX_CLOSURE_RECORDS} records"))
-        if graph.deleted_records.len() + entry.deleted_records.len() > @STORE_MAX_CLOSURE_DELETIONS {
-            return Err(StoreError.Other("closure graph exceeds {@STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+        if record_count > STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
+        if graph.deleted_records.len() + entry.deleted_records.len() > STORE_MAX_CLOSURE_DELETIONS {
+            return Err(StoreError.Other("closure graph exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
         }
     }
     if entry.kind == ClosureJournalKind.Snapshot -> graph = ClosureGraph.empty()
@@ -173,13 +173,13 @@ pub fn store_apply_entry(graph: &ClosureGraph, entry: ClosureJournalEntry) Store
 }
 
 // Test seam: full structure and store-proof validation.
-pub fn store_validate_graph(roots: HangarRoots, graph: ClosureGraph) StoreError! {
-    store_validate_graph_mode(roots, graph, false)
+pub fn store_validate_graph(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph) StoreError! {
+    store_validate_graph_mode(&verification, roots, graph, false)
 }
 
-pub fn store_validate_graph_mode(roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
+pub fn store_validate_graph_mode(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
     store_validate_graph_structure_mode(roots, graph, allow_legacy)
-    store_validate_graph_store_proofs(roots, graph, allow_legacy)
+    store_validate_graph_store_proofs(&verification, roots, graph, allow_legacy)
 }
 
 // Shared per-object descriptor checks of full and incremental validation.
@@ -207,7 +207,7 @@ fn store_validate_record_shape(roots: HangarRoots, graph: ClosureGraph, record: 
         if !graph.objects.has_key(missing) -> return Err(StoreError.Other("closure record `{id}` references missing object `{missing}`"))
     }
     legacy :: record.producer_record == "" && record.package_meta == ""
-    if allow_legacy && legacy -> return Ok()
+    if allow_legacy && legacy -> return
     ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{id}` has invalid producer record: {err.message()}"))
     meta :: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{id}` has invalid package metadata"))
     store_validate_receipt_projection(roots, id, meta, allow_legacy)
@@ -260,19 +260,19 @@ fn store_validate_applied_entry(roots: HangarRoots, graph: ClosureGraph, entry: 
     }
 }
 
-pub fn store_validate_graph_store_proofs(roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
+pub fn store_validate_graph_store_proofs(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, allow_legacy: Bool) StoreError! {
     loop record in graph.sorted_records() {
         if record.package_meta != "" {
             meta :: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid package metadata"))
             store_validate_receipt_projection(roots, record.id, meta, allow_legacy)
         }
-        store_validate_record_store_proof(roots, record, allow_legacy)
+        store_validate_record_store_proof(&verification, roots, record, allow_legacy)
     }
 }
 
 fn store_validate_receipt_projection(roots: HangarRoots, id: String, meta: ParsedMeta, allow_legacy: Bool) StoreError! {
     if meta.receipt == "" {
-        if allow_legacy -> return Ok()
+        if allow_legacy -> return
         return Err(StoreError.Other("closure record `{id}` has no Hangar receipt"))
     }
     if !store_valid_receipt_digest(meta.receipt) {
@@ -284,25 +284,25 @@ fn store_validate_receipt_projection(roots: HangarRoots, id: String, meta: Parse
     if meta.receipt != expected {
         return Err(StoreError.Other("closure record `{id}` receipt digest `{meta.receipt}` disagrees with `{expected}`"))
     }
-    path :: files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), meta.receipt)
+    path :: files.join(files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR), meta.receipt)
     bytes :: if files.read_bytes(path) == {
         .Ok(bytes) -> bytes
         .Err(error) -> {
             // Locked recovery materializes a missing immutable object from
             // the authoritative closure record immediately after loading.
-            if StoreError.Io(error).is_not_found() && allow_legacy -> return Ok()
+            if StoreError.IO(error).is_not_found() && allow_legacy -> return
             return Err(StoreError.Other("closure record `{id}` cannot read Hangar receipt `{path}`: {error}"))
         }
     }
     if bytes != expected_bytes -> return Err(StoreError.Other("closure record `{id}` Hangar receipt is corrupt"))
 }
 
-pub fn store_validate_record_store_proof(roots: HangarRoots, record: ClosureRecord, allow_legacy: Bool) StoreError! {
+pub fn store_validate_record_store_proof(verification: &StoreVerification, roots: HangarRoots, record: ClosureRecord, allow_legacy: Bool) StoreError! {
     legacy :: record.producer_record == "" && record.package_meta == ""
-    if (allow_legacy && legacy) || record.references.len() > 0 -> return Ok()
+    if (allow_legacy && legacy) || record.references.len() > 0 -> return
     producer :: ProducerRecord.decode(record.producer_record) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid producer record: {err.message()}"))
     meta :: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.Other("closure record `{record.id}` has invalid package metadata"))
-    if !store_validates_complete_closure(roots, record, meta, producer) {
+    if !store_validates_complete_closure(&verification, roots, record, meta, producer) {
         return Err(StoreError.Other("closure record `{record.id}` has no dependency references or store-validated closure proof"))
     }
 }
@@ -370,23 +370,23 @@ fn store_merge_action_projection(action: &CanonicalActionRecord, projection: Can
     }
 }
 
-fn store_validates_complete_closure(roots: HangarRoots, record: ClosureRecord, meta: ParsedMeta, producer: ProducerRecord) -> Bool Never! {
+fn store_validates_complete_closure(verification: &StoreVerification, roots: HangarRoots, record: ClosureRecord, meta: ParsedMeta, producer: ProducerRecord) -> Bool Never! {
     output :: meta.out
-    local :: files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), record.primary)
+    local :: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), record.primary)
     authority :: producer.facts.get("closure.authority") ?? ""
     if producer.provider == {
-        "core" -> store_rehashes_as_recorded(roots, meta, record)
-        "adapter" | "cran" | "luarocks" -> output == local && store_rehashes_as_recorded(roots, meta, record)
-        "hangar-ingest" -> output == local && authority == "hangar-cas" && store_rehashes_as_recorded(roots, meta, record)
-        "store-record" -> authority == "hangar-cas" && store_rehashes_as_recorded(roots, meta, record)
+        "core" -> store_rehashes_as_recorded(&verification, roots, meta, record)
+        "adapter" | "cran" | "luarocks" -> output == local && store_rehashes_as_recorded(&verification, roots, meta, record)
+        "hangar-ingest" -> output == local && authority == "hangar-cas" && store_rehashes_as_recorded(&verification, roots, meta, record)
+        "store-record" -> authority == "hangar-cas" && store_rehashes_as_recorded(&verification, roots, meta, record)
         // A jetpackage release artifact is a complete native output with no
         // dependency edges. Store registration has already canonicalized it
         // into Hangar, so the same byte proof used by Core applies here.
-        "jetpackage" -> output == local && store_rehashes_as_recorded(roots, meta, record)
+        "jetpackage" -> output == local && store_rehashes_as_recorded(&verification, roots, meta, record)
         "nix" -> {
-            if output == local -> return store_rehashes_as_recorded(roots, meta, record)
+            if output == local -> return store_rehashes_as_recorded(&verification, roots, meta, record)
             if !store_path_starts_with(output, "/nix/store") -> return false
-            root :: files.join(files.join(roots.hangar_dir(), record.id), @STORE_NIX_GC_ROOT)
+            root :: files.join(files.join(roots.hangar_dir(), record.id), STORE_NIX_GC_ROOT)
             if !files.exists(root) -> return false
             files.canonicalize(root) ?? "" == files.canonicalize(output) ?? ""
         }
@@ -394,8 +394,8 @@ fn store_validates_complete_closure(roots: HangarRoots, record: ClosureRecord, m
     }
 }
 
-fn store_rehashes_as_recorded(roots: HangarRoots, meta: ParsedMeta, record: ClosureRecord) -> Bool Never! {
-    actual :: store_try_entry_output_hash(roots, store_entry_from_meta(record.id, meta)) ?? return false
+fn store_rehashes_as_recorded(verification: &StoreVerification, roots: HangarRoots, meta: ParsedMeta, record: ClosureRecord) -> Bool Never! {
+    actual :: store_try_entry_output_hash(&verification, roots, store_entry_from_meta(record.id, meta)) ?? return false
     actual == record.primary
 }
 
@@ -428,18 +428,18 @@ pub fn store_append_entry(roots: HangarRoots, entry: ClosureJournalEntry) -> Str
     store_journal_write_entry(journal, sequence, entry)
 }
 
-pub fn store_compact_if_needed(roots: HangarRoots) StoreError! {
+pub fn store_compact_if_needed(verification: &StoreVerification, roots: HangarRoots) StoreError! {
     journal :: store_journal_dir(roots)
     paths := store_journal_transaction_paths(journal)
-    if paths.len() <= @STORE_JOURNAL_COMPACT_AFTER {
+    if paths.len() <= STORE_JOURNAL_COMPACT_AFTER {
         total_bytes := 0
         loop path in paths {
             info :: files.stat(path) ?? next
             total_bytes += info.size
         }
-        if paths.len() <= 1 || total_bytes <= @STORE_JOURNAL_COMPACT_AFTER_BYTES -> return Ok()
+        if paths.len() <= 1 || total_bytes <= STORE_JOURNAL_COMPACT_AFTER_BYTES -> return
     }
-    graph :: store_load_graph_structure_mode(roots, false)
+    graph :: store_load_graph_structure_mode(&verification, roots, false)
     objects := [ClosureObject]{}
     loop digest in store_sorted_object_keys(graph.objects) -> &objects.push(graph.objects[digest])
     snapshot :: ClosureJournalEntry{kind: ClosureJournalKind.Snapshot, objects: objects, records: graph.sorted_records(), deleted_records: graph.deleted_records}
@@ -502,7 +502,7 @@ fn store_render_journal_entry(entry: ClosureJournalEntry) -> String Never! {
         .Delta -> "kind\tdelta\n"
         .Snapshot -> "kind\tsnapshot\n"
     }
-    out := "{@STORE_JOURNAL_HEADER}\n{kind}"
+    out := "{STORE_JOURNAL_HEADER}\n{kind}"
     objects := ~entry.objects
     &objects.sort_by(object -> object.digest)
     loop object in objects {
@@ -531,7 +531,7 @@ pub fn store_parse_journal_entry(raw: String) -> ClosureJournalEntry StoreError!
     if !store_is_lower_hex(checksum, 64) -> return Err(StoreError.Other("invalid checksum frame"))
     if store_sha256_hex(body.bytes()) != checksum -> return Err(StoreError.Other("checksum mismatch"))
     lines :: store_text_lines(body)
-    if lines.len() == 0 || lines[0] != @STORE_JOURNAL_HEADER -> return Err(StoreError.Other("unsupported journal version"))
+    if lines.len() == 0 || lines[0] != STORE_JOURNAL_HEADER -> return Err(StoreError.Other("unsupported journal version"))
     if lines.len() < 2 -> return Err(StoreError.Other("missing journal kind"))
     kind :: store_journal_kind(lines[1]) ?? return Err(StoreError.Other("missing journal kind"))
     objects := [ClosureObject]{}
@@ -543,13 +543,13 @@ pub fn store_parse_journal_entry(raw: String) -> ClosureJournalEntry StoreError!
         field_kind :: fields[0]
         if {
             field_kind == "object" && fields.len() == 4 && (fields[3] == "0" || fields[3] == "1") -> {
-                if objects.len() >= @STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_OBJECTS} objects"))
+                if objects.len() >= STORE_MAX_CLOSURE_OBJECTS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_OBJECTS} objects"))
                 &objects.push(ClosureObject{digest: store_journal_unhex(fields[1]), path: store_journal_unhex(fields[2]), external: fields[3] == "1"})
             }
             field_kind == "record" && (fields.len() == 6 || fields.len() == 4) -> {
                 id :: store_journal_unhex(fields[1])
                 if records.has_key(id) -> return Err(StoreError.Other("duplicate closure record `{id}`"))
-                if records.len() >= @STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_RECORDS} records"))
+                if records.len() >= STORE_MAX_CLOSURE_RECORDS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_RECORDS} records"))
                 primary :: store_journal_unhex(fields[2])
                 action_key :: store_journal_unhex(fields[3])
                 producer_record :: if fields.len() == 6 -> store_journal_unhex(fields[4]) else -> ""
@@ -573,7 +573,7 @@ pub fn store_parse_journal_entry(raw: String) -> ClosureJournalEntry StoreError!
                 records[id] = record
             }
             field_kind == "delete" && fields.len() == 2 -> {
-                if deleted_records.len() >= @STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {@STORE_MAX_CLOSURE_DELETIONS} deleted records"))
+                if deleted_records.len() >= STORE_MAX_CLOSURE_DELETIONS -> return Err(StoreError.Other("closure transaction exceeds {STORE_MAX_CLOSURE_DELETIONS} deleted records"))
                 &deleted_records.push(store_journal_unhex(fields[1]))
             }
             else -> return Err(StoreError.Other("invalid journal line `{line}`"))
@@ -592,7 +592,7 @@ fn store_journal_unhex(value: String) -> String StoreError! {
         .Text(text) -> Ok(text)
         .OddLength -> Err(StoreError.Other("odd hex field"))
         .NotLowerHex -> Err(StoreError.Other("invalid hex field"))
-        .NotUtf8 -> Err(StoreError.Other("journal field is not UTF-8"))
+        .NotUTF8 -> Err(StoreError.Other("journal field is not UTF-8"))
     }
 }
 
@@ -611,9 +611,9 @@ pub fn store_journal_transaction_paths(journal: String) -> [String] StoreError! 
     entries :: files.list_dir(journal) ?? return Ok([String]{})
     paths := [String]{}
     loop entry in entries {
-        if !entry.name.ends_with(@STORE_JOURNAL_TXN_SUFFIX) -> next
-        if paths.len() >= @STORE_MAX_CLOSURE_TRANSACTIONS {
-            return Err(StoreError.InvalidData("closure journal exceeds {@STORE_MAX_CLOSURE_TRANSACTIONS} transactions"))
+        if !entry.name.ends_with(STORE_JOURNAL_TXN_SUFFIX) -> next
+        if paths.len() >= STORE_MAX_CLOSURE_TRANSACTIONS {
+            return Err(StoreError.InvalidData("closure journal exceeds {STORE_MAX_CLOSURE_TRANSACTIONS} transactions"))
         }
         &paths.push(entry.path)
     }
@@ -621,11 +621,11 @@ pub fn store_journal_transaction_paths(journal: String) -> [String] StoreError! 
 }
 
 pub fn store_journal_dir(roots: HangarRoots) -> String Never! {
-    files.join(files.join(roots.hangar_dir(), @STORE_CLOSURE_DB_DIR), @STORE_JOURNAL_DIR)
+    files.join(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR), STORE_JOURNAL_DIR)
 }
 
 fn store_journal_ensure_directory_durable(path: String) StoreError! {
-    if files.is_dir(path) -> return Ok()
+    if files.is_dir(path) -> return
     parent :: files.dirname(path)
     if parent == "" || parent == path -> return Err(StoreError.Other("closure database path has no parent"))
     store_journal_ensure_directory_durable(parent)
@@ -635,8 +635,8 @@ fn store_journal_ensure_directory_durable(path: String) StoreError! {
             store_sync_store_directory(parent)
         }
         .Err(error) -> {
-            if StoreError.Io(error).is_already_exists() && files.is_dir(path) -> return Ok()
-            return Err(StoreError.Io(error))
+            if StoreError.IO(error).is_already_exists() && files.is_dir(path) -> return
+            return Err(StoreError.IO(error))
         }
     }
 }

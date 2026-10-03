@@ -1,0 +1,190 @@
+// Source/Publish/Sign.rs: author Ed25519 signatures and signing-key files.
+// Main retired the cargo/jet-crypto-helper transport: Core crypto owns Ed25519,
+// entropy and secret wiping. No subprocess, copied primitive, or weak fallback.
+// Provider gates: entropy #3597; held no-follow permissions/publication #3593.
+// Compiler gate #4303: borrowed String.trim -> bytes ABI. Keep the exact
+// trimmed-hex original acceptance; never copy trim to hide the compiler defect.
+use core.crypto.expert as publication_sign_expert
+
+PUBLICATION_DEFAULT_REGISTRY :: "jet"
+
+pub struct PublicationKeyPaths {
+    pub seed_path: String
+    pub public_key_path: String
+}
+pub struct PublicationGeneratedKey {
+    pub seed_path: String
+    pub public_key_path: String
+    pub public_key_hex: String
+}
+
+// Rust keys_dir / key_paths. Empty HOME remains a supplied value, not absence.
+pub fn publication_keys_dir() -[Env]> String Never! {
+    override :: sys.get("JET_KEYS_DIR") ?? ""
+    if override != "" -> return override
+    home :: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
+    files.join(files.join(home, ".jet"), "keys")
+}
+pub fn publication_key_paths(registry: String) -[Env]> PublicationKeyPaths Never! {
+    root :: publication_keys_dir()
+    PublicationKeyPaths{seed_path: files.join(root, "{registry}.ed25519"), public_key_path: files.join(root, "{registry}.ed25519.pub")}
+}
+pub fn publication_key_exists(registry: String) -[FS, Env]> Bool Never! {
+    paths :: publication_key_paths(registry)
+    files.is_file(paths.seed_path)
+}
+pub fn publication_read_public_key(registry: String) -[FS, Env]> String? Never! {
+    bytes :: foundation_read_file_nofollow_at_root(publication_keys_dir(), "{registry}.ed25519.pub", MAX_TREE_FILE_BYTES) ?? return None
+    text :: String.from_bytes(bytes) ?? return None
+    key :: text.trim()
+    if key == "" -> return None
+    Val(key)
+}
+
+// Rust keygen/write_private_seed/set_mode. The canonical Foundation publisher
+// owns root creation, exclusive reservation, descriptor permissions, fsync,
+// binding checks, atomic create-new/replace and cleanup (#3593).
+pub fn publication_keygen(registry: String, force: Bool) -[FS, Env, Time, Rand]> PublicationGeneratedKey PublicationDiagnosticError! {
+    paths :: publication_key_paths(registry)
+    if files.is_file(paths.seed_path) && !force -> return Err(PublicationDiagnosticError{diagnostic: publication_e1248(paths.seed_path)})
+    key :: if crypto.SigningKey.new_random() == {
+        .Ok(generated) -> generated
+        .Err(error) -> {
+            if error == .Unavailable -> return Err(PublicationDiagnosticError{diagnostic: publication_e1292()})
+            return Err(publication_sign_crypto_error("could not generate a signing key"))
+        }
+    }
+    public :: hex.encode(key.public_key().bytes)
+    #Unsafe("export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome") {
+        if publication_sign_write_key_pair(paths, key.bytes, public, force) == {
+            .Ok(_) -> close(^key)
+            .Err(error) -> {
+                close(^key)
+                return Err(error)
+            }
+        }
+    }
+    Ok(PublicationGeneratedKey{seed_path: paths.seed_path, public_key_path: paths.public_key_path, public_key_hex: public})
+}
+// Rust keygen's write step: the seed through write_private_seed, then the
+// public key only after the private seed succeeds, both at the ONE key_paths
+// result reported to the caller. Public publication is protected too, but
+// preserves its required 0644 wire mode.
+fn publication_sign_write_key_pair(paths: PublicationKeyPaths, seed: [U8], public: String, force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
+    publication_write_private_seed(paths.seed_path, seed, force)
+    public_policy :: FoundationPublicationPolicy{mode: 420, create: .Replace, destination_links: .Refuse, create_root: true}
+    if foundation_write_file_nofollow_at_root(files.dirname(paths.public_key_path), files.basename(paths.public_key_path), public.bytes(), None, public_policy) == .Err(error) -> return Err(publication_sign_io_error("public key", "{error}"))
+}
+pub fn publication_write_private_seed(path: String, seed: [U8], force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
+    if sys.family() != "unix" -> return Err(publication_sign_io_error("signing key permissions", "private signing-key permissions are unavailable on this platform"))
+    policy :: FoundationPublicationPolicy{mode: 384, create: if force -> .Replace else -> .CreateNew, destination_links: if force -> .ReplaceBinding else -> .Refuse, create_root: true}
+    if foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), seed, None, policy) == .Err(error) -> return Err(publication_sign_io_error("signing key", "{error}"))
+}
+
+// Rust sign: sign the hash STRING's UTF-8 bytes, not the decoded hash digest.
+// This shared pure seam also permits deterministic real-crypto tests without RNG.
+pub fn publication_sign_bytes(seed: [U8], content_hash: String) -> String PublicationDiagnosticError! {
+    key :: crypto.SigningKey.from_bytes(seed) ?? return Err(publication_sign_crypto_error("signing key must contain exactly 32 bytes"))
+    signature :: if crypto.sign(key, content_hash.bytes()) == {
+        .Ok(signed) -> {
+            close(^key)
+            signed
+        }
+        .Err(_) -> {
+            close(^key)
+            return Err(publication_sign_crypto_error("the signing key was rejected"))
+        }
+    }
+    Ok(base64.encode(signature.bytes))
+}
+pub fn publication_sign(seed_path: String, content_hash: String) -[FS, Env]> String PublicationDiagnosticError! {
+    held :: if foundation_open_file_authority(files.dirname(seed_path), files.basename(seed_path)) == {
+        .Ok(source) -> source
+        .Err(error) -> {
+            return Err(publication_sign_io_error("signing key", "{error}"))
+        }
+    }
+    seed :: if held.read_bounded(32) == {
+        .Ok(bytes) -> crypto.Secret.from_bytes(bytes)
+        .Err(error) -> {
+            return Err(publication_sign_io_error("signing key", "{error}"))
+        }
+    }
+    #Unsafe("import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure") {
+        signature :: if publication_sign_bytes(seed.bytes, content_hash) == {
+            .Ok(signed) -> {
+                close(^seed)
+                signed
+            }
+            .Err(error) -> {
+                close(^seed)
+                return Err(error)
+            }
+        }
+        if held.revalidate() == .Err(error) -> return Err(publication_sign_io_error("signing key", "{error}"))
+        return Ok(signature)
+    }
+}
+
+// Rust verify: malformed base64, bad keys/lengths and failed verification are
+// false; Core strict verification rejects small-order/noncanonical points and S.
+pub fn publication_verify(public_key_hex: String, content_hash: String, signature_b64: String) -> Bool PublicationDiagnosticError! {
+    signature_bytes :: publication_sign_base64_decode(signature_b64) ?? return Ok(false)
+    key_bytes :: publication_sign_hex_decode(public_key_hex) ?? return Ok(false)
+    key :: crypto.VerifyKey.from_bytes(key_bytes) ?? return Ok(false)
+    signature :: crypto.Signature.from_bytes(signature_bytes) ?? return Ok(false)
+    verified := false
+    #Unsafe("package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process") {
+        verified = publication_sign_expert.ed25519_verify_strict(key.bytes, content_hash.bytes(), signature.bytes) ?? false
+    }
+    Ok(verified)
+}
+
+// String errors in Rust's private encoding helpers, not Diagnostic failures.
+#Error
+pub struct PublicationSigningEncodingError {
+    pub message: String
+}
+pub fn publication_sign_hex_decode(text: String) -> [U8] PublicationSigningEncodingError! {
+    trimmed :: text.trim()
+    if trimmed.bytes().len() %% 2 != 0 -> return Err(PublicationSigningEncodingError{message: "odd-length hex string"})
+    bytes :: hex.decode(trimmed) ?? return Err(PublicationSigningEncodingError{message: "invalid hex digit"})
+    Ok(bytes)
+}
+// Reuse Core's standard decoder, then enforce Rust's canonical roundtrip rule
+// independently of the importing package's edition-specific decoder strictness.
+pub fn publication_sign_base64_decode(text: String) -> [U8] PublicationSigningEncodingError! {
+    if text.bytes().len() %% 4 != 0 -> return Err(PublicationSigningEncodingError{message: "base64 length not a multiple of 4"})
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 43 || code == 47 || code == 61) -> return Err(PublicationSigningEncodingError{message: "invalid base64 character"})
+    }
+    bytes :: base64.decode(text) ?? return Err(PublicationSigningEncodingError{message: "non-canonical base64 encoding"})
+    if base64.encode(bytes) != text -> return Err(PublicationSigningEncodingError{message: "non-canonical base64 encoding"})
+    Ok(bytes)
+}
+
+pub fn publication_e1248(path: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1248", None,
+        "`jet registry keygen` refused: a signing key already exists at `{path}`",
+        "overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would require a reviewed, re-signed takeover release.",
+        "use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet registry key backup`.")
+}
+// Main's tandem corrects Rust's hand-rendered E1292 defect. The canonical row
+// owns ALL static entropy prose; callers render it through diagnostic_render.
+pub fn publication_e1292() -> Diagnostic Never! {
+    row :: diagnostic_registry_row("E1292") ?? panic("E1292 must be registered")
+    diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)
+}
+fn publication_sign_io_error(what: String, detail: String) -> PublicationDiagnosticError Never! {
+    PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E0704", None,
+        "couldn't write the {what}: {detail}",
+        "signing keys live under `~/.jet/keys` (or `$JET_KEYS_DIR`)",
+        "check disk permissions and try again")}
+}
+fn publication_sign_crypto_error(detail: String) -> PublicationDiagnosticError Never! {
+    PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E0704", None,
+        "couldn't use Ed25519 signing: {detail}",
+        "the canonical Core cryptography provider rejected the signing operation",
+        "check that the signing seed is a valid 32-byte Ed25519 seed and try again")}
+}

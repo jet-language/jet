@@ -1,6 +1,9 @@
-// Machine-wide artifact store claims (Rust `jet_store` lib.rs tests). Each
-// claim opens a private store under the system temporary directory and
-// removes it afterwards.
+// Machine-wide artifact store claims (Rust `jet_store` lib.rs tests).
+// Native operations retain their real #3593/#3594 provider gates. Pure wire,
+// identity and configuration regressions below do not substitute for them.
+// BLOCKED #4417: exact Rust Float wire text requires the canonical service;
+// #4415 optional/fallible return lowering and #4303 trim remain compiler gates.
+// #3598 / #4262 retain protocol parser/main Compiler integration prerequisites.
 
 // A fresh store root under the system temporary directory.
 fn store_artifact_test_root(label: String) -[Env, Rand]> String {
@@ -29,7 +32,7 @@ fn store_artifact_test_entries(directory: String) -[FS]> Int {
 // The variant name of a store failure, for claims about its kind.
 fn store_artifact_test_kind(error: ArtifactStoreError) -> String {
     if error == {
-        .Io(_) -> "io"
+        .IO(_) -> "io"
         .Config(_) -> "config"
         .InvalidDigest(_) -> "invalid-digest"
         .InvalidKey(_) -> "invalid-key"
@@ -53,6 +56,36 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     if store.publish_blob(text.bytes()) == {
         .Ok(_) -> true
         .Err(error) -> panic("{text} publish failed: {error.message()}")
+    }
+}
+
+// Jet calls propagate failure separately from `??` on an optional payload.
+// Match the Result so a successful miss stays None and an IO failure panics.
+fn store_artifact_test_blob(store: ArtifactStore, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? Never! {
+    if store.get_blob(object) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("blob read failed: {error.message()}")
+    }
+}
+
+fn store_artifact_test_action(store: ArtifactStore, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? Never! {
+    if store.get_action(action) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("action read failed: {error.message()}")
+    }
+}
+
+fn store_artifact_test_lto(store: ArtifactStore, namespace: String, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? Never! {
+    if store.get_lto(namespace, object) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("LTO read failed: {error.message()}")
+    }
+}
+
+fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
+    if store.host_limit() == {
+        .Ok(value) -> value
+        .Err(error) -> panic("host limit read failed: {error.message()}")
     }
 }
 
@@ -99,9 +132,13 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     root :: store_artifact_test_root("blob")
     store :: store_artifact_test_store(root, 1024)
     bytes :: "hello store".bytes()
+    assert_eq(store.root(), root)
+    assert_eq(store.config().root(), root)
+    assert_eq(store.owner().pid(), sys.pid())
+    assert(store.owner().start() != "")
     object :: store.publish_blob(bytes) ?? panic("publish")
     assert_eq(object.length(), bytes.len())
-    assert_eq(store.get_blob(object) ?? panic("get"), Val(bytes))
+    assert_eq(store_artifact_test_blob(store, object), Val(bytes))
     assert(files.is_file(store.object_path(object)))
     layout :: [String]{"cas", "ac", "lto", "locks", "leases"}
     loop name in layout -> assert(files.is_dir(files.join(root, name)), "{name} is a directory")
@@ -113,10 +150,10 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     store :: store_artifact_test_store(root, 1024)
     object :: store.publish_blob("good".bytes()) ?? panic("publish")
     files.write_bytes(store.object_path(object), "bad".bytes()) ?? panic("corrupt")
-    assert_eq(store.get_blob(object) ?? panic("miss"), None)
+    assert_eq(store_artifact_test_blob(store, object), None)
     assert_eq(store_artifact_test_entries(files.join(root, "quarantine")), 1)
     store.publish_object(object, "good".bytes()) ?? panic("repair")
-    assert_eq(store.get_blob(object) ?? panic("get"), Val("good".bytes()))
+    assert_eq(store_artifact_test_blob(store, object), Val("good".bytes()))
     store_artifact_test_cleanup(root)
 }
 
@@ -125,13 +162,13 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     store :: store_artifact_test_store(root, 1024)
     action :: store.action("compile|unit-a")
     store.publish_action(action, "record".bytes()) ?? panic("publish")
-    assert_eq(store.get_action(action) ?? panic("get"), Val("record".bytes()))
+    assert_eq(store_artifact_test_action(store, action), Val("record".bytes()))
     if store.publish_action(action, "different".bytes()) == {
         .Ok(_) -> panic("a different record replaced an immutable action")
         .Err(error) -> assert_eq(store_artifact_test_kind(error), "conflict")
     }
     files.write_bytes(store.action_path(action), "bad".bytes()) ?? panic("corrupt")
-    assert_eq(store.get_action(action) ?? panic("miss"), None)
+    assert_eq(store_artifact_test_action(store, action), None)
     assert_eq(store_artifact_test_entries(files.join(root, "quarantine")), 1)
     store_artifact_test_cleanup(root)
 }
@@ -140,7 +177,7 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     root :: store_artifact_test_root("lto")
     store :: store_artifact_test_store(root, 1024)
     object :: store.publish_lto("output-identity", "thin-lto".bytes()) ?? panic("publish")
-    assert_eq(store.get_lto("output-identity", object) ?? panic("get"), Val("thin-lto".bytes()))
+    assert_eq(store_artifact_test_lto(store, "output-identity", object), Val("thin-lto".bytes()))
     assert(files.is_file(store.lto_path("output-identity", object)))
     store_artifact_test_cleanup(root)
 }
@@ -151,15 +188,15 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     first :: store.publish_blob("1111".bytes()) ?? panic("first")
     second :: store.publish_blob("2222".bytes()) ?? panic("second")
     third :: store.publish_blob("3333".bytes()) ?? panic("third")
-    _ :: store.get_blob(second) ?? panic("touch")
+    assert_eq(store_artifact_test_blob(store, second), Val("2222".bytes()))
     reopened :: store_artifact_test_open(store.config())
     status :: reopened.status() ?? panic("status")
     assert_eq(status.entries.len(), 3)
     report :: reopened.prune_to(4) ?? panic("prune")
     assert_eq(report.after_bytes, 4)
-    assert((reopened.get_blob(second) ?? panic("second")) != None)
-    assert((reopened.get_blob(first) ?? panic("first")) == None)
-    assert((reopened.get_blob(third) ?? panic("third")) == None)
+    assert(store_artifact_test_blob(reopened, second) != None)
+    assert(store_artifact_test_blob(reopened, first) == None)
+    assert(store_artifact_test_blob(reopened, third) == None)
     store_artifact_test_cleanup(root)
 }
 
@@ -169,11 +206,13 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     first :: store.publish_blob("1111".bytes()) ?? panic("first")
     second :: store.publish_blob("2222".bytes()) ?? panic("second")
     lease :: store.acquire_lease([ObjectHandle]{first}) ?? panic("lease")
+    assert_eq(lease.owner(), store.owner())
+    assert_eq(files.dirname(lease.path()), files.join(root, "leases"))
     stale :: files.join(files.join(root, "leases"), "lease-stale")
-    files.write(stale, "{@STORE_ARTIFACT_VERSION}|lease|4294967295|dead\nblob|{second.key()}\n") ?? panic("stale lease")
+    files.write(stale, "{STORE_ARTIFACT_VERSION}|lease|4294967295|dead\nblob|{second.key()}\n") ?? panic("stale lease")
     report :: store.prune_to(0) ?? panic("prune")
     assert(report.blocked)
-    assert((store.get_blob(first) ?? panic("pinned")) != None)
+    assert(store_artifact_test_blob(store, first) != None)
     assert(!files.lexists(stale))
     close(^lease)
     released :: store.prune_to(0) ?? panic("prune after release")
@@ -199,7 +238,7 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     object :: store.publish_blob("payload".bytes()) ?? panic("publish")
     files.append_all(files.join(root, "journal"), "not a journal record\n") ?? panic("append")
     reopened :: store_artifact_test_open(store.config())
-    assert_eq(reopened.get_blob(object) ?? panic("get"), Val("payload".bytes()))
+    assert_eq(store_artifact_test_blob(reopened, object), Val("payload".bytes()))
     status :: reopened.status() ?? panic("status")
     assert_eq(status.entries.len(), 1)
     store_artifact_test_cleanup(root)
@@ -215,23 +254,52 @@ fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, 
     assert(store_artifact_test_size_refused("18446744073709551615K"), "an overflowing size is refused")
 }
 
+#Test("artifact store size parser preserves the full Rust u64 domain") {
+    assert_eq(store_artifact_parse_size("9223372036854775808") ?? panic("above i64"), 9223372036854775808)
+    assert_eq(store_artifact_parse_size("18446744073709551615") ?? panic("u64 maximum"), STORE_ARTIFACT_U64_MAX)
+    assert_eq(store_artifact_parse_size(" +18446744073709551615B ") ?? panic("signed maximum bytes"), STORE_ARTIFACT_U64_MAX)
+    assert_eq(store_artifact_parse_size("18014398509481983KiB") ?? panic("largest KiB count"), 18446744073709550592)
+    assert(store_artifact_test_size_refused("18014398509481984KiB"))
+    assert(store_artifact_test_size_refused("18446744073709551616"))
+    assert(store_artifact_test_size_refused("-1"))
+    units :: store_artifact_size_units()
+    loop unit in units {
+        count :: STORE_ARTIFACT_U64_MAX /% unit.multiplier
+        assert_eq(store_artifact_parse_size("{count}{unit.suffix}") ?? panic("largest whole unit"), count * unit.multiplier)
+        assert(store_artifact_test_size_refused("{count + 1}{unit.suffix}"))
+    }
+}
+
+#Test("artifact store distinguishes u64 parse overflow from unit multiplication overflow") {
+    if store_artifact_parse_size("18446744073709551616") == {
+        .Err(error) -> assert_eq(error.message(), "invalid byte size `18446744073709551616`")
+        .Ok(_) -> panic("an overflowing u64 count must fail")
+    }
+    if store_artifact_parse_size("18014398509481984K") == {
+        .Err(error) -> assert_eq(error.message(), "byte size `18014398509481984K` is too large")
+        .Ok(_) -> panic("unit multiplication overflow must fail")
+    }
+    assert_eq(store_artifact_saturating_add(STORE_ARTIFACT_U64_MAX, 1), STORE_ARTIFACT_U64_MAX)
+    assert_eq(store_artifact_saturating_mul(STORE_ARTIFACT_U64_MAX, 2), STORE_ARTIFACT_U64_MAX)
+}
+
 #Test("artifact store host limit overrides adaptive and persists") {
     root :: store_artifact_test_root("host-limit")
     store :: store_artifact_test_store(root, 1024)
-    assert_eq(store.host_limit() ?? panic("host limit"), None)
+    assert_eq(store_artifact_test_host_limit(store), None)
     store.set_host_limit(Val(512)) ?? panic("set host limit")
-    assert_eq(store.host_limit() ?? panic("host limit"), Val(512))
+    assert_eq(store_artifact_test_host_limit(store), Val(512))
     assert_eq(store.limit(), 512)
     reopened :: store_artifact_test_open(store.config())
-    assert_eq(reopened.host_limit() ?? panic("host limit"), Val(512))
+    assert_eq(store_artifact_test_host_limit(reopened), Val(512))
     reopened.set_host_limit(None) ?? panic("clear host limit")
-    assert_eq(reopened.host_limit() ?? panic("host limit"), None)
+    assert_eq(store_artifact_test_host_limit(reopened), None)
     store_artifact_test_cleanup(root)
 }
 
 #Test("artifact store reserve admission refuses when disk reserve would be breached") {
     root :: store_artifact_test_root("reserve")
-    gated :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(@STORE_ARTIFACT_INT_MAX).with_reserve_bytes(@STORE_ARTIFACT_INT_MAX))
+    gated :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(STORE_ARTIFACT_U64_MAX).with_reserve_bytes(STORE_ARTIFACT_U64_MAX))
     if gated.publish_blob("reserve".bytes()) == {
         .Ok(_) -> panic("a publish breaching the disk reserve was admitted")
         .Err(error) -> assert_eq(store_artifact_test_kind(error), "capacity")
@@ -314,7 +382,7 @@ fn store_artifact_test_store_v0_fixture() -> [U8] {
 }
 
 // The previous build-record schema (tests/fixtures/build-metadata-compat/build-record-v0.json).
-@STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: `{"schema":"jet.build-record/v0","program":"main.jet","nodes":[{"kind":"check","key":"0e40789b60214972cb731d97fc32a472e1f054759cb0c4dcd01cdf74f8d0ea67","subject":"main.jet","duration_ms":0,"why_ran":"first-run","inputs":["main.jet"]},{"kind":"compile","key":"5f47f088c0aede64d6e43bcecdbde05830885f38d531f2c82ad91850d186a6ca","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":["check:main.jet"]},{"kind":"link","key":"1ed86259bc7ec780692d7dd13bcd44758d55b8922685a706f397c46dd600b62c","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":["compile:main"]}]}`
+STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: prep { `{"schema":"jet.build-record/v0","program":"main.jet","nodes":[{"kind":"check","key":"0e40789b60214972cb731d97fc32a472e1f054759cb0c4dcd01cdf74f8d0ea67","subject":"main.jet","duration_ms":0,"why_ran":"first-run","inputs":["main.jet"]},{"kind":"compile","key":"5f47f088c0aede64d6e43bcecdbde05830885f38d531f2c82ad91850d186a6ca","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":["check:main.jet"]},{"kind":"link","key":"1ed86259bc7ec780692d7dd13bcd44758d55b8922685a706f397c46dd600b62c","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":["compile:main"]}]}` }
 
 #Test("artifact store previous store and build record fixtures fail closed") {
     action :: ActionHandle.from_key("build-metadata-compat")
@@ -322,8 +390,96 @@ fn store_artifact_test_store_v0_fixture() -> [U8] {
         .Ok(_) -> panic("previous store schema must be rejected")
         .Err(error) -> assert_eq(error.reason, "action record has an unknown version or short header")
     }
-    if BuildRecord.from_json(@STORE_ARTIFACT_TEST_BUILD_RECORD_V0) == {
+    if BuildRecord.from_json(STORE_ARTIFACT_TEST_BUILD_RECORD_V0) == {
         .Ok(_) -> panic("previous build-record schema must be rejected")
         .Err(error) -> assert_eq(error.reason, "unsupported build record schema `jet.build-record/v0`")
     }
+}
+
+// Backing-field migration regression: public Rust accessor APIs stay intact.
+#Test("artifact store handle accessors preserve canonical identities") {
+    hex :: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    digest :: ArtifactDigest.from_hex(hex) ?? panic("valid digest")
+    object :: ObjectHandle.new(digest, 42)
+    assert_eq(object.digest(), digest)
+    assert_eq(object.length(), 42)
+    assert_eq(object.key(), hex)
+    assert_eq(object.text(), "{hex}:42")
+    action :: ActionHandle.new(digest)
+    assert_eq(action.digest(), digest)
+    assert_eq(action.key(), hex)
+    namespace :: LTONamespace.new("output-identity") ?? panic("valid namespace")
+    assert_eq(namespace.name(), "output-identity")
+}
+
+#Test("artifact store configuration builders preserve public accessors and defaults") {
+    config :: ArtifactStoreConfig.new("/store")
+    assert_eq(config.root(), "/store")
+    assert_eq(config.cap_bytes(), None)
+    assert_eq(config.reserve_bytes(), STORE_ARTIFACT_DEFAULT_RESERVE_BYTES)
+    assert_eq(config.lock_wait().ns, STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS * 1000000)
+    updated :: config.with_cap_bytes(42).with_reserve_bytes(7).with_lock_wait(time.duration_ms(25))
+    assert_eq(updated.root(), "/store")
+    assert_eq(updated.cap_bytes(), Val(42))
+    assert_eq(updated.reserve_bytes(), 7)
+    assert_eq(updated.lock_wait().ns, 25000000)
+    assert_eq(config.cap_bytes(), None)
+    assert_eq(config.reserve_bytes(), STORE_ARTIFACT_DEFAULT_RESERVE_BYTES)
+}
+
+// #4407: the canonical Fixed formatter owns Rust's ties-to-even behavior.
+// Do not restore a store-local integer half-up formatter for lock diagnostics.
+#Test("artifact store lock duration uses canonical fixed ties to even") {
+    error :: ArtifactStoreError.Locked{path: "/store/locks/store.lock", owner_pid: None, elapsed_ns: 62500000}
+    assert_eq(error.message(), "store lock is owned by a live process (owner pid unknown) after waiting 0.062s: /store/locks/store.lock")
+}
+
+#Test("artifact store process identity accessors preserve owner wire") {
+    owner :: ArtifactProcessIdentity.new(123, "start-token")
+    assert_eq(owner.pid(), 123)
+    assert_eq(owner.start(), "start-token")
+    assert_eq(owner.owner_line("lock"), "jet.store.v1|lock|123|start-token\n")
+    assert_eq(owner.owner_line("lease"), "jet.store.v1|lease|123|start-token\n")
+}
+
+#Test("artifact store build record wire preserves fixed field order and shared quoting") {
+    c1 :: String.from_bytes([U8]{127, 194, 133}) ?? panic("valid C1 control scalars")
+    c0 :: String.from_bytes([U8]{8, 12}) ?? panic("valid C0 control scalars")
+    record :: BuildRecord.new("main\".jet", [BuildNodeRecord]{
+        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", c1, c0}},
+        BuildNodeRecord{kind: "link", key: "out", subject: "main", duration_ms: Float{-1.0}, why_ran: "first-run", inputs: [String]{}},
+    })
+    expected :: `{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\u007f\u0085","\u0008\u000c"]},{"kind":"link","key":"out","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":[]}]}`
+    assert_eq(record.to_json(), expected)
+    assert_eq(BuildRecord.new("empty", [BuildNodeRecord]{}).to_json(), `{"schema":"jet.build-record/v1","program":"empty","nodes":[]}`)
+    assert_eq(record.program, "main\".jet")
+    assert_eq(record.nodes[0].inputs[0], "a\\b")
+}
+
+#Test("artifact store build record parser preserves schema and failure domains") {
+    record :: BuildRecord.new("main.jet", [BuildNodeRecord]{
+        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "first-run", inputs: [String]{"main.jet"}},
+    })
+    assert_eq(BuildRecord.from_json(record.to_json()) ?? panic("build record round trip"), record)
+    if BuildRecord.from_json("not JSON") == {
+        .Err(error) -> assert_eq(error.reason, "build record is not valid JSON")
+        .Ok(_) -> panic("invalid JSON must fail")
+    }
+    if BuildRecord.from_json(`{"schema":"jet.build-record/v1","program":"main.jet","nodes":[{"duration_ms":-1}]}`) == {
+        .Err(error) -> assert_eq(error.reason, "build record node duration_ms is out of range")
+        .Ok(_) -> panic("negative duration must fail")
+    }
+}
+
+#Test("artifact store build record empty wire is byte exact") {
+    assert_eq(BuildRecord.new("empty", [BuildNodeRecord]{}).to_json(), `{"schema":"jet.build-record/v1","program":"empty","nodes":[]}`)
+}
+
+#Test("artifact store build record fractional wire preserves Foundation escaping and node order") {
+    controls :: String.from_bytes([U8]{8, 12, 127, 194, 133}) ?? panic("valid control scalars")
+    record :: BuildRecord.new("main\".jet", [BuildNodeRecord]{
+        BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", controls}},
+        BuildNodeRecord{kind: "compile", key: "out", subject: "main", duration_ms: Float{9030.391929}, why_ran: "first-run", inputs: [String]{}},
+    })
+    assert_eq(record.to_json(), `{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\u0008\u000c\u007f\u0085"]},{"kind":"compile","key":"out","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":[]}]}`)
 }

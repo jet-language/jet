@@ -153,6 +153,30 @@ pub enum FactValue {
         }
     }
 
+    // Rust's tuple-variant Debug spelling is part of the lock projection,
+    // distinct from the human-facing value display above.
+    fn debug_text(self) -> String Never! {
+        if self == {
+            .Bool(value) -> "Bool({value:Debug})"
+            .Int(value) -> "Int({value:Debug})"
+            .Char(value) -> "Char({value:Debug})"
+            .Text(value) -> "Text({value:Debug})"
+            .Enum(variant) -> "Enum({variant:Debug})"
+            .OptionalText(value) -> {
+                if value == {
+                    .Val(text) -> "OptionalText(Some({text:Debug}))"
+                    .None -> "OptionalText(None)"
+                }
+            }
+            .Policy(value) -> {
+                if value == {
+                    .Limit(limit) -> "Policy(Limit({limit:Debug}))"
+                    else -> "Policy({value:Debug})"
+                }
+            }
+        }
+    }
+
     fn safety_relation(self, next: FactValue) -> SafetyRelation Never! {
         if self == next -> return SafetyRelation.Same
         if self == {
@@ -434,5 +458,7 @@ pub fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> Effec
             }
         }
     }
-    Ok(Val(EffectiveFact{key: key, value: first.value, provenance: chain, effective: candidates[0], forced: first.force || force_layer >= 0}))
+    value :: ~first.value
+    forced :: first.force || force_layer >= 0
+    Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: candidates[0], forced: forced}))
 }

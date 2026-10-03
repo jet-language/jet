@@ -22,7 +22,7 @@ fn store_test_expectation(out: String) -> CacheExpectation Never! {
 
 // Ingest one package whose outputs each hold a `payload` file with the given
 // text.
-fn store_test_ingest_fixture(roots: HangarRoots, name: String, outputs: [String: String], references: [String]) -> IngestedObject Never! {
+fn store_test_ingest_fixture(verification: &StoreVerification, roots: HangarRoots, name: String, outputs: [String: String], references: [String]) -> IngestedObject Never! {
     paths := [String: String]{}
     loop output in outputs {
         path :: files.join(roots.root, "fixture-{name}-{output.key}")
@@ -41,11 +41,11 @@ fn store_test_ingest_fixture(roots: HangarRoots, name: String, outputs: [String:
         provenance: "closure-test",
         platform_artifact_kind: "",
     }
-    store_ingest_tree(roots, request) ?? panic("fixture ingest")
+    store_ingest_tree(&verification, roots, request) ?? panic("fixture ingest")
 }
 
-fn store_test_verified(roots: HangarRoots, reference: String, expectation: CacheExpectation) -> Bool Never! {
-    hit :: store_find_verified_by_reference(roots, reference, expectation) ?? panic("verified lookup")
+fn store_test_verified(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> Bool Never! {
+    hit :: store_find_verified_by_reference(&verification, roots, reference, expectation) ?? panic("verified lookup")
     hit != None
 }
 

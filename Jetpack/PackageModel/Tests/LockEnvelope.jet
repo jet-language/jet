@@ -101,7 +101,7 @@ fn pkg_lock_test_project(label: String) -[FS]> TempDir Never! {
     assert(text.contains("channel = \"1.79\""))
     back :: pkg_lock_parse(text) ?? panic("parse")
     assert_eq(back.toolchains, [LockedToolchain]{toolchain})
-    assert_eq(back.version, @PKG_LOCK_VERSION)
+    assert_eq(back.version, PKG_LOCK_VERSION)
 }
 
 #Test("receipt roundtrips without changing other packages") {
@@ -150,7 +150,7 @@ fn pkg_lock_test_project(label: String) -[FS]> TempDir Never! {
 #Test("record envelope backfills lock on disk") {
     scratch :: pkg_lock_test_project("a4-record")
     lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", None), pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
-    files.write(files.join(scratch.path, @UNIFIED_LOCK_FILE), pkg_lock_write(lock)) ?? panic("seed lock")
+    files.write(files.join(scratch.path, UNIFIED_LOCK_FILE), pkg_lock_write(lock)) ?? panic("seed lock")
     envelope :: pkg_lock_test_env("sha256-real", "x86_64-linux", "", "hello via core-source")
     pkg_lock_record_envelope(scratch.path, "hello", envelope)
     reloaded :: pkg_lock_load(scratch.path) ?? panic("reload")

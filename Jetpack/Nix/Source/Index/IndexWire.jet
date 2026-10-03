@@ -3,19 +3,19 @@
 // parser re-encodes what it read and rejects bytes that are not already
 // canonical, because the canonical bytes are what the producer signed.
 
-@NIX_INDEX_MAX_COMPRESSED_BYTES :: 33554432
-@NIX_INDEX_MAX_DECODED_BYTES :: 268435456
-@NIX_INDEX_MAX_RECORDS :: 400000
-@NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: 4194304
-@NIX_INDEX_MAX_SIGNATURE_BYTES :: 16384
-@NIX_INDEX_MAX_MANIFEST_BYTES :: 16777216
-@NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: 300
-@NIX_INDEX_SCHEMA :: 1
-@NIX_INDEX_U64_MAX :: 18446744073709551615
-@NIX_INDEX_JSON_MAX_DEPTH :: 16
-@NIX_INDEX_CHANNELS :: [String]{"nixpkgs-unstable", "nixos-unstable"}
-@NIX_INDEX_SYSTEMS :: [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
-@NIX_INDEX_COVERAGE_REASONS :: [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"}
+NIX_INDEX_MAX_COMPRESSED_BYTES :: prep { 33554432 }
+NIX_INDEX_MAX_DECODED_BYTES :: prep { 268435456 }
+NIX_INDEX_MAX_RECORDS :: prep { 400000 }
+NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: prep { 4194304 }
+NIX_INDEX_MAX_SIGNATURE_BYTES :: prep { 16384 }
+NIX_INDEX_MAX_MANIFEST_BYTES :: prep { 16777216 }
+NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: prep { 300 }
+NIX_INDEX_SCHEMA :: prep { 1 }
+NIX_INDEX_U64_MAX :: prep { 18446744073709551615 }
+NIX_INDEX_JSON_MAX_DEPTH :: prep { 16 }
+NIX_INDEX_CHANNELS :: prep { [String]{"nixpkgs-unstable", "nixos-unstable"} }
+NIX_INDEX_SYSTEMS :: prep { [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"} }
+NIX_INDEX_COVERAGE_REASONS :: prep { [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"} }
 
 #Error
 pub enum NixIndexError {
@@ -243,11 +243,11 @@ pub struct NixIndexDocument {
     }
 
     fn validate(self) NixIndexError! {
-        if self.schema != @NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index schema"))
+        if self.schema != NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index schema"))
         nix_index_validate_channel(self.channel)
         nix_index_validate_revision(self.revision)
         nix_index_validate_system(self.system)
-        if self.records.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
+        if self.records.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
         records := [String: Bool]{}
         loop record in self.records {
             nix_index_validate_attrpath(record.attrpath)
@@ -281,7 +281,7 @@ pub struct NixIndexDocument {
         }
         if !nix_index_same_keys(indexed, records) -> return Err(NixIndexError.Invalid("nix index coverage does not exactly match indexed records"))
         misses := [String: Bool]{}
-        reasons :: @NIX_INDEX_COVERAGE_REASONS
+        reasons :: NIX_INDEX_COVERAGE_REASONS
         loop miss in self.coverage.not_indexed {
             nix_index_validate_attrpath(miss.attrpath)
             if !reasons.contains(miss.reason) -> return Err(NixIndexError.Invalid("nix index has an unknown coverage reason"))
@@ -431,7 +431,7 @@ pub struct NixIndexChannelManifest {
     }
 
     fn validate(self) NixIndexError! {
-        if self.schema != @NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index manifest schema"))
+        if self.schema != NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index manifest schema"))
         nix_index_validate_channel(self.channel)
         if self.expires_unix <= self.issued_unix -> return Err(NixIndexError.Invalid("nix index manifest expiry is not after issue time"))
         keys := [String]{}
@@ -441,9 +441,9 @@ pub struct NixIndexChannelManifest {
             key :: "{target.revision}\n{target.system}"
             if keys.contains(key) -> return Err(NixIndexError.Invalid("nix index manifest has duplicate targets"))
             &keys.push(key)
-            if target.compressed_length == 0 || target.compressed_length > @NIX_INDEX_MAX_COMPRESSED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds compressed bound"))
-            if target.decoded_length == 0 || target.decoded_length > @NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds decoded bound"))
-            if target.record_count > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index target exceeds record bound"))
+            if target.compressed_length == 0 || target.compressed_length > NIX_INDEX_MAX_COMPRESSED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds compressed bound"))
+            if target.decoded_length == 0 || target.decoded_length > NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds decoded bound"))
+            if target.record_count > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index target exceeds record bound"))
             if !nix_is_lower_hex(target.sha256, 64) -> return Err(NixIndexError.Invalid("nix index target digest is malformed"))
             if !nix_is_lower_hex(target.signature_sha256, 64) -> return Err(NixIndexError.Invalid("nix index signature digest is malformed"))
             nix_index_validate_url(target.url)
@@ -482,14 +482,14 @@ pub fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexErr
 }
 
 fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixIndexError! {
-    if bytes.len() > @NIX_INDEX_MAX_NATIVE_RECIPE_BYTES -> return Err(NixIndexError.Invalid("local unofficial native catalog exceeds its size bound"))
+    if bytes.len() > NIX_INDEX_MAX_NATIVE_RECIPE_BYTES -> return Err(NixIndexError.Invalid("local unofficial native catalog exceeds its size bound"))
     text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("local unofficial native catalog is not UTF-8"))
     value :: nix_index_parse_json(text, "parse local unofficial native catalog JSON")
     map :: nix_index_object(value, "local unofficial native catalog")
     nix_index_reject_unknown(map, [String]{"schema", "recipes"})
     if nix_index_u64_field(map, "schema") != 1 -> return Err(NixIndexError.Invalid("local unofficial native catalog schema is unsupported"))
     values :: nix_index_array_field(map, "recipes")
-    if values.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
+    if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     recipes := [NixNativeRecipe]{}
     loop value in values -> &recipes.push(nix_index_parse_native_recipe(value))
     &recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
@@ -557,7 +557,7 @@ fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] 
 
 fn nix_index_parse_records(value: DataTree) -> [NixIndexRecordWire] NixIndexError! {
     values :: nix_index_value_array(value, "records")
-    if values.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
+    if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
     records := [NixIndexRecordWire]{}
     loop item in values -> &records.push(nix_index_parse_record(item))
     Ok(records)
@@ -624,12 +624,12 @@ fn nix_index_parse_manifest_target(value: DataTree) -> NixIndexManifestTarget Ni
 }
 
 fn nix_index_validate_channel(channel: String) NixIndexError! {
-    channels :: @NIX_INDEX_CHANNELS
+    channels :: NIX_INDEX_CHANNELS
     if !channels.contains(channel) -> return Err(NixIndexError.Invalid("unsupported nixpkgs channel `{channel}`"))
 }
 
 fn nix_index_validate_system(system: String) NixIndexError! {
-    systems :: @NIX_INDEX_SYSTEMS
+    systems :: NIX_INDEX_SYSTEMS
     if !systems.contains(system) -> return Err(NixIndexError.Invalid("unsupported nixpkgs system `{system}`"))
 }
 
@@ -694,8 +694,8 @@ fn nix_index_parse_json(text: String, context: String) -> DataTree NixIndexError
 
 fn nix_index_json_limits() -> encoding.EncodingLimits Never! {
     limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val(@NIX_INDEX_MAX_DECODED_BYTES)
-    limits.max_depth = @NIX_INDEX_JSON_MAX_DEPTH
+    limits.max_total_bytes = Val(NIX_INDEX_MAX_DECODED_BYTES)
+    limits.max_depth = NIX_INDEX_JSON_MAX_DEPTH
     limits
 }
 
@@ -753,7 +753,7 @@ fn nix_index_u64_value(value: DataTree, label: String) -> Int NixIndexError! {
     if value == {
         .Int(number) -> {
             if number < 0 -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
-            if number > @NIX_INDEX_U64_MAX -> return Err(NixIndexError.Invalid("{label} is out of range"))
+            if number > NIX_INDEX_U64_MAX -> return Err(NixIndexError.Invalid("{label} is out of range"))
             return Ok(number)
         }
         .Float(_) -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))

@@ -17,11 +17,11 @@ fn pkg_bridge_test_tool_runs(tool: String) -[Exec, Time.Wait]> Bool Never! {
 }
 
 #Test("identity is stable and input sensitive") {
-    first := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    first := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     &first.field("descriptor", "one".bytes())
-    same := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    same := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     &same.field("descriptor", "one".bytes())
-    changed := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    changed := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     &changed.field("descriptor", "two".bytes())
     first_digest :: first.finish()
     assert_eq(first_digest, same.finish())

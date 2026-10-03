@@ -101,7 +101,7 @@ fn pkg_debug_target_identity(identity: TargetProfileIdentity) -> String Never! {
     if identity == {
         .WebBrowser -> "WebBrowser"
         .WebWasiServer -> "WebWasiServer"
-        .WebNoOs -> "WebNoOs"
+        .WebNoOS -> "WebNoOs"
         .Named(value) -> "Named({pkg_debug_str(value)})"
     }
 }
@@ -278,13 +278,15 @@ fn pkg_debug_claims(grade: ClaimsGrade?) -> String Never! {
     }
 }
 
-fn pkg_debug_source_maps(maps: [PolicySourceMap]) -> String Never! {
+// Shared by package facts and publication policy fingerprints; both identities
+// use these exact Rust-derived Debug bytes, not a second formatter.
+pub fn pkg_debug_source_maps(maps: [PolicySourceMap]) -> String Never! {
     parts := [String]{}
     loop map in maps -> &parts.push("({pkg_debug_str(map.pattern)}, {pkg_debug_str_list(map.sources)})")
     "[{parts.join(", ")}]"
 }
 
-fn pkg_debug_exceptions(exceptions: [PackagePolicyException]) -> String Never! {
+pub fn pkg_debug_exceptions(exceptions: [PackagePolicyException]) -> String Never! {
     parts := [String]{}
     loop exception in exceptions -> &parts.push("PackagePolicyException {{ id: {pkg_debug_str(exception.id)}, scope: {pkg_debug_str(exception.scope)}, reason: {pkg_debug_str(exception.reason)}, expires_at: {exception.expires_at} }}")
     "[{parts.join(", ")}]"

@@ -323,7 +323,12 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         binder_refs :: args[index].flags.binder_refs
         binder_start :: context.name_references.len()
         binder_keys :: if binder_refs.len() > 0 -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, &scopes, &state, expr_span(args[index].expr)) else -> [String]{}
-        checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        // Rust `arg_expect`: a self-typed numeric read widens into the
+        // parameter after it is checked on its own.
+        self_typed :: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
+        argument_expected := Type?{None}
+        if !self_typed -> argument_expected = Val(required)
+        checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if binder_refs.len() > 0 {
             sema_scope_leave(&scopes, &state)
             if sema_call_binder_refs_read(binder_keys, binder_start, context) {
@@ -331,7 +336,8 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 binder_site = args[index].flags.binder_site ?? span.start
             }
         }
-        value :: checked_argument ?? return None
+        checked_value :: checked_argument ?? return None
+        value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, &diagnostics) ?? return None else -> checked_value
         compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
         if !compatible {
             &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))

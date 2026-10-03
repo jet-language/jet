@@ -14,8 +14,8 @@ pub struct EnvironmentFactError {
 
 // The largest value a Rust `u64` duration may carry; debounce arithmetic
 // saturates here.
-@ENVMODEL_U64_MAX :: 18446744073709551615
-@ENVMODEL_DEFAULT_DEBOUNCE_MS :: 250
+ENVMODEL_U64_MAX :: prep { 18446744073709551615 }
+ENVMODEL_DEFAULT_DEBOUNCE_MS :: prep { 250 }
 
 // ── Presets ──
 
@@ -220,12 +220,12 @@ fn envmodel_language_token(value: CtValue, field: String) -> String EnvironmentF
 // lifecycle field.
 pub fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
     if name == {
-        @ENV_FIELD_FORMATTER -> lifecycle.formatter = Val(envmodel_formatter_from_value(value))
+        ENV_FIELD_FORMATTER -> lifecycle.formatter = Val(envmodel_formatter_from_value(value))
         "dotenv" -> lifecycle.dotenv = envmodel_dotenv_from_value(value)
         "unset" -> lifecycle.unset = envmodel_env_names_named(value, "unset")
         "on_enter" -> lifecycle.on_enter = envmodel_hooks_from_value("on_enter", value)
         "checks" -> lifecycle.checks = envmodel_hooks_from_value("check", value)
-        @ENV_FIELD_GIT_HOOKS_PATH -> lifecycle.git_hooks_path = Val(envmodel_git_hooks_path_from_value(value))
+        ENV_FIELD_GIT_HOOKS_PATH -> lifecycle.git_hooks_path = Val(envmodel_git_hooks_path_from_value(value))
         "reload" -> {
             lifecycle.reload = envmodel_reload_from_value(value)
             lifecycle.reload_explicit = true
@@ -451,15 +451,15 @@ fn envmodel_reload_from_value(value: CtValue) -> ReloadPolicy EnvironmentFactErr
             }
             debounce_ms :: if fields.get("debounce") == {
                 .Val(raw) -> envmodel_duration_ms(raw)
-                .None -> @ENVMODEL_DEFAULT_DEBOUNCE_MS
+                .None -> ENVMODEL_DEFAULT_DEBOUNCE_MS
             }
-            Ok(ReloadPolicy.Watch(paths, debounce_ms))
+            Ok(ReloadPolicy.Watch{paths: paths, debounce_ms: debounce_ms})
         }
         .Str(text) -> {
             if pkg_ascii_lower(text) == {
                 "never" -> Ok(ReloadPolicy.Never)
                 "prompt" -> Ok(ReloadPolicy.Prompt)
-                "watch" -> Ok(ReloadPolicy.Watch([String]{}, @ENVMODEL_DEFAULT_DEBOUNCE_MS))
+                "watch" -> Ok(ReloadPolicy.Watch{paths: [String]{}, debounce_ms: ENVMODEL_DEFAULT_DEBOUNCE_MS})
                 else -> Err(EnvironmentFactError.new("unknown reload policy `{text}`"))
             }
         }
@@ -469,7 +469,7 @@ fn envmodel_reload_from_value(value: CtValue) -> ReloadPolicy EnvironmentFactErr
 
 fn envmodel_reload_watch_from_args(args: [CtEnumArg]) -> ReloadPolicy EnvironmentFactError! {
     paths := [String]{}
-    debounce_ms := @ENVMODEL_DEFAULT_DEBOUNCE_MS
+    debounce_ms := ENVMODEL_DEFAULT_DEBOUNCE_MS
     loop arg in args {
         if arg.label == {
             .Val(label) -> {
@@ -487,7 +487,7 @@ fn envmodel_reload_watch_from_args(args: [CtEnumArg]) -> ReloadPolicy Environmen
             }
         }
     }
-    Ok(ReloadPolicy.Watch(paths, debounce_ms))
+    Ok(ReloadPolicy.Watch{paths: paths, debounce_ms: debounce_ms})
 }
 
 fn envmodel_is_list(value: CtValue) -> Bool Never! {
@@ -527,7 +527,7 @@ fn envmodel_duration_ms(value: CtValue) -> Int EnvironmentFactError! {
 }
 
 fn envmodel_positive_u64(number: Int) -> Int? Never! {
-    if number > 0 && number <= @ENVMODEL_U64_MAX -> return Val(number)
+    if number > 0 && number <= ENVMODEL_U64_MAX -> return Val(number)
     None
 }
 
@@ -544,7 +544,7 @@ fn envmodel_duration_scaled(unit: String, value: CtValue?) -> Int? Never! {
         else -> 1
     }
     scaled :: amount * factor
-    if scaled > @ENVMODEL_U64_MAX -> return Val(@ENVMODEL_U64_MAX)
+    if scaled > ENVMODEL_U64_MAX -> return Val(ENVMODEL_U64_MAX)
     Val(scaled)
 }
 

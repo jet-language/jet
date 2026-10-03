@@ -6,7 +6,7 @@
 
 #Error
 pub enum ImageError {
-    Io(IOError)
+    IO(IOError)
     InvalidData(String)
     InvalidInput(String)
     AlreadyExists(String)
@@ -14,7 +14,7 @@ pub enum ImageError {
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .InvalidData(text) -> text
             .InvalidInput(text) -> text
             .AlreadyExists(text) -> text
@@ -25,7 +25,7 @@ pub enum ImageError {
     // Rust `error.kind() == ErrorKind::NotFound`.
     fn is_not_found(self) -> Bool Never! {
         if self == {
-            .Io(error) -> {
+            .IO(error) -> {
                 if error == {
                     .NotFound(_) -> true
                     else -> false
@@ -36,7 +36,7 @@ pub enum ImageError {
     }
 }
 
-impl IOError -> ImageError { ImageError.Io(self) }
+impl IOError -> ImageError { ImageError.IO(self) }
 
 impl EncodingError -> ImageError { ImageError.Other(self.reason) }
 

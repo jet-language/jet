@@ -97,9 +97,9 @@ fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Ne
 // `from:` names (D-JPK-IMAGE1) — e.g. `kind: .Iso` alongside
 // `from: packages.<name>`, or any `from: system.<name>`.
 fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalError Never! {
-    wants :: if kind == @IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
-    got :: if kind == @IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
-    status :: if kind == @IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
+    wants :: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
+    got :: if kind == IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
+    status :: if kind == IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
     envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "D-JPK-IMAGE1: {status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
 }
 

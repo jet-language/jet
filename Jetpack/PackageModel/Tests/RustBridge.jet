@@ -15,13 +15,13 @@ fn pkg_ffi_test_entry(jet_name: String, rust_path: String, params: [(convention:
 
 fn pkg_ffi_test_asm_entry() -> ExternEntry Never! {
     entry := pkg_ffi_test_entry("add_one", "", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "`#FFI(asm) fn add_one`")
-    contract :: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register("rax")), clobbers: [String]{}}
+    contract :: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{}}
     entry.inline = Val(InlineEntry{lang: "asm", source: "mov rax, {{value}}; -> return", param_names: [String]{"value"}, asm_contract: Val(contract)})
     entry
 }
 
 fn pkg_ffi_test_key(entries: [ExternEntry], target: String, native_toolchain: InlineNativeToolchain?) -[FS]> String Never! {
-    RustBridgeKeyInputs{entries: entries, deps: [String: String]{}, needs: RustBridgeNeeds.none(), authority_needs: [String]{}, handle_facts: [FfiHandleFact]{}, record_source: "", link_closure: FfiLinkClosure.empty(), selected_target: target, rust_toolchain: "rustc-test-toolchain", native_toolchain: native_toolchain, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
+    RustBridgeKeyInputs{entries: entries, deps: [String: String]{}, needs: RustBridgeNeeds.none(), authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_source: "", link_closure: FFILinkClosure.empty(), selected_target: target, rust_toolchain: "rustc-test-toolchain", native_toolchain: native_toolchain, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
 }
 
 fn pkg_ffi_test_occurrences(text: String, needle: String) -> Int Never! {
@@ -40,7 +40,7 @@ fn pkg_ffi_test_occurrences(text: String, needle: String) -> Int Never! {
     entry := pkg_ffi_test_asm_entry()
     inline := entry.inline ?? panic("asm entry")
     inline.source = "add {{value}}, 1 ; -> return\n; clobbers rbx, rbx"
-    inline.asm_contract = Val(InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Parameter(0)), clobbers: [String]{"rbx"}})
+    inline.asm_contract = Val(InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Parameter{index: 0}), clobbers: [String]{"rbx"}})
     entry.inline = Val(inline)
     wrapper :: pkg_ffi_emit_asm_wrapper(entry, inline)
     assert(wrapper.contains("value = inout(reg) p0"))
@@ -144,7 +144,7 @@ dependencies = [
     original :: "bridge artifact"
     files.write(artifact, original) ?? panic("write artifact")
     digest :: pkg_sha256_hex(original.bytes())
-    files.write(files.join(target, "bridge.sha256"), "{@FFI_BRIDGE_ARTIFACTS_SCHEMA}\n{digest} libbridge.rlib\n") ?? panic("write manifest")
+    files.write(files.join(target, "bridge.sha256"), "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n{digest} libbridge.rlib\n") ?? panic("write manifest")
     tampered :: "tampered bridge artifact"
     files.write(artifact, tampered) ?? panic("tamper")
     deps := [String: String]{}
@@ -330,7 +330,7 @@ dependencies = [
 }
 
 #Test("c handle cabi uses native pointer for checked nominal type") {
-    entry := pkg_ffi_test_entry("gzclose", "gzclose", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Move, ty: Type.Named("GzFile"))}, [String]{"file"}, None, "generated zlib close")
+    entry := pkg_ffi_test_entry("gzclose", "gzclose", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Move, ty: Type.Named{name: "GzFile"})}, [String]{"file"}, None, "generated zlib close")
     entry.c_abi = true
     entry.generated = true
     entry.c_module = true
@@ -341,7 +341,7 @@ dependencies = [
 }
 
 #Test("c handle cabi preserves writable pointee abi") {
-    params :: [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.Named("HbFont")), (convention: AccessConvention.Read, ty: Type.Int), (convention: AccessConvention.Read, ty: Type.Int)}
+    params :: [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.Named{name: "HbFont"}), (convention: AccessConvention.Read, ty: Type.Int), (convention: AccessConvention.Read, ty: Type.Int)}
     entry := pkg_ffi_test_entry("hb_font_set_scale", "hb_font_set_scale", params, [String]{"font", "x_scale", "y_scale"}, None, "generated harfbuzz scale")
     entry.c_abi = true
     entry.generated = true
@@ -366,7 +366,7 @@ dependencies = [
         (ty: Type.Bool, native: "bool"),
         (ty: Type.Char, native: "u32"),
         (ty: Type.InlineRange{base: Type.Int, lo: 0, hi: 10}, native: "i64"),
-        (ty: Type.Tagged{marker: TagMarker.User("ffi"), inner: Type.Float32}, native: "f32"),
+        (ty: Type.Tagged{marker: TagMarker.User{name: "ffi"}, inner: Type.Float32}, native: "f32"),
         (ty: Type.Quantity{base: Type.Float, dimension: Dimension{axes: [DimensionAxis]{}}}, native: "f64")
     }
     loop index in 0..<cases.len() {
@@ -381,7 +381,7 @@ dependencies = [
     generated :: pkg_ffi_test_wrapper_lib([ExternEntry]{scalar}, RustBridgeNeeds.none())
     assert(generated.contains("jet_ffi_out_scalar_cabi"))
     nominal := scalar
-    nominal.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Named("Nominal"))}
+    nominal.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Named{name: "Nominal"})}
     assert(pkg_ffi_emit_cabi_trampoline(nominal, [String]{}, CRecordDefinitions.empty()) == None)
     string_entry := pkg_ffi_test_entry("out_string", "out_string", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.String)}, [String]{"value"}, None, "portable string write fixture")
     string_entry.c_abi = true

@@ -263,6 +263,17 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
+// Rust `core_module_path_from_receiver` + `infer_core_call`: a call through a
+// module alias's known Core submodule (`core.math.fabs(n)` under `use core as
+// core`) routes against that submodule by name, exactly as an alias of the
+// submodule itself would.
+pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+    imported :: sema_call_core_import_target(environment, alias) ?? return None
+    if imported.item != None -> return None
+    if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
+    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, span, &diagnostics)
+}
+
 // D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
 // `core.term` print with other than one argument is the qualified twin of the
 // ambient variadic `print`, checked and lowered exactly like it (Rust

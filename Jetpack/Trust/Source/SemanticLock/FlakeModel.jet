@@ -215,8 +215,8 @@ fn trust_flake_is_revision(value: String) -> Bool Never! {
 fn trust_flake_query_fields(query: String) -> [FlakeQueryField]? Never! {
     fields := [FlakeQueryField]{}
     if query == "" -> return Val(fields)
-    loop field in trust_text_split(query, @TRUST_AMPERSAND) {
-        parts :: trust_text_split_first(field, @TRUST_EQUALS) ?? return None
+    loop field in trust_text_split(query, TRUST_AMPERSAND) {
+        parts :: trust_text_split_first(field, TRUST_EQUALS) ?? return None
         if parts.before == "" || trust_flake_query_value(fields, parts.before) != None -> return None
         &fields.push(FlakeQueryField{key: parts.before, value: parts.after})
     }
@@ -235,7 +235,7 @@ fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> String? Ne
 // hex-looking last path segment, else "".
 pub fn trust_flake_revision(url: String) -> String Never! {
     base := ~url
-    if trust_text_split_first(url, @TRUST_QUESTION) == {
+    if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
             if trust_flake_query_fields(parts.after) == {
                 .Val(fields) -> {
@@ -250,7 +250,7 @@ pub fn trust_flake_revision(url: String) -> String Never! {
         }
         .None -> {}
     }
-    candidate :: if trust_text_split_last(base, @TRUST_SLASH) == {
+    candidate :: if trust_text_split_last(base, TRUST_SLASH) == {
         .Val(parts) -> parts.after
         .None -> base
     }
@@ -263,7 +263,7 @@ pub fn trust_flake_revision(url: String) -> String Never! {
 pub fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
     base := ~url
     query_text := ""
-    if trust_text_split_first(url, @TRUST_QUESTION) == {
+    if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
             base = parts.before
             query_text = parts.after
@@ -273,7 +273,7 @@ pub fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
     query :: trust_flake_query_fields(query_text) ?? return None
     direct :: trust_flake_direct_source(base) ?? return trust_flake_indirect_identity(base, query)
     segments := [String]{}
-    loop part in trust_text_split(direct.after, @TRUST_SLASH) {
+    loop part in trust_text_split(direct.after, TRUST_SLASH) {
         if part != "" -> &segments.push(part)
     }
     if segments.len() < 2 -> return None
@@ -316,7 +316,7 @@ fn trust_flake_direct_source(base: String) -> TrustTextSplit? Never! {
 fn trust_flake_indirect_identity(base: String, query: [FlakeQueryField]) -> FlakeSourceIdentity? Never! {
     path :: if base.starts_with("flake:") -> base.removeprefix("flake:") else -> ~base
     if path == "" || path.starts_with(".") || path.starts_with("/") || path.contains(":") -> return None
-    parts :: trust_text_split(path, @TRUST_SLASH)
+    parts :: trust_text_split(path, TRUST_SLASH)
     alias :: parts[0]
     if alias == "" -> return None
     tail := [String]{}

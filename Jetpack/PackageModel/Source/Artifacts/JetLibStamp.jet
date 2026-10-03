@@ -7,15 +7,15 @@
 // the library's own code declares. The load site parses and checks the whole
 // header before it writes or maps the payload (JetLibTrust.jet).
 
-@JETLIB_MAGIC :: "jet-jetlib-v3"
+JETLIB_MAGIC :: prep { "jet-jetlib-v3" }
 // The ABI table version, independent of the compiler version.
-@JETLIB_ABI_VERSION :: 2
+JETLIB_ABI_VERSION :: prep { 2 }
 // The complete native boundary identity: a data value the driver records and
 // the loader gates, not a second policy table.
-@JETLIB_ABI_IDENTITY :: "jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8"
-@JETLIB_MAX_HEADER_ITEMS :: 4096
-@JETLIB_MAX_HEADER_FIELD_BYTES :: 1048576
-@JETLIB_MAX_EXPORT_PARAMS :: 4096
+JETLIB_ABI_IDENTITY :: prep { "jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8" }
+JETLIB_MAX_HEADER_ITEMS :: prep { 4096 }
+JETLIB_MAX_HEADER_FIELD_BYTES :: prep { 1048576 }
+JETLIB_MAX_EXPORT_PARAMS :: prep { 4096 }
 
 // Why a `.jetlib` header or artifact was refused; `message` is the reference text.
 #Error
@@ -138,15 +138,15 @@ pub struct JetLibStamp {
     fn for_this_compiler(declared_effects: [String]) -[Env]> JetLibStamp Never! {
         target :: pkg_jetlib_current_target()
         JetLibStamp{
-            compiler_version: @COMPILER_VERSION,
-            compiler_build: @COMPILER_VERSION,
+            compiler_version: COMPILER_VERSION,
+            compiler_build: COMPILER_VERSION,
             library_name: "anonymous",
             entry: None,
             target: target,
             target_triple: target,
             linker_identity: "system",
-            abi_identity: @JETLIB_ABI_IDENTITY,
-            abi_version: @JETLIB_ABI_VERSION,
+            abi_identity: JETLIB_ABI_IDENTITY,
+            abi_version: JETLIB_ABI_VERSION,
             exports: [JetLibExport]{},
             declared_effects: authority_holds(declared_effects),
             payload_digest: ""
@@ -155,22 +155,22 @@ pub struct JetLibStamp {
 
     // The stamp emitted for one checked native Library projection.
     fn for_library(name: String, exports: [JetLibExport], declared_effects: [String]) -[Env]> JetLibStamp Never! {
-        JetLibStamp.for_library_with_identity(name, exports, declared_effects, @COMPILER_VERSION, pkg_jetlib_current_target(), "system")
+        JetLibStamp.for_library_with_identity(name, exports, declared_effects, COMPILER_VERSION, pkg_jetlib_current_target(), "system")
     }
 
     // The stamp the native driver emits with the exact identities that
     // produced the payload; `linker_identity` is the whole toolchain identity.
     fn for_library_with_identity(name: String, exports: [JetLibExport], declared_effects: [String], compiler_build: String, target_triple: String, linker_identity: String) -[Env]> JetLibStamp Never! {
         JetLibStamp{
-            compiler_version: @COMPILER_VERSION,
+            compiler_version: COMPILER_VERSION,
             compiler_build: compiler_build,
             library_name: name,
             entry: None,
             target: pkg_jetlib_current_target(),
             target_triple: target_triple,
             linker_identity: linker_identity,
-            abi_identity: @JETLIB_ABI_IDENTITY,
-            abi_version: @JETLIB_ABI_VERSION,
+            abi_identity: JETLIB_ABI_IDENTITY,
+            abi_version: JETLIB_ABI_VERSION,
             exports: exports,
             declared_effects: authority_holds(declared_effects),
             payload_digest: ""
@@ -184,9 +184,9 @@ pub struct JetLibStamp {
 
     // The header bytes: magic, identities, the checked export table, the
     // count of length-prefixed effect names (sorted), and the payload digest.
-    fn encode(self) -> [U8] Never! {
+    fn encode_bytes(self) -> [U8] Never! {
         out := JetLibWriter.new()
-        &out.push_raw(@JETLIB_MAGIC.bytes())
+        &out.push_raw(JETLIB_MAGIC.bytes())
         &out.push_raw([U8]{U8{0}})
         &out.push_text(self.compiler_version)
         &out.push_text(self.compiler_build)
@@ -218,9 +218,9 @@ pub struct JetLibStamp {
         out.bytes
     }
 
-    // Parse header bytes written by `encode`. A bad magic, a truncated
+    // Parse header bytes written by `encode_bytes`. A bad magic, a truncated
     // buffer, or non-UTF-8 text fails closed; nothing is partially trusted.
-    fn decode(bytes: [U8]) -> JetLibStamp JetLibError! {
+    fn decode_bytes(bytes: [U8]) -> JetLibStamp JetLibError! {
         reader := JetLibReader{bytes: bytes, at: 0}
         stamp :: JetLibStamp.decode_prefix(&reader)
         if reader.at != bytes.len() -> return Err(JetLibError.new("unexpected payload after .jetlib stamp"))
@@ -228,7 +228,7 @@ pub struct JetLibStamp {
     }
 
     fn decode_prefix(reader: &JetLibReader) -> JetLibStamp JetLibError! {
-        magic :: @JETLIB_MAGIC.bytes()
+        magic :: JETLIB_MAGIC.bytes()
         if !pkg_bytes_starts_with(reader.bytes, 0, magic) || reader.bytes.len() <= magic.len() || Int.from_u8(reader.bytes[magic.len()]) != 0 {
             return Err(JetLibError.new("not a .jetlib artifact (bad magic)"))
         }
@@ -250,7 +250,7 @@ pub struct JetLibStamp {
             scalar_code :: &reader.take_byte() ?? return Err(JetLibError.new("truncated .jetlib header (export scalar)"))
             scalar :: JetLibScalar.from_tag(scalar_code)
             params :: &reader.take_u32("export parameter count")
-            if params > @JETLIB_MAX_EXPORT_PARAMS -> return Err(JetLibError.new(".jetlib export has too many parameters"))
+            if params > JETLIB_MAX_EXPORT_PARAMS -> return Err(JetLibError.new(".jetlib export has too many parameters"))
             conventions := [JetLibAccess]{}
             loop _ in 0..<params {
                 convention :: &reader.take_byte() ?? return Err(JetLibError.new("truncated .jetlib header (access convention)"))
@@ -288,14 +288,14 @@ pub struct JetLibArtifact {
     pub stamp: JetLibStamp
     pub payload: [U8]
 
-    fn encode(self) -> [U8] Never! {
-        out := JetLibWriter{bytes: self.stamp.encode()}
+    fn encode_bytes(self) -> [U8] Never! {
+        out := JetLibWriter{bytes: self.stamp.encode_bytes()}
         loop byte in pkg_u64_be_bytes(self.payload.len()) -> &out.bytes.push(byte)
         &out.push_raw(self.payload)
         out.bytes
     }
 
-    fn decode(bytes: [U8]) -> JetLibArtifact JetLibError! {
+    fn decode_bytes(bytes: [U8]) -> JetLibArtifact JetLibError! {
         reader := JetLibReader{bytes: bytes, at: 0}
         stamp :: JetLibStamp.decode_prefix(&reader)
         if bytes.len() - reader.at < 8 -> return Err(JetLibError.new("truncated .jetlib artifact (payload length)"))
@@ -317,17 +317,17 @@ struct JetLibWriter {
         JetLibWriter{bytes: [U8]{}}
     }
 
-    fn push_raw(&self, bytes: [U8]) {
+    fn push_raw(&self, bytes: [U8]) Never! {
         loop byte in bytes -> &self.bytes.push(byte)
     }
 
-    fn push_u32(&self, value: Int) {
+    fn push_u32(&self, value: Int) Never! {
         shift_values :: [Int]{24, 16, 8, 0}
         loop shift in shift_values -> &self.bytes.push(U8{(value >> shift) & 0xFF})
     }
 
     // A u32 length prefix, then the bytes.
-    fn push_text(&self, text: String) {
+    fn push_text(&self, text: String) Never! {
         raw :: text.bytes()
         &self.push_u32(raw.len())
         &self.push_raw(raw)
@@ -359,7 +359,7 @@ struct JetLibReader {
         length := 0
         loop index in 0..<4 -> length = (length << 8) | Int.from_u8(self.bytes[self.at + index])
         self.at += 4
-        if length > @JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(JetLibError.new(".jetlib header field is too large"))
+        if length > JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(JetLibError.new(".jetlib header field is too large"))
         if self.bytes.len() - self.at < length -> return Err(JetLibError.new("truncated .jetlib header (field bytes)"))
         field :: self.bytes[self.at..<self.at + length]
         self.at += length
@@ -376,14 +376,14 @@ struct JetLibReader {
         present :: &self.take_byte() ?? return Err(JetLibError.new("truncated .jetlib header ({what} presence)"))
         if present == {
             0 -> Ok(None)
-            1 -> Ok(Val(self.take_string(what)))
+            1 -> Ok(Val(&self.take_string(what)))
             else -> Err(JetLibError.new("invalid .jetlib {what} presence tag {present}"))
         }
     }
 
     fn take_count(&self, what: String) -> Int JetLibError! {
         count :: &self.take_u32("{what} count")
-        if count > @JETLIB_MAX_HEADER_ITEMS -> return Err(JetLibError.new(".jetlib header has too many {what} entries"))
+        if count > JETLIB_MAX_HEADER_ITEMS -> return Err(JetLibError.new(".jetlib header has too many {what} entries"))
         Ok(count)
     }
 }

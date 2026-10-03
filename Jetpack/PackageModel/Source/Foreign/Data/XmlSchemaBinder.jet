@@ -5,37 +5,37 @@
 // wire keys, simple content `$text`, mixed content an ordered `$content`
 // DataTree, nested elements records, and repeated children lists.
 
-@XML_NAMESPACE_URI :: "http://www.w3.org/XML/1998/namespace"
-@XMLNS_NAMESPACE_URI :: "http://www.w3.org/2000/xmlns/"
+XML_NAMESPACE_URI :: prep { "http://www.w3.org/XML/1998/namespace" }
+XMLNS_NAMESPACE_URI :: prep { "http://www.w3.org/2000/xmlns/" }
 
 fn pkg_data_bind_xml(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
-    parser := XmlParser{chars: pkg_data_scalars(input), pos: 0}
+    parser := XMLParser{chars: pkg_data_scalars(input), pos: 0}
     root :: &parser.parse_document()
     preferred :: root_name ?? pkg_data_type_name(root.name)
     builder := SchemaBuilder.new()
-    _ :: pkg_data_add_xml_record(&builder, preferred, [XmlNode]{root})
+    _ :: pkg_data_add_xml_record(&builder, preferred, [XMLNode]{root})
     Ok(builder)
 }
 
 // What one piece of element content is.
-enum XmlContent {
+enum XMLContent {
     Text
     CData
-    Element(XmlNode)
+    Element(XMLNode)
     Comment
     ProcessingInstruction
 }
 
 // An element with its expanded name, expanded attributes, content kinds, and
 // the namespace bindings in scope.
-struct XmlNode {
+struct XMLNode {
     name: String
     attrs: [(name: String, value: String)]
-    content: [XmlContent]
+    content: [XMLContent]
     namespaces: [String: String]
 }
 
-struct XmlParser {
+struct XMLParser {
     chars: [String]
     pos: Int
 
@@ -65,7 +65,7 @@ struct XmlParser {
         pkg_data_xml_is_space(self.peek())
     }
 
-    fn skip_space(&self) {
+    fn skip_space(&self) Never! {
         loop self.at_space() -> self.pos += 1
     }
 
@@ -112,7 +112,7 @@ struct XmlParser {
         if pkg_data_eq_ignore_case(target, "xml") -> return Err(DataBindError{message: "XML processing-instruction target cannot be xml"})
         if self.starts_with("?>") {
             self.pos += 2
-            return Ok()
+            return
         }
         if !self.at_space() -> return Err(DataBindError{message: "XML processing instruction needs whitespace after its target"})
         start :: self.pos
@@ -150,11 +150,11 @@ struct XmlParser {
         self.pos += 2
     }
 
-    fn parse_document(&self) -> XmlNode DataBindError! {
+    fn parse_document(&self) -> XMLNode DataBindError! {
         if self.peek() == pkg_data_scalar_of(0xFEFF) -> self.pos += 1
         declaration_allowed := true
-        stack := [XmlNode]{}
-        root := None
+        stack := [XMLNode]{}
+        root := XMLNode?{None}
         loop !self.at_end() {
             if self.starts_with_xml_declaration() {
                 if !declaration_allowed -> return Err(DataBindError{message: "XML declaration is out of order"})
@@ -170,7 +170,7 @@ struct XmlParser {
                 if text.contains("]]>") -> return Err(DataBindError{message: "XML text contains a close CDATA marker"})
                 pkg_data_validate_xml_entities(text)
                 if stack.len() > 0 {
-                    &stack[stack.len() - 1].content.push(XmlContent.Text)
+                    &stack[stack.len() - 1].content.push(XMLContent.Text)
                 } else {
                     loop scalar in pkg_data_scalars(text) {
                         if !pkg_data_xml_is_space(scalar) -> return Err(DataBindError{message: "XML has text outside its root element"})
@@ -186,7 +186,7 @@ struct XmlParser {
                 body :: pkg_data_slice(self.chars, start, self.pos)
                 if body.contains("--") || body.ends_with("-") -> return Err(DataBindError{message: "XML comment contains an invalid double hyphen"})
                 pkg_data_validate_xml_characters(body)
-                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XmlContent.Comment)
+                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XMLContent.Comment)
                 self.pos += 3
                 next
             }
@@ -197,13 +197,13 @@ struct XmlParser {
                 if self.at_end() -> return Err(DataBindError{message: "XML CDATA section is not closed"})
                 pkg_data_validate_xml_characters(pkg_data_slice(self.chars, start, self.pos))
                 if stack.len() == 0 -> return Err(DataBindError{message: "XML CDATA appears outside its root element"})
-                &stack[stack.len() - 1].content.push(XmlContent.CData)
+                &stack[stack.len() - 1].content.push(XMLContent.CData)
                 self.pos += 3
                 next
             }
             if self.starts_with("<?") {
                 &self.consume_processing_instruction()
-                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XmlContent.ProcessingInstruction)
+                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XMLContent.ProcessingInstruction)
                 next
             }
             if self.starts_with("</") {
@@ -259,7 +259,7 @@ struct XmlParser {
                 &expanded_names.push(expanded)
                 &attrs.push((name: expanded, value: attr.value))
             }
-            node :: XmlNode{name: name, attrs: attrs, content: [XmlContent]{}, namespaces: namespaces}
+            node :: XMLNode{name: name, attrs: attrs, content: [XMLContent]{}, namespaces: namespaces}
             if self_closing {
                 root = pkg_data_xml_attach(&stack, root, node)
             } else {
@@ -274,9 +274,9 @@ struct XmlParser {
 
 // Attach a closed element to its parent, or make it the root. Returns the
 // root after the attachment.
-fn pkg_data_xml_attach(stack: &[XmlNode], root: XmlNode?, node: XmlNode) -> XmlNode? DataBindError! {
+fn pkg_data_xml_attach(stack: &[XMLNode], root: XMLNode?, node: XMLNode) -> XMLNode? DataBindError! {
     if stack.len() > 0 {
-        &stack[stack.len() - 1].content.push(XmlContent.Element(node))
+        &stack[stack.len() - 1].content.push(XMLContent.Element(node))
         return Ok(root)
     }
     if root != None -> return Err(DataBindError{message: "XML has more than one root element"})
@@ -284,7 +284,7 @@ fn pkg_data_xml_attach(stack: &[XmlNode], root: XmlNode?, node: XmlNode) -> XmlN
 }
 
 fn pkg_data_xml_initial_namespaces() -> [String: String] Never! {
-    [String: String]{"xml": @XML_NAMESPACE_URI}
+    [String: String]{"xml": XML_NAMESPACE_URI}
 }
 
 // The namespace bindings in scope after an element's `xmlns` attributes.
@@ -298,13 +298,13 @@ fn pkg_data_xml_resolve_namespaces(inherited: [String: String], attrs: [(name: S
         prefix :: attr.name.removeprefix("xmlns:")
         if prefix == "" || prefix == "xmlns" -> return Err(DataBindError{message: "XML namespace prefix {prefix} is reserved"})
         if attr.value == "" -> return Err(DataBindError{message: "XML namespace prefix {prefix} has an empty URI"})
-        if prefix == "xml" && attr.value != @XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
-        if attr.value == @XMLNS_NAMESPACE_URI -> return Err(DataBindError{message: "XML namespace URI for xmlns is reserved"})
+        if prefix == "xml" && attr.value != XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+        if attr.value == XMLNS_NAMESPACE_URI -> return Err(DataBindError{message: "XML namespace URI for xmlns is reserved"})
         namespaces[prefix] = attr.value
     }
     if namespaces.get("xml") == {
         .Val(xml_uri) -> {
-            if xml_uri != @XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+            if xml_uri != XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
         }
         .None -> {}
     }
@@ -423,8 +423,8 @@ fn pkg_data_parse_radix(digits: String, radix: Int) -> Int? Never! {
     Val(total)
 }
 
-fn pkg_data_xml_child_elements(node: XmlNode) -> [XmlNode] Never! {
-    out := [XmlNode]{}
+fn pkg_data_xml_child_elements(node: XMLNode) -> [XMLNode] Never! {
+    out := [XMLNode]{}
     loop content in node.content {
         if content == {
             .Element(child) -> &out.push(child)
@@ -435,7 +435,7 @@ fn pkg_data_xml_child_elements(node: XmlNode) -> [XmlNode] Never! {
 }
 
 // An element whose content is only text and CDATA.
-fn pkg_data_xml_is_simple(node: XmlNode) -> Bool Never! {
+fn pkg_data_xml_is_simple(node: XMLNode) -> Bool Never! {
     loop content in node.content {
         if content == {
             .Text | .CData -> {}
@@ -447,7 +447,7 @@ fn pkg_data_xml_is_simple(node: XmlNode) -> Bool Never! {
 
 // One record over every element: sorted attributes, `$text` / `$content`,
 // then sorted child element names.
-fn pkg_data_add_xml_record(builder: &SchemaBuilder, preferred: String, nodes: [XmlNode]) -> String Never! {
+fn pkg_data_add_xml_record(builder: &SchemaBuilder, preferred: String, nodes: [XMLNode]) -> String Never! {
     record :: &builder.begin_record(preferred)
     attr_names := [String]{}
     child_names := [String]{}
@@ -482,11 +482,11 @@ fn pkg_data_add_xml_record(builder: &SchemaBuilder, preferred: String, nodes: [X
     if simple_count > 0 -> &fields.push(FieldSeed{wire_name: "$text", ty: BoundType.Scalar("String"), optional: mixed_count > 0, note: None})
     if mixed_count > 0 -> &fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("DataTree"), optional: simple_count > 0, note: None})
     loop child_name in child_names {
-        children := [XmlNode]{}
+        children := [XMLNode]{}
         present_count := 0
         repeated := false
         loop node in nodes {
-            matching := [XmlNode]{}
+            matching := [XMLNode]{}
             loop child in pkg_data_xml_child_elements(node) {
                 if child.name == child_name -> &matching.push(child)
             }

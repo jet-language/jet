@@ -52,7 +52,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
 }
 
 #Test("binding plan registry covers each message renderer once") {
-    registry :: @PKG_GENERATOR_REGISTRY
+    registry :: PKG_GENERATOR_REGISTRY
     registered := 0
     loop renderer in registry {
         if pkg_renderer_canonical_for(renderer) != None -> registered += 1
@@ -73,7 +73,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
     }
 
     loop renderer in registry {
-        found := None
+        found := BinderDescriptor?{None}
         loop descriptor in binders {
             if descriptor.language == renderer.language {
                 found = Val(descriptor)
@@ -119,7 +119,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
                 assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 1)
                 assert(!source.contains("decode_status("))
             }
-            .LuaRawJson -> {
+            .LuaRawJSON -> {
                 assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 0)
                 assert_eq(pkg_test_plan_count(source, "fn decode_status("), 1)
                 assert(source.contains("if code == 4 -> return Err(LuaError.CommandFailed)"))

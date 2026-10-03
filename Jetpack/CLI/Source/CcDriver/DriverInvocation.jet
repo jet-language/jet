@@ -15,41 +15,41 @@ pub struct CcInvocation {
 }
 
 // `jet cc` / `jet c++` entry, reached from the CLI before flag parsing.
-pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int {
+pub fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> Int {
     options :: cli_cc_parse_args(verb, args) ?? {
         cli_cc_report_usage_error(verb, err.message)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     if options.help {
         print(cli_cc_usage(verb))
-        return @EXIT_OK
+        return EXIT_OK
     }
     project_root :: cli_cc_resolve_project_root(options) ?? {
         cli_cc_report_operational_error("C/C++ driver could not determine the project root", err.message, "run the driver from an accessible project directory")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     target :: options.target ?? "native"
     reference :: if target == "native" || target == "host" -> "cc-toolchain@jetpack" else -> "cc-toolchain@jetpack#target={target}"
     spec :: RefSpec.classify(reference) ?? {
         cli_cc_report_usage_error(verb, "invalid target selection: {err}")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     if provider_cc_toolchain_requested_target(spec) == {
         .Err(error) -> {
             cli_cc_report_usage_error(verb, "invalid target selection: {error.message()}")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         .Ok(_) -> {}
     }
     roots :: pkg_resolve_roots()
     fixtures :: provider_fixtures_from_env(options.fixtures)
-    descriptor :: cli_cc_resolve_toolchain(roots, spec, fixtures, options.offline, project_root) ?? {
+    descriptor :: cli_cc_resolve_toolchain(&verification, roots, spec, fixtures, options.offline, project_root) ?? {
         cli_cc_report_provider_error(err)
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     if options.version {
         print("jet {verb} {descriptor.version} (target {descriptor.target}; ABI {descriptor.abi})")
-        return @EXIT_OK
+        return EXIT_OK
     }
     if options.probe == {
         .Val(probe) -> {
@@ -58,23 +58,23 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
                 .PrintSysroot -> print(descriptor.sysroot_path())
                 .DumpVersion -> print(cli_cc_compiler_version(descriptor))
             }
-            return @EXIT_OK
+            return EXIT_OK
         }
         .None -> {}
     }
     if options.verbose && options.sources.len() == 0 {
         print("jet {verb} {descriptor.version} (target {descriptor.target}; sysroot {descriptor.sysroot_path()})")
-        return @EXIT_OK
+        return EXIT_OK
     }
 
     invocation :: cli_cc_build_invocation(project_root, verb, options) ?? {
         cli_cc_report_usage_error(verb, err.message)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     build := BuildContext.new()
     toolchain :: build.toolchain("cc-toolchain", descriptor.toolchain_spec()) ?? {
         cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", "{err}", "repair the pinned Hangar descriptor and retry")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     // The target is already a declared ToolchainSpec fact and action-key
     // label. Do not inject Clang's `--target` spelling into the pinned GCC
@@ -98,7 +98,7 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
     if !options.compile_only -> action = action.with_pool(BuildResourcePool.Linker)
     action_handle :: build.action("cc", action) ?? {
         cli_cc_report_operational_error("C/C++ invocation could not enter the build graph", "{err}", "check the declared source and output paths")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     target_spec := TargetSpec.new().with_action(action_handle).with_toolchain(toolchain)
     loop source in invocation.sources -> target_spec = target_spec.with_source(source)
@@ -106,16 +106,16 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
     loop output in invocation.outputs -> target_spec = target_spec.with_output(output)
     build_target :: build.add_executable("cc-output", target_spec) ?? {
         cli_cc_report_operational_error("C/C++ invocation could not create its build target", "{err}", "check the declared source and output paths")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     plan :: build.plan_with_default(build_target) ?? {
         cli_cc_report_operational_error("C/C++ invocation produced an invalid build graph", "{err}", "check the declared source and output paths")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     grants :: [BuildCapability]{BuildCapability.Exec}
     artifact_store :: BuildArtifactStoreHandle.open() ?? {
         cli_cc_report_operational_error("C/C++ invocation could not open the artifact store", "{err}", "check JET_STORE_DIR and retry")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     if build_execute_build_plan(plan, project_root, artifact_store, grants) == {
         .Ok(_) -> {
@@ -123,53 +123,53 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
                 if cli_cc_mark_link_outputs_executable(project_root, invocation.outputs) == {
                     .Err(error) -> {
                         cli_cc_report_operational_error("C/C++ link output could not be published", error.message, "check that the declared link output is a regular file, then retry")
-                        return @EXIT_USER_ERROR
+                        return EXIT_USER_ERROR
                     }
                     .Ok(_) -> {}
                 }
             }
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             cli_cc_report_execution_error(error)
-            @EXIT_USER_ERROR
+            EXIT_USER_ERROR
         }
     }
 }
 
 // Normalize sources, outputs, dependency files, and path operands to
 // project-relative paths and declare every project input.
-fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS]> CcInvocation CliToolError! {
+fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS]> CcInvocation CLIToolError! {
     build_root :: cli_cc_resolve_build_root(project_root, options)
     explicit_build_root :: options.build_root != None
     sources := [String]{}
     loop source in options.sources {
         &sources.push(cli_cc_validate_source(project_root, options.working_dir, source))
     }
-    if (options.output ?? "") == "-" -> return Err(CliToolError.new("`-o -` cannot produce a declared file output"))
+    if (options.output ?? "") == "-" -> return Err(CLIToolError.new("`-o -` cannot produce a declared file output"))
     output :: if options.output == {
         .Val(raw) -> Val(cli_cc_normalize_output_path(raw, project_root, build_root, options.working_dir, explicit_build_root, "-o"))
         .None -> None
     }
     if output == {
-        .Val(path) -> if sources.contains(path) -> return Err(CliToolError.new("the output path cannot overwrite a source or object input"))
+        .Val(path) -> if sources.contains(path) -> return Err(CLIToolError.new("the output path cannot overwrite a source or object input"))
         .None -> {}
     }
-    if (options.depfile ?? "") == "-" -> return Err(CliToolError.new("`-MF -` cannot produce a declared dependency file"))
+    if (options.depfile ?? "") == "-" -> return Err(CLIToolError.new("`-MF -` cannot produce a declared dependency file"))
     depfile :: if options.depfile == {
         .Val(raw) -> Val(cli_cc_normalize_output_path(raw, project_root, build_root, options.working_dir, explicit_build_root, "-MF"))
         .None -> None
     }
     if depfile == {
-        .Val(path) -> if sources.contains(path) -> return Err(CliToolError.new("the dependency-file path cannot overwrite a source or object input"))
+        .Val(path) -> if sources.contains(path) -> return Err(CLIToolError.new("the dependency-file path cannot overwrite a source or object input"))
         .None -> {}
     }
     outputs := [String]{}
     if options.compile_only {
-        if output != None && sources.len() != 1 -> return Err(CliToolError.new("`-c -o` needs exactly one source"))
+        if output != None && sources.len() != 1 -> return Err(CLIToolError.new("`-c -o` needs exactly one source"))
         loop source in sources -> &outputs.push(output ?? cli_cc_replace_extension(source, "o"))
         if options.dep_mode {
-            if depfile != None && sources.len() != 1 -> return Err(CliToolError.new("`-MF` needs exactly one source when compiling multiple files"))
+            if depfile != None && sources.len() != 1 -> return Err(CLIToolError.new("`-MF` needs exactly one source when compiling multiple files"))
             if depfile == {
                 .Val(dependency) -> &outputs.push(dependency)
                 .None -> {
@@ -179,16 +179,16 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
             }
         }
     } else {
-        if options.dep_mode -> return Err(CliToolError.new("dependency generation is only supported with `-c`"))
+        if options.dep_mode -> return Err(CLIToolError.new("dependency generation is only supported with `-c`"))
         link_default :: if sys.is_windows() -> "a.exe" else -> "a.out"
         &outputs.push(output ?? cli_cc_normalize_output_path(link_default, project_root, build_root, options.working_dir, explicit_build_root, "link output"))
     }
     unique_outputs := [String]{}
     loop declared in outputs {
         cli_cc_validate_relative_path(declared, "output")
-        if unique_outputs.contains(declared) -> return Err(CliToolError.new("duplicate declared output `{declared}`"))
+        if unique_outputs.contains(declared) -> return Err(CLIToolError.new("duplicate declared output `{declared}`"))
         &unique_outputs.push(declared)
-        if sources.contains(declared) -> return Err(CliToolError.new("output `{declared}` overwrites an input"))
+        if sources.contains(declared) -> return Err(CLIToolError.new("output `{declared}` overwrites an input"))
     }
     dep_target :: if options.dep_target == {
         .Val(raw) -> Val(cli_cc_normalize_output_path(raw, project_root, build_root, options.working_dir, explicit_build_root, "dep target"))
@@ -206,28 +206,28 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
     normalized_argv := options.argv
     loop i in 0..<sources.len() {
         slot :: options.source_indices.get(i) ?? next
-        if slot >= normalized_argv.len() -> return Err(CliToolError.new("driver source index is outside the parsed argument vector"))
+        if slot >= normalized_argv.len() -> return Err(CLIToolError.new("driver source index is outside the parsed argument vector"))
         normalized_argv[slot] = sources[i]
     }
     if options.output_index == .Val(slot) {
-        normalized :: output ?? return Err(CliToolError.new("driver output index has no normalized output path"))
-        argument :: normalized_argv.get(slot) ?? return Err(CliToolError.new("driver output index is outside the parsed argument vector"))
+        normalized :: output ?? return Err(CLIToolError.new("driver output index has no normalized output path"))
+        argument :: normalized_argv.get(slot) ?? return Err(CLIToolError.new("driver output index is outside the parsed argument vector"))
         normalized_argv[slot] = cli_cc_replace_option_operand(argument, "-o", normalized)
     }
     if options.depfile_index == .Val(slot) {
-        normalized :: depfile ?? return Err(CliToolError.new("driver depfile index has no normalized depfile path"))
-        argument :: normalized_argv.get(slot) ?? return Err(CliToolError.new("driver depfile index is outside the parsed argument vector"))
+        normalized :: depfile ?? return Err(CLIToolError.new("driver depfile index has no normalized depfile path"))
+        argument :: normalized_argv.get(slot) ?? return Err(CLIToolError.new("driver depfile index is outside the parsed argument vector"))
         normalized_argv[slot] = cli_cc_replace_option_operand(argument, "-MF", normalized)
     }
     if options.dep_target_index == .Val(slot) {
-        normalized :: dep_target ?? return Err(CliToolError.new("driver dep-target index has no normalized target path"))
-        argument :: normalized_argv.get(slot) ?? return Err(CliToolError.new("driver dep-target index is outside the parsed argument vector"))
+        normalized :: dep_target ?? return Err(CLIToolError.new("driver dep-target index has no normalized target path"))
+        argument :: normalized_argv.get(slot) ?? return Err(CLIToolError.new("driver dep-target index is outside the parsed argument vector"))
         option :: options.dep_target_option ?? "-MT"
         normalized_argv[slot] = cli_cc_replace_option_operand(argument, option, normalized)
     }
     loop operand in options.path_indices {
-        argument :: normalized_argv.get(operand.index) ?? return Err(CliToolError.new("driver path index is outside the parsed argument vector"))
-        if operand.prefix != "" && !argument.starts_with(operand.prefix) -> return Err(CliToolError.new("driver path option changed during normalization"))
+        argument :: normalized_argv.get(operand.index) ?? return Err(CLIToolError.new("driver path index is outside the parsed argument vector"))
+        if operand.prefix != "" && !argument.starts_with(operand.prefix) -> return Err(CLIToolError.new("driver path option changed during normalization"))
         raw :: if operand.prefix == "" -> argument else -> argument.removeprefix(operand.prefix)
         normalized :: cli_cc_normalize_working_path(raw, project_root, options.working_dir, "include/library path")
         normalized_argv[operand.index] = "{operand.prefix}{normalized}"
@@ -239,12 +239,12 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
     }
     if (options.separator_index ?? -1) == options.argv.len() -> &argv.push("--")
     if options.dep_mode && options.depfile == None && sources.len() == 1 {
-        dependency :: outputs.get(outputs.len() - 1) ?? return Err(CliToolError.new("dependency output was not declared"))
+        dependency :: outputs.get(outputs.len() - 1) ?? return Err(CLIToolError.new("dependency output was not declared"))
         &argv.push("-MF")
         &argv.push(dependency)
     }
     if options.dep_mode && options.dep_target == None && sources.len() == 1 {
-        object :: outputs.get(0) ?? return Err(CliToolError.new("object output was not declared"))
+        object :: outputs.get(0) ?? return Err(CLIToolError.new("object output was not declared"))
         &argv.push("-MT")
         &argv.push(object)
     }
@@ -253,10 +253,10 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
 
 // The verified Hangar C toolchain for the requested target, provisioned
 // through the provider when the Hangar has no descriptor yet.
-fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: String?, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Time]> CcToolchainDescriptor ProviderError! {
+fn cli_cc_resolve_toolchain(verification: &StoreVerification, roots: HangarRoots, spec: RefSpec, fixtures: String?, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> CcToolchainDescriptor ProviderError! {
     hangar :: roots.hangar_dir()
     target :: provider_cc_toolchain_requested_target(spec) ?? return Err(ProviderError.Unsupported(err.message()))
-    if provider_cc_toolchain_resolve_for_target(hangar, target, fixtures != None) == {
+    if provider_cc_toolchain_resolve_for_target(&verification, hangar, target, fixtures != None) == {
         .Ok(descriptor) -> return Ok(descriptor)
         .Err(error) -> {
             if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
@@ -273,33 +273,33 @@ fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: String?
         allow_local_nix_catalog: false
     }
     table :: SourceTable.empty()
-    realized :: provider_realize(spec, table, ctx)
+    realized :: provider_realize(&verification, spec, table, ctx)
     if realized.source_state == {
-        .Downloaded | .Substituted -> store_record_realized_mode(roots, realized) ?? return Err(ProviderError.BadOutput(err.message()))
+        .Downloaded | .Substituted -> store_record_realized_mode(&verification, roots, realized) ?? return Err(ProviderError.BadOutput(err.message()))
         else -> {}
     }
-    provider_cc_toolchain_resolve_for_target(hangar, target, fixtures != None) ?? return Err(ProviderError.BadOutput(err.message()))
+    provider_cc_toolchain_resolve_for_target(&verification, hangar, target, fixtures != None) ?? return Err(ProviderError.BadOutput(err.message()))
 }
 
 // `raw` resolved against `base_root`, kept inside `allowed_root`, free of
 // existing symlinks, and returned relative to `output_root`.
-fn cli_cc_normalize_scoped_path(raw: String, allowed_root: String, base_root: String, output_root: String, label: String) -[FS]> String CliToolError! {
+fn cli_cc_normalize_scoped_path(raw: String, allowed_root: String, base_root: String, output_root: String, label: String) -[FS]> String CLIToolError! {
     candidate :: cli_cc_absolutize_lexically(base_root, raw, label)
-    if !cli_cc_path_starts_with(candidate, allowed_root) -> return Err(CliToolError.new("{label} path {raw} must stay inside {allowed_root}"))
+    if !cli_cc_path_starts_with(candidate, allowed_root) -> return Err(CLIToolError.new("{label} path {raw} must stay inside {allowed_root}"))
     cli_cc_reject_existing_symlinks(allowed_root, candidate, label)
-    relative_parts :: cli_cc_path_strip_prefix(candidate, output_root) ?? return Err(CliToolError.new("{label} path {raw} is outside the project root"))
+    relative_parts :: cli_cc_path_strip_prefix(candidate, output_root) ?? return Err(CLIToolError.new("{label} path {raw} is outside the project root"))
     relative :: relative_parts.join("/")
     cli_cc_validate_relative_path(relative, label)
     Ok(relative)
 }
 
-fn cli_cc_normalize_working_path(raw: String, project_root: String, working_dir: String, label: String) -[FS]> String CliToolError! {
+fn cli_cc_normalize_working_path(raw: String, project_root: String, working_dir: String, label: String) -[FS]> String CLIToolError! {
     cli_cc_normalize_scoped_path(raw, project_root, working_dir, project_root, label)
 }
 
 // An output path inside the build root, relative to the project root. A
 // relative path resolves against the explicit build root when one is given.
-fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: String, working_dir: String, explicit_build_root: Bool, label: String) -[FS]> String CliToolError! {
+fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: String, working_dir: String, explicit_build_root: Bool, label: String) -[FS]> String CLIToolError! {
     base :: if explicit_build_root -> build_root else -> working_dir
     cli_cc_normalize_scoped_path(raw, build_root, base, project_root, label)
 }
@@ -310,33 +310,33 @@ fn cli_cc_replace_option_operand(argument: String, option: String, value: String
     value
 }
 
-fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String CliToolError! {
-    cwd :: sys.current_dir() ?? return Err(CliToolError.new("could not determine the current directory: {err}"))
-    current :: files.canonicalize(cwd) ?? return Err(CliToolError.new("could not canonicalize the current directory: {err}"))
+fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String CLIToolError! {
+    cwd :: sys.current_dir() ?? return Err(CLIToolError.new("could not determine the current directory: {err}"))
+    current :: files.canonicalize(cwd) ?? return Err(CLIToolError.new("could not canonicalize the current directory: {err}"))
     raw :: options.project_root ?? current
     path :: cli_cc_absolutize_lexically(current, raw, "project root")
     cli_cc_canonical_real_directory(path, "project root")
 }
 
-fn cli_cc_resolve_build_root(project_root: String, options: DriverOptions) -[FS, Env]> String CliToolError! {
+fn cli_cc_resolve_build_root(project_root: String, options: DriverOptions) -[FS, Env]> String CLIToolError! {
     raw :: options.build_root ?? return Ok(project_root)
     path :: cli_cc_absolutize_lexically(options.working_dir, raw, "build root")
     canonical :: cli_cc_canonical_real_directory(path, "build root")
-    if !cli_cc_path_starts_with(canonical, project_root) -> return Err(CliToolError.new("build root {canonical} must be inside project root {project_root}"))
+    if !cli_cc_path_starts_with(canonical, project_root) -> return Err(CLIToolError.new("build root {canonical} must be inside project root {project_root}"))
     Ok(canonical)
 }
 
 // A source operand as a project-relative path to an existing regular file.
-fn cli_cc_validate_source(root: String, working_dir: String, raw: String) -[FS]> String CliToolError! {
+fn cli_cc_validate_source(root: String, working_dir: String, raw: String) -[FS]> String CLIToolError! {
     source :: cli_cc_normalize_working_path(raw, root, working_dir, "source")
-    metadata :: files.stat(files.join(root, source)) ?? return Err(CliToolError.new("source {source} is unavailable: {err}"))
-    if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("source {source} is not a regular file"))
+    metadata :: files.stat(files.join(root, source)) ?? return Err(CLIToolError.new("source {source} is unavailable: {err}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("source {source} is not a regular file"))
     Ok(source)
 }
 
 // Every regular project file except declared outputs, VCS/build directories
 // and the explicit build root, in name order, within the input bounds.
-fn cli_cc_collect_project_inputs(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CliToolError! {
+fn cli_cc_collect_project_inputs(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CLIToolError! {
     walk := CcProjectInputWalk{root: root, excluded: excluded, ignored_root: ignored_root, inputs: [String]{}, bytes: 0}
     &walk.visit(root)
     Ok(walk.inputs)
@@ -349,14 +349,14 @@ struct CcProjectInputWalk {
     inputs: [String]
     bytes: Int
 
-    fn visit(&self, directory: String) CliToolError! -[FS]> {
-        entries := files.list_dir(directory) ?? return Err(CliToolError.new("read project inputs in `{directory}`: {err}"))
+    fn visit(&self, directory: String) CLIToolError! -[FS]> {
+        entries := files.list_dir(directory) ?? return Err(CLIToolError.new("read project inputs in `{directory}`: {err}"))
         &entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
         loop entry in entries {
             path :: entry.path
-            relative_parts :: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CliToolError.new("project input `{path}` escaped the project root"))
+            relative_parts :: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CLIToolError.new("project input `{path}` escaped the project root"))
             relative :: relative_parts.join("/")
-            metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect project input `{relative}`: {err}"))
+            metadata :: files.stat(path) ?? return Err(CLIToolError.new("inspect project input `{relative}`: {err}"))
             if metadata.is_symlink -> next
             if metadata.is_dir {
                 if (self.ignored_root ?? "") == path -> next
@@ -368,12 +368,11 @@ struct CcProjectInputWalk {
                 next
             }
             if !metadata.is_file || self.excluded.contains(relative) -> next
-            if self.inputs.len() >= @CC_MAX_INPUT_FILES -> return Err(CliToolError.new("project input set exceeds {@CC_MAX_INPUT_FILES} files"))
+            if self.inputs.len() >= CC_MAX_INPUT_FILES -> return Err(CLIToolError.new("project input set exceeds {CC_MAX_INPUT_FILES} files"))
             self.bytes = self.bytes + metadata.size
-            if self.bytes > @CC_MAX_INPUT_BYTES -> return Err(CliToolError.new("project input set exceeds {@CC_MAX_INPUT_BYTES} bytes"))
+            if self.bytes > CC_MAX_INPUT_BYTES -> return Err(CLIToolError.new("project input set exceeds {CC_MAX_INPUT_BYTES} bytes"))
             &self.inputs.push(relative)
         }
-        Ok()
     }
 }
 
@@ -381,20 +380,19 @@ struct CcProjectInputWalk {
 // executable bit through the output file mode. Restore that product property
 // at the driver boundary after both a cache hit and a fresh action. Compile
 // outputs intentionally remain ordinary data files.
-fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) CliToolError! -[FS, Env]> {
+fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) CLIToolError! -[FS, Env]> {
     loop output in outputs {
         path :: files.join(project_root, output)
         if sys.is_windows() {
-            metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect link output `{output}`: {err}"))
-            if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("link output `{output}` is not a regular file"))
+            metadata :: files.stat(path) ?? return Err(CLIToolError.new("inspect link output `{output}`: {err}"))
+            if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("link output `{output}` is not a regular file"))
             next
         }
-        reader :: files.open(path, links: .Refuse) ?? return Err(CliToolError.new("open link output `{output}`: {err}"))
-        metadata :: reader.stat() ?? return Err(CliToolError.new("inspect link output `{output}`: {err}"))
-        if !metadata.is_file -> return Err(CliToolError.new("link output `{output}` is not a regular file"))
-        files.set_mode(path, metadata.mode | 0o111) ?? return Err(CliToolError.new("set executable mode on link output `{output}`: {err}"))
+        reader :: files.open(path, links: .Refuse) ?? return Err(CLIToolError.new("open link output `{output}`: {err}"))
+        metadata :: reader.stat() ?? return Err(CLIToolError.new("inspect link output `{output}`: {err}"))
+        if !metadata.is_file -> return Err(CLIToolError.new("link output `{output}` is not a regular file"))
+        files.set_mode(path, metadata.mode | 0o111) ?? return Err(CLIToolError.new("set executable mode on link output `{output}`: {err}"))
     }
-    Ok()
 }
 
 // `path` with its final extension replaced (`PathBuf::set_extension`).
@@ -419,12 +417,12 @@ fn cli_cc_compiler_version(descriptor: CcToolchainDescriptor) -> String Never! {
     version.split_once("+")?.before ?? version
 }
 
-fn cli_cc_report_usage_error(verb: String, reason: String) -[IO, Env]> {
+fn cli_cc_report_usage_error(verb: String, reason: String) -[IO, Env, Time.Wait]> {
     theme :: Theme.resolve_choice(ColorChoice.Auto)
     theme.error_coded("E2102", "invalid arguments for `jet {verb}`", reason, cli_cc_usage(verb))
 }
 
-fn cli_cc_report_provider_error(error: ProviderError) -[IO, Env]> {
+fn cli_cc_report_provider_error(error: ProviderError) -[IO, Env, Time.Wait]> {
     theme :: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
         .Offline(reason) -> theme.error_coded("E1276", "C/C++ toolchain is unavailable offline", reason, "install or import the pinned Hangar bundle, then retry without `--offline` only when acquisition is allowed")
@@ -435,7 +433,7 @@ fn cli_cc_report_provider_error(error: ProviderError) -[IO, Env]> {
     }
 }
 
-fn cli_cc_report_execution_error(error: BuildExecutionError) -[IO, Env]> {
+fn cli_cc_report_execution_error(error: BuildExecutionError) -[IO, Env, Time.Wait]> {
     theme :: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
         .SandboxUnavailable -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", "the native action boundary could not be enforced", "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
@@ -447,6 +445,6 @@ fn cli_cc_report_execution_error(error: BuildExecutionError) -[IO, Env]> {
     }
 }
 
-fn cli_cc_report_operational_error(headline: String, reason: String, fix: String) -[IO, Env]> {
+fn cli_cc_report_operational_error(headline: String, reason: String, fix: String) -[IO, Env, Time.Wait]> {
     Theme.resolve_choice(ColorChoice.Auto).error_coded("E1340", headline, reason, fix)
 }

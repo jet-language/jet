@@ -2,7 +2,7 @@
 // `jet_store::BuildRecord`). The CAS payload is JSON so tools can inspect it
 // without a second codec.
 
-@STORE_BUILD_RECORD_SCHEMA :: "jet.build-record/v1"
+STORE_BUILD_RECORD_SCHEMA :: prep { "jet.build-record/v1" }
 
 // One compiler-owned node execution recorded for `explain-build`.
 pub struct BuildNodeRecord {
@@ -21,42 +21,37 @@ pub struct BuildRecord {
     pub nodes: [BuildNodeRecord]
 
     fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord Never! {
-        BuildRecord{schema: @STORE_BUILD_RECORD_SCHEMA, program, nodes}
+        BuildRecord{schema: STORE_BUILD_RECORD_SCHEMA, program, nodes}
     }
 
-    // Compact JSON in field order; a negative or non-finite duration is
-    // recorded as 0.
+    // Rust BuildRecord::to_json (lib.rs:411-445): preserve field order and
+    // Foundation JSON quoting; generic object/JCS ordering is not this wire.
+    // Pieces are joined once, never re-copying the growing payload.
     fn to_json(self) -> String Never! {
-        nodes := [DataTree]{}
-        loop node in self.nodes {
-            inputs := [DataTree]{}
-            loop input in node.inputs -> &inputs.push(DataTree.Text(input))
+        parts := [String]{"{{\"schema\":{foundation_json_quote(self.schema)},\"program\":{foundation_json_quote(self.program)},\"nodes\":["}
+        loop index in 0..<self.nodes.len() {
+            if index != 0 -> &parts.push(",")
+            node :: self.nodes[index]
             finite :: node.duration_ms - node.duration_ms == 0.0
-            duration :: if finite && node.duration_ms >= 0.0 -> node.duration_ms else -> 0.0
-            &nodes.push(DataTree.Object([
-                "kind": DataTree.Text(node.kind),
-                "key": DataTree.Text(node.key),
-                "subject": DataTree.Text(node.subject),
-                "duration_ms": DataTree.Float(duration),
-                "why_ran": DataTree.Text(node.why_ran),
-                "inputs": DataTree.Array(inputs),
-            ]))
+            duration :: if finite && node.duration_ms >= 0.0 -> node.duration_ms else -> Float{0.0}
+            &parts.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"duration_ms\":{duration},\"why_ran\":{foundation_json_quote(node.why_ran)},\"inputs\":[")
+            loop input_index in 0..<node.inputs.len() {
+                if input_index != 0 -> &parts.push(",")
+                &parts.push(foundation_json_quote(node.inputs[input_index]))
+            }
+            &parts.push("]}}")
         }
-        document :: DataTree.Object([
-            "schema": DataTree.Text(self.schema),
-            "program": DataTree.Text(self.program),
-            "nodes": DataTree.Array(nodes),
-        ])
-        json.to_string(document) ?? panic("compact JSON rendering of a DataTree is total")
+        &parts.push("]}}")
+        parts.join("")
     }
 
     // Parse a record, refusing any schema other than the current one.
     fn from_json(payload: String) -> BuildRecord BuildRecordError! {
-        value :: json.parse(payload) ?? return Err(BuildRecordError{reason: "build record is not valid JSON"})
+        value :: foundation_parse_protocol_json(payload) ?? return Err(BuildRecordError{reason: "build record is not valid JSON"})
         object :: store_build_record_object(value) ?? return Err(BuildRecordError{reason: "build record must be an object: expected a DataTree object"})
         schema_value :: object.get("schema") ?? return Err(BuildRecordError{reason: "build record is missing schema"})
         schema :: store_build_record_text(schema_value) ?? return Err(BuildRecordError{reason: "build record schema is invalid: expected a DataTree string"})
-        if schema != @STORE_BUILD_RECORD_SCHEMA -> return Err(BuildRecordError{reason: "unsupported build record schema `{schema}`"})
+        if schema != STORE_BUILD_RECORD_SCHEMA -> return Err(BuildRecordError{reason: "unsupported build record schema `{schema}`"})
         program_value :: object.get("program") ?? return Err(BuildRecordError{reason: "build record is missing program"})
         program :: store_build_record_text(program_value) ?? return Err(BuildRecordError{reason: "build record program is invalid: expected a DataTree string"})
         nodes_value :: object.get("nodes") ?? return Err(BuildRecordError{reason: "build record is missing nodes"})

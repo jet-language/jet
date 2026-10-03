@@ -5,7 +5,7 @@
 // Static token discovery run with `php -r`: prints `N\t<name>` per top-level
 // one-argument function or `E\tARG\t<name>` for an unsupported signature.
 // Source bytes are tokenized, never executed.
-@PKG_PHP_TOKEN_ANALYZER :: ```
+PKG_PHP_TOKEN_ANALYZER :: prep { ```
 $source = @file_get_contents($argv[1]);
 if ($source === false) exit(2);
 $tokens = token_get_all($source, TOKEN_PARSE);
@@ -53,10 +53,10 @@ for ($i = 0, $count = count($tokens); $i < $count; $i++) {
     }
     echo "N\t", $name, "\n";
 }
-```
+``` }
 
 // The pool worker. Hole: `allowed`, one `'name' => true` row per function.
-@PKG_PHP_WORKER :: ```<?php
+PKG_PHP_WORKER :: prep { ```<?php
 ini_set('display_errors', '0');
 error_reporting(0);
 $autoload = getenv('COMPOSER_AUTOLOAD');
@@ -107,11 +107,11 @@ while (true) {
     fwrite(STDOUT, pack('V', strlen($encoded)) . pack('V2', $id & 0xffffffff, intdiv($id, 4294967296)) . $encoded);
     fflush(STDOUT);
 }
-```
+``` }
 
 // The pool layer over the supervisor. Holes: `abi` (the public pool ABI),
 // `inner` (the supervisor ABI), and `wrappers`.
-@PKG_PHP_POOL_C :: ```
+PKG_PHP_POOL_C :: prep { ```
 #define PHP_POOL_WORKERS 4
 #define PHP_POOLS 8
 typedef struct {int64_t workers[PHP_POOL_WORKERS];uint32_t generation;uint32_t next;int opening;int open;int closing;int active;pthread_mutex_t mutex;pthread_cond_t idle;} PhpPool;
@@ -128,9 +128,9 @@ static const char* pool_invoke(int64_t h,const char*command,const char*json,int6
 void @@abi@@_cancel(int64_t h){php_failed=0;int idx;int64_t worker;if(!php_acquire(h,&idx,&worker)){php_failed=1;return;}PhpPool*p=&php_pools[idx];pthread_mutex_lock(&p->mutex);int64_t copy[PHP_POOL_WORKERS];for(int i=0;i<PHP_POOL_WORKERS;i++)copy[i]=p->workers[i];for(int i=0;i<PHP_POOL_WORKERS;i++)@@inner@@_cancel(copy[i]);for(int i=0;i<PHP_POOL_WORKERS;i++){@@inner@@_close(copy[i]);p->workers[i]=@@inner@@_open();}pthread_mutex_unlock(&p->mutex);php_release(idx);}
 void @@abi@@_close(int64_t h){php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(uint32_t)((uint64_t)h>>8);if(n<0||n>=PHP_POOLS){php_failed=1;return;}pthread_mutex_lock(&php_lock);PhpPool*p=&php_pools[n];pthread_mutex_lock(&p->mutex);if(!p->open||p->generation!=gen){pthread_mutex_unlock(&p->mutex);pthread_mutex_unlock(&php_lock);php_failed=1;return;}p->closing=1;p->open=0;pthread_mutex_unlock(&php_lock);while(p->active>0)pthread_cond_wait(&p->idle,&p->mutex);int64_t copy[PHP_POOL_WORKERS];for(int i=0;i<PHP_POOL_WORKERS;i++){copy[i]=p->workers[i];p->workers[i]=0;}p->closing=0;pthread_mutex_unlock(&p->mutex);for(int i=0;i<PHP_POOL_WORKERS;i++)@@inner@@_close(copy[i]);}
 @@wrappers@@
-```
+``` }
 
-@PKG_PHP_RESERVED :: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"}
+PKG_PHP_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"} }
 
 // Bind the top-level one-argument functions of the PHP script at `path`.
 pub fn pkg_php_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -162,11 +162,11 @@ pub fn pkg_php_bind(path: String, source: String, lib: String, cache: String) -[
 // `php -n -l`: any failing status is reported as a parse error.
 fn pkg_php_lint(php: String, script: String) ForeignBindError! -[Exec, Time.Wait]> {
     if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", WorkerLanguage.Php, true) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             if error == {
-                .ToolFailed(_, _, _) -> Err(ForeignBindError.ToolFailed{tool: "php", action: WorkerLanguage.Php.action(), detail: "the PHP source has a parse error"})
-                else -> Err(error)
+                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: WorkerLanguage.Php.action(), detail: "the PHP source has a parse error"})
+                else -> return Err(error)
             }
         }
     }
@@ -174,7 +174,7 @@ fn pkg_php_lint(php: String, script: String) ForeignBindError! -[Exec, Time.Wait
 
 // Static discovery through PHP's own tokenizer.
 fn pkg_php_discover_functions(php: String, script: String) -[Exec, Time.Wait]> [String] ForeignBindError! {
-    output :: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", @PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", WorkerLanguage.Php, true)
+    output :: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", WorkerLanguage.Php, true)
     pkg_php_parse_discovery(output)
 }
 
@@ -200,13 +200,13 @@ fn pkg_php_parse_discovery(output: [U8]) -> [String] ForeignBindError! {
 fn pkg_php_render_worker(functions: [String]) -> String Never! {
     allowed := [String]{}
     loop name in functions -> &allowed.push("    '{name}' => true")
-    pkg_binder_fill_template(@PKG_PHP_WORKER, [String: String]{"allowed": allowed.join(",\n")})
+    pkg_binder_fill_template(PKG_PHP_WORKER, [String: String]{"allowed": allowed.join(",\n")})
 }
 
 fn pkg_php_render_pool_c(abi: String, inner: String, functions: [String]) -> String Never! {
     wrappers := [String]{}
     loop name in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
-    pkg_binder_fill_template(@PKG_PHP_POOL_C, [String: String]{"abi": abi, "inner": inner, "wrappers": wrappers.join("")})
+    pkg_binder_fill_template(PKG_PHP_POOL_C, [String: String]{"abi": abi, "inner": inner, "wrappers": wrappers.join("")})
 }
 
 fn pkg_php_render_jet(lib: String, functions: [String]) -> String Never! {
@@ -229,5 +229,5 @@ pub fn pkg_php_render_probe() -> String Never! {
 }
 
 fn pkg_php_reserved(value: String) -> Bool Never! {
-    @PKG_PHP_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_PHP_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }

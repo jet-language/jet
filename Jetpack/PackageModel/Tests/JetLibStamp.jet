@@ -29,9 +29,9 @@ fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnost
     }
 }
 
-#Test("jetlib stamp round trips through encode and decode") {
+#Test("jetlib stamp round trips through byte encode and decode") {
     stamp :: pkg_test_jetlib_stamp("1.4.2", [String]{"FS", "Net"})
-    assert_eq(JetLibStamp.decode(stamp.encode()) ?? panic("decode"), stamp)
+    assert_eq(JetLibStamp.decode_bytes(stamp.encode_bytes()) ?? panic("decode"), stamp)
 }
 
 #Test("jetlib library stamp carries the exact native export table") {
@@ -39,7 +39,7 @@ fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnost
     stamp := JetLibStamp.for_library("loadable", exports, [String]{"FS"})
     stamp.entry = Val("run")
     &stamp.seal_payload("native-shared-object".bytes())
-    decoded :: JetLibStamp.decode(stamp.encode()) ?? panic("decode")
+    decoded :: JetLibStamp.decode_bytes(stamp.encode_bytes()) ?? panic("decode")
     assert_eq(decoded, stamp)
     assert_eq(decoded.entry, Val("run"))
     assert(pkg_jetlib_validate_load_metadata(decoded) == .Ok(_))
@@ -47,19 +47,19 @@ fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnost
 
 #Test("jetlib empty effect set round trips") {
     stamp :: JetLibStamp.for_this_compiler([String]{})
-    assert_eq(JetLibStamp.decode(stamp.encode()) ?? panic("decode"), stamp)
+    assert_eq(JetLibStamp.decode_bytes(stamp.encode_bytes()) ?? panic("decode"), stamp)
 }
 
 #Test("jetlib artifact round trip keeps the native payload opaque") {
     artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}), payload: "native-shared-object".bytes()}
-    assert_eq(JetLibArtifact.decode(artifact.encode()) ?? panic("decode"), artifact)
+    assert_eq(JetLibArtifact.decode_bytes(artifact.encode_bytes()) ?? panic("decode"), artifact)
 }
 
 #Test("jetlib artifact rejects a truncated payload") {
     artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}), payload: "native-shared-object".bytes()}
-    bytes := artifact.encode()
+    bytes := artifact.encode_bytes()
     &bytes.pop()
-    if JetLibArtifact.decode(bytes) == {
+    if JetLibArtifact.decode_bytes(bytes) == {
         .Ok(_) -> panic("a truncated payload must be refused")
         .Err(error) -> assert(error.message.contains("payload declares"))
     }
@@ -82,17 +82,17 @@ fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnost
 }
 
 #Test("jetlib decode rejects bad magic") {
-    if JetLibStamp.decode("not-a-jetlib".bytes()) == {
+    if JetLibStamp.decode_bytes("not-a-jetlib".bytes()) == {
         .Ok(_) -> panic("bad magic must be refused")
         .Err(error) -> assert(error.message.contains("bad magic"))
     }
 }
 
 #Test("jetlib decode rejects truncated bytes") {
-    bytes := JetLibStamp.for_this_compiler([String]{"FS"}).encode()
+    bytes := JetLibStamp.for_this_compiler([String]{"FS"}).encode_bytes()
     &bytes.pop()
     &bytes.pop()
-    assert(JetLibStamp.decode(bytes) == .Err(_))
+    assert(JetLibStamp.decode_bytes(bytes) == .Err(_))
 }
 
 #Test("jetlib matching compiler identity passes") {
@@ -104,7 +104,7 @@ fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnost
     assert_eq(diagnostics.len(), 1)
     assert_eq(diagnostics[0].code, "E1338")
     assert(diagnostics[0].what.contains("0.0.1-old"))
-    assert(diagnostics[0].what.contains(@COMPILER_VERSION))
+    assert(diagnostics[0].what.contains(COMPILER_VERSION))
 }
 
 #Test("jetlib declared effect within the grant passes") {

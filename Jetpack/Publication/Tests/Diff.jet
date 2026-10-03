@@ -1,0 +1,231 @@
+// Source/Publish/Diff.rs:71-82; Publish/mod.rs:765-840;
+// tests/pkg.rs:5841-5900,6615-6639,6669-6695, with consumer edge cases.
+// Producer journeys remain mandatory, read-only Rust tandem acceptance:
+// tests/pkg.rs:5903-5946 capability_sigil_frozen_in_public_api;
+// :5967-6063 physical_unit_api_freeze_and_semver_share_one_canonical_signature;
+// :6066-6083 soft_public_names_are_not_semver_promises;
+// :6086-6104 inferred_public_effect_drift_is_breaking;
+// :6107-6133 inferred_inline_module_effects_are_published;
+// :6136-6176 v2_snapshot_upgrade_matches_duplicate_inline_leaves;
+// :6194-6215 public_trait_effect_contract_drift_is_breaking. They require the actual checked
+// API producer (#4445) and Root provider integration (#4262), not a test extractor.
+// Obsolete Rust lowercase diagnostic goldens are read-only tandem markers;
+// these byte regressions exercise the canonical registry's sentence casing.
+fn publication_diff_test_item(kind: String, name: String, signature: String) -> PublicAPIItem Never! {
+    PublicAPIItem{kind: kind, name: name, signature: signature}
+}
+fn publication_diff_test_function(name: String, signature: String) -> PublicAPIItem Never! {
+    publication_diff_test_item("fn", name, signature)
+}
+fn publication_diff_test_changes() -> [PublicationBreakingChange] Never! {
+    [PublicationBreakingChange]{PublicationBreakingChange{description: "fn `foo` removed", item_name: "foo"}}
+}
+fn publication_diff_test_gate(build_ok: Bool, tests_ok: Bool, breaking: [PublicationBreakingChange], bump: PublicationBumpKind) -> PublicationPrePublishGate Never! {
+    PublicationPrePublishGate{build_ok: build_ok, tests_ok: tests_ok, breaking: breaking, version: "1.1.0", bump_kind: bump, next_major: 2}
+}
+fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
+    publication_parse_semver(text) ?? panic("invalid test version: {text}")
+}
+
+#Test("publication duplicate_legacy_names_match_as_signature_multisets") {
+    old :: [PublicAPIItem]{publication_diff_test_function("report", "fn report()"), publication_diff_test_function("report", "fn report(x: Int)")}
+    new :: [PublicAPIItem]{publication_diff_test_function("report", "fn report(x: Int)"), publication_diff_test_function("report", "fn report()")}
+    assert_eq(publication_diff_public_api(old, new).len(), 0)
+}
+#Test("publication api_diff_detects_removed_fn") {
+    old :: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}
+    changes :: publication_diff_public_api(old, [PublicAPIItem]{})
+    assert_eq(changes.len(), 1)
+    assert_eq(changes[0].item_name, "parse")
+    assert_eq(changes[0].description, "pub fn `parse` was removed\n   | fn parse(raw: String) -> Int\n   | (removed)")
+}
+#Test("publication api_diff_detects_changed_signature") {
+    old :: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}
+    new :: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Float")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 1)
+    assert_eq(changes[0].description, "pub fn `parse` changed signature\n   | was: fn parse(raw: String) -> Int\n   | now: fn parse(raw: String) -> Float")
+}
+#Test("publication api_diff_no_change") {
+    api :: [PublicAPIItem]{publication_diff_test_function("greet", "fn greet(name: String)")}
+    assert_eq(publication_diff_public_api(api, api).len(), 0)
+}
+#Test("publication api diff empty and added only are nonbreaking") {
+    empty :: [PublicAPIItem]{}
+    added :: [PublicAPIItem]{publication_diff_test_function("extra", "fn extra()")}
+    assert_eq(publication_diff_public_api(empty, empty).len(), 0)
+    assert_eq(publication_diff_public_api(empty, added).len(), 0)
+    more :: [PublicAPIItem]{publication_diff_test_function("extra", "fn extra()"), publication_diff_test_item("struct", "More", "struct More {{ value: Int }}")}
+    assert_eq(publication_diff_public_api(added, more).len(), 0)
+}
+#Test("publication api diff duplicate cardinality consumes each new item once") {
+    item :: publication_diff_test_function("f", "fn f()")
+    pair :: [PublicAPIItem]{item, item}
+    single :: [PublicAPIItem]{item}
+    changes :: publication_diff_public_api(pair, single)
+    assert_eq(changes.len(), 1)
+    assert(changes[0].description.contains("was removed"))
+    assert_eq(publication_diff_public_api(single, pair).len(), 0)
+}
+#Test("publication api diff exact triple precedes first kind name match") {
+    old :: [PublicAPIItem]{publication_diff_test_function("f", "A"), publication_diff_test_function("f", "B"), publication_diff_test_function("f", "A")}
+    new :: [PublicAPIItem]{publication_diff_test_function("f", "C"), publication_diff_test_function("f", "A"), publication_diff_test_function("f", "B")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 1)
+    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: C")
+}
+#Test("publication api diff does not reserve a later old signature match") {
+    old :: [PublicAPIItem]{publication_diff_test_function("f", "A"), publication_diff_test_function("f", "B")}
+    new :: [PublicAPIItem]{publication_diff_test_function("f", "B")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 2)
+    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: B")
+    assert_eq(changes[1].description, "pub fn `f` was removed\n   | B\n   | (removed)")
+}
+#Test("publication api diff kind and name are both identity") {
+    old :: [PublicAPIItem]{publication_diff_test_item("trait", "Render", "same"), publication_diff_test_function("before", "same")}
+    new :: [PublicAPIItem]{publication_diff_test_item("struct", "Render", "same"), publication_diff_test_function("after", "same")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 2)
+    assert_eq(changes[0].description, "pub trait `Render` was removed\n   | same\n   | (removed)")
+    assert_eq(changes[1].item_name, "before")
+    assert(changes[1].description.contains("was removed"))
+}
+#Test("publication api diff replacements take first unmatched pair in old order") {
+    old :: [PublicAPIItem]{publication_diff_test_function("f", "A"), publication_diff_test_function("gone", "G"), publication_diff_test_function("f", "B")}
+    new :: [PublicAPIItem]{publication_diff_test_function("f", "X"), publication_diff_test_function("f", "Y")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 3)
+    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: X")
+    assert_eq(changes[1].item_name, "gone")
+    assert_eq(changes[2].description, "pub fn `f` changed signature\n   | was: B\n   | now: Y")
+}
+#Test("publication pre_publish_gate_blocked_on_minor_with_break") {
+    gate :: publication_diff_test_gate(true, true, publication_diff_test_changes(), .Minor)
+    assert(gate.is_blocked())
+    errors :: gate.semver_errors()
+    assert_eq(errors.len(), 1)
+    assert_eq(errors[0].code, "E2601")
+}
+#Test("publication pre_publish_gate_passes_major_with_break") {
+    gate :: PublicationPrePublishGate{build_ok: true, tests_ok: true, breaking: publication_diff_test_changes(), version: "2.0.0", bump_kind: .Major, next_major: 3}
+    assert(!gate.is_blocked())
+    assert_eq(gate.semver_errors().len(), 0)
+}
+#Test("publication pre_publish_gate_blocks_on_build_failure") {
+    gate :: publication_diff_test_gate(false, true, [PublicationBreakingChange]{}, .Minor)
+    assert(gate.is_blocked())
+}
+#Test("publication pre_publish_gate_passes_with_no_breaks_and_minor_bump") {
+    gate :: publication_diff_test_gate(true, true, [PublicationBreakingChange]{}, .Minor)
+    assert(!gate.is_blocked())
+    assert_eq(gate.semver_errors().len(), 0)
+}
+#Test("publication pre publish gate all bump and build test combinations") {
+    bumps :: [PublicationBumpKind]{.Major, .Minor, .Patch, .Same}
+    states :: [Bool]{true, false}
+    loop bump in bumps {
+        loop build_ok in states {
+            loop tests_ok in states {
+                gate :: publication_diff_test_gate(build_ok, tests_ok, publication_diff_test_changes(), bump)
+                assert_eq(gate.is_blocked(), !build_ok || !tests_ok || bump != .Major)
+                assert_eq(gate.semver_errors().len(), if bump == .Major -> 0 else -> 1)
+                clean :: publication_diff_test_gate(build_ok, tests_ok, [PublicationBreakingChange]{}, bump)
+                assert_eq(clean.is_blocked(), !build_ok || !tests_ok)
+                assert_eq(clean.semver_errors().len(), 0)
+            }
+        }
+    }
+}
+#Test("publication gate semver diagnostics preserve multiple change order") {
+    breaking :: [PublicationBreakingChange]{PublicationBreakingChange{description: "first", item_name: "a"}, PublicationBreakingChange{description: "second", item_name: "b"}}
+    errors :: publication_diff_test_gate(false, false, breaking, .Patch).semver_errors()
+    assert_eq(errors.len(), 2)
+    assert(errors[0].why.ends_with("\n  first"))
+    assert(errors[1].why.ends_with("\n  second"))
+    assert(errors[0].fix.contains("restore `a`"))
+    assert(errors[1].fix.contains("restore `b`"))
+}
+#Test("publication semver_break_e2601") {
+    changes :: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
+    assert_eq(changes.len(), 1)
+    diagnostic :: publication_e2601("1.2.0", .Minor, changes[0], 2)
+    assert_eq(diagnostic.code, "E2601")
+    assert(diagnostic.what.contains("1.2.0"))
+    assert(diagnostic.why.contains("minor"))
+    assert(diagnostic.fix.contains("2.0.0"))
+    assert(diagnostic.why.contains("parse"))
+}
+#Test("publication returned_view_source_union_change_feeds_e1218_and_e2601") {
+    old :: [PublicAPIItem]{publication_diff_test_function("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:0;access:read;path:range")}
+    new :: [PublicAPIItem]{publication_diff_test_function("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 1)
+    assert(changes[0].description.contains("parameter:0"))
+    assert(changes[0].description.contains("parameter:1"))
+    bump :: publication_classify_bump(publication_diff_test_semver("1.0.0"), publication_diff_test_semver("1.1.0"))
+    assert_eq(bump, PublicationBumpKind.Minor)
+    assert_eq(publication_e1218("1.0.0", "1.1.0", bump, changes[0], 2).code, "E1218")
+    assert_eq(publication_e2601("1.1.0", bump, changes[0], 2).code, "E2601")
+}
+#Test("publication e1218_breaking_change_under_minor_bump") {
+    changes :: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
+    assert_eq(changes.len(), 1)
+    bump :: publication_classify_bump(publication_diff_test_semver("1.0.0"), publication_diff_test_semver("1.1.0"))
+    assert_eq(bump, PublicationBumpKind.Minor)
+    diagnostic :: publication_e1218("1.0.0", "1.1.0", bump, changes[0], 2)
+    assert_eq(diagnostic.code, "E1218")
+    assert(diagnostic.what.contains("1.1.0"))
+    assert(diagnostic.fix.contains("2.0.0"))
+}
+#Test("publication diff diagnostic bytes and canonical metadata") {
+    change :: PublicationBreakingChange{description: "pub fn `parse` was removed\n   | fn parse()\n   | (removed)", item_name: "parse"}
+    registry :: publication_e2601("1.2.0", .Minor, change, 2)
+    assert_eq(registry.what, "This release is tagged 1.2.0 but removes public API")
+    assert_eq(registry.why, "1.2.0 is a minor bump, which promises no breaking changes. Callers pinned to ^1.0 would stop compiling.\n  pub fn `parse` was removed\n   | fn parse()\n   | (removed)")
+    assert_eq(registry.fix, "Bump to 2.0.0, or restore `parse` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
+    local :: publication_e1218("1.0.0", "1.2.0", .Minor, change, 2)
+    assert_eq(local.what, "Publishing 1.2.0 after 1.0.0 is a minor bump but breaks the public API")
+    assert_eq(local.why, "A minor bump promises callers no breaking changes, but the public API changed since 1.0.0:\n  pub fn `parse` was removed\n   | fn parse()\n   | (removed)")
+    assert_eq(local.fix, "Bump to 2.0.0 (a major release), or restore `parse` (a deprecated shim counts).")
+    diagnostics :: [Diagnostic]{registry, local}
+    loop diagnostic in diagnostics {
+        assert_eq(diagnostic.moment, DiagnosticMoment.Compile)
+        assert_eq(diagnostic.severity, 1)
+        assert_eq(diagnostic.span, None)
+        assert_eq(diagnostic.edit, None)
+        assert(diagnostic.no_fix_reason != None)
+    }
+}
+#Test("publication diff diagnostics all four bump labels and version segments") {
+    change :: PublicationBreakingChange{description: "changed", item_name: "f"}
+    bumps :: [PublicationBumpKind]{.Major, .Minor, .Patch, .Same}
+    labels :: [String]{"major", "minor", "patch", "unchanged"}
+    registry_labels :: [String]{"non-breaking", "minor", "patch", "non-breaking"}
+    loop index in 0..<bumps.len() {
+        local :: publication_e1218("old", "new", bumps[index], change, 9)
+        assert_eq(local.what, "Publishing new after old is a {labels[index]} bump but breaks the public API")
+        assert_eq(local.why, "A {labels[index]} bump promises callers no breaking changes, but the public API changed since old:\n  changed")
+        registry :: publication_e2601("v4.5.6", bumps[index], change, 9)
+        assert(registry.why.contains("is a {registry_labels[index]} bump"))
+        assert(registry.why.contains("^v4.0"))
+        assert(registry.fix.starts_with("Bump to 9.0.0"))
+    }
+    assert(publication_e2601("", .Same, change, 0).why.contains("^.0"))
+    assert(publication_e2601("release", .Same, change, 0).why.contains("^release.0"))
+    assert(publication_e2601(".1.0", .Same, change, 0).why.contains("^.0"))
+    // Rust split('.').next() is a text prefix; a byte find must never feed a
+    // character slice, so non-ASCII text before the first dot stays exact.
+    assert(publication_e2601("é1.0", .Same, change, 0).why.contains("Callers pinned to ^é1.0 would"))
+    assert(publication_e2601("é", .Same, change, 0).why.contains("Callers pinned to ^é.0 would"))
+}
+#Test("publication diff treats published capability effect dimension and trait signatures as opaque bytes") {
+    old :: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[]>"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ fn draw(self) -[IO]> Int }}")}
+    new :: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: &Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[IO]>"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ fn draw(self) -[GPU]> Int }}")}
+    changes :: publication_diff_public_api(old, new)
+    assert_eq(changes.len(), 5)
+    loop index in 0..<old.len() {
+        assert_eq(changes[index].item_name, old[index].name)
+        assert_eq(changes[index].description, "pub {old[index].kind} `{old[index].name}` changed signature\n   | was: {old[index].signature}\n   | now: {new[index].signature}")
+    }
+}

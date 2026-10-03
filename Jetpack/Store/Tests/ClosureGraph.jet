@@ -1,7 +1,7 @@
 // Closure registration claims ported from crates/jetpack/src/Store/Closure.rs
 // (registration_tests).
 
-fn store_test_closure_ingest(roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
+fn store_test_closure_ingest(verification: &StoreVerification, roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
     source :: files.join(roots.root, "fixture-{name}")
     files.create_dir_all(source) ?? panic("fixture dir")
     files.write(files.join(source, "payload"), payload) ?? panic("fixture payload")
@@ -16,18 +16,18 @@ fn store_test_closure_ingest(roots: HangarRoots, name: String, references: [Stri
         provenance: provenance,
         platform_artifact_kind: "",
     }
-    store_ingest_tree(roots, request) ?? panic("fixture ingest")
+    store_ingest_tree(&verification, roots, request) ?? panic("fixture ingest")
 }
 
 // Physical bytes of `paths`, each filesystem identity counted once.
 fn store_test_independent_physical_bytes(paths: [String]) -> Int Never! {
-    seen := [FileId: Bool]{}
+    seen := [FileID: Bool]{}
     total := 0
     loop path in paths -> total += store_test_physical_walk(path, &seen)
     total
 }
 
-fn store_test_physical_walk(path: String, seen: &[FileId: Bool]) -> Int Never! {
+fn store_test_physical_walk(path: String, seen: &[FileID: Bool]) -> Int Never! {
     metadata :: files.stat(path) ?? panic("stat")
     if seen.has_key(metadata.id) -> return 0
     seen[metadata.id] = true
@@ -39,9 +39,9 @@ fn store_test_physical_walk(path: String, seen: &[FileId: Bool]) -> Int Never! {
 }
 
 // Register under the Hangar lock.
-fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+fn store_test_register_entry_locked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_register_entry_unlocked(roots, entry)
+    store_register_entry_unlocked(&verification, roots, entry)
 }
 
 #Test("store wal stamp is stable when directory insertion order changes") {
@@ -65,16 +65,17 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
 }
 
 #Test("store hangar du counts each closure object once and splits shared bytes") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    shared :: store_test_closure_ingest(roots, "du-shared", [String]{}, "bytes", "registration-test")
-    first :: store_test_closure_ingest(roots, "du-first", [String]{shared.entry.envelope.output_hash}, "du-first", "du-test")
-    second :: store_test_closure_ingest(roots, "du-second", [String]{shared.entry.envelope.output_hash}, "du-second", "du-test")
+    shared :: store_test_closure_ingest(&verification, roots, "du-shared", [String]{}, "bytes", "registration-test")
+    first :: store_test_closure_ingest(&verification, roots, "du-first", [String]{shared.entry.envelope.output_hash}, "du-first", "du-test")
+    second :: store_test_closure_ingest(&verification, roots, "du-second", [String]{shared.entry.envelope.output_hash}, "du-second", "du-test")
     first_path :: first.entry.out
     store_make_tree_writable_for_removal(first_path) ?? panic("chmod")
     files.hard_link(files.join(first_path, "payload"), files.join(first_path, "payload-hard")) ?? panic("hard link")
     files.symlink("payload", files.join(first_path, "payload-link")) ?? panic("symlink")
 
-    report :: store_du(roots) ?? panic("du")
+    report :: store_du(&verification, roots) ?? panic("du")
     assert_eq(report.objects, 3)
     assert_eq(report.packages, 3)
     assert((report.shared_bytes ?? 0) > 0)
@@ -85,7 +86,7 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
     }
     assert(first_shared)
 
-    graph :: store_closure_graph_structure(roots) ?? panic("graph")
+    graph :: store_closure_graph_structure(&verification, roots) ?? panic("graph")
     paths := [String]{}
     loop record in graph.sorted_records() {
         loop output in record.outputs {
@@ -98,9 +99,10 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
 }
 
 #Test("store hangar du never substitutes logical length for physical use") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_closure_ingest(roots, "du-physical", [String]{}, "bytes", "registration-test")
-    report :: store_du(roots) ?? panic("du")
+    ingested :: store_test_closure_ingest(&verification, roots, "du-physical", [String]{}, "bytes", "registration-test")
+    report :: store_du(&verification, roots) ?? panic("du")
     logical := 0
     loop entry in files.list_dir(ingested.entry.out) ?? panic("list") -> logical += (files.stat(entry.path) ?? panic("stat")).size
     assert((report.closure_physical_bytes ?? 0) > logical)
@@ -108,10 +110,11 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
 }
 
 #Test("store connected receipt is atomic recoverable and corruption preserves output") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_closure_ingest(roots, "receipt-proof", [String]{}, "bytes", "registration-test")
+    ingested :: store_test_closure_ingest(&verification, roots, "receipt-proof", [String]{}, "bytes", "registration-test")
     assert(ingested.entry.receipt.starts_with("sha256-"))
-    receipt :: files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), ingested.entry.receipt)
+    receipt :: files.join(files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR), ingested.entry.receipt)
     bytes :: files.read_bytes(receipt) ?? panic("read receipt")
     text :: String.from_bytes(bytes) ?? panic("receipt text")
     assert(text.starts_with("jet-development-receipt-v1\n"))
@@ -126,37 +129,38 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
 
     partial :: files.join(files.dirname(receipt), ".crashed-receipt.partial")
     files.write(partial, "partial receipt") ?? panic("partial")
-    store_recover_closure_journal(roots) ?? panic("recover")
+    store_recover_closure_journal(&verification, roots) ?? panic("recover")
     assert(!files.exists(partial))
 
     files.remove(receipt) ?? panic("remove receipt")
-    assert((store_recover_closure_journal(roots) ?? panic("recover")) >= 1)
+    assert((store_recover_closure_journal(&verification, roots) ?? panic("recover")) >= 1)
     assert_eq(files.read_bytes(receipt) ?? panic("read receipt"), bytes)
 
     files.write(receipt, "corrupt receipt") ?? panic("corrupt")
-    if store_list_checked(roots) == {
+    if store_list_checked(&verification, roots) == {
         .Ok(_) -> panic("a corrupt receipt must fail listing")
         .Err(error) -> assert(error.message().contains("receipt"))
     }
     assert(files.is_dir(ingested.entry.out))
     files.remove(receipt) ?? panic("remove receipt")
-    store_recover_closure_journal(roots) ?? panic("recover")
+    store_recover_closure_journal(&verification, roots) ?? panic("recover")
     assert_eq(files.read_bytes(receipt) ?? panic("read receipt"), bytes)
     store_test_drop_roots(roots)
 }
 
 #Test("store receipt directory symlink is rejected without path escape") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     outside :: files.join(roots.root, "receipt-outside")
     files.create_dir_all(outside) ?? panic("outside dir")
     files.write(files.join(outside, "keep"), "live") ?? panic("keep")
     files.create_dir_all(roots.hangar_dir()) ?? panic("hangar dir")
-    files.symlink(outside, files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR)) ?? panic("receipts link")
+    files.symlink(outside, files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR)) ?? panic("receipts link")
     source :: files.join(roots.root, "receipt-symlink-source")
     files.create_dir_all(source) ?? panic("source dir")
     files.write(files.join(source, "payload"), "bytes") ?? panic("payload")
     request :: IngestRequest{name: "receipt-symlink", version: "1", reference: "path:receipt-symlink", cache_identity: store_test_identity(), references: [String]{}, outputs: [String: String]{"out": source}, signature: "", provenance: "registration-test", platform_artifact_kind: ""}
-    assert(store_ingest_tree(roots, request) == .Err(_))
+    assert(store_ingest_tree(&verification, roots, request) == .Err(_))
     assert_eq(files.read(files.join(outside, "keep")) ?? panic("read keep"), "live")
     store_test_drop_roots(roots)
 }
@@ -166,95 +170,98 @@ fn store_test_register_entry_locked(roots: HangarRoots, entry: StoreEntry) -> Bo
     dir :: files.join(roots.hangar_dir(), "existing-entry")
     files.create_dir_all(dir) ?? panic("dir")
     files.write(files.join(dir, "keep"), "existing metadata") ?? panic("keep")
-    files.write(files.join(dir, @STORE_NIX_GC_ROOT), "new lease") ?? panic("gc root")
+    files.write(files.join(dir, STORE_NIX_GC_ROOT), "new lease") ?? panic("gc root")
     store_rollback_registration_dir(dir, false, false) ?? panic("rollback")
     assert(files.is_file(files.join(dir, "keep")))
-    assert(!files.exists(files.join(dir, @STORE_NIX_GC_ROOT)))
+    assert(!files.exists(files.join(dir, STORE_NIX_GC_ROOT)))
     store_test_drop_roots(roots)
 }
 
 #Test("store external output is rejected before registration") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "external-output")
     files.create_dir_all(out) ?? panic("dir")
     files.write(files.join(out, "payload"), "stable bytes") ?? panic("payload")
     envelope :: Envelope.for_output(out, "path:external", "test")
-    if store_record_verified_mode(roots, "external", "1", "path:external", out, "", "", envelope, store_test_identity(), true) == {
+    if store_record_verified_mode(&verification, roots, "external", "1", "path:external", out, "", "", envelope, store_test_identity(), true) == {
         .Ok(_) -> panic("an external output must be refused")
         .Err(error) -> assert(error.message().contains("outside Hangar"))
     }
     assert(files.exists(out))
-    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 0)
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 0)
+    assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 0)
     store_test_drop_roots(roots)
 }
 
 #Test("store projection failure after journal commit is recoverable success") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_closure_ingest(roots, "projection-commit", [String]{}, "bytes", "registration-test")
+    ingested :: store_test_closure_ingest(&verification, roots, "projection-commit", [String]{}, "bytes", "registration-test")
     dir :: files.join(roots.hangar_dir(), ingested.entry.id)
     store_make_tree_writable_for_removal(dir) ?? panic("chmod")
     files.remove_all(dir) ?? panic("remove dir")
-    files.remove_all(files.join(roots.hangar_dir(), @STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
+    files.remove_all(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
     files.create_dir_all(dir) ?? panic("dir")
     blocker :: files.join(dir, "meta.json.{process.current_pid()}.partial")
     files.create_dir(blocker) ?? panic("blocker")
-    assert(store_test_register_entry_locked(roots, ingested.entry) ?? panic("register"))
+    assert(store_test_register_entry_locked(&verification, roots, ingested.entry) ?? panic("register"))
     assert(!files.exists(files.join(dir, "meta.json")))
     assert_eq((store_journal_transaction_paths(store_journal_dir(roots)) ?? panic("paths")).len(), 1)
     files.remove_dir(blocker) ?? panic("remove blocker")
-    assert_eq(store_recover_closure_journal(roots) ?? panic("recover"), 1)
+    assert_eq(store_recover_closure_journal(&verification, roots) ?? panic("recover"), 1)
     assert(files.is_file(files.join(dir, "meta.json")))
     store_test_drop_roots(roots)
 }
 
 #Test("store disappearing output after journal append rolls back transaction") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_closure_ingest(roots, "post-append-race", [String]{}, "bytes", "registration-test")
+    ingested :: store_test_closure_ingest(&verification, roots, "post-append-race", [String]{}, "bytes", "registration-test")
     object :: ingested.entry.out
     dir :: files.join(roots.hangar_dir(), ingested.entry.id)
     store_make_tree_writable_for_removal(dir) ?? panic("chmod")
     files.remove_all(dir) ?? panic("remove dir")
-    files.remove_all(files.join(roots.hangar_dir(), @STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
+    files.remove_all(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
     disappeared := false
     disappear :: () -> {
         store_make_tree_writable_for_removal(object) ?? panic("chmod object")
         files.remove_all(object) ?? panic("remove object")
         disappeared = true
     }
-    registered :: store_test_register_with_hook(roots, ingested.entry, disappear)
+    registered :: store_test_register_with_hook(&verification, roots, ingested.entry, disappear)
     assert(disappeared)
     if registered == {
         .Ok(_) -> panic("a disappearing output must fail registration")
         .Err(error) -> assert(error.message().contains("does not exist"))
     }
     assert_eq((store_journal_transaction_paths(store_journal_dir(roots)) ?? panic("paths")).len(), 0)
-    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 0)
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 0)
+    assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 0)
 
     files.create_dir_all(object) ?? panic("recreate object")
     files.write(files.join(object, "payload"), "bytes") ?? panic("payload")
     store_seal_node(object) ?? panic("seal")
-    assert(store_test_register_entry_locked(roots, ingested.entry) ?? panic("register"))
-    assert_eq(store_list_checked(roots) ?? panic("listing"), [StoreEntry]{ingested.entry})
+    assert(store_test_register_entry_locked(&verification, roots, ingested.entry) ?? panic("register"))
+    assert_eq(store_list_checked(&verification, roots) ?? panic("listing"), [StoreEntry]{ingested.entry})
     store_test_drop_roots(roots)
 }
 
-fn store_test_register_with_hook(roots: HangarRoots, entry: StoreEntry, hook: fn()) -> Bool StoreError! {
+fn store_test_register_with_hook(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, hook: fn()) -> Bool StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_register_entry_unlocked_with_hook(roots, entry, hook)
+    store_register_entry_unlocked_with_hook(&verification, roots, entry, hook)
 }
 
 // Give each entry a hashed `payload` dependency object and optionally make it
 // an admitted Nix record.
-fn store_test_batch_entries(roots: HangarRoots, prefix: String, nix: Bool) -> [StoreEntry] Never! {
+fn store_test_batch_entries(verification: &StoreVerification, roots: HangarRoots, prefix: String, nix: Bool) -> [StoreEntry] Never! {
     entries := [StoreEntry]{}
     loop index in 0..<3 {
-        entry := store_test_closure_ingest(roots, "{prefix}-{index}", [String]{}, "bytes", "registration-test").entry
-        assert(store_remove_closure_record(roots, entry.id) ?? panic("remove record"))
+        entry := store_test_closure_ingest(&verification, roots, "{prefix}-{index}", [String]{}, "bytes", "registration-test").entry
+        assert(store_remove_closure_record(&verification, roots, entry.id) ?? panic("remove record"))
         output :: entry.out
-        store_invalidate_verified_digest(output)
-        store_reset_verified_digest_hash_count(output)
+        store_invalidate_verified_digest(&verification, output)
+        store_reset_verified_digest_hash_count(&verification, output)
         dependency :: files.join(output, "payload")
         digest :: "sha256-{store_sha256_hex(files.read_bytes(dependency) ?? panic("read dependency"))}"
         producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
@@ -266,36 +273,38 @@ fn store_test_batch_entries(roots: HangarRoots, prefix: String, nix: Bool) -> [S
         producer.facts["dependency.object.{digest}"] = "payload"
         entry.producer_record = producer.encode()
         &entry.references.push(digest)
-        store_invalidate_verified_digest(dependency)
-        store_reset_verified_digest_hash_count(dependency)
+        store_invalidate_verified_digest(&verification, dependency)
+        store_reset_verified_digest_hash_count(&verification, dependency)
         &entries.push(entry)
     }
     entries
 }
 
-fn store_test_assert_hashed_at_most_once(entries: [StoreEntry]) Never! {
+fn store_test_assert_hashed_at_most_once(verification: &StoreVerification, entries: [StoreEntry]) Never! {
     loop entry in entries {
         // Sealed verification manifests allow zero content hashes when a
         // valid seal is trusted; the batch contract is at most one.
-        assert(store_verified_digest_hash_count(entry.out) <= 1)
-        assert(store_verified_digest_hash_count(files.join(entry.out, "payload")) <= 1)
+        assert(store_verified_digest_hash_count(&verification, entry.out) <= 1)
+        assert(store_verified_digest_hash_count(&verification, files.join(entry.out, "payload")) <= 1)
     }
 }
 
 #Test("store batch registration hashes each object once") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entries :: store_test_batch_entries(roots, "batch", false)
+    entries :: store_test_batch_entries(&verification, roots, "batch", false)
     hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
-    assert(store_register_entries_unlocked(roots, entries) ?? panic("register batch"))
-    store_test_assert_hashed_at_most_once(entries)
+    assert(store_register_entries_unlocked(&verification, roots, entries) ?? panic("register batch"))
+    store_test_assert_hashed_at_most_once(&verification, entries)
     store_test_drop_roots(roots)
 }
 
 #Test("store admitted nix batch verifies each shared output once") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entries :: store_test_batch_entries(roots, "admitted-nix", true)
+    entries :: store_test_batch_entries(&verification, roots, "admitted-nix", true)
     hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
-    assert(store_register_admitted_nix_entries_unlocked(roots, entries) ?? panic("register batch"))
-    store_test_assert_hashed_at_most_once(entries)
+    assert(store_register_admitted_nix_entries_unlocked(&verification, roots, entries) ?? panic("register batch"))
+    store_test_assert_hashed_at_most_once(&verification, entries)
     store_test_drop_roots(roots)
 }

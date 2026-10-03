@@ -1,8 +1,8 @@
 // NAR codec and narinfo claims ported from crates/jetpack/src/Store/Nar.rs.
 
-@STORE_TEST_RIPGREP_NARINFO_HEAD :: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\n"
-@STORE_TEST_RIPGREP_DERIVER :: "Deriver: iv6j10qg3d5j5m2nija24gzvph451r7a-ripgrep-15.2.0.drv\n"
-@STORE_TEST_RIPGREP_SIG :: "Sig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n"
+STORE_TEST_RIPGREP_NARINFO_HEAD :: prep { "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\n" }
+STORE_TEST_RIPGREP_DERIVER :: prep { "Deriver: iv6j10qg3d5j5m2nija24gzvph451r7a-ripgrep-15.2.0.drv\n" }
+STORE_TEST_RIPGREP_SIG :: prep { "Sig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n" }
 
 fn store_test_nar_root(label: String) -> String Never! {
     root :: files.join(sys.temp_dir(), "jet-nar-{label}-{process.current_pid()}")
@@ -44,7 +44,7 @@ fn store_test_nar_root(label: String) -> String Never! {
 }
 
 #Test("store standard narinfo parses real zstd and distinct hashes") {
-    text :: "{@STORE_TEST_RIPGREP_NARINFO_HEAD}{@STORE_TEST_RIPGREP_DERIVER}{@STORE_TEST_RIPGREP_SIG}"
+    text :: "{STORE_TEST_RIPGREP_NARINFO_HEAD}{STORE_TEST_RIPGREP_DERIVER}{STORE_TEST_RIPGREP_SIG}"
     info :: NixNarInfo.parse(text) ?? panic("real narinfo must parse")
     assert(info.compression == NixCompression.Zstd)
     assert(info.file_hash != Val(info.nar_hash))
@@ -54,7 +54,7 @@ fn store_test_nar_root(label: String) -> String Never! {
 }
 
 #Test("store nix narinfo signature matches upstream fingerprint") {
-    text :: "{@STORE_TEST_RIPGREP_NARINFO_HEAD}{@STORE_TEST_RIPGREP_SIG}"
+    text :: "{STORE_TEST_RIPGREP_NARINFO_HEAD}{STORE_TEST_RIPGREP_SIG}"
     info :: NixNarInfo.parse(text) ?? panic("real narinfo must parse")
     fingerprint :: String.from_bytes(info.fingerprint("/nix/store") ?? panic("fingerprint")) ?? panic("fingerprint text")
     assert_eq(fingerprint, "1;/nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0;sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh;7088584;/nix/store/0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67,/nix/store/dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47,/nix/store/r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib")

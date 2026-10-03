@@ -8,7 +8,7 @@
 // the Rust `StoreError` Display implementation.
 #Error
 pub enum ArtifactStoreError {
-    Io(IOError)
+    IO(IOError)
     Config(String)
     InvalidDigest(String)
     InvalidKey(String)
@@ -19,7 +19,7 @@ pub enum ArtifactStoreError {
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .Config(message) -> message
             .InvalidDigest(value) -> "invalid SHA-256 digest `{value}`"
             .InvalidKey(value) -> "invalid store key `{value}`"
@@ -30,7 +30,8 @@ pub enum ArtifactStoreError {
                     .Val(pid) -> "{pid}"
                     else -> "unknown"
                 }
-                "store lock is owned by a live process (owner pid {owner}) after waiting {store_artifact_seconds_text(elapsed_ns)}s: {path}"
+                seconds :: time.duration_ns(elapsed_ns).total_in("seconds")
+                "store lock is owned by a live process (owner pid {owner}) after waiting {seconds:Fixed(3)}s: {path}"
             }
             .Capacity(path, needed_bytes, available_bytes, limit_bytes) -> {
                 available :: if available_bytes == {
@@ -43,19 +44,7 @@ pub enum ArtifactStoreError {
     }
 }
 
-impl IOError -> ArtifactStoreError { ArtifactStoreError.Io(self) }
-
-// Rust `{:.3}` of a duration in seconds: rounded to the nearest millisecond.
-fn store_artifact_seconds_text(elapsed_ns: Int) -> String Never! {
-    millis :: (elapsed_ns + 500000) /% 1000000
-    fraction :: millis %% 1000
-    padded :: if {
-        fraction < 10 -> "00{fraction}"
-        fraction < 100 -> "0{fraction}"
-        else -> "{fraction}"
-    }
-    "{millis /% 1000}.{padded}"
-}
+impl IOError -> ArtifactStoreError { ArtifactStoreError.IO(self) }
 
 // A canonical SHA-256 digest used by every local artifact namespace.
 pub struct ArtifactDigest {
@@ -81,13 +70,13 @@ pub struct ArtifactDigest {
 
     // Lowercase hex, the Display form.
     fn to_hex(self) -> String Never! {
-        mir_sha256_hex_bytes(self.bytes) ?? panic("hex rendering of a digest is total")
+        mir_sha256_hex_bytes(self.bytes)
     }
 }
 
 // SHA-256 of `bytes` through the compiler's canonical hash.
 fn store_artifact_sha256(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes) ?? panic("SHA-256 indexed outside its padded blocks")
+    mir_sha256_bytes(bytes)
 }
 
 fn store_artifact_hex_value(byte: U8) -> Int? Never! {
@@ -103,75 +92,75 @@ fn store_artifact_hex_value(byte: U8) -> Int? Never! {
 // A verified immutable blob reference. The length is part of the handle so a
 // caller cannot accidentally consume a digest with a different payload size.
 pub struct ObjectHandle {
-    digest: ArtifactDigest
-    length: Int
+    digest_value: ArtifactDigest
+    length_value: Int
 
     fn new(digest: ArtifactDigest, length: Int) -> ObjectHandle Never! {
-        ObjectHandle{digest, length}
+        ObjectHandle{digest_value: digest, length_value: length}
     }
 
     fn from_bytes(bytes: [U8]) -> ObjectHandle Never! {
         ObjectHandle.new(ArtifactDigest.hash(bytes), bytes.len())
     }
 
-    fn digest(self) -> ArtifactDigest Never! { self.digest }
+    fn digest(self) -> ArtifactDigest Never! { self.digest_value }
 
-    fn length(self) -> Int Never! { self.length }
+    fn length(self) -> Int Never! { self.length_value }
 
-    fn key(self) -> String Never! { self.digest.to_hex() }
+    fn key(self) -> String Never! { self.digest_value.to_hex() }
 
     // Display form `<hex>:<length>`, also the build-record pointer payload.
-    fn text(self) -> String Never! { "{self.digest.to_hex()}:{self.length}" }
+    fn text(self) -> String Never! { "{self.digest_value.to_hex()}:{self.length_value}" }
 }
 
 // A typed action-cache key. Action records are immutable per key and carry a
 // second digest in their envelope so replacement with another valid record is
 // still detected as corruption.
 pub struct ActionHandle {
-    key: ArtifactDigest
+    key_value: ArtifactDigest
 
-    fn new(key: ArtifactDigest) -> ActionHandle Never! { ActionHandle{key} }
+    fn new(key: ArtifactDigest) -> ActionHandle Never! { ActionHandle{key_value: key} }
 
     fn from_key(key: String) -> ActionHandle Never! { ActionHandle.from_bytes(key.bytes()) }
 
     fn from_bytes(key: [U8]) -> ActionHandle Never! { ActionHandle.new(ArtifactDigest.hash(key)) }
 
-    fn digest(self) -> ArtifactDigest Never! { self.key }
+    fn digest(self) -> ArtifactDigest Never! { self.key_value }
 
-    fn key(self) -> String Never! { self.key.to_hex() }
+    fn key(self) -> String Never! { self.key_value.to_hex() }
 }
 
 // A validated `lto/<namespace>/` directory name.
-pub struct LtoNamespace {
-    name: String
+pub struct LTONamespace {
+    name_value: String
 
-    fn new(value: String) -> LtoNamespace ArtifactStoreError! {
+    fn new(value: String) -> LTONamespace ArtifactStoreError! {
         store_artifact_validate_component(value, "LTO namespace")
-        Ok(LtoNamespace{name: value})
+        Ok(LTONamespace{name_value: value})
     }
 
-    fn name(self) -> String Never! { self.name }
+    fn name(self) -> String Never! { self.name_value }
 }
 
 // An artifact that a live build lease pins from pruning.
 pub enum LeaseTarget {
     Blob(ObjectHandle)
     Action(ActionHandle)
-    Lto(namespace: LtoNamespace, object: ObjectHandle)
+    LTO(namespace: LTONamespace, object: ObjectHandle)
 
     fn blob(object: ObjectHandle) -> LeaseTarget Never! { LeaseTarget.Blob(object) }
 
     fn action(action: ActionHandle) -> LeaseTarget Never! { LeaseTarget.Action(action) }
 
     fn lto(namespace: String, object: ObjectHandle) -> LeaseTarget ArtifactStoreError! {
-        Ok(LeaseTarget.Lto{namespace: LtoNamespace.new(namespace), object})
+        Ok(LeaseTarget.LTO{namespace: LTONamespace.new(namespace), object})
     }
 
     fn entry_key(self) -> ArtifactEntryKey Never! {
         if self == {
             .Blob(object) -> ArtifactEntryKey.Blob(object.key())
             .Action(action) -> ArtifactEntryKey.Action(action.key())
-            .Lto(namespace, object) -> ArtifactEntryKey.Lto{namespace: namespace.name(), key: object.key()}
+            .LTO(namespace, object) -> ArtifactEntryKey.LTO{namespace: namespace.name(), key: object.key()}
         }
     }
 }
@@ -180,13 +169,13 @@ pub enum LeaseTarget {
 pub enum ArtifactEntryKind {
     Blob
     Action
-    Lto
+    LTO
 
     fn rank(self) -> Int Never! {
         if self == {
             .Blob -> 0
             .Action -> 1
-            .Lto -> 2
+            .LTO -> 2
         }
     }
 }
@@ -196,13 +185,13 @@ pub enum ArtifactEntryKind {
 pub enum ArtifactEntryKey {
     Blob(String)
     Action(String)
-    Lto(namespace: String, key: String)
+    LTO(namespace: String, key: String)
 
     fn kind(self) -> ArtifactEntryKind Never! {
         if self == {
             .Blob(_) -> ArtifactEntryKind.Blob
             .Action(_) -> ArtifactEntryKind.Action
-            .Lto(_, _) -> ArtifactEntryKind.Lto
+            .LTO(_, _) -> ArtifactEntryKind.LTO
         }
     }
 
@@ -210,7 +199,7 @@ pub enum ArtifactEntryKey {
         if self == {
             .Blob(_) -> "blob"
             .Action(_) -> "action"
-            .Lto(_, _) -> "lto"
+            .LTO(_, _) -> "lto"
         }
     }
 
@@ -218,7 +207,7 @@ pub enum ArtifactEntryKey {
     fn storage_key(self) -> String Never! {
         if self == {
             .Blob(key) | .Action(key) -> key
-            .Lto(namespace, key) -> "{namespace}-{key}"
+            .LTO(namespace, key) -> "{namespace}-{key}"
         }
     }
 
@@ -226,7 +215,7 @@ pub enum ArtifactEntryKey {
     fn wire_value(self) -> String Never! {
         if self == {
             .Blob(key) | .Action(key) -> key
-            .Lto(namespace, key) -> "{namespace}~{key}"
+            .LTO(namespace, key) -> "{namespace}~{key}"
         }
     }
 
@@ -236,19 +225,20 @@ pub enum ArtifactEntryKey {
     fn primary(self) -> String Never! {
         if self == {
             .Blob(key) | .Action(key) -> key
-            .Lto(namespace, _) -> namespace
+            .LTO(namespace, _) -> namespace
         }
     }
 
     fn secondary(self) -> String Never! {
         if self == {
-            .Lto(_, key) -> key
+            .LTO(_, key) -> key
             else -> ""
         }
     }
 
     // Parse a journal or lease `kind|value` pair; None for an unknown kind or
     // an invalid digest or namespace.
+    // #4415: native lowering of the original `?? return None` paths is gated.
     fn parse_wire(kind: String, value: String) -> ArtifactEntryKey? Never! {
         if kind == {
             "blob" -> {
@@ -261,9 +251,9 @@ pub enum ArtifactEntryKey {
             }
             "lto" -> {
                 parts :: store_artifact_split_once(value, "~") ?? return None
-                LtoNamespace.new(parts.before) ?? return None
+                LTONamespace.new(parts.before) ?? return None
                 ArtifactDigest.from_hex(parts.after) ?? return None
-                Val(ArtifactEntryKey.Lto{namespace: parts.before, key: parts.after})
+                Val(ArtifactEntryKey.LTO{namespace: parts.before, key: parts.after})
             }
             else -> None
         }
@@ -280,11 +270,11 @@ fn store_artifact_sort_keys(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Neve
 // Keys in their derived order without duplicates (a Rust `BTreeSet`).
 fn store_artifact_unique_keys(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
     out := [ArtifactEntryKey]{}
-    seen := [String]{}
+    seen := [String: Bool]{}
     loop key in store_artifact_sort_keys(keys) {
         identity :: key.identity()
-        if seen.contains(identity) -> next
-        &seen.push(identity)
+        if seen.has_key(identity) -> next
+        seen[identity] = true
         &out.push(key)
     }
     out

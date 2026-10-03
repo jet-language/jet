@@ -22,13 +22,13 @@ pub fn cli_find_jet_binary() -[FS, Env]> String Never! {
         candidate :: files.join(files.dirname(exe), name)
         if files.is_file(candidate) -> return candidate
     }
-    @BINARY_NAME
+    BINARY_NAME
 }
 
 // Project entry for bare `jet dev`, matching `jet`'s run-first convention:
 // the typed Package run output, then `run.jet`, `src/run.jet`, and
 // `<package>.jet`, else the (missing) root `run.jet`.
-pub fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec]> String Never! {
+pub fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     resolver :: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
     package := CheckedPackage?{None}
     if resolver.checked_package(".") == {
@@ -44,21 +44,21 @@ pub fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec]> String 
             }
             .Err(error) -> {
                 Theme.resolve_choice(ColorChoice.Auto).error("the project entry could not be selected", error.message, "repair the typed Package output or point at a `.jet` file directly")
-                process.exit(@EXIT_USER_ERROR)
+                process.exit(EXIT_USER_ERROR)
             }
         }
     }
-    if cli_checked_project_entry(resolver, @DEFAULT_ENTRY_FILE) == .Val(entry) -> return entry
-    if cli_checked_project_entry(resolver, files.join("src", @DEFAULT_ENTRY_FILE)) == .Val(entry) -> return entry
+    if cli_checked_project_entry(resolver, DEFAULT_ENTRY_FILE) == .Val(entry) -> return entry
+    if cli_checked_project_entry(resolver, files.join("src", DEFAULT_ENTRY_FILE)) == .Val(entry) -> return entry
     if package == .Val(checked) {
-        named :: "{checked.facts.name}.{@FILE_EXT}"
+        named :: "{checked.facts.name}.{FILE_EXT}"
         if cli_checked_project_entry(resolver, named) == .Val(entry) -> return entry
     }
-    files.join(resolver.root(), @DEFAULT_ENTRY_FILE)
+    files.join(resolver.root, DEFAULT_ENTRY_FILE)
 }
 
 // A checked, revalidated project file, or None when it does not exist.
-fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec]> String? Never! {
+fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
     if resolver.checked_file(relative) == {
         .Ok(file) -> {
             if resolver.revalidate_file(file) == .Err(error) -> cli_report_entry_authority_error(error.diagnostic())
@@ -72,9 +72,9 @@ fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO
 }
 
 // Render one entry-authority refusal and exit with the user-error code.
-fn cli_report_entry_authority_error(diagnostic: Diagnostic) -[IO, Exec]> Never {
+fn cli_report_entry_authority_error(diagnostic: Diagnostic) -[IO, Env, Exec, Time.Wait]> Never {
     Theme.resolve_choice(ColorChoice.Auto).error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-    process.exit(@EXIT_USER_ERROR)
+    process.exit(EXIT_USER_ERROR)
 }
 
 // Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's

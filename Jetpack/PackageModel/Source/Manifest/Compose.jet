@@ -30,7 +30,7 @@ impl PackageFacts {
     fn select_output(self, intent: String, explicit: String?, legacy: String?) -> OutputFact ComposeError! {
         self.validate_defaults()
         pkg_validate_intent(intent)
-        selected := explicit ?? legacy ?? ""
+        selected := explicit ?? (legacy ?? "")
         if explicit == None && legacy == None {
             compatible := [String]{}
             loop name in pkg_manifest_sorted(self.outputs.keys().to_list()) {
@@ -96,8 +96,8 @@ fn pkg_intent_kind_description(intent: String) -> String Never! {
 
 fn pkg_validate_intent(intent: String) ComposeError! {
     if intent == {
-        "run" | "test" | "check" | "dev" | "enter" | "publish" | "deploy" | "fleet" | "activate" | "activation" -> Ok()
-        else -> Err(ComposeError.UnknownIntent{intent: intent})
+        "run" | "test" | "check" | "dev" | "enter" | "publish" | "deploy" | "fleet" | "activate" | "activation" -> {}
+        else -> return Err(ComposeError.UnknownIntent{intent: intent})
     }
 }
 
@@ -377,7 +377,7 @@ pub fn pkg_record_provenance(provenance: &[String: [String]], field: String, ori
 }
 
 fn pkg_provenance_origin(provenance: [String: [String]], field: String, fallback: String) -> String Never! {
-    origins :: provenance.get(field) ?? return fallback
-    if origins.len() == 0 -> return fallback
+    origins :: provenance.get(field) ?? return ~fallback
+    if origins.len() == 0 -> return ~fallback
     origins[origins.len() - 1]
 }

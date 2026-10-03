@@ -12,9 +12,9 @@ pub struct RustBridgeBuild {
     pub entries: [ExternEntry]
     pub needs: RustBridgeNeeds
     pub authority_needs: [String]
-    pub handle_facts: [FfiHandleFact]
+    pub handle_facts: [FFIHandleFact]
     pub record_defs: CRecordDefinitions
-    pub link_closure: FfiLinkClosure
+    pub link_closure: FFILinkClosure
     pub native_link_args: [String]
     pub selected_target: String
     pub project_root: String?
@@ -24,17 +24,17 @@ pub struct RustBridgeBuild {
 // cache key: an atomic `create_dir` with stale stealing, scoped per key so
 // two processes on different keys never block each other here. Closing the
 // handle releases it.
-struct FfiBuildLock {
+struct FFIBuildLock {
     dir: String
 
     // Blocks until the lock is held. A lock older than two minutes (far
     // longer than any bridge build) is stolen, so a killed build cannot
     // wedge every later build of this key.
-    fn acquire(cache_root: String) -[FS, Time]> FfiBuildLock RustBridgeError! {
+    fn acquire(cache_root: String) -[FS, Time]> FFIBuildLock RustBridgeError! {
         dir :: files.join(cache_root, ".build-lock")
         loop {
             if files.create_dir(dir) == {
-                .Ok(_) -> return Ok(FfiBuildLock{dir: dir})
+                .Ok(_) -> return Ok(FFIBuildLock{dir: dir})
                 .Err(error) -> {
                     if error == {
                         .AlreadyExists(_) -> {}
@@ -54,20 +54,20 @@ struct FfiBuildLock {
     }
 }
 
-impl FfiBuildLock.Close {
+impl FFIBuildLock.Close {
     fn close(^self) -[FS]> {
         files.remove_dir(self.dir).drop("the lock directory may already be gone")
     }
 }
 
 // The bridge for the host target with no C facts (Rust `build_bridge`).
-pub fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env, Exec, Time, Time.Wait]> FfiLink RustBridgeError! {
-    pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, needs: needs, authority_needs: [String]{}, handle_facts: [FfiHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FfiLinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
+pub fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {
+    pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, needs: needs, authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FFILinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
 }
 
 // The crypto helper crates (D-DEP-CRYPTO1 / D-PWHASH1 / D-CRYPTO-SUITE1).
-fn pkg_ffi_crypto_crate_specs() -> [FfiCrateSpec] Never! {
-    [FfiCrateSpec]{@FFI_AES_GCM_CRATE_SPEC, @FFI_CHACHA_POLY_CRATE_SPEC, @FFI_ED25519_CRATE_SPEC, @FFI_ARGON2_CRATE_SPEC, @FFI_SHA2_CRATE_SPEC, @FFI_BLAKE3_CRATE_SPEC, @FFI_HKDF_CRATE_SPEC, @FFI_X25519_CRATE_SPEC, @FFI_SUBTLE_CRATE_SPEC}
+fn pkg_ffi_crypto_crate_specs() -> [FFICrateSpec] Never! {
+    [FFICrateSpec]{FFI_AES_GCM_CRATE_SPEC, FFI_CHACHA_POLY_CRATE_SPEC, FFI_ED25519_CRATE_SPEC, FFI_ARGON2_CRATE_SPEC, FFI_SHA2_CRATE_SPEC, FFI_BLAKE3_CRATE_SPEC, FFI_HKDF_CRATE_SPEC, FFI_X25519_CRATE_SPEC, FFI_SUBTLE_CRATE_SPEC}
 }
 
 // Path of the already-built Ed25519 helper, without creating cache state.
@@ -79,43 +79,43 @@ pub fn pkg_ffi_cached_crypto_helper_path() -[FS, Env, Exec, Time.Wait]> String N
     loop spec in pkg_ffi_crypto_crate_specs() -> deps[spec.name] = spec.version
     needs := RustBridgeNeeds.none()
     needs.crypto = true
-    key :: RustBridgeKeyInputs{entries: [ExternEntry]{}, deps: deps, needs: needs, authority_needs: [String]{}, handle_facts: [FfiHandleFact]{}, record_source: "", link_closure: FfiLinkClosure.empty(), selected_target: target, rust_toolchain: rust_toolchain, native_toolchain: None, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
+    key :: RustBridgeKeyInputs{entries: [ExternEntry]{}, deps: deps, needs: needs, authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_source: "", link_closure: FFILinkClosure.empty(), selected_target: target, rust_toolchain: rust_toolchain, native_toolchain: None, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
     pkg_ffi_bridge_paths(key, target, [String]{}, rust_toolchain).crypto_helper
 }
 
 // The Cargo dependency map the entries and providers need.
 fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env]> [String: String] RustBridgeError! {
     deps := pkg_ffi_collect_crate_deps(entries)
-    specs := [FfiCrateSpec]{}
-    if needs.db -> &specs.push(@FFI_DB_CRATE_SPEC)
+    specs := [FFICrateSpec]{}
+    if needs.db -> &specs.push(FFI_DB_CRATE_SPEC)
     if needs.parquet {
         loop spec in pkg_ffi_parquet_crate_specs() -> &specs.push(spec)
     }
     if needs.http_client {
-        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
-        &specs.push(@FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
+        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
     }
     if needs.http_server_tls {
-        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
-        &specs.push(@FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
+        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
     }
     if needs.net_tls {
-        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
-        &specs.push(@FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
-        &specs.push(@FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
+        &specs.push(FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
+        &specs.push(FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
     }
     if needs.crypto {
         loop spec in pkg_ffi_crypto_crate_specs() -> &specs.push(spec)
     }
-    if needs.secrets -> &specs.push(@FFI_AGE_CRATE_SPEC)
-    if needs.plugin -> &specs.push(@FFI_WASMTIME_CRATE_SPEC)
+    if needs.secrets -> &specs.push(FFI_AGE_CRATE_SPEC)
+    if needs.plugin -> &specs.push(FFI_WASMTIME_CRATE_SPEC)
     loop spec in specs -> deps[spec.name] = spec.version
     if needs.parquet || needs.plugin -> deps["jet-foundation"] = pkg_ffi_jet_foundation_crate_path()
     Ok(deps)
 }
 
-fn pkg_ffi_link_for(request: RustBridgeBuild, key: String, paths: BridgePaths, cdylib: String, helper_bin: String?, secrets_helper_bin: String?) -> FfiLink Never! {
-    FfiLink{
+fn pkg_ffi_link_for(request: RustBridgeBuild, key: String, paths: BridgePaths, cdylib: String, helper_bin: String?, secrets_helper_bin: String?) -> FFILink Never! {
+    FFILink{
         crate_name: paths.crate_name,
         cache_identity: key,
         provenance_path: paths.provenance,
@@ -132,7 +132,7 @@ fn pkg_ffi_link_for(request: RustBridgeBuild, key: String, paths: BridgePaths, c
 
 // A verified cache hit for this key, or `None` for a miss. Tampered bytes
 // under a present manifest are an integrity error, not a miss.
-fn pkg_ffi_verified_cache_hit(request: RustBridgeBuild, key: String, deps: [String: String], paths: BridgePaths, helper_bin: String?, secrets_helper_bin: String?) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+fn pkg_ffi_verified_cache_hit(request: RustBridgeBuild, key: String, deps: [String: String], paths: BridgePaths, helper_bin: String?, secrets_helper_bin: String?) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     artifacts :: pkg_ffi_bridge_artifact_paths(paths.rlib, paths.target, paths.crate_name, helper_bin, secrets_helper_bin) ?? return Ok(None)
     if pkg_ffi_bridge_artifact_integrity_diagnostic(paths.target, paths.crate_name, deps, artifacts) == .Val(diagnostic) -> return Err(pkg_ffi_single_error(diagnostic))
     if !pkg_ffi_bridge_cache_verified(paths.target, paths.crate_name, key, request.selected_target, request.entries, artifacts) -> return Ok(None)
@@ -150,15 +150,15 @@ fn pkg_ffi_sandbox_unavailable(detail: String) -> RustBridgeError Never! {
     pkg_ffi_single_error(diagnostic_from_registry("E1275", None, "build sandboxing is required but unavailable", detail, "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"))
 }
 
-pub fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Time.Wait]> FfiLink RustBridgeError! {
+pub fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {
     entries :: request.entries
     needs :: request.needs
     selected_target :: request.selected_target
     deps :: pkg_ffi_bridge_deps(entries, needs)
     native_toolchain :: pkg_ffi_inline_native_toolchain(entries, selected_target)
-    foundation_sources := None
+    foundation_sources := JetFoundationSources?{None}
     if needs.parquet || needs.plugin -> foundation_sources = Val(pkg_ffi_jet_foundation_sources())
-    foundation_digest := None
+    foundation_digest := String?{None}
     if foundation_sources == .Val(sources) -> foundation_digest = Val(sources.digest)
     rust_toolchain :: pkg_ffi_native_toolchain_identity()
     key :: RustBridgeKeyInputs{entries: entries, deps: deps, needs: needs, authority_needs: request.authority_needs, handle_facts: request.handle_facts, record_source: request.record_defs.source, link_closure: request.link_closure, selected_target: selected_target, rust_toolchain: rust_toolchain, native_toolchain: native_toolchain, native_link_args: request.native_link_args, foundation_source_digest: foundation_digest}.cache_key()
@@ -176,7 +176,7 @@ pub fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time
     // Slow path: another process may be building this key right now. Cargo's
     // target-dir lock protects the shared `target/`, not the sources this
     // build is about to rewrite.
-    lock :: FfiBuildLock.acquire(paths.cache_root)
+    lock :: FFIBuildLock.acquire(paths.cache_root)
     defer close(^lock)
     // Re-check under the lock: the holder may have just finished this key.
     locked_hit :: pkg_ffi_verified_cache_hit(request, key, deps, paths, helper_bin, secrets_helper_bin)
@@ -219,7 +219,7 @@ fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, key: String, deps: [St
         lang :: entry.inline_lang() ?? next
         if lang == "c" || lang == "cpp" -> has_native = true
     }
-    foundation_path := None
+    foundation_path := String?{None}
     if deps.has_key("jet-foundation") -> foundation_path = Val(pkg_ffi_jet_foundation_crate_path())
     files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps, has_native, foundation_path)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
     if has_native {
@@ -238,7 +238,7 @@ fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, key: String, deps: [St
     wrapper_source := pkg_ffi_emit_wrapper_lib_with_handles(entries, needs, handle_names, request.record_defs)
     // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
     // declaration as data; it never reparses package.jet or invents needs.
-    if needs.plugin -> wrapper_source = wrapper_source + pkg_ffi_plugin_authority_source(request.authority_needs)
+    if needs.plugin -> wrapper_source = "{wrapper_source}{pkg_ffi_plugin_authority_source(request.authority_needs)}"
     files.write(files.join(src_dir, "lib.rs"), wrapper_source) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI wrappers: {err}"))
     // `src/bin/` holds only the generated helpers; clear it so a helper under
     // an old unkeyed name cannot linger as a second bin target.
@@ -319,12 +319,12 @@ fn pkg_ffi_json_field(value: DataTree, key: String) -> DataTree ForeignBridgeErr
 }
 
 fn pkg_ffi_json_items(value: DataTree) -> [DataTree] ForeignBridgeError! {
-    items :: pkg_json_array(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_ARRAY))
+    items :: pkg_json_array(value) ?? return Err(pkg_bridge_error(PKG_JSON_NOT_ARRAY))
     Ok(items)
 }
 
 fn pkg_ffi_json_text(value: DataTree) -> String ForeignBridgeError! {
-    text :: pkg_json_text(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_STRING))
+    text :: pkg_json_text(value) ?? return Err(pkg_bridge_error(PKG_JSON_NOT_STRING))
     Ok(text)
 }
 
@@ -395,7 +395,7 @@ fn pkg_ffi_normalize_ffi_generated_source_line(line: String) -> String Never! {
         parts :: line.split_once(marker) ?? next
         return "{parts.before}{marker}<generated wrapper>)"
     }
-    line
+    ~line
 }
 
 // `jet_ffi_<16 hex>` becomes `jet_ffi_<hash>`.
@@ -457,7 +457,7 @@ fn pkg_ffi_normalize_ffi_cache_path(line: String) -> String Never! {
         rest = rest.removeprefix("deps/")
     }
     hash_len :: pkg_ffi_hex_prefix_len(rest)
-    if hash_len != 16 -> return line
+    if hash_len != 16 -> return ~line
     suffix :: pkg_bytes_text(rest.bytes(), hash_len, rest.bytes().len())
     "{pkg_bytes_text(bytes, 0, path_start)}~/.cache/jet/ffi/{shared}<hash>{suffix}"
 }

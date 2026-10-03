@@ -111,7 +111,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     first :: pkg_lock_write(lock)
     parsed :: pkg_lock_parse(first) ?? panic("portable Nix closure parses")
     assert_eq(parsed.packages[0].nix_closure, Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a"))))
-    assert(first.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+    assert(first.bytes().len() <= PKG_MAX_LOCK_BYTES)
     current := first
     loop cycle in 1..<33 {
         loaded :: pkg_lock_parse(current) ?? panic("lock must parse on cycle {cycle}")
@@ -148,7 +148,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     lock.root_dependencies = [String]{"other", "duplicate", "other"}
     first :: pkg_lock_write(lock)
     assert_eq(first.split("[[package]]").to_list().len() - 1, 2)
-    assert(first.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+    assert(first.bytes().len() <= PKG_MAX_LOCK_BYTES)
     parsed :: pkg_lock_parse(first) ?? panic("canonical lock must parse")
     assert_eq(parsed.packages[0].name, "duplicate")
     envelope :: parsed.packages[0].envelope ?? panic("envelope")
@@ -157,7 +157,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     loop cycle in 1..<33 {
         current = pkg_lock_write(pkg_lock_parse(current) ?? panic("cycle {cycle} must parse"))
         assert_eq(current, first)
-        assert(current.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+        assert(current.bytes().len() <= PKG_MAX_LOCK_BYTES)
     }
 }
 
@@ -260,7 +260,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 // The registered E1205 row text (tests/fixtures/jetpack-diagnostics/
 // E1205.stderr).
 #Test("oversized lock value returns corrupt lock diagnostic") {
-    raw :: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", @PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
+    raw :: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
     diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
         .Ok(_) -> panic("an oversized lock value must stop parsing")
         .Err(error) -> pkg_lock_test_reported(error)
@@ -299,7 +299,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     first.version = "0.22.1"
     first.content_hash = Val("sha256-cargo-checksum")
     first.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
-    first.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{@PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key")})
+    first.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key", [LockedPackage]{first}) ?? panic("record bridge")
     lock :: pkg_lock_load(scratch.path) ?? panic("reload")
     records := [LockedPackage]{}
@@ -316,7 +316,7 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     second := first
     second.version = "0.22.2"
     second.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.2", output: "sha256-bridge-2"}
-    second.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{@PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key-2")})
+    second.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key-2")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key-2", [LockedPackage]{second}) ?? panic("record second bridge")
     relock :: pkg_lock_load(scratch.path) ?? panic("reload")
     versions := [String]{}
@@ -328,12 +328,12 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 
 #Test("atomic lock writer rejects oversized output without replacing lock") {
     scratch :: pkg_lock_test_project("lock-writer")
-    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
     original :: "version = 1\n[root]\ndependencies = []\n"
     files.write(path, pkg_lock_test_repeat("stale lock bytes\n", 128)) ?? panic("seed stale lock")
     pkg_lock_write_atomically(scratch.path, original.bytes()) ?? panic("small lock write")
     assert_eq(files.read(path) ?? panic("read"), original)
-    oversized :: pkg_lock_test_repeat("x", @PKG_MAX_LOCK_BYTES + 1)
+    oversized :: pkg_lock_test_repeat("x", PKG_MAX_LOCK_BYTES + 1)
     if pkg_lock_write_atomically(scratch.path, oversized.bytes()) == {
         .Ok(_) -> panic("oversized lock must be refused")
         .Err(error) -> {
@@ -380,12 +380,12 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 #Test("repeated source channel updates are byte identical and bounded") {
     scratch :: pkg_lock_test_project("lock-channel-cycles")
     source :: LockedSourceChannel{name: "stable", channel: "stable", exact: "owner/repo@github#v1"}
-    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
     first := [U8]{}
     loop cycle in 1..<33 {
         pkg_lock_record_source_channel(scratch.path, source) ?? panic("valid test lock record")
         bytes :: files.read_bytes(path) ?? panic("read lock")
-        assert(bytes.len() <= @PKG_MAX_LOCK_BYTES)
+        assert(bytes.len() <= PKG_MAX_LOCK_BYTES)
         if cycle == 1 -> first = bytes
         assert_eq(bytes, first)
     }
@@ -393,8 +393,8 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 
 #Test("bounded lock reader rejects oversized line") {
     scratch :: pkg_lock_test_project("lock-reader")
-    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
-    files.write(path, "version = 1\n{pkg_lock_test_repeat("x", @PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
     if pkg_lock_read_text(path) == {
         .Ok(_) -> panic("oversized line must be rejected")
         .Err(error) -> assert(error.message().contains("1 MiB safety limit"))
@@ -404,8 +404,8 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 
 #Test("bounded lock reader rejects oversized file") {
     scratch :: pkg_lock_test_project("lock-file-reader")
-    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
-    files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", @PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
     if pkg_lock_read_text(path) == {
         .Ok(_) -> panic("oversized file must be rejected")
         .Err(error) -> assert(error.message().contains("lock file exceeds"))

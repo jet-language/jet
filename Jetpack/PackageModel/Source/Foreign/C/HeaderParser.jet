@@ -30,7 +30,7 @@ struct CRawRecord {
 
 // The callback typedef marker the catalog stores as an alias target:
 // `__jet_callback__<ret>|<param>|<param>...`.
-@CBIND_CALLBACK_MARKER :: "__jet_callback__"
+CBIND_CALLBACK_MARKER :: prep { "__jet_callback__" }
 
 // Header type facts shared by prototype rendering and generated C records.
 struct CTypeCatalog {
@@ -130,8 +130,8 @@ struct CTypeCatalog {
     // parameter makes it a managed callback whose events carry the scalars.
     fn map_callback_alias(self, c_type: String) -> String? Never! {
         target :: self.aliases.get(pkg_cbind_canonical_c_type(c_type)) ?? return None
-        if !target.starts_with(@CBIND_CALLBACK_MARKER) -> return None
-        pieces :: target.removeprefix(@CBIND_CALLBACK_MARKER).split("|").to_list()
+        if !target.starts_with(CBIND_CALLBACK_MARKER) -> return None
+        pieces :: target.removeprefix(CBIND_CALLBACK_MARKER).split("|").to_list()
         if pieces.len() == 0 -> return None
         ret :: pieces[0]
         raw_params := [String]{}
@@ -152,14 +152,14 @@ struct CTypeCatalog {
     // Whether a callback typedef takes a `void *` context first.
     fn callback_has_context(self, c_type: String) -> Bool Never! {
         target :: self.aliases.get(pkg_cbind_canonical_c_type(c_type)) ?? return false
-        if !target.starts_with(@CBIND_CALLBACK_MARKER) -> return false
-        pieces :: target.removeprefix(@CBIND_CALLBACK_MARKER).split("|").to_list()
+        if !target.starts_with(CBIND_CALLBACK_MARKER) -> return false
+        pieces :: target.removeprefix(CBIND_CALLBACK_MARKER).split("|").to_list()
         pieces.len() > 1 && pkg_cbind_is_void_pointer_type(pieces[1])
     }
 
     // The element type of a single-level typed pointer, when it is a scalar,
     // an ABI scalar, or a generated record and not an owned handle.
-    fn map_array_element(self, c_type: String, contract: ForeignAbiContract, handles: OpaqueHandleDiscovery) -> String? Never! {
+    fn map_array_element(self, c_type: String, contract: ForeignABIContract, handles: OpaqueHandleDiscovery) -> String? Never! {
         pointer :: pkg_cbind_pointer_base(c_type)
         if pointer.depth != 1 -> return None
         if handles.handle_for_type(c_type) != None -> return None
@@ -262,7 +262,7 @@ fn pkg_cbind_parse_callback_alias(decl: String) -> (alias: String, target: Strin
     params :: pkg_cbind_split_params(pkg_bytes_text(bytes, params_open + 1, params_close)) ?? return None
     types := [String]{}
     loop param in params -> &types.push(pkg_cbind_split_param_type_and_name(param, 0).ty)
-    Val((alias: alias, target: "{@CBIND_CALLBACK_MARKER}{ret}|{types.join("|")}"))
+    Val((alias: alias, target: "{CBIND_CALLBACK_MARKER}{ret}|{types.join("|")}"))
 }
 
 // `typedef <target> <alias>` without a body or parameter list. The target is
@@ -473,7 +473,7 @@ fn pkg_cbind_pointer_base(c_type: String) -> (base: String, depth: Int) Never! {
     loop byte in norm.bytes() {
         if Int.from_u8(byte) == 42 -> depth += 1
     }
-    (base: pkg_cbind_canonical_c_type(&norm.replace("*", " ")), depth: depth)
+    (base: pkg_cbind_canonical_c_type(norm.replace("*", " ")), depth: depth)
 }
 
 fn pkg_cbind_canonical_c_type(c_type: String) -> String Never! {
@@ -539,8 +539,8 @@ fn pkg_cbind_callback_scalar_type(c_type: String) -> String? Never! {
     }
 }
 
-@CBIND_LENGTH_SUFFIXES :: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
-@CBIND_LENGTH_PREFIXES :: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
+CBIND_LENGTH_SUFFIXES :: prep { [String]{"_len", "_length", "_count", "_size", "_num", "_number"} }
+CBIND_LENGTH_PREFIXES :: prep { [String]{"len_", "length_", "count_", "size_", "num_", "number_"} }
 
 // Parameter names that may carry an element count.
 fn pkg_cbind_is_length_name(name: String) -> Bool Never! {
@@ -549,10 +549,10 @@ fn pkg_cbind_is_length_name(name: String) -> Bool Never! {
         "n" | "len" | "length" | "count" | "size" | "num" | "number" -> return true
         else -> {}
     }
-    loop suffix in @CBIND_LENGTH_SUFFIXES {
+    loop suffix in CBIND_LENGTH_SUFFIXES {
         if lower.ends_with(suffix) -> return true
     }
-    loop prefix in @CBIND_LENGTH_PREFIXES {
+    loop prefix in CBIND_LENGTH_PREFIXES {
         if lower.starts_with(prefix) -> return true
     }
     false

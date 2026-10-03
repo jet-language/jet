@@ -10,15 +10,15 @@
 // All patches are staged in memory first and committed file by file with an
 // atomic rename; a failed commit restores the files already written.
 
-@OVERLAY_TEMP_ATTEMPTS :: 16
-@OVERLAY_TEMP_MODE :: 0o600
-@OVERLAY_NO_NEWLINE_MARKER :: "\\ No newline at end of file"
+OVERLAY_TEMP_ATTEMPTS :: prep { 16 }
+OVERLAY_TEMP_MODE :: prep { 0o600 }
+OVERLAY_NO_NEWLINE_MARKER :: prep { "\\ No newline at end of file" }
 
 // Pinned identity of one opened input.
 struct OverlayInputIdentity {
     length: Int
     modified_ns: Int
-    id: FileId
+    id: FileID
     links: Int
 }
 
@@ -81,7 +81,7 @@ struct OverlayAuthority {
 
     fn open(path: String, label: String) -[FS, Env]> OverlayAuthority OverlayError! {
         resolver :: AuthorityResolver.open(path) ?? return Err(OverlayError.IO("could not open {label} authority `{path}`: {err.message()}"))
-        root :: resolver.root()
+        root :: ~resolver.root
         checked :: resolver.checked_directory("") ?? return Err(OverlayError.IO("could not hold {label} authority `{root}`: {err.message()}"))
         Ok(OverlayAuthority{root, resolver, root_handle: checked.handle})
     }
@@ -203,7 +203,7 @@ fn env_overlay_apply_unified_patch_staged(source: OverlayAuthority, patch_text: 
                 if at >= lines.len() -> return Err(OverlayError.Patch("patch hunk body ended unexpectedly"))
                 hunk_line :: lines[at]
                 at += 1
-                if hunk_line == @OVERLAY_NO_NEWLINE_MARKER -> next
+                if hunk_line == OVERLAY_NO_NEWLINE_MARKER -> next
                 if hunk_line == "" -> return Err(OverlayError.Patch("unsupported empty patch line"))
                 body :: String.from_bytes(hunk_line.bytes()[1..<hunk_line.bytes().len()]) ?? ""
                 if {
@@ -328,10 +328,10 @@ fn env_overlay_write_atomically(entry: OverlayStagedFile, bytes: [U8], verify_ta
         if !root.is_dir -> return Err(env_overlay_io("source root authority is no longer a directory"))
     }
     collision := IOError?{None}
-    loop _ in 0..<@OVERLAY_TEMP_ATTEMPTS {
+    loop _ in 0..<OVERLAY_TEMP_ATTEMPTS {
         token :: random.token_hex(8) ?? return Err(env_overlay_io("could not draw an overlay temporary name"))
         temporary :: ".{entry.name}.jet-overlay-{sys.pid()}-{token}"
-        file :: if entry.parent.create(temporary, if_exists: .Refuse, mode: Val(@OVERLAY_TEMP_MODE)) == {
+        file :: if entry.parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
             .Ok(created) -> created
             .Err(error) -> {
                 if error == {
@@ -344,7 +344,9 @@ fn env_overlay_write_atomically(entry: OverlayStagedFile, bytes: [U8], verify_ta
             }
         }
         write_error :: if env_overlay_publish(entry, file, temporary, bytes) == {
-            .Ok(_) -> { return Ok() }
+            .Ok(_) -> {
+                return
+            }
             .Err(error) -> error
         }
         if entry.parent.remove(temporary) == .Err(cleanup) {

@@ -4,8 +4,8 @@
 // generated Jet wrapper, and a pthread-once C bridge elaborates the GNAT
 // runtime before the first call.
 
-@ADA_BIND_SCHEMA :: "jet-ada-bind-v1"
-@ADA_TOOL_ACTION :: "rejected the Ada binding source"
+ADA_BIND_SCHEMA :: prep { "jet-ada-bind-v1" }
+ADA_TOOL_ACTION :: prep { "rejected the Ada binding source" }
 
 pub struct AdaBindResult {
     pub source: String
@@ -99,7 +99,7 @@ pub fn pkg_ada_bind(spec_path: String, spec: String, lib: String, cache: String)
     pkg_ada_run([String]{"ar", "rcs", archive, files.join(build, "{stem}.o"), files.join(build, "b~{stem}.o"), bridge_obj}, None, "ar")
     runtime_dir :: pkg_ada_gnat_runtime_dir()
     identity := [U8]{}
-    pkg_binder_append_field(&identity, @ADA_BIND_SCHEMA.bytes())
+    pkg_binder_append_field(&identity, ADA_BIND_SCHEMA.bytes())
     pkg_binder_append_field(&identity, spec.bytes())
     pkg_binder_append_field(&identity, body.bytes())
     loop byte in runtime_dir.bytes() -> &identity.push(byte)
@@ -116,7 +116,7 @@ pub fn pkg_ada_bind(spec_path: String, spec: String, lib: String, cache: String)
         }
     }
     pkg_binder_remove_tree_quiet(build)
-    provenance := "schema={@ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
+    provenance := "schema={ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Ada, "Ada", lib, spec_path, archive, "gnatmake/gnatbind/cc/ar")
     Ok(AdaBindResult{source: source, bound: bound, archive: archive, runtime_dir: runtime_dir, provenance: provenance})
 }
@@ -255,7 +255,7 @@ fn pkg_ada_params_jet(params: [AdaParam]) -> String Never! {
 // An Ada literal as a Jet number: digit separators dropped, and a Float
 // bound always carries a fraction or exponent.
 fn pkg_ada_jet_number(value: String, scalar: AdaScalar) -> String Never! {
-    out := &value.replace("_", "")
+    out := value.replace("_", "")
     if scalar == AdaScalar.Float && !out.contains(".") && !out.contains("e") && !out.contains("E") -> out = "{out}.0"
     out
 }
@@ -283,7 +283,7 @@ fn pkg_ada_params_c(params: [AdaParam]) -> String Never! {
 // GNAT runtime.
 fn pkg_ada_gnat_runtime_dir() -[FS, Env, Exec, Time.Wait]> String ForeignBindError! {
     output :: pkg_ada_capture([String]{"gnatls", "-v"}, None, "gnatls")
-    runtime_name :: BinderHostOs.current().shared_library("gnat", "libgnat.so")
+    runtime_name :: BinderHostOS.current().shared_library("gnat", "libgnat.so")
     loop line in pkg_binder_lines(String.from_bytes_lossy(output)) {
         candidate :: pkg_binder_trim_end_matches(line.trim(), "/")
         if candidate.ends_with("/adalib") && files.is_abs(candidate) && files.is_file(files.join(candidate, runtime_name)) -> return Ok(candidate)
@@ -293,13 +293,13 @@ fn pkg_ada_gnat_runtime_dir() -[FS, Env, Exec, Time.Wait]> String ForeignBindErr
 
 fn pkg_ada_run(argv: [String], cwd: String?, tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     output :: pkg_ada_capture(argv, cwd, tool)
-    if Int.from_u8(output[0]) == 0 -> return Ok()
-    Err(ForeignBindError.ToolFailed{tool: tool, action: @ADA_TOOL_ACTION, detail: pkg_ada_launder(output[1..<output.len()])})
+    if Int.from_u8(output[0]) == 0 -> return
+    return Err(ForeignBindError.ToolFailed{tool: tool, action: ADA_TOOL_ACTION, detail: pkg_ada_launder(output[1..<output.len()])})
 }
 
 // The status byte (0 on success) followed by stdout then stderr.
 fn pkg_ada_capture(argv: [String], cwd: String?, tool: String) -[Exec, Time.Wait]> [U8] ForeignBindError! {
-    output :: pkg_binder_capture(argv, cwd, tool, @ADA_TOOL_ACTION)
+    output :: pkg_binder_capture(argv, cwd, tool, ADA_TOOL_ACTION)
     result := [U8]{if output.success -> U8{0} else -> U8{1}}
     loop byte in output.stdout -> &result.push(byte)
     loop byte in output.stderr -> &result.push(byte)
@@ -316,7 +316,7 @@ fn pkg_ada_launder(bytes: [U8]) -> String Never! {
         if trimmed == "" -> next
         return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
     }
-    @BINDER_TOOL_FAILURE_DETAIL
+    BINDER_TOOL_FAILURE_DETAIL
 }
 
 // The quoted value after `needle` (matched case-insensitively).

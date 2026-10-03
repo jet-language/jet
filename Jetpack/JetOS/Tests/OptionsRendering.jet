@@ -1,0 +1,306 @@
+// JP-JOS-BASE behavioral claims for Rust types.rs:1-79 and
+// options_rendering.rs:1-511 (neither source file has inline tests).
+// User/profile fixtures mirror tests/jetpack_jetos.rs:1133-1138,1709-1712,
+// 2378-2396. These test projections, not the separately owned process engine.
+// Compiler gate #4303 (borrowed trim views: AOT &str ABI and the default-tier
+// empty bound view returned from jetos_clean_value) blocks tier proof; the
+// list-splitting claim's blank items are the default-tier reproduction.
+
+fn jetos_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    return SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_test_option(key: String, value: String) -> OptionPlan Never! {
+    return OptionPlan{key: key, value: value}
+}
+
+fn jetos_test_plan(images: [ImagePlan]) -> EnvPlan Never! {
+    return EnvPlan{
+        table: SourceTable.empty(), source_files: [String]{}, graph_identity: None,
+        environment_reads: [EnvironmentRead]{}, package_refs: [String]{},
+        adapters: [AdapterPlan]{}, prompt: None, prompt_path: PromptPathMode.Short,
+        prompt_strip: PromptStripMode.Off, images: images,
+        dev_services: [DevServicePlan]{}, secrets: [SecretSpec]{},
+        lifecycle: EnvironmentLifecycle{}, presets: [PresetSpec]{}, languages: [LanguageSpec]{},
+        selected_preset: None, language_expansion: LanguageExpansion{},
+        language_packs: [LanguagePack]{}, language_projections: [LanguageProjection]{},
+        files: [ManagedFile]{}, integrations: [EnvironmentIntegration]{},
+        integration_facts: IntegrationFactProjection{}, package_profiles: [PackageProfileSpec]{},
+        environment_names: [String]{}, active_environment: None,
+        active_environment_provenance: [String]{}
+    }
+}
+
+fn jetos_test_image(name: String, kind: ImageKind, from: String, format: String) -> ImagePlan Never! {
+    return ImagePlan{name: name, kind: kind, from: from, format: format,
+        from_environment: false, target: None, expose: [Int]{}, env_vars: [ImageEnvVar]{},
+        files: [String]{}, base: None, services: [String]{}, health: None, entrypoint: None, user: None}
+}
+
+#Test("JetOS constants retain VM tool and desktop package order") {
+    assert_eq(JETOS_CACHYOS_KERNEL_PACKAGE, "cachyos-kernel")
+    assert_eq(JETOS_SYSTEMD_INIT_PACKAGE, "systemd")
+    assert_eq(JETOS_GNOME_DESKTOP_PACKAGES, [String]{"gdm", "gnome-session", "gnome-shell"})
+    assert_eq(JETOS_VM_TOOLS, [String]{"qemu-system-x86_64", "qemu-img", "xorriso", "limine", "sfdisk", "blockdev", "mkfs.ext4", "mkfs.vfat", "mmd", "mcopy", "zstd"})
+    assert_eq(JETOS_VM_GUEST_PROOF_MARKER, "JETOS_GUEST_PROOF:")
+    assert_eq(JETOS_VM_PROOF_TIMEOUT_MS, 300000)
+}
+
+#Test("JetOS clean values and symbols preserve literal content") {
+    cases :: [(input: String, value: String, symbol: String)]{
+        (input: "  \"hello\"  ", value: "hello", symbol: "hello"),
+        (input: "\"\"", value: "", symbol: ""),
+        (input: "\"", value: "\"", symbol: "\""),
+        (input: "\"unfinished", value: "\"unfinished", symbol: "\"unfinished"),
+        (input: "...users.nate", value: "...users.nate", symbol: "nate"),
+        (input: " \" .users.users.nate \" ", value: " .users.users.nate ", symbol: "users.nate"),
+        (input: "users", value: "users", symbol: "users"),
+        (input: "\"a\\nb\"", value: "a\\nb", symbol: "a\\nb")
+    }
+    loop case in cases {
+        assert_eq(jetos_clean_value(case.input), case.value)
+        assert_eq(jetos_clean_symbol(case.input), case.symbol)
+    }
+}
+
+#Test("JetOS shell quoting and safe names are scalar-wise ASCII projections") {
+    assert_eq(jetos_shell_single_quote(""), "''")
+    assert_eq(jetos_shell_single_quote("a'b\n雪"), "'a'\\''b\n雪'")
+    assert_eq(jetos_safe_filename("A-z_09/雪é.."), "A-z_09-----")
+    assert_eq(jetos_safe_filename(""), "")
+    assert_eq(jetos_safe_identifier("9a-/雪é"), "_9a____")
+    assert_eq(jetos_safe_identifier(""), "_")
+    assert_eq(jetos_safe_identifier("_aB09"), "_aB09")
+    assert_eq(jetos_clean_bool_json("\"...users.TrUe\""), "true")
+    loop value in ([String]{"false", "1", "true!", "truｅ", "", "TRUE ", ".False"}) {
+        // clean_symbol trims the trailing space, as Rust does.
+        assert_eq(jetos_clean_bool_json(value), if value == "TRUE " -> "true" else -> "false")
+    }
+}
+
+#Test("JetOS option resolution retains all contenders and last-source winner") {
+    system :: jetos_test_system([OptionPlan]{
+        jetos_test_option("k", "\"first\""), jetos_test_option("other", "0"),
+        jetos_test_option("k", " second "), jetos_test_option("k", "\"last\"")
+    })
+    resolved :: jetos_resolved_option(system, "k") ?? panic("option exists")
+    assert_eq(resolved.to_json(), "{{\"key\":\"k\",\"value\":\"last\",\"tier\":\"Normal\",\"priority\":1000,\"contenders\":[{{\"value\":\"first\",\"tier\":\"Normal\",\"priority\":1000,\"source_order\":0,\"winner\":false}},{{\"value\":\"second\",\"tier\":\"Normal\",\"priority\":1000,\"source_order\":2,\"winner\":false}},{{\"value\":\"last\",\"tier\":\"Normal\",\"priority\":1000,\"source_order\":3,\"winner\":true}}]}}")
+    assert_eq(jetos_raw_option_value(system, "k"), Val("first"))
+    assert_eq(jetos_resolved_option_value(system, "k"), Val("last"))
+    assert_eq(jetos_resolved_option(system, "missing"), None)
+    assert_eq(jetos_option_value(system, [String]{"missing", "other", "k"}), Val("0"))
+    assert_eq(jetos_option_value(system, [String]{}), None)
+    assert_eq(jetos_option_value(system, [String]{"missing"}), None)
+}
+
+#Test("JetOS tier metadata is first-writer and explicit priority overrides tier") {
+    cases :: [(tier: String, priority: Int)]{
+        (tier: ".Default", priority: 100), (tier: "Force", priority: 10000),
+        (tier: "Normal", priority: 1000), (tier: "force", priority: 1000),
+        (tier: "", priority: 1000), (tier: "\"...users.Force\"", priority: 10000)
+    }
+    loop case in cases {
+        system := jetos_test_system([OptionPlan]{
+            jetos_test_option("k.tier", case.tier), jetos_test_option("k.tier", "Default"),
+            jetos_test_option("k", "a"), jetos_test_option("k", "b")
+        })
+        resolved :: jetos_resolved_option(system, "k") ?? panic("option exists")
+        assert_eq(resolved.priority, case.priority)
+        assert_eq(resolved.value, "b")
+        assert_eq(resolved.contenders[0].tier, jetos_clean_symbol(case.tier))
+        &system.options.push(jetos_test_option("k.priority", "-17"))
+        &system.options.push(jetos_test_option("k.priority", "100000"))
+        explicit :: jetos_resolved_option(system, "k") ?? panic("option exists")
+        assert_eq(explicit.priority, -17)
+        assert_eq(explicit.contenders[0].priority, -17)
+        assert_eq(explicit.contenders[1].priority, -17)
+        assert(explicit.contenders[1].winner)
+    }
+}
+
+#Test("JetOS priority honors i64 boundaries and falls back on invalid text") {
+    cases :: [(text: String, expected: Int)]{
+        (text: "9223372036854775807", expected: 9223372036854775807),
+        (text: "-9223372036854775808", expected: -9223372036854775808),
+        (text: "+0007", expected: 7), (text: "0", expected: 0),
+        (text: "9223372036854775808", expected: 10000),
+        (text: "-9223372036854775809", expected: 10000),
+        (text: "\" 7 \"", expected: 10000), (text: "+", expected: 10000),
+        (text: "1_000", expected: 10000), (text: "１２", expected: 10000),
+        (text: "", expected: 10000), (text: "1.0", expected: 10000)
+    }
+    loop case in cases {
+        system :: jetos_test_system([OptionPlan]{jetos_test_option("k", "x"), jetos_test_option("k.tier", "Force"), jetos_test_option("k.priority", case.text)})
+        resolved :: jetos_resolved_option(system, "k") ?? panic("option exists")
+        assert_eq(resolved.priority, case.expected)
+    }
+    metadata_only :: jetos_test_system([OptionPlan]{jetos_test_option("k.tier", "Force")})
+    assert_eq(jetos_resolved_option(metadata_only, "k"), None)
+}
+
+#Test("JetOS list splitting preserves quoted commas and Rust literal quote toggles") {
+    assert_eq(jetos_parse_list_items(" [\"lsm=landlock,yama,bpf\", .users.nate, , \"ext4\"] "), [String]{"lsm=landlock,yama,bpf", "nate", "ext4"})
+    assert_eq(jetos_parse_list_items("[ ]"), [String]{})
+    assert_eq(jetos_parse_list_items(""), [String]{})
+    assert_eq(jetos_parse_list_items("a,b,"), [String]{"a", "b"})
+    assert_eq(jetos_parse_list_items("[a,b"), [String]{"[a", "b"})
+    assert_eq(jetos_parse_list_items("a,b]"), [String]{"a", "b]"})
+    assert_eq(jetos_parse_list_items("[\"a,b]"), [String]{"\"a,b"})
+    assert_eq(jetos_parse_list_items("[\"a\\\",b\",c]"), [String]{"a\\", "b\",c"})
+    assert_eq(jetos_parse_list_items("[\"\", ., users., ...users.雪]"), [String]{"雪"})
+}
+
+#Test("JetOS type inference uses exact order and i64 grammar") {
+    cases :: [(value: String, ty: String)]{
+        (value: " [broken", ty: "List"), (value: " true ", ty: "Bool"),
+        (value: "false", ty: "Bool"), (value: "True", ty: "String"),
+        (value: "+01", ty: "Int"), (value: "-9223372036854775808", ty: "Int"),
+        (value: "9223372036854775808", ty: "String"), (value: "1_0", ty: "String"),
+        (value: "1.0", ty: "String"), (value: ".Force", ty: "Enum"),
+        (value: "\"false\"", ty: "String"), (value: "", ty: "String")
+    }
+    loop case in cases -> assert_eq(jetos_option_type(case.value), case.ty)
+    loop suffix in ([String]{".tier", ".priority", ".override", ".disabled"}) -> assert(jetos_is_option_priority_metadata("k{suffix}"))
+    loop key in ([String]{"tier", "k.tier.more", "k.priorityX", "k.disabledly", ""}) -> assert(!jetos_is_option_priority_metadata(key))
+}
+
+#Test("JetOS namespace defaults and docs are byte-exact") {
+    cases :: [(ns: String, default: String, doc: String)]{
+        (ns: "network", default: "dhcp-and-closed-firewall", doc: "Network identity, DNS, wireless, and firewall policy."),
+        (ns: "services", default: "disabled", doc: "System service declaration projected to systemd units and proof."),
+        (ns: "users", default: "absent", doc: "System account identity used by login and generated roots."),
+        (ns: "user", default: "absent", doc: "Per-user generation applied by jetos-user-apply."),
+        (ns: "filesystem", default: "guided-root", doc: "Mounted filesystems, swap, timezone, and root projection."),
+        (ns: "storage", default: "guided-root", doc: "Installer and activation storage tree."),
+        (ns: "boot", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."),
+        (ns: "kernel", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."),
+        (ns: "performance", default: "safe", doc: "Safe performance profile plus expert sysctl/zram/scheduler overrides."),
+        (ns: "theme", default: "default", doc: "Reusable theme projection for GTK, terminals, editors, DM, and Studio."),
+        (ns: "apps", default: "none", doc: "Foreign app ecosystem policy and app permissions."),
+        (ns: "workload", default: "none", doc: "Container or microVM workload declaration."),
+        (ns: "deploy", default: "unset", doc: "Fleet deploy target, rollout, health, and rollback policy."),
+        (ns: "other", default: "unset", doc: "JetOS system option."),
+        (ns: "", default: "unset", doc: "JetOS system option.")
+    }
+    loop case in cases {
+        assert_eq(jetos_option_default(case.ns), case.default)
+        assert_eq(jetos_option_doc("{case.ns}.key"), case.doc)
+        assert_eq(jetos_option_doc(case.ns), case.doc)
+    }
+}
+
+#Test("JetOS prefix rows keep duplicates and source order while names deduplicate") {
+    system :: jetos_test_system([OptionPlan]{
+        jetos_test_option("users.zoe.home", "z"), jetos_test_option("user.nate.home", "n"),
+        jetos_test_option("users.nate.shell", "sh"), jetos_test_option("users.zoe.home", "\"zz\""),
+        jetos_test_option("users..home", "bad"), jetos_test_option("users.lonely", "ignored"),
+        jetos_test_option("usersx.anna.home", "ignored"), jetos_test_option("user.anna.home", "a")
+    })
+    assert_eq(jetos_collect_names(system, "users"), [String]{"nate", "zoe"})
+    assert_eq(jetos_user_names(system), [String]{"anna", "nate", "zoe"})
+    assert_eq(jetos_collect_names(system, "missing"), [String]{})
+    assert_eq(jetos_option_rows_json(jetos_prefixed_options(system, "users.zoe.")), "{{\n  \"key\": \"home\",\n  \"value\": \"z\"\n}},{{\n  \"key\": \"home\",\n  \"value\": \"zz\"\n}}")
+    assert_eq(jetos_option_rows_json(jetos_prefixed_options(system, "missing.")), "")
+    assert_eq(jetos_prefixed_options(system, "").len(), 8)
+    exact :: jetos_test_system([OptionPlan]{jetos_test_option("prefix", "v")})
+    assert_eq(jetos_option_rows_json(jetos_prefixed_options(exact, "prefix")), "{{\n  \"key\": \"\",\n  \"value\": \"v\"\n}}")
+    assert_eq(jetos_strings_json([String]{"雪", "a\"b", "line\n"}), "\"雪\",\"a\\\"b\",\"line\\n\"")
+    assert_eq(jetos_strings_json([String]{}), "")
+    controls :: String.from_bytes([U8]{8, 12, 127, 194, 128, 194, 159}) ?? panic("valid control scalars")
+    // Rust JSON::quote protocol spelling, distinct from generic Core JSON.
+    assert_eq(jetos_strings_json([String]{controls}), "\"\\u0008\\u000c\\u007f\\u0080\\u009f\"")
+}
+
+#Test("JetOS all JSON projections retain Rust control escape spellings") {
+    controls :: String.from_bytes([U8]{8, 12, 127, 194, 128, 194, 159}) ?? panic("valid control scalars")
+    quoted :: "\"\\u0008\\u000c\\u007f\\u0080\\u009f\""
+    boot :: JetOSBootProfile{loader: controls, kernel: controls, init: controls, initrd_modules: [String]{controls}}
+    assert_eq(boot.to_json(), "{{\"loader\":{quoted},\"kernel\":{quoted},\"init\":{quoted},\"initrd_modules\":[{quoted}]}}")
+    resolved :: JetOSResolvedOption{key: controls, value: controls, tier: controls, priority: 1, contenders: [JetOSOptionContender]{JetOSOptionContender{value: controls, tier: controls, priority: 1, source_order: 0, winner: true}}}
+    assert_eq(resolved.to_json(), "{{\"key\":{quoted},\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"contenders\":[{{\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"source_order\":0,\"winner\":true}}]}}")
+    assert_eq(jetos_option_rows_json([(key: String, value: String)]{(key: controls, value: controls)}), "{{\n  \"key\": {quoted},\n  \"value\": {quoted}\n}}")
+    assert_eq(jetos_render_user_profile_json_parts(controls, controls, controls, "", "", ""), "{{\"kind\":\"jetos.user-generation\",\"user\":{quoted},\"home\":{quoted},\"shell\":{quoted},\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+}
+
+#Test("JetOS boot profile defaults empty lists and honors explicit aliases") {
+    empty :: jetos_test_system([OptionPlan]{})
+    assert_eq(jetos_boot_profile(empty).to_json(), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"]}}")
+    overrides := jetos_test_system([OptionPlan]{
+        jetos_test_option("boot.loader", ".Grub"), jetos_test_option("kernel.package", "packages.linux"),
+        jetos_test_option("init.path", "\"/bin/init\""), jetos_test_option("boot.initrd.modules", "[]")
+    })
+    assert_eq(jetos_boot_profile(overrides).to_json(), "{{\"loader\":\"Grub\",\"kernel\":\"packages.linux\",\"init\":\"/bin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"]}}")
+    &overrides.options.push(jetos_test_option("boot.kernel", ".Custom"))
+    &overrides.options.push(jetos_test_option("boot.initrd.modules", "[\"nvme\", .ext4]"))
+    assert_eq(jetos_boot_profile(overrides).to_json(), "{{\"loader\":\"Grub\",\"kernel\":\"Custom\",\"init\":\"/bin/init\",\"initrd_modules\":[\"nvme\",\"ext4\"]}}")
+    blanks :: jetos_test_system([OptionPlan]{jetos_test_option("boot.loader", "\"\""), jetos_test_option("boot.kernel", "\"\""), jetos_test_option("init.path", "\"\"")})
+    assert_eq(jetos_boot_profile(blanks).loader, "")
+    assert_eq(jetos_boot_profile(blanks).kernel, "")
+    assert_eq(jetos_boot_profile(blanks).init, "")
+}
+
+#Test("JetOS user JSON defaults and complete standalone command list are exact") {
+    empty :: jetos_test_system([OptionPlan]{})
+    assert_eq(jetos_render_user_profile_json(empty, "nate"), "{{\"kind\":\"jetos.user-generation\",\"user\":\"nate\",\"home\":\"/home/nate\",\"shell\":\"/run/current-system/sw/bin/sh\",\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+    system :: jetos_test_system([OptionPlan]{
+        jetos_test_option("users.nate.home", "\"/old\""), jetos_test_option("user.nate.home", "\"/new\""),
+        jetos_test_option("users.nate.shell", "packages.sh"), jetos_test_option("user.nate.shell", "packages.fish"),
+        jetos_test_option("user.nate.packages", "[.hello, \"a,b\"]"),
+        jetos_test_option("users.nate.services", "[.syncthing]"),
+        jetos_test_option("user.nate.files.a\"b", "\"source\\n\""),
+        jetos_test_option("user.nate.files.a\"b", "\"second\""),
+        jetos_test_option("users.nate.files.ignored", "ignored")
+    })
+    assert_eq(jetos_render_user_profile_json(system, "nate"), "{{\"kind\":\"jetos.user-generation\",\"user\":\"nate\",\"home\":\"/new\",\"shell\":\"/run/current-system/sw/bin/fish\",\"packages\":[\"hello\",\"a,b\"],\"services\":[\"syncthing\"],\"files\":[{{\n  \"path\": \"a\\\"b\",\n  \"source\": \"source\\\\n\"\n}},{{\n  \"path\": \"a\\\"b\",\n  \"source\": \"second\"\n}}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+    plural :: jetos_test_system([OptionPlan]{jetos_test_option("users.nate.home", "/home/other"), jetos_test_option("users.nate.shell", "/bin/zsh"), jetos_test_option("users.nate.packages", "[.hello]"), jetos_test_option("user.nate.services", "[.syncthing]")})
+    assert_eq(jetos_render_user_profile_json(plural, "nate"), jetos_render_user_profile_json_parts("nate", "/home/other", "/bin/zsh", "\"hello\"", "\"syncthing\"", ""))
+    assert_eq(jetos_package_path_or_literal("packages."), "/run/current-system/sw/bin/")
+    assert_eq(jetos_package_path_or_literal("/bin/sh"), "/bin/sh")
+    assert_eq(jetos_package_path_or_literal(" packages.sh"), " packages.sh")
+}
+
+#Test("JetOS service extras prioritize source order rather than requested key order") {
+    service :: ServicePlan{name: "test", enable: true, extra: [ServicePlanExtra]{
+        ServicePlanExtra{key: "b", value: "\"first\""}, ServicePlanExtra{key: "a", value: "second"}
+    }}
+    assert_eq(jetos_service_extra(service, [String]{"a", "b"}), Val("first"))
+    assert_eq(jetos_service_extra(service, [String]{"a"}), Val("second"))
+    assert_eq(jetos_service_extra(service, [String]{"missing"}), None)
+    assert_eq(jetos_service_extra(service, [String]{}), None)
+}
+
+#Test("JetOS risks retain encounter order and enabled service risk only once") {
+    system := jetos_test_system([OptionPlan]{
+        jetos_test_option("performance.x", "0"), jetos_test_option("reboot.kernel", "x"),
+        jetos_test_option("filesystem.root", "x"), jetos_test_option("user.nate.home", "x"),
+        jetos_test_option("storage.x", "x"), jetos_test_option("boot.x", "x"),
+        jetos_test_option("apps.x", "x"), jetos_test_option("workload.x", "x")
+    })
+    system.services = [ServicePlan]{ServicePlan{name: "off", enable: false, extra: [ServicePlanExtra]{}}, ServicePlan{name: "on", enable: true, extra: [ServicePlanExtra]{}}, ServicePlan{name: "also-on", enable: true, extra: [ServicePlanExtra]{}}}
+    assert_eq(jetos_risk_classes(system), [String]{"performance/storage", "boot", "kernel", "filesystem", "user-app-workload", "service-risk"})
+    assert_eq(jetos_risk_classes(jetos_test_system([OptionPlan]{jetos_test_option("users.nate.home", "x"), jetos_test_option("network.bootless", "x")})), [String]{"boot"})
+    assert_eq(jetos_risk_classes(jetos_test_system([OptionPlan]{})), [String]{})
+}
+
+#Test("JetOS proof renders exact sections and only matching ISO images") {
+    empty :: jetos_test_system([OptionPlan]{})
+    assert_eq(jetos_render_proof(empty, [JetOSRealizedPackage]{}, jetos_test_plan([ImagePlan]{})), "jetos proof for halcyon\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\noptions:\nservices:\nimages:\n")
+    system := jetos_test_system([OptionPlan]{jetos_test_option("boot.kernel", " .Linux ")})
+    system.services = [ServicePlan]{ServicePlan{name: "off", enable: false, extra: [ServicePlanExtra]{}}, ServicePlan{name: "on", enable: true, extra: [ServicePlanExtra]{}}}
+    images :: [ImagePlan]{jetos_test_image("iso", ImageKind.Iso, "halcyon", "raw"), jetos_test_image("oci", ImageKind.OCI, "halcyon", "oci"), jetos_test_image("other", ImageKind.Iso, "elsewhere", "raw")}
+    assert_eq(jetos_render_proof(system, [JetOSRealizedPackage]{}, jetos_test_plan(images)), "jetos proof for halcyon\ntarget: linux.x64\nrisk: boot, kernel, service-risk\nplan: pass\npackages:\noptions:\n  boot.kernel =  .Linux \nservices:\n  off enable=false\n  on enable=true\nimages:\n  iso raw\n")
+}
+
+// The lease is produced by the real Store snapshot path, not forged test data.
+// This is a metadata-only proof render: no consumption/admission is claimed.
+#Test("JetOS proof reads held package entry instead of original or override paths") {
+    verification := StoreVerification.new()
+    root :: files.tmpdir("jetos-proof-package-") ?? panic("create root")
+    entry :: StoreEntry{id: "fixture", name: "fixture", version: "1", reference: "fixture@jetpack", out: files.join(root, "missing-output"), bin: "", rlib: "", envelope: Envelope.empty(), cache_identity: CacheIdentity.empty(), references: [String]{}, named_outputs: [String: String]{}, platform_artifact_kind: "", producer_record: "", receipt: "", realized_at: 0, last_used_at: 0}
+    lease :: store_snapshot_lease(&verification, HangarRoots.at(root), entry) ?? panic("create real non-consumable lease")
+    package :: JetOSRealizedPackage{entry: entry, lease: lease, original_out: "/original", original_reference_text: "original@jetpack", consumption_override: Val("/override")}
+    packages := [JetOSRealizedPackage]{package}
+    assert_eq(jetos_render_proof(jetos_test_system([OptionPlan]{}), packages, jetos_test_plan([ImagePlan]{})), "jetos proof for halcyon\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\n  fixture@jetpack -> {entry.out}\noptions:\nservices:\nimages:\n")
+    ^packages[0].lease.release()
+    files.remove_all(root) ?? panic("remove root")
+}

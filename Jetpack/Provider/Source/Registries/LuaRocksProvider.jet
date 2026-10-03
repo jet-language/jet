@@ -7,8 +7,8 @@
 // Rockspecs and manifests are Lua data files. The readers here accept only
 // the quoted scalar and table fields the provider needs; no Lua code runs.
 
-@LUAROCKS_RECIPE_ID :: "luarocks-provider-v1"
-@LUAROCKS_DEFAULT_REPOSITORY :: "https://luarocks.org"
+LUAROCKS_RECIPE_ID :: prep { "luarocks-provider-v1" }
+LUAROCKS_DEFAULT_REPOSITORY :: prep { "https://luarocks.org" }
 
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
 pub struct LuaRocksDependency {
@@ -42,31 +42,31 @@ pub struct LuaRocksArtifact {
 pub struct LuaRocksProvider {
     // A locked LuaRocks realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
-        project :: ctx.project_dir ?? return Ok()
-        locked :: pkg_lock_luarocks_realization(project, spec.raw) ?? return Ok()
+        project :: ctx.project_dir ?? return
+        locked :: pkg_lock_luarocks_realization(project, spec.raw) ?? return
         current :: provider_luarocks_cache_authority(ctx)
         provider_ensure_locked_authority("LuaRocks", locked.repository, locked.authority, current)
     }
 
     // The exact identity a cached LuaRocks output must carry, from the lock.
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project :: ctx.project_dir ?? return None
         locked :: pkg_lock_luarocks_realization(project, spec.raw) ?? return None
         authority :: provider_luarocks_cache_authority(ctx) ?? return None
-        identity := provider_cache_identity(locked.source_hash, @LUAROCKS_RECIPE_ID, ctx, authority.provenance())
+        identity := provider_cache_identity(locked.source_hash, LUAROCKS_RECIPE_ID, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
         Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
     // Rock metadata carries no trusted sizes: every ref is a new item of
     // unknown size.
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         Ok(plan)
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids LuaRocks metadata or source fetches"))
         realized :: provider_luarocks_realize(spec, ctx) ?? return Err(err.into_provider(RegistryErrorKind.LuaRocks))
         Ok(realized)
@@ -77,7 +77,7 @@ pub struct LuaRocksProvider {
 // `authority.providers.luarocks`, else luarocks.org and the GitHub hosts
 // rockspecs commonly point at.
 fn provider_luarocks_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
-    RegistryAuthority.load(ctx, "luarocks", @LUAROCKS_DEFAULT_REPOSITORY, [String]{"luarocks.org", "github.com", "codeload.github.com", "raw.githubusercontent.com"})
+    RegistryAuthority.load(ctx, "luarocks", LUAROCKS_DEFAULT_REPOSITORY, [String]{"luarocks.org", "github.com", "codeload.github.com", "raw.githubusercontent.com"})
 }
 
 pub fn provider_luarocks_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
@@ -85,7 +85,7 @@ pub fn provider_luarocks_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryA
     Ok(authority)
 }
 
-fn provider_luarocks_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+fn provider_luarocks_realize(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
     authority :: provider_luarocks_authority(ctx)
     repository :: authority.registry()
     fetch_authority :: authority.provenance()
@@ -144,7 +144,7 @@ fn provider_luarocks_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, N
     provider_luarocks_write_runtime_files(out_dir)
     provider_registry_write_text(files.join(out_dir, "luarocks.provenance"), provider_luarocks_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write LuaRocks provenance")
     provider_registry_seal(out_dir, "could not seal LuaRocks output")
-    envelope :: Envelope.for_output(out_dir, spec.raw, @LUAROCKS_RECIPE_ID)
+    envelope :: Envelope.for_output(out_dir, spec.raw, LUAROCKS_RECIPE_ID)
     dependencies := [String]{}
     loop name in order {
         if name == root_ref.name -> next
@@ -155,14 +155,14 @@ fn provider_luarocks_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, N
         .Val(project) -> pkg_lock_record_luarocks_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
         .None -> {}
     }
-    identity :: provider_cache_identity(source_hash, @LUAROCKS_RECIPE_ID, ctx, fetch_authority)
+    identity :: provider_cache_identity(source_hash, LUAROCKS_RECIPE_ID, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
     loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.spec.name, sha256: artifact.source_hash, file_name: files.basename(artifact.source_path)})
     edges :: provider_registry_dependency_objects(root.name, objects)
     facts := edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
-    producer :: provider_registry_producer("luarocks", "luarocks-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, @LUAROCKS_RECIPE_ID, identity, facts)
+    producer :: provider_registry_producer("luarocks", "luarocks-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, LUAROCKS_RECIPE_ID, identity, facts)
     Ok(Realized{
         name: root.name,
         version: root.version,
@@ -222,7 +222,7 @@ struct LuaRocksResolver {
         if self.specs.get(name) == {
             .Val(existing) -> {
                 if existing.version != version -> return Err(RegistryError.Reason("LuaRocks closure selects `{name}` as both {existing.version} and {version}"))
-                return Ok()
+                return
             }
             .None -> {}
         }
@@ -343,7 +343,7 @@ struct LuaRocksOrderWalk {
     out: [String]
 
     fn visit(&self, name: String) RegistryError! {
-        if self.done.contains(name) -> return Ok()
+        if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
         &self.active.push(name)
         spec :: self.specs.get(name) ?? return Err(RegistryError.Reason("missing resolved LuaRocks dependency `{name}`"))
@@ -442,7 +442,7 @@ fn provider_luarocks_render_provenance(repository: String, fetch_authority: Stri
 // `supported_platforms`: an empty list allows every host; `!name` denies a
 // host; positive names allow only those hosts (`unix` covers non-Windows).
 fn provider_luarocks_ensure_platform_supported(platforms: [String]) RegistryError! -[Env]> {
-    if platforms.len() == 0 -> return Ok()
+    if platforms.len() == 0 -> return
     windows :: sys.is_windows()
     host :: if {
         windows -> "windows"

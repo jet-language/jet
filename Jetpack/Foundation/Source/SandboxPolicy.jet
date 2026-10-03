@@ -5,7 +5,7 @@
 // Foundation where Store, Provider and Environment can all reach them; the
 // rest of RuntimePolicy reuses these names.
 
-@SANDBOX_POLICY_FILE :: "sandbox-policy"
+SANDBOX_POLICY_FILE :: prep { "sandbox-policy" }
 
 pub enum SandboxPolicy {
     AllowFallback
@@ -14,8 +14,8 @@ pub enum SandboxPolicy {
     // The persisted spelling (`jet config sandbox <verb>`).
     fn verb(self) -> String Never! {
         if self == {
-            .AllowFallback -> @CONFIG_SANDBOX_VERB_ALLOW
-            .Require -> @CONFIG_SANDBOX_VERB_REQUIRE
+            .AllowFallback -> CONFIG_SANDBOX_VERB_ALLOW
+            .Require -> CONFIG_SANDBOX_VERB_REQUIRE
         }
     }
 
@@ -41,14 +41,14 @@ pub fn env_sandbox_backend_name() -[Env]> String Never! {
 // directory).
 pub fn env_sandbox_policy_path() -[Env]> String Never! {
     home :: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
-    files.join(files.join(home, @CONFIG_DEFAULT_DIR), @SANDBOX_POLICY_FILE)
+    files.join(files.join(home, CONFIG_DEFAULT_DIR), SANDBOX_POLICY_FILE)
 }
 
 // `Require` only when the policy file says exactly `require`; anything else,
 // including a missing or unreadable file, allows the fallback.
 pub fn env_read_sandbox_policy() -[FS, Env]> SandboxPolicy Never! {
     text :: files.read(env_sandbox_policy_path()) ?? return SandboxPolicy.AllowFallback
-    if text.trim() == @CONFIG_SANDBOX_VERB_REQUIRE -> return SandboxPolicy.Require
+    if text.trim() == CONFIG_SANDBOX_VERB_REQUIRE -> return SandboxPolicy.Require
     SandboxPolicy.AllowFallback
 }
 

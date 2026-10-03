@@ -25,7 +25,7 @@ pub struct SharedStoreConfig {
 
     // Whether this is the administrator's system broker.
     fn is_admin(self) -> Bool Never! {
-        self.socket == @STORE_BROKER_ADMIN_SOCKET
+        self.socket == STORE_BROKER_ADMIN_SOCKET
     }
 }
 
@@ -46,13 +46,13 @@ struct BrokerLayout {
 }
 
 fn store_broker_user_layout(roots: HangarRoots) -> BrokerLayout {
-    base :: files.join(store_broker_absolute_path(roots.root), @STORE_BROKER_SHARED_DIR)
+    base :: files.join(store_broker_absolute_path(roots.root), STORE_BROKER_SHARED_DIR)
     BrokerLayout{admin: false, config: files.join(base, "config"), base: base, socket: files.join(base, "broker.sock"), shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
 }
 
 fn store_broker_admin_layout() -> BrokerLayout Never! {
-    base :: @STORE_BROKER_ADMIN_BASE
-    BrokerLayout{admin: true, config: @STORE_BROKER_ADMIN_CONFIG, base: base, socket: @STORE_BROKER_ADMIN_SOCKET, shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
+    base :: STORE_BROKER_ADMIN_BASE
+    BrokerLayout{admin: true, config: STORE_BROKER_ADMIN_CONFIG, base: base, socket: STORE_BROKER_ADMIN_SOCKET, shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
 }
 
 // Normal callers resolve their private root; the administrator layout is
@@ -103,7 +103,7 @@ fn store_broker_lstat(path: String) -> Stat? StoreError! {
         .Err(failure) -> {
             if failure == {
                 .NotFound(_) -> Ok(None)
-                else -> Err(StoreError.Io(failure))
+                else -> Err(StoreError.IO(failure))
             }
         }
     }
@@ -155,13 +155,13 @@ fn store_broker_read_config(layout: BrokerLayout) -> SharedStoreConfig? StoreErr
     found :: store_broker_lstat(path)
     info :: found ?? return Ok(None)
     if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("shared-store config is not a regular file"))
-    if info.size > @STORE_BROKER_MAX_CONFIG_BYTES -> return Err(store_broker_invalid("shared-store config is too large"))
+    if info.size > STORE_BROKER_MAX_CONFIG_BYTES -> return Err(store_broker_invalid("shared-store config is too large"))
     if layout.admin {
         store_broker_require_admin_descriptor(path)
     } else {
         store_broker_require_private_mode(path, "shared-store config")
     }
-    text :: store_broker_bounded_text_file(path, @STORE_BROKER_MAX_CONFIG_BYTES, "shared-store config")
+    text :: store_broker_bounded_text_file(path, STORE_BROKER_MAX_CONFIG_BYTES, "shared-store config")
     config :: store_broker_parse_config(text)
     store_broker_validate_config_paths(layout, config)
     Ok(Val(config))
@@ -170,7 +170,7 @@ fn store_broker_read_config(layout: BrokerLayout) -> SharedStoreConfig? StoreErr
 // The descriptor text: magic, then `key=hex(path)` lines.
 pub fn store_broker_parse_config(text: String) -> SharedStoreConfig StoreError! {
     lines :: store_text_lines(text)
-    if lines.len() == 0 || lines[0] != @STORE_BROKER_CONFIG_MAGIC -> return Err(store_broker_invalid("shared-store config has an unknown format"))
+    if lines.len() == 0 || lines[0] != STORE_BROKER_CONFIG_MAGIC -> return Err(store_broker_invalid("shared-store config has an unknown format"))
     fields := [String: String]{}
     loop index in 1..<lines.len() {
         pair :: lines[index].split_once("=") ?? return Err(store_broker_invalid("shared-store config has a malformed field"))
@@ -196,7 +196,7 @@ fn store_broker_config_path(fields: [String: String], key: String) -> String Sto
 // The descriptor bytes for `config`; a path holding a newline, carriage
 // return or `=` is refused.
 fn store_broker_render_config(config: SharedStoreConfig) -> String StoreError! {
-    text := "{@STORE_BROKER_CONFIG_MAGIC}\n"
+    text := "{STORE_BROKER_CONFIG_MAGIC}\n"
     loop field in config.fields() {
         if field.value.contains("\n") || field.value.bytes().contains(U8{13}) || field.value.contains("=") {
             return Err(store_broker_invalid("shared-store path contains an unsafe character"))
@@ -284,14 +284,13 @@ fn store_broker_activate_admin_socket() StoreError! {
         receipt :: process.cmd(argv).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(store_broker_invalid("could not activate shared-store systemd socket: {err}"))
         if !receipt.success -> return Err(store_broker_invalid("systemctl {args.join(" ")} failed with exit status: {receipt.code}"))
     }
-    Ok()
 }
 
 // Rust `validate_config_paths`: every configured path is exactly the
 // installed layout, and every directory keeps its ownership and mode law.
 fn store_broker_validate_config_paths(layout: BrokerLayout, config: SharedStoreConfig) StoreError! {
     base :: files.canonicalize(layout.base) ?? return Err(store_broker_invalid("could not resolve shared-store directory: {err}"))
-    socket :: if layout.admin -> @STORE_BROKER_ADMIN_SOCKET else -> files.join(base, "broker.sock")
+    socket :: if layout.admin -> STORE_BROKER_ADMIN_SOCKET else -> files.join(base, "broker.sock")
     expected :: [BrokerField]{
         BrokerField{key: "socket", value: socket},
         BrokerField{key: "shared root", value: files.join(base, "root")},
@@ -304,7 +303,7 @@ fn store_broker_validate_config_paths(layout: BrokerLayout, config: SharedStoreC
             return Err(store_broker_invalid("shared-store {expected[index].key} is outside the installed private boundary"))
         }
     }
-    if layout.admin -> store_broker_require_admin_descriptor(@STORE_BROKER_ADMIN_CONFIG)
+    if layout.admin -> store_broker_require_admin_descriptor(STORE_BROKER_ADMIN_CONFIG)
     if layout.admin {
         store_broker_validate_admin_directory(base, "shared-store directory")
         store_broker_validate_managed_directory(config.shared_root, "shared-store root")
@@ -327,7 +326,6 @@ fn store_broker_validate_config_paths(layout: BrokerLayout, config: SharedStoreC
         }
         .Err(_) -> {}
     }
-    Ok()
 }
 
 fn store_broker_validate_private_directory(path: String, label: String) StoreError! {
@@ -341,10 +339,10 @@ fn store_broker_validate_private_directory(path: String, label: String) StoreErr
 // `/var/lib/private/jet/shared-store/root`.
 fn store_broker_validate_managed_directory(path: String, label: String) StoreError! {
     found :: store_broker_lstat(path)
-    info :: found ?? return Ok()
+    info :: found ?? return
     if info.is_symlink {
         canonical :: files.canonicalize(path) ?? return Err(store_broker_invalid("{label} managed state target cannot be resolved: {err}"))
-        if path != files.join(@STORE_BROKER_ADMIN_BASE, "root") || canonical != "/var/lib/private/jet/shared-store/root" {
+        if path != files.join(STORE_BROKER_ADMIN_BASE, "root") || canonical != "/var/lib/private/jet/shared-store/root" {
             return Err(store_broker_invalid("{label} is an unexpected symlink"))
         }
         return store_broker_require_private_mode_followed(path, label)
@@ -355,10 +353,9 @@ fn store_broker_validate_managed_directory(path: String, label: String) StoreErr
 
 // The mode of the node a link resolves to.
 fn store_broker_require_private_mode_followed(path: String, label: String) StoreError! {
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     info :: files.stat(files.canonicalize(path))
     if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
-    Ok()
 }
 
 // Rust `user_systemd_unit_dir`: `$XDG_CONFIG_HOME` or `$HOME/.config`.
@@ -383,7 +380,6 @@ fn store_broker_ensure_real_dir(path: String) StoreError! {
             if info.is_symlink || !info.is_dir -> return Err(store_broker_invalid("shared-store path is not a real directory"))
         }
     }
-    Ok()
 }
 
 fn store_broker_ensure_system_dir(path: String) StoreError! {
@@ -408,19 +404,17 @@ fn store_broker_ensure_admin_public_dir(path: String) StoreError! {
 }
 
 fn store_broker_require_admin_dir(path: String) StoreError! {
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     info :: files.stat(path)
     if (info.owner ?? -1) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
     if info.mode & 0o022 != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
-    Ok()
 }
 
 fn store_broker_require_admin_public_dir(path: String) StoreError! {
     store_broker_require_admin_dir(path)
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     info :: files.stat(path)
     if info.mode & 0o005 != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
-    Ok()
 }
 
 fn store_broker_validate_admin_directory(path: String, label: String) StoreError! {
@@ -430,9 +424,8 @@ fn store_broker_validate_admin_directory(path: String, label: String) StoreError
 }
 
 fn store_broker_set_mode(path: String, mode: Int) StoreError! {
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     files.set_mode(path, mode)
-    Ok()
 }
 
 // A private directory: an existing one with group or other bits is refused;
@@ -440,20 +433,18 @@ fn store_broker_set_mode(path: String, mode: Int) StoreError! {
 fn store_broker_ensure_private_dir(path: String) StoreError! {
     existed :: store_broker_node_exists(path)
     store_broker_ensure_real_dir(path)
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     info :: files.stat(path)
     if info.mode & 0o077 != 0 {
         if existed -> return Err(store_broker_invalid("shared-store directory has insecure permissions"))
         files.set_mode(path, 0o700)
     }
-    Ok()
 }
 
 fn store_broker_require_private_mode(path: String, label: String) StoreError! {
-    if sys.family() == "windows" -> return Ok()
+    if sys.family() == "windows" -> return
     info :: files.stat(path)
     if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
-    Ok()
 }
 
 fn store_broker_set_private_mode(path: String) StoreError! {
@@ -465,7 +456,6 @@ fn store_broker_require_safe_descriptor(path: String, label: String) StoreError!
     info :: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("{label} is not a regular file"))
     if sys.family() != "windows" && info.mode & 0o022 != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
-    Ok()
 }
 
 fn store_broker_require_admin_descriptor(path: String) StoreError! {
@@ -473,7 +463,6 @@ fn store_broker_require_admin_descriptor(path: String) StoreError! {
     if sys.family() != "windows" && store_broker_owner_uid(path) != 0 {
         return Err(store_broker_invalid("shared-store administrator descriptor is not root-owned"))
     }
-    Ok()
 }
 
 // Rust `ensure_secret`: an existing private secret of at least 32 bytes, or
@@ -484,9 +473,8 @@ fn store_broker_ensure_secret(path: String) StoreError! {
         .Val(info) -> {
             if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("shared-store secret is not a regular file"))
             store_broker_require_private_mode(path, "shared-store secret")
-            secret :: store_broker_bounded_file(path, @STORE_BROKER_MAX_CONFIG_BYTES, "shared-store secret")
+            secret :: store_broker_bounded_file(path, STORE_BROKER_MAX_CONFIG_BYTES, "shared-store secret")
             if secret.len() < 32 -> return Err(store_broker_invalid("shared-store secret is too short"))
-            Ok()
         }
         .None -> {
             secret := random.bytes(32) ?? return Err(StoreError.Other("operating-system randomness is unavailable: {err}"))
@@ -501,7 +489,6 @@ fn store_broker_ensure_secret(path: String) StoreError! {
                 .None -> {}
             }
             store_broker_set_private_mode(path)
-            Ok()
         }
     }
 }
@@ -525,7 +512,7 @@ fn store_broker_atomic_write(path: String, bytes: [U8]) StoreError! {
             store_broker_discard_remove(partial)
             Err(error)
         }
-        else -> Ok()
+        else -> {}
     }
 }
 
@@ -534,7 +521,6 @@ fn store_broker_write_partial(partial: String, path: String, bytes: [U8]) StoreE
     out.write_all(bytes)
     out.fsync()
     files.rename(partial, path)
-    Ok()
 }
 
 // Best-effort removal of a file this broker created.

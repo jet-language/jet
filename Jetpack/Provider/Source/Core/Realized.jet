@@ -9,14 +9,14 @@
 // D-JPK-OFFLINE2=B: the stable recipe id of a Nix-provider realization. Hashed
 // into the cache identity's recipe fingerprint and recomputed offline, so a
 // lock-backed reuse reproduces it without any Nix or network call.
-@PROVIDER_NIX_RECIPE_ID :: "nix-compat-v1"
+PROVIDER_NIX_RECIPE_ID :: prep { "nix-compat-v1" }
 
 // The shared provider-facts carrier kept in every producer record.
-@PROVIDER_SHARED_FACTS :: "provider-facts"
-@PROVIDER_SHARED_FACTS_DIGEST :: "provider-facts-digest"
+PROVIDER_SHARED_FACTS :: prep { "provider-facts" }
+PROVIDER_SHARED_FACTS_DIGEST :: prep { "provider-facts-digest" }
 // The native document a Nix producer retained verbatim.
-@PROVIDER_NIX_NATIVE_FORMAT :: "nix.native.format"
-@PROVIDER_NIX_NATIVE_DOCUMENT :: "nix.native.document"
+PROVIDER_NIX_NATIVE_FORMAT :: prep { "nix.native.format" }
+PROVIDER_NIX_NATIVE_DOCUMENT :: prep { "nix.native.document" }
 
 // What a provider needs to acquire and realize a ref beyond the ref and its
 // source table: offline fixtures, the store to materialize into, the project
@@ -167,7 +167,7 @@ pub enum ProviderError {
     // Render the one friendly diagnostic for this failure (Rust CLI
     // `report_provider_error`; it lives with the carrier so Provider callers
     // below the CLI can report without reaching up).
-    fn report(self, theme: Theme) Never! {
+    fn report(self, theme: Theme) Never! -[IO, Time.Wait]> {
         if self == {
             .BuildFailed(reason) -> theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")
             .BadOutput(reason) -> theme.error("couldn't understand the provider's output", reason, "this is likely a Jetpack bug — please report it.")
@@ -184,7 +184,7 @@ pub enum ProviderError {
             .Adapter(reason) -> theme.error_coded("E1270", "adapter package could not be realized", reason, "check the `Pkg.adapt(...)` source and recipe.")
             .BuildDebug(reason) -> theme.error_coded("E1273", "package build failed at a logged step", reason, "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.")
             .SandboxUnavailable(reason) -> theme.error_coded("E1275", "build sandboxing is required but unavailable", reason, "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.")
-            .Channel(reason) -> theme.error_coded("E1271", "source channel could not be resolved", reason, "run `jetpack update` with network or fixture metadata, then commit `{@UNIFIED_LOCK_FILE}`.")
+            .Channel(reason) -> theme.error_coded("E1271", "source channel could not be resolved", reason, "run `jetpack update` with network or fixture metadata, then commit `{UNIFIED_LOCK_FILE}`.")
             .NixIndex(error) -> theme.error_coded(provider_nix_index_code(error), "signed nixpkgs index could not resolve that package", error.message(), "refresh the signed index, use a covered locked nixpkgs attr, or drop `--offline` when a refresh is required.")
             .NixCache(reason) -> theme.error_coded("E1350", "native Nix cache closure could not be admitted", reason, "repair the signed cache response or restore network access, then retry the realization.")
             .Offline(reason) -> theme.error_coded("E1276", "--offline forbids network access", reason, "drop `--offline` for this command, or realize/fetch the needed object before going offline.")

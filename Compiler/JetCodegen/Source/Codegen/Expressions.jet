@@ -2182,65 +2182,74 @@ fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, expression: T
     loop module_index in 0..<builder.modules.len() {
         loop nominal_index in 0..<builder.modules[module_index].nominals.len() {
             if builder.modules[module_index].nominals[nominal_index].symbol.id.key != owner.key -> next
-            // Only the matched owner is needed while lowering mutates builder.
-            nominal := builder.modules[module_index].nominals[nominal_index]
-            loop candidate in nominal.variants {
-                if candidate.symbol.id.key != variant.key -> next
-                definition := TTypeDef?{None}
-                loop declared in builder.modules[module_index].declarations.type_defs {
-                    if declared.name == nominal.symbol.name -> definition = Val(declared)
+            // Lowering mutates builder, so copy out only the matched variant
+            // and the two declaration facts used below. Iterating or copying
+            // the write-borrowed builder's nominal or declaration tables costs
+            // the program's type declarations per constructor.
+            variant_index := -1
+            loop index in 0..<builder.modules[module_index].nominals[nominal_index].variants.len() {
+                if builder.modules[module_index].nominals[nominal_index].variants[index].symbol.id.key == variant.key {
+                    variant_index = index
+                    break
                 }
-                declared :: definition ?? panic("checked enum constructor has no type declaration")
-                lowered := [MIREnumArg]{}
-                if candidate.payload == {
-                    .Unit -> {
-                        if payload == {
-                            .Unit -> {}
-                            else -> panic("checked unit enum constructor carries a payload")
-                        }
-                    }
-                    .Single(slot_type, _) -> {
-                        argument :: if payload == {
-                            .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
-                            else -> panic("checked single enum constructor has no positional payload")
-                        }
-                        value := jet_codegen_lower_enum_slot(&builder, argument, slot_type)
-                        &lowered.push(MIREnumArg{field: None, value: value, boxed: declared.boxed_edges.contains(candidate.symbol.name)})
-                    }
-                    .Named(fields) -> {
-                        args :: if payload == {
-                            .Named(values) -> values
-                            else -> panic("checked named enum constructor has no named payload")
-                        }
-                        if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
-                        // Rust `lower_enum_lit`: every argument is evaluated in
-                        // the order it was written; only then do the values
-                        // take their declared payload slots.
-                        values := [MIRValueID?]{}
-                        loop _ in fields -> &values.push(None)
-                        loop argument in args {
-                            slot := -1
-                            loop (index, field) in fields {
-                                if field.name == argument.name {
-                                    slot = index
-                                    break
-                                }
-                            }
-                            if slot < 0 -> panic("checked enum constructor payload field is not declared")
-                            if values[slot] != None -> panic("checked enum constructor repeats a payload field")
-                            values[slot] = Val(jet_codegen_lower_enum_slot(&builder, argument.value, fields[slot].ty))
-                        }
-                        loop (index, field) in fields {
-                            field_id := mir_field_id("{declared.key}::{candidate.symbol.name}::{field.name}")
-                            value :: values[index] ?? panic("checked enum constructor misses a payload field")
-                            &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: declared.boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
-                        }
-                    }
-                }
-                type_id := jet_codegen_type_instance_id(expression.ty, builder.modules, builder.function.module_identity, builder.generic_type_names)
-                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
             }
-            panic("checked enum constructor variant does not belong to its owner")
+            if variant_index < 0 -> panic("checked enum constructor variant does not belong to its owner")
+            candidate := builder.modules[module_index].nominals[nominal_index].variants[variant_index]
+            definition := -1
+            loop index in 0..<builder.modules[module_index].declarations.type_defs.len() {
+                if builder.modules[module_index].declarations.type_defs[index].name == builder.modules[module_index].nominals[nominal_index].symbol.name -> definition = index
+            }
+            if definition < 0 -> panic("checked enum constructor has no type declaration")
+            declared_key := builder.modules[module_index].declarations.type_defs[definition].key
+            boxed_edges := builder.modules[module_index].declarations.type_defs[definition].boxed_edges
+            lowered := [MIREnumArg]{}
+            if candidate.payload == {
+                .Unit -> {
+                    if payload == {
+                        .Unit -> {}
+                        else -> panic("checked unit enum constructor carries a payload")
+                    }
+                }
+                .Single(slot_type, _) -> {
+                    argument :: if payload == {
+                        .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
+                        else -> panic("checked single enum constructor has no positional payload")
+                    }
+                    value := jet_codegen_lower_enum_slot(&builder, argument, slot_type)
+                    &lowered.push(MIREnumArg{field: None, value: value, boxed: boxed_edges.contains(candidate.symbol.name)})
+                }
+                .Named(fields) -> {
+                    args :: if payload == {
+                        .Named(values) -> values
+                        else -> panic("checked named enum constructor has no named payload")
+                    }
+                    if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
+                    // Rust `lower_enum_lit`: every argument is evaluated in
+                    // the order it was written; only then do the values
+                    // take their declared payload slots.
+                    values := [MIRValueID?]{}
+                    loop _ in fields -> &values.push(None)
+                    loop argument in args {
+                        slot := -1
+                        loop (index, field) in fields {
+                            if field.name == argument.name {
+                                slot = index
+                                break
+                            }
+                        }
+                        if slot < 0 -> panic("checked enum constructor payload field is not declared")
+                        if values[slot] != None -> panic("checked enum constructor repeats a payload field")
+                        values[slot] = Val(jet_codegen_lower_enum_slot(&builder, argument.value, fields[slot].ty))
+                    }
+                    loop (index, field) in fields {
+                        field_id := mir_field_id("{declared_key}::{candidate.symbol.name}::{field.name}")
+                        value :: values[index] ?? panic("checked enum constructor misses a payload field")
+                        &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
+                    }
+                }
+            }
+            type_id := jet_codegen_type_instance_id(expression.ty, builder.modules, builder.function.module_identity, builder.generic_type_names)
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
         }
     }
     panic("checked enum constructor has no registered nominal owner")

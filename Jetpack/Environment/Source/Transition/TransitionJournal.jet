@@ -5,12 +5,12 @@
 // links. The journal records each changed file's exact before and after
 // bytes, so fold can restore any mix of partially applied states.
 
-@TRANSITION_PACKAGE_FILE :: "package.jet"
-@TRANSITION_JOURNAL_DIR :: ".jet/package-transition"
-@TRANSITION_JOURNAL_HEADER :: "jet-package-transition-v1"
-@TRANSITION_MAX_JOURNAL_BYTES :: 67108864
-@TRANSITION_READ_CHUNK :: 65536
-@TRANSITION_LEGACY_PREFIX :: "legacy-role-fold-"
+TRANSITION_PACKAGE_FILE :: prep { "package.jet" }
+TRANSITION_JOURNAL_DIR :: prep { ".jet/package-transition" }
+TRANSITION_JOURNAL_HEADER :: prep { "jet-package-transition-v1" }
+TRANSITION_MAX_JOURNAL_BYTES :: prep { 67108864 }
+TRANSITION_READ_CHUNK :: prep { 65536 }
+TRANSITION_LEGACY_PREFIX :: prep { "legacy-role-fold-" }
 
 // Rust TEMP_COUNTER: the per-process sequence in staged temporary names.
 env_transition_temp_counter := 1
@@ -83,17 +83,17 @@ fn env_transition_read_bounded(path: String) -[FS]> [U8] EnvironmentError! {
     if info.is_symlink || !info.is_file {
         return Err(env_transition_error("{path} must be a regular file"))
     }
-    if info.size > @TRANSITION_MAX_JOURNAL_BYTES {
-        return Err(env_transition_error("{path} exceeds the {@TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit"))
+    if info.size > TRANSITION_MAX_JOURNAL_BYTES {
+        return Err(env_transition_error("{path} exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit"))
     }
     reader :: files.open(path, links: .Refuse) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
     bytes := [U8]{}
     loop {
-        chunk :: reader.read(@TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+        chunk :: reader.read(TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
-        if bytes.len() > @TRANSITION_MAX_JOURNAL_BYTES {
-            return Err(env_transition_error("{path} exceeded the {@TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit while being read"))
+        if bytes.len() > TRANSITION_MAX_JOURNAL_BYTES {
+            return Err(env_transition_error("{path} exceeded the {TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit while being read"))
         }
     }
     Ok(bytes)
@@ -140,7 +140,6 @@ fn env_transition_ensure_new_file(root: String, relative: String) EnvironmentErr
         if next_parent == parent -> break
         parent = next_parent
     }
-    Ok()
 }
 
 fn env_transition_remove_regular(root: String, path: String) EnvironmentError! -[FS]> {
@@ -152,12 +151,11 @@ fn env_transition_remove_regular(root: String, path: String) EnvironmentError! -
             files.remove(path) ?? return Err(env_transition_error("couldn't remove {path}: {err}"))
             parent :: files.dirname(path)
             env_transition_sync_directory(if parent == "" -> root else -> parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
-            Ok()
         }
         .Err(error) -> {
             if error == {
-                .NotFound(_) -> Ok()
-                else -> Err(env_transition_error("couldn't inspect {path}: {error}"))
+                .NotFound(_) -> {}
+                else -> return Err(env_transition_error("couldn't inspect {path}: {error}"))
             }
         }
     }
@@ -196,7 +194,6 @@ fn env_transition_create_real_dirs(root: String, directory: String) EnvironmentE
             }
         }
     }
-    Ok()
 }
 
 // Stage in a new temporary beside `path`, sync, rename, and sync the parent
@@ -223,7 +220,6 @@ fn env_transition_write_atomic(path: String, bytes: [U8]) EnvironmentError! -[FS
         else -> {}
     }
     env_transition_sync_directory(parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
-    Ok()
 }
 
 fn env_transition_stage(temp: String, bytes: [U8]) IOError! -[FS]> {
@@ -234,7 +230,7 @@ fn env_transition_stage(temp: String, bytes: [U8]) IOError! -[FS]> {
 
 // A directory sync makes a create, remove, or rename inside it durable.
 fn env_transition_sync_directory(path: String) IOError! -[FS, Env]> {
-    if !sys.is_unix() -> return Ok()
+    if !sys.is_unix() -> return
     files.fsync(path)
 }
 
@@ -247,7 +243,7 @@ fn env_transition_journal_path(root: String, operation: String, changes: [Transi
         }
     }
     suffix :: pkg_sha256_hex(identity)
-    files.join(files.join(root, @TRANSITION_JOURNAL_DIR), "{operation}-{pkg_bytes_text(suffix.bytes(), 0, 16)}.journal")
+    files.join(files.join(root, TRANSITION_JOURNAL_DIR), "{operation}-{pkg_bytes_text(suffix.bytes(), 0, 16)}.journal")
 }
 
 fn env_transition_encode_state(state: [U8]?) -> String Never! {
@@ -259,7 +255,7 @@ fn env_transition_encode_state(state: [U8]?) -> String Never! {
 
 fn env_transition_encode_journal(journal: TransitionJournal) -> [U8] Never! {
     lines := [String]{
-        "{@TRANSITION_JOURNAL_HEADER}\n",
+        "{TRANSITION_JOURNAL_HEADER}\n",
         "operation={journal.operation}\n",
         "before={journal.before_fingerprint}\n",
         "after={journal.after_fingerprint}\n"
@@ -272,12 +268,12 @@ fn env_transition_encode_journal(journal: TransitionJournal) -> [U8] Never! {
 
 fn env_transition_read_journal(path: String) -[FS]> TransitionJournal EnvironmentError! {
     bytes :: env_transition_read_regular(path)
-    if bytes.len() > @TRANSITION_MAX_JOURNAL_BYTES {
-        return Err(env_transition_error("journal {path} exceeds the {@TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
+    if bytes.len() > TRANSITION_MAX_JOURNAL_BYTES {
+        return Err(env_transition_error("journal {path} exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
     }
     text :: String.from_bytes(bytes) ?? return Err(env_transition_error("journal {path} is not UTF-8"))
     lines :: text.lines().to_list()
-    if lines.len() == 0 || lines[0] != @TRANSITION_JOURNAL_HEADER {
+    if lines.len() == 0 || lines[0] != TRANSITION_JOURNAL_HEADER {
         return Err(env_transition_error("journal {path} has an unknown format"))
     }
     operation :: env_transition_journal_value(lines, 1, "operation", path)
@@ -320,7 +316,6 @@ fn env_transition_validate_journal_operation(operation: String, path: String) En
         if !pkg_bytes_is_word(code) && code != 45 -> unsafe_name = true
     }
     if unsafe_name -> return Err(env_transition_error("journal {path} has an unsafe operation"))
-    Ok()
 }
 
 fn env_transition_is_hex(code: Int) -> Bool Never! {
@@ -337,7 +332,6 @@ fn env_transition_validate_journal_fingerprint(fingerprint: String, field: Strin
         if !env_transition_is_hex(Int.from_u8(byte)) -> valid = false
     }
     if !valid -> return Err(env_transition_error("journal {path} has an invalid {field} fingerprint"))
-    Ok()
 }
 
 fn env_transition_journal_value(lines: [String], index: Int, key: String, path: String) -> String EnvironmentError! {
@@ -369,9 +363,9 @@ fn env_transition_decode_state(value: String?, path: String) -> [U8]? Environmen
 }
 
 fn env_transition_latest_legacy_journal(root: String) -[FS]> String EnvironmentError! {
-    directory :: files.join(root, @TRANSITION_JOURNAL_DIR)
+    directory :: files.join(root, TRANSITION_JOURNAL_DIR)
     entries :: files.list_dir(directory) ?? return Err(env_transition_error("no role-file migration journal: {err}"))
-    latest := None
+    latest := String?{None}
     latest_sequence := -1
     loop entry in entries {
         sequence :: env_transition_legacy_journal_sequence(entry.name) ?? next
@@ -386,7 +380,7 @@ fn env_transition_latest_legacy_journal(root: String) -[FS]> String EnvironmentE
 
 fn env_transition_next_legacy_operation(root: String) -[FS]> String Never! {
     next_sequence := 1
-    if files.list_dir(files.join(root, @TRANSITION_JOURNAL_DIR)) == .Ok(entries) {
+    if files.list_dir(files.join(root, TRANSITION_JOURNAL_DIR)) == .Ok(entries) {
         loop entry in entries {
             sequence :: env_transition_legacy_journal_sequence(entry.name) ?? next
             if sequence + 1 > next_sequence -> next_sequence = sequence + 1
@@ -394,14 +388,14 @@ fn env_transition_next_legacy_operation(root: String) -[FS]> String Never! {
     }
     digits := "{next_sequence}"
     loop digits.bytes().len() < 20 -> digits = "0{digits}"
-    "{@TRANSITION_LEGACY_PREFIX}{digits}"
+    "{TRANSITION_LEGACY_PREFIX}{digits}"
 }
 
 fn env_transition_legacy_journal_sequence(name: String) -> Int? Never! {
     if !name.ends_with(".journal") -> return None
     stem :: name.removesuffix(".journal")
-    if !stem.starts_with(@TRANSITION_LEGACY_PREFIX) -> return None
-    rest :: stem.removeprefix(@TRANSITION_LEGACY_PREFIX)
+    if !stem.starts_with(TRANSITION_LEGACY_PREFIX) -> return None
+    rest :: stem.removeprefix(TRANSITION_LEGACY_PREFIX)
     sequence_text :: rest.split_once("-")?.before ?? rest
     value :: Int.parse(sequence_text) ?? return None
     if value < 0 -> return None

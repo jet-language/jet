@@ -8,7 +8,7 @@ fn store_broker_test_binding() -> ProvenanceBinding Never! {
 // A private rootless broker under `<roots>/shared-store` (Rust
 // `configure_test_broker`).
 fn store_broker_test_configure(roots: HangarRoots) -> SharedStoreConfig Never! {
-    base :: files.join(roots.root, @STORE_BROKER_SHARED_DIR)
+    base :: files.join(roots.root, STORE_BROKER_SHARED_DIR)
     config :: SharedStoreConfig{socket: files.join(base, "broker.sock"), shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
     directories :: [String]{base, config.shared_root, files.dirname(config.trust_key), config.grants}
     loop directory in directories {
@@ -39,14 +39,14 @@ fn store_broker_test_request(identity_name: String, reference: String, source: S
 
 // Serve exactly one connection on `socket` in a task; the task yields the
 // failure text, or "" on success.
-fn store_broker_test_serve_once(socket: String, config: SharedStoreConfig) -> Task<String> Never! {
+fn store_broker_test_serve_once(verification: &StoreVerification, socket: String, config: SharedStoreConfig) -> Task<String> Never! {
     listener :: net.unix_listen(socket) ?? panic("broker listen")
-    task { store_broker_test_serve_result(listener, config) }
+    task { store_broker_test_serve_result(&verification, listener, config) }
 }
 
-fn store_broker_test_serve_result(listener: UnixListener, config: SharedStoreConfig) -> String Never! {
+fn store_broker_test_serve_result(verification: &StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
     stream :: net.unix_accept(listener) ?? panic("broker accept")
-    if store_broker_serve_connection(stream, config) == {
+    if store_broker_serve_connection(&verification, stream, config) == {
         .Ok(_) -> ""
         .Err(error) -> error.message()
     }
@@ -72,12 +72,12 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 }
 
 #Test("store broker request operations reject fields from the other operation") {
-    write := BrokerWireReader.memory("{@STORE_BROKER_REQUEST_MAGIC}\nop=write\nbytes=0\ncredential=00\n\n".bytes())
+    write := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=write\nbytes=0\ncredential=00\n\n".bytes())
     if store_broker_read_request(&write) == {
         .Ok(_) -> panic("a write without provenance must fail")
         .Err(error) -> assert(error.message().contains("no `reference`"))
     }
-    read := BrokerWireReader.memory("{@STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes("app".bytes())}\nbytes=0\n\n".bytes())
+    read := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes("app".bytes())}\nbytes=0\n\n".bytes())
     if store_broker_read_request(&read) == {
         .Ok(_) -> panic("a read with archive bytes must fail")
         .Err(error) -> assert(error.message().contains("cannot include archive bytes"))
@@ -88,14 +88,14 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     encoded :: store_broker_encode_archive_response("archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
     assert_eq(store_broker_read_archive_response(&reader) ?? panic("parse"), Val("archive".bytes()))
-    missing := BrokerWireReader.memory("{@STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
+    missing := BrokerWireReader.memory("{STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
     assert_eq(store_broker_read_archive_response(&missing) ?? panic("parse missing"), [U8]?{None})
 }
 
 #Test("store broker configured paths must stay inside the installed boundary") {
     roots :: store_test_temp_roots()
-    files.create_dir_all(files.join(roots.root, @STORE_BROKER_SHARED_DIR)) ?? panic("shared dir")
-    base :: files.canonicalize(files.join(roots.root, @STORE_BROKER_SHARED_DIR)) ?? panic("canonical base")
+    files.create_dir_all(files.join(roots.root, STORE_BROKER_SHARED_DIR)) ?? panic("shared dir")
+    base :: files.canonicalize(files.join(roots.root, STORE_BROKER_SHARED_DIR)) ?? panic("canonical base")
     config :: SharedStoreConfig{socket: files.join(roots.root, "outside.sock"), shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
     layout :: store_broker_user_layout(roots)
     if store_broker_validate_config_paths(layout, config) == {
@@ -107,7 +107,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 
 #Test("store broker peer authorization requires read and write grants") {
     roots :: store_test_temp_roots()
-    base :: files.join(roots.root, @STORE_BROKER_SHARED_DIR)
+    base :: files.join(roots.root, STORE_BROKER_SHARED_DIR)
     grants :: files.join(base, "users")
     files.create_dir_all(files.join(base, "root")) ?? panic("shared root")
     files.create_dir_all(grants) ?? panic("grants")
@@ -118,15 +118,15 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     files.write(files.join(grants, "{uid}"), "jet-shared-store-grant-v2\nread\n") ?? panic("read grant")
     assert(store_broker_authorize_peer(config, uid, false, None, None) == .Ok(_))
     assert(store_broker_authorize_peer(config, uid, true, Val(binding), Val("abc")) == .Err(_))
-    expires :: store_broker_now_secs() + @STORE_BROKER_GRANT_TTL_SECS
+    expires :: store_broker_now_secs() + STORE_BROKER_GRANT_TTL_SECS
     files.write(files.join(grants, "{uid}"), "jet-shared-store-grant-v2\nread\nwrite\nexpires={expires}\ncredential=abc\nsource=source\nbuilder=builder\naction=action\noutput=output\nplatform=platform\nsandbox=sandbox\npolicy=policy\n") ?? panic("write grant")
     assert(store_broker_authorize_peer(config, uid, true, Val(binding), Val("abc")) == .Ok(_))
     store_test_drop_roots(roots)
 }
 
 #Test("store broker admin service unit uses ephemeral non root state boundary") {
-    base :: @STORE_BROKER_ADMIN_BASE
-    config :: SharedStoreConfig{socket: @STORE_BROKER_ADMIN_SOCKET, shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
+    base :: STORE_BROKER_ADMIN_BASE
+    config :: SharedStoreConfig{socket: STORE_BROKER_ADMIN_SOCKET, shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
     service :: store_broker_admin_service_unit_text("/usr/bin/jetpack", config)
     assert(service.contains("DynamicUser=yes"))
     assert(!service.contains("User=root"))
@@ -164,8 +164,8 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     files.create_dir_all(files.join(incoming, "old-stage")) ?? panic("old stage")
     files.create_dir_all(files.join(incoming, "fresh-stage")) ?? panic("fresh stage")
     now :: store_broker_now_secs()
-    files.write(files.join(files.join(incoming, "old-stage"), @STORE_BROKER_STAGE_MARKER), "{now - @STORE_BROKER_INCOMING_STALE_AFTER_SECS - 1}") ?? panic("old marker")
-    files.write(files.join(files.join(incoming, "fresh-stage"), @STORE_BROKER_STAGE_MARKER), "{now}") ?? panic("fresh marker")
+    files.write(files.join(files.join(incoming, "old-stage"), STORE_BROKER_STAGE_MARKER), "{now - STORE_BROKER_INCOMING_STALE_AFTER_SECS - 1}") ?? panic("old marker")
+    files.write(files.join(files.join(incoming, "fresh-stage"), STORE_BROKER_STAGE_MARKER), "{now}") ?? panic("fresh marker")
     assert_eq(store_broker_sweep_stale_incoming_at(incoming, now) ?? panic("sweep"), 1)
     assert(!files.exists(files.join(incoming, "old-stage")))
     assert(files.exists(files.join(incoming, "fresh-stage")))
@@ -175,12 +175,13 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 }
 
 #Test("store broker promotion commits verified archive and preserves live data on rejection") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "source")
     files.create_dir_all(source) ?? panic("source")
     files.write(files.join(source, "payload"), "broker payload\n") ?? panic("payload")
     local :: HangarRoots.at(roots.root)
-    entry :: (store_ingest_tree(local, store_broker_test_request("broker-demo", "broker-demo@local", source, "broker promotion test")) ?? panic("ingest")).entry
+    entry :: (store_ingest_tree(&verification, local, store_broker_test_request("broker-demo", "broker-demo@local", source, "broker promotion test")) ?? panic("ingest")).entry
     archive :: store_export_unsigned_archive(local, entry.id, true) ?? panic("export")
     shared_root :: files.join(roots.root, "shared")
     config :: SharedStoreConfig{socket: files.join(roots.root, "broker.sock"), shared_root: shared_root, trust_key: files.join(roots.root, "trust/hangar.key"), grants: files.join(roots.root, "users")}
@@ -188,29 +189,30 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     files.write(key_path, store_test_repeat("k", 32)) ?? panic("key")
     binding :: store_broker_provenance_binding_for_entry(entry) ?? panic("binding")
     shared :: HangarRoots.at(shared_root)
-    store_broker_promote_staged_archive(shared, config, key_path, archive, binding) ?? panic("promote")
-    published :: store_find_by_reference(shared, entry.reference) ?? panic("published")
-    store_verify_hangar_object(shared, published) ?? panic("verify published")
+    store_broker_promote_staged_archive(&verification, shared, config, key_path, archive, binding) ?? panic("promote")
+    published :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
+    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
     assert(store_broker_test_incoming_empty(shared_root))
 
     corrupted := archive
     corrupted[0] = U8{Int.from_u8(corrupted[0]) ^ 1}
-    assert(store_broker_promote_staged_archive(shared, config, key_path, corrupted, binding) == .Err(_))
-    still :: store_find_by_reference(shared, entry.reference) ?? panic("still published")
+    assert(store_broker_promote_staged_archive(&verification, shared, config, key_path, corrupted, binding) == .Err(_))
+    still :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
-    store_verify_hangar_object(shared, still) ?? panic("verify still published")
+    store_verify_hangar_object(&verification, shared, still) ?? panic("verify still published")
     assert(store_broker_test_incoming_empty(shared_root))
     store_test_drop_roots(roots)
 }
 
 #Test("store broker authenticated socket handler promotes reads and rejects failures") {
+    verification := StoreVerification.new()
     if sys.family() == "windows" -> return
     roots :: store_test_temp_roots()
     local :: HangarRoots.at(files.join(roots.root, "l"))
     source :: files.join(roots.root, "s")
     files.create_dir_all(source) ?? panic("source")
     files.write(files.join(source, "payload"), "socket protocol payload\n") ?? panic("payload")
-    entry :: (store_ingest_tree(local, store_broker_test_request("socket-demo", "socket-demo@local", source, "socket protocol test")) ?? panic("ingest")).entry
+    entry :: (store_ingest_tree(&verification, local, store_broker_test_request("socket-demo", "socket-demo@local", source, "socket protocol test")) ?? panic("ingest")).entry
     archive :: store_export_unsigned_archive(local, entry.id, true) ?? panic("export")
     config :: store_broker_test_configure(local)
     shared_root :: config.shared_root
@@ -219,51 +221,52 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 
     // A wrong credential is refused before any byte is promoted.
     wrong_socket :: files.join(roots.root, "wrong.sock")
-    refusing :: store_broker_test_serve_once(wrong_socket, config)
+    refusing :: store_broker_test_serve_once(&verification, wrong_socket, config)
     client := net.unix_connect(wrong_socket) ?? panic("connect")
     request :: store_broker_encode_write_request(binding, "wrong-credential", archive) ?? panic("encode")
     net.unix_write_all_bytes(client, request).drop("the broker may close first")
     net.unix_close(client).drop("client close")
     failure :: refusing.join() ?? panic("broker task")
     assert(failure.contains("credential is invalid"))
-    assert(store_find_by_reference(shared, entry.reference) == None)
+    assert(store_find_by_reference(&verification, shared, entry.reference) == None)
 
     // The private owner promotes through the configured socket.
-    promoting :: store_broker_test_serve_once(config.socket, config)
+    promoting :: store_broker_test_serve_once(&verification, config.socket, config)
     assert(store_promote_shared_entry(local, entry) ?? panic("promote"))
     assert_eq(promoting.join() ?? panic("broker task"), "")
-    published :: store_find_by_reference(shared, entry.reference) ?? panic("published")
-    store_verify_hangar_object(shared, published) ?? panic("verify published")
+    published :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
+    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
     assert(store_broker_test_incoming_empty(shared_root))
 
     // A reader imports the signed entry through its own configured socket.
     reader :: HangarRoots.at(files.join(roots.root, "r"))
     reader_config :: store_broker_test_configure(reader)
-    reading :: store_broker_test_serve_once(reader_config.socket, config)
+    reading :: store_broker_test_serve_once(&verification, reader_config.socket, config)
     expectation :: CacheExpectation{identity: entry.cache_identity, owned_output: None, allow_unsigned_local: true}
-    reused :: store_reuse_shared_entry(reader, entry.reference, expectation) ?? panic("reuse") ?? panic("authenticated broker read should return the published entry")
+    reused :: store_reuse_shared_entry(&verification, reader, entry.reference, expectation) ?? panic("reuse") ?? panic("authenticated broker read should return the published entry")
     assert_eq(reading.join() ?? panic("broker task"), "")
     assert_eq(reused.envelope.output_hash, entry.envelope.output_hash)
-    store_verify_hangar_object(reader, reused) ?? panic("verify reused")
+    store_verify_hangar_object(&verification, reader, reused) ?? panic("verify reused")
 
     // A corrupted archive is refused and live data stays intact.
     corrupted := archive
     corrupted[0] = U8{Int.from_u8(corrupted[0]) ^ 1}
     corrupt_socket :: files.join(roots.root, "corrupt.sock")
-    rejecting :: store_broker_test_serve_once(corrupt_socket, config)
+    rejecting :: store_broker_test_serve_once(&verification, corrupt_socket, config)
     corrupt_client := net.unix_connect(corrupt_socket) ?? panic("connect")
-    corrupt_request :: store_broker_encode_write_request(binding, @STORE_BROKER_PRIVATE_OWNER, corrupted) ?? panic("encode")
+    corrupt_request :: store_broker_encode_write_request(binding, STORE_BROKER_PRIVATE_OWNER, corrupted) ?? panic("encode")
     net.unix_write_all_bytes(corrupt_client, corrupt_request).drop("the broker may close first")
     net.unix_close(corrupt_client).drop("client close")
     assert((rejecting.join() ?? panic("broker task")) != "")
-    still :: store_find_by_reference(shared, entry.reference) ?? panic("still published")
+    still :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
-    store_verify_hangar_object(shared, still) ?? panic("verify still published")
+    store_verify_hangar_object(&verification, shared, still) ?? panic("verify still published")
     assert(store_broker_test_incoming_empty(shared_root))
     store_test_drop_roots(roots)
 }
 
 #Test("store broker realize verified round trips through broker and fails closed on auth") {
+    verification := StoreVerification.new()
     if sys.family() == "windows" -> return
     roots :: store_test_temp_roots()
     repo :: files.join(roots.root, "repo")
@@ -274,7 +277,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     executable :: files.join(package, "bin/hello")
     files.write(executable, "#!/bin/sh\necho broker-realize\n") ?? panic("hello")
     files.set_mode(executable, 0o755) ?? panic("chmod")
-    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
     spec :: RefSpec.classify_in("hello@mine", table) ?? panic("classify")
 
     // A fresh build is promoted through the local broker.
@@ -284,17 +287,17 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     broker :: task {
         loop _ in 0..<2 {
             stream :: net.unix_accept(listener) ?? panic("accept")
-            store_broker_serve_connection(stream, config) ?? panic("serve")
+            store_broker_serve_connection(&verification, stream, config) ?? panic("serve")
         }
     }
-    realized :: store_realize_verified(local, store_broker_test_ctx(local), RealizeRequest.Package(spec, table)) ?? panic("realize")
+    realized :: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
     assert(realized.source_state() == SourceState.Built)
     broker.join() ?? panic("broker task")
     files.remove(config.socket) ?? panic("remove socket")
 
     shared :: HangarRoots.at(config.shared_root)
-    published :: store_find_by_reference(shared, "hello@mine") ?? panic("published")
-    store_verify_hangar_object(shared, published) ?? panic("verify published")
+    published :: store_find_by_reference(&verification, shared, "hello@mine") ?? panic("published")
+    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
     exported :: store_export_archive(shared, published.id, true, Val(config.trust_key)) ?? panic("export")
 
     // A reader with the published entry in its shared root reuses it.
@@ -304,9 +307,9 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     reader_listener :: net.unix_listen(reader_config.socket) ?? panic("listen")
     reader_broker :: task {
         stream :: net.unix_accept(reader_listener) ?? panic("accept")
-        store_broker_serve_connection(stream, reader_config) ?? panic("serve")
+        store_broker_serve_connection(&verification, stream, reader_config) ?? panic("serve")
     }
-    reused :: store_realize_verified(reader, store_broker_test_ctx(reader), RealizeRequest.Package(spec, table)) ?? panic("reuse")
+    reused :: store_realize_verified(&verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
     assert(reused.source_state() == SourceState.Cached)
     assert_eq(reused.metadata().envelope.output_hash, published.envelope.output_hash)
     reader_broker.join() ?? panic("broker task")
@@ -317,14 +320,14 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     denied_config :: store_broker_test_configure(denied)
     denied_listener :: net.unix_listen(denied_config.socket) ?? panic("listen")
     server_config := denied_config
-    server_config.socket = @STORE_BROKER_ADMIN_SOCKET
+    server_config.socket = STORE_BROKER_ADMIN_SOCKET
     server_config.grants = files.join(roots.root, "missing-grants")
-    denied_broker :: task { store_broker_test_serve_result(denied_listener, server_config) }
-    if store_realize_verified(denied, store_broker_test_ctx(denied), RealizeRequest.Package(spec, table)) == {
+    denied_broker :: task { store_broker_test_serve_result(&verification, denied_listener, server_config) }
+    if store_realize_verified(&verification, denied, store_broker_test_ctx(denied), RealizeRequest.Package{spec: spec, table: table}) == {
         .Ok(_) -> panic("unauthorized broker read must not reach provider realization")
         .Err(error) -> assert(error == .Store(_))
     }
-    assert(store_find_by_reference(denied, "hello@mine") == None)
+    assert(store_find_by_reference(&verification, denied, "hello@mine") == None)
     assert((denied_broker.join() ?? panic("broker task")) != "")
     reused.into_parts().lease.release()
     realized.into_parts().lease.release()

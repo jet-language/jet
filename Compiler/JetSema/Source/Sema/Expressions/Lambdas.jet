@@ -1724,11 +1724,16 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if !inline_loop -> lambda_scopes.loop_depth = 0
 
     first_reference := lambda_state.references.len()
+    // D-COPY-DEFAULT1=A (Rust `record_share_site` keeps one checker-wide
+    // list): a share site the body finds is found for the enclosing function
+    // too, even when that use stops this body's check with its E0121.
     body_result_ty := Type.Named{name: "Unit"}
     executable := TLambdaBody?{None}
     if lambda.body == {
         .Expr(value) -> {
-            checked :: sema_check_expression(value, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics) ?? return None
+            checked_value := sema_check_expression(value, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+            sema_ownership_keep_share_found(&state, lambda_state)
+            checked :: checked_value ?? return None
             body_result_ty = checked.ty
             executable = Val(TLambdaBody.Expr{value: checked})
         }
@@ -1750,6 +1755,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 statement_index += 1
             }
             checked_block :: sema_check_statements(statement_body, statement_return, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
+            sema_ownership_keep_share_found(&state, lambda_state)
             sema_single_use_check_scope_end(lambda_state, &diagnostics)
             if !checked_block.complete {
                 loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(&context, "closure body: {reason}")
@@ -1763,7 +1769,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             if {
                 tail_source != None -> {
                     tail :: tail_source ?? Expr.Unit{span: lambda.span}
-                    checked_tail :: sema_check_expression(tail, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics) ?? return None
+                    checked_tail_value := sema_check_expression(tail, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+                    sema_ownership_keep_share_found(&state, lambda_state)
+                    checked_tail :: checked_tail_value ?? return None
                     body_result_ty = checked_tail.ty
                     &checked_body.push(TStmt.Return{value: Val(checked_tail), span: expr_span(tail)})
                 }
@@ -2057,8 +2065,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     sema_expression_lambda_merge_context_facts(&lambda_context, &context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
     // #3708: the callback's propagated failures stay rows of the enclosing
     // body (the Rust body walk reads callbacks too); a callback that
-    // propagates into its own inferred carrier is a failure source, and an
-    // inline loop shares its owner's direct sources.
+    // propagates into its own inferred carrier is a failure source. Statement
+    // direct sources stay in the lambda body, inline loops included: a
+    // collecting loop's item `Yield` or a `return` inside it never makes the
+    // owner fallible (the Rust reference's `in_lambda_body` gate).
     loop edge_index in failure_edge_start..<lambda_context.failure_edges.len() -> &context.failure_edges.push(lambda_context.failure_edges[edge_index])
     if lambda_work.meta.fallible_propagation {
         &context.failure_edges.push("")
@@ -2068,7 +2078,6 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         context.failure_union_general = true
     }
     if inline_loop {
-        if lambda_context.failure_direct_source -> context.failure_direct_source = true
         // An inline loop body is the owner's body: its default-route failures
         // join the owner's failure-union row.
         context.failure_union_members = ~lambda_context.failure_union_members

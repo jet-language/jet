@@ -1,8 +1,8 @@
 // Claims ported from crates/jetpack/src/Provider/script_registry.rs
 // #[cfg(test)].
 
-@SCRIPT_TEST_SHA256 :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-@SCRIPT_TEST_SHA1 :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SCRIPT_TEST_SHA256 :: prep { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+SCRIPT_TEST_SHA1 :: prep { "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
 
 fn provider_script_test_authority(kind: ScriptRegistryKind) -> RegistryAuthority Never! {
     RegistryAuthority{provider: kind.label(), registry: kind.repository(), allow: kind.fetch_authorities(), deny: [String]{}}
@@ -42,7 +42,7 @@ fn provider_script_test_artifact(name: String, version: String, path: String) -[
     RegistryArtifact{
         sha256: pkg_sha256_hex(bytes),
         path,
-        package: RegistryPackage{name, version, url: "", integrity: RegistryIntegrity.Sha256(provider_script_test_repeat("0", 64)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}},
+        package: RegistryPackage{name, version, url: "", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("0", 64)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}},
     }
 }
 
@@ -81,7 +81,7 @@ fn provider_script_test_cpan(base: String, repo: String, name: String, version: 
     archive
 }
 
-@SCRIPT_TEST_CREATE_ZIP :: `$z=new ZipArchive(); if($z->open($argv[2],ZipArchive::CREATE|ZipArchive::OVERWRITE)!==true) exit(2); $root=rtrim($argv[1],DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR; $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($argv[1],FilesystemIterator::SKIP_DOTS)); foreach($it as $f){$z->addFile($f->getPathname(),substr($f->getPathname(),strlen($root)));} if(!$z->close()) exit(3);`
+SCRIPT_TEST_CREATE_ZIP :: prep { `$z=new ZipArchive(); if($z->open($argv[2],ZipArchive::CREATE|ZipArchive::OVERWRITE)!==true) exit(2); $root=rtrim($argv[1],DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR; $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($argv[1],FilesystemIterator::SKIP_DOTS)); foreach($it as $f){$z->addFile($f->getPathname(),substr($f->getPathname(),strlen($root)));} if(!$z->close()) exit(3);` }
 
 // A Packagist dist `dist/<name>.zip` whose root directory holds `relative`.
 fn provider_script_test_zip(base: String, repo: String, name: String, relative: String, code: String) -[FS, Exec, Time.Wait]> String Never! {
@@ -91,7 +91,7 @@ fn provider_script_test_zip(base: String, repo: String, name: String, relative: 
     files.write(file, code) ?? panic("zip source file")
     archive :: files.join(files.join(repo, "dist"), "{name}.zip")
     files.create_dir_all(files.dirname(archive)) ?? panic("zip repo dir")
-    provider_script_test_run([String]{"php", "-r", @SCRIPT_TEST_CREATE_ZIP, "--", source, archive})
+    provider_script_test_run([String]{"php", "-r", SCRIPT_TEST_CREATE_ZIP, "--", source, archive})
     archive
 }
 
@@ -123,7 +123,7 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
     assert(provider_script_version_satisfies(ScriptRegistryKind.Packagist, "1.2.9", "~1.2"))
     assert_eq(provider_script_cpan_requirement("2.27300"), ">= 2.27300")
 
-    ruby :: "2.0.0 jetdep:>= 1.0&< 2.0|checksum:{@SCRIPT_TEST_SHA256}\n"
+    ruby :: "2.0.0 jetdep:>= 1.0&< 2.0|checksum:{SCRIPT_TEST_SHA256}\n"
     gems :: provider_rubygems_parse_info(ScriptRegistryKind.RubyGems.repository(), "jetapp", ruby) ?? panic("compact index parses")
     assert_eq(gems[0].dependencies[0].requirement, ">= 1.0,< 2.0")
     cpan_release :: `{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[{"module":"Jet-Dep","phase":"runtime","relationship":"requires","version":">= 1.0"}]}`
@@ -149,17 +149,17 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
     attacker_doc :: `{"packages":{"jet/app":[{"version":"2.0.0","type":"library","source":{"type":"git","url":"https://github.com/attacker/jet-app.git","reference":"REF"},"dist":{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/REF?source=https://github.com/attacker/jet-app.git","reference":"REF","shasum":""}}]}}`.replace("REF", reference)
     assert(provider_script_test_packagist("jet/app", attacker_doc) == .Err(_))
 
-    tampered :: RegistryPackage{name: "jetapp", version: "2.0.0", url: "unused", integrity: RegistryIntegrity.Sha256(provider_script_test_repeat("00", 32)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}}
+    tampered :: RegistryPackage{name: "jetapp", version: "2.0.0", url: "unused", integrity: RegistryIntegrity.SHA256(provider_script_test_repeat("00", 32)), dependencies: [RegistryDependency]{}, psr4: [String: [String]]{}}
     assert(provider_script_verify_integrity(tampered, "changed source".bytes()) == .Err(_))
 }
 
 #Test("script registry solver backtracks across a diamond and cpan enumerates older releases") {
     ruby_repository :: ScriptRegistryKind.RubyGems.repository()
     ruby_info :: [String: String]{
-        "root": "1.0 a:>= 1&< 3,b:= 1|checksum:{@SCRIPT_TEST_SHA256}\n",
-        "a": "2.0 c:>= 2|checksum:{@SCRIPT_TEST_SHA256}\n1.0 c:< 2|checksum:{@SCRIPT_TEST_SHA256}\n",
-        "b": "1.0 c:< 2|checksum:{@SCRIPT_TEST_SHA256}\n",
-        "c": "2.0 |checksum:{@SCRIPT_TEST_SHA256}\n1.0 |checksum:{@SCRIPT_TEST_SHA256}\n",
+        "root": "1.0 a:>= 1&< 3,b:= 1|checksum:{SCRIPT_TEST_SHA256}\n",
+        "a": "2.0 c:>= 2|checksum:{SCRIPT_TEST_SHA256}\n1.0 c:< 2|checksum:{SCRIPT_TEST_SHA256}\n",
+        "b": "1.0 c:< 2|checksum:{SCRIPT_TEST_SHA256}\n",
+        "c": "2.0 |checksum:{SCRIPT_TEST_SHA256}\n1.0 |checksum:{SCRIPT_TEST_SHA256}\n",
     }
     ruby_candidates := [String: [RegistryPackage]]{}
     loop entry in ruby_info {
@@ -179,7 +179,7 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
     }
     composer_candidates := [String: [RegistryPackage]]{}
     loop entry in composer_docs {
-        parsed :: provider_script_test_packagist(entry.key, entry.value.replace("SHA1", @SCRIPT_TEST_SHA1)) ?? panic("Packagist metadata parses")
+        parsed :: provider_script_test_packagist(entry.key, entry.value.replace("SHA1", SCRIPT_TEST_SHA1)) ?? panic("Packagist metadata parses")
         composer_candidates[entry.key] = provider_script_sorted_candidates(parsed)
     }
     composer :: provider_script_resolve_closure(ScriptRegistryKind.Packagist, provider_script_test_authority(ScriptRegistryKind.Packagist), "", "vendor/root", "1.0.0", composer_candidates) ?? panic("the Composer closure resolves")
@@ -200,6 +200,7 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
 }
 
 #Test("script registry cache rejects policy authority drift") {
+    verification := StoreVerification.new()
     base :: files.tmpdir("jet-registry-authority-cache-") ?? panic("claim a directory")
     project :: files.join(base, "project")
     store :: files.join(base, "store")
@@ -213,10 +214,10 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
     authority :: provider_script_registry_cache_authority(ScriptRegistryKind.RubyGems, ctx) ?? panic("cache authority loads")
     pkg_lock_record_registry_realization(project, "ruby", "demo", "1.0", spec.raw, "/hangar/demo", provider_script_test_repeat("a", 64), authority.registry(), authority.provenance(), [String]{}, LockEnvelope{})
     assert(provider_validate_cache_authority(spec, table, ctx) == .Ok(_))
-    locked_policy :: (provider_cache_expectation(spec, table, ctx) ?? panic("locked expectation")).identity.policy_fingerprint
+    locked_policy :: (provider_cache_expectation(&verification, spec, table, ctx) ?? panic("locked expectation")).identity.policy_fingerprint
 
     files.write(manifest, provider_script_test_policy("https://mirror.example.test", "\"dist.example.test\", \"more.example.test\"", "")) ?? panic("policy")
-    changed_policy :: (provider_cache_expectation(spec, table, ctx) ?? panic("changed expectation")).identity.policy_fingerprint
+    changed_policy :: (provider_cache_expectation(&verification, spec, table, ctx) ?? panic("changed expectation")).identity.policy_fingerprint
     assert(locked_policy != changed_policy)
     assert(provider_validate_cache_authority(spec, table, ctx) == .Err(_))
     files.write(manifest, provider_script_test_policy("https://other.example.test", "\"dist.example.test\"", "")) ?? panic("policy")
@@ -257,11 +258,11 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
 
     source :: files.join(base, "source/Bad-1.0/lib")
     files.create_dir_all(source) ?? panic("source dir")
-    provider_script_test_run([String]{"truncate", "-s", "{@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1}", files.join(source, "Bad.pm")})
+    provider_script_test_run([String]{"truncate", "-s", "{PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1}", files.join(source, "Bad.pm")})
     archive :: files.join(base, "Bad-1.0.tar.gz")
     provider_script_test_run([String]{"tar", "--sparse", "-czf", archive, "-C", files.join(base, "source"), "Bad-1.0"})
     artifact := provider_script_test_artifact("Bad", "1.0", archive)
-    artifact.package.integrity = RegistryIntegrity.Sha256(artifact.sha256)
+    artifact.package.integrity = RegistryIntegrity.SHA256(artifact.sha256)
     provider_script_verify_integrity(artifact.package, files.read_bytes(artifact.path) ?? panic("read")) ?? panic("integrity holds")
     out :: files.join(base, "out")
     scratch :: files.join(base, "scratch")
@@ -276,18 +277,18 @@ fn provider_script_test_cpan_refusal(artifact: RegistryArtifact, out: String, sc
     total_archive :: files.join(base, "Total-1.0.tar.gz")
     provider_script_test_run([String]{"tar", "--sparse", "-czf", total_archive, "-C", files.join(base, "total"), "Total-1.0"})
     total := provider_script_test_artifact("Total", "1.0", total_archive)
-    total.package.integrity = RegistryIntegrity.Sha256(total.sha256)
+    total.package.integrity = RegistryIntegrity.SHA256(total.sha256)
     provider_script_verify_integrity(total.package, files.read_bytes(total.path) ?? panic("read")) ?? panic("integrity holds")
     total_reason :: provider_script_test_cpan_refusal(total, files.join(base, "total-out"), scratch)
     assert(total_reason.contains("expands beyond"), total_reason)
 
     many_root :: files.join(base, "many/Many-1.0/lib")
     files.create_dir_all(many_root) ?? panic("many dir")
-    loop index in 0..<@PROVIDER_MAX_ARCHIVE_ENTRIES -> files.write(files.join(many_root, "M{index}.pm"), "") ?? panic("empty module")
+    loop index in 0..<PROVIDER_MAX_ARCHIVE_ENTRIES -> files.write(files.join(many_root, "M{index}.pm"), "") ?? panic("empty module")
     many_archive :: files.join(base, "Many-1.0.tar.gz")
     provider_script_test_run([String]{"tar", "-czf", many_archive, "-C", files.join(base, "many"), "Many-1.0"})
     many := provider_script_test_artifact("Many", "1.0", many_archive)
-    many.package.integrity = RegistryIntegrity.Sha256(many.sha256)
+    many.package.integrity = RegistryIntegrity.SHA256(many.sha256)
     provider_script_verify_integrity(many.package, files.read_bytes(many.path) ?? panic("read")) ?? panic("integrity holds")
     many_reason :: provider_script_test_cpan_refusal(many, files.join(base, "many-out"), scratch)
     assert(many_reason.contains("too many entries"), many_reason)

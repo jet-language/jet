@@ -53,12 +53,12 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
     if service.ready_probe == .Val(probe) {
         value :: if probe == {
             .Exec(command) -> "exec:{command}"
-            .Http(url, status) -> if status == {
+            .HTTP(url, status) -> if status == {
                 .Val(code) -> "http:{url}:{code}"
                 .None -> "http:{url}"
             }
             .Notify(path) -> "notify:{path}"
-            .Tcp(host, port) -> "tcp:{host}:{port}"
+            .TCP(host, port) -> "tcp:{host}:{port}"
         }
         &facts.push("ready_probe={value}")
     }
@@ -109,7 +109,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> DataTree Never! {
         .None -> DataTree.Null
         .Val(probe) -> if probe == {
             .Exec(command) -> DataTree.Object(["kind": DataTree.Text("exec"), "command": DataTree.Text(command)])
-            .Http(url, status) -> {
+            .HTTP(url, status) -> {
                 code :: if status == {
                     .Val(value) -> DataTree.Int(value)
                     .None -> DataTree.Null
@@ -117,7 +117,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> DataTree Never! {
                 DataTree.Object(["kind": DataTree.Text("http"), "url": DataTree.Text(url), "status": code])
             }
             .Notify(path) -> DataTree.Object(["kind": DataTree.Text("notify"), "path": DataTree.Text(path)])
-            .Tcp(host, port) -> DataTree.Object(["kind": DataTree.Text("tcp"), "host": DataTree.Text(host), "port": DataTree.Int(port)])
+            .TCP(host, port) -> DataTree.Object(["kind": DataTree.Text("tcp"), "host": DataTree.Text(host), "port": DataTree.Int(port)])
         }
     }
     restart :: if service.restart == {
@@ -157,8 +157,8 @@ fn cli_add_variable_source(sources: &[String: [String]], name: String, source: S
     sources[name] = known
 }
 
-fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int Never! {
-    plan :: cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+    plan :: cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_validate_integration_facts(plan) ?? {
         theme.error_coded(
             "E1335",
@@ -166,7 +166,7 @@ fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int N
             err.message(),
             "use the supported integration preset and keep its typed package, host, task, and grant facts intact"
         )
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     facts :: plan.environment
     preset :: if facts.selected_preset == {
@@ -220,7 +220,7 @@ fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int N
     catalog :: LanguagePackCatalog.builtin()
     if parsed.flags.json {
         print(cli_env_info_json(plan, preset, selected_presets, applied_presets, packages, checks, jobs, variable_sources, variable_names, catalog))
-        return @EXIT_OK
+        return EXIT_OK
     }
     theme.status("preset: {preset}")
     applied :: if facts.selected_preset == {
@@ -260,8 +260,8 @@ fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int N
     theme.detail("services: {cli_none_or_join(services, ", ")}")
     // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant
     // the machine key reads.
-    theme.detail("{@ENV_REPORT_CHECKS_KEY}: {cli_none_or_join(checks, ", ")}")
-    theme.detail("{@ENV_REPORT_JOBS_KEY}: {cli_none_or_join(jobs, ", ")}")
+    theme.detail("{ENV_REPORT_CHECKS_KEY}: {cli_none_or_join(checks, ", ")}")
+    theme.detail("{ENV_REPORT_JOBS_KEY}: {cli_none_or_join(jobs, ", ")}")
     variables := [String]{}
     loop name in variable_names -> &variables.push("{name} [{(variable_sources.get(name) ?? [String]{}).join(",")}]")
     theme.detail("variables: {cli_none_or_join(variables, ", ")}")
@@ -274,7 +274,7 @@ fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int N
         &integrations.push(if integration.name == "" -> integration.kind.as_str() else -> "{integration.name} ({integration.kind.as_str()})")
     }
     theme.detail("integrations: {cli_none_or_join(integrations, ", ")}")
-    @EXIT_OK
+    EXIT_OK
 }
 
 // The `env info --json` object, in the Rust key order.
@@ -401,8 +401,8 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
     report["services"] = DataTree.Array(services)
     // D-JOB-NAME2=B: both keys always appear; the key text is the same
     // `Syntax` constant the human heading uses.
-    report[@ENV_REPORT_CHECKS_KEY] = cli_json_texts(checks)
-    report[@ENV_REPORT_JOBS_KEY] = cli_json_texts(jobs)
+    report[ENV_REPORT_CHECKS_KEY] = cli_json_texts(checks)
+    report[ENV_REPORT_JOBS_KEY] = cli_json_texts(jobs)
     report["variables"] = DataTree.Array(variables)
     report["files"] = cli_json_texts(managed)
     report["dotenv"] = DataTree.Array(dotenv)

@@ -1,12 +1,12 @@
 // Claims ported from crates/jet-pkg-model/src/MCP.rs #[cfg(test)].
 
-fn pkg_test_mcp_list_request(id: Int, params: DataTree) -> McpMessage {
-    McpMessage.Request(McpRequest.new(McpRequestId.Number(id), "tools/list", Val(params)) ?? panic("valid tools/list request"))
+fn pkg_test_mcp_list_request(id: Int, params: DataTree) -> MCPMessage {
+    MCPMessage.Request(MCPRequest.new(MCPRequestID.Number(id), "tools/list", Val(params)) ?? panic("valid tools/list request"))
 }
 
-fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
+fn pkg_test_mcp_codec_error(result: MCPCodecError) -> String {
     if result == {
-        .InvalidJson -> "InvalidJson"
+        .InvalidJSON -> "InvalidJson"
         .InvalidMessage(_) -> "InvalidMessage"
         .MessageTooLarge(_, _) -> "MessageTooLarge"
         .SchemaTooDeep(_) -> "SchemaTooDeep"
@@ -16,38 +16,38 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
 }
 
 #Test("stable mcp peer negotiates and completes the session lifecycle") {
-    peer := McpPeer.server(McpPolicy.stable())
-    selected :: peer.negotiate([String]{@MCP_PREVIEW_REVISION, @MCP_STABLE_REVISION}) ?? panic("stable negotiation")
-    assert_eq(selected.revision, McpRevision.Stable20251125)
-    assert_eq(peer.state(), McpLifecycleState.Negotiated)
-    client_info :: McpImplementation.new("client", "1") ?? panic("client identity")
-    params :: McpInitializeParams.new(McpRevision.Stable20251125, McpCapabilities.empty(), Val(client_info))
-    server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
-    _ :: &peer.initialize(params, server_info, McpCapabilities.empty()) ?? panic("initialize")
+    peer := MCPPeer.server(MCPPolicy.stable())
+    selected :: peer.negotiate([String]{MCP_PREVIEW_REVISION, MCP_STABLE_REVISION}) ?? panic("stable negotiation")
+    assert_eq(selected.revision, MCPRevision.Stable20251125)
+    assert_eq(peer.state(), MCPLifecycleState.Negotiated)
+    client_info :: MCPImplementation.new("client", "1") ?? panic("client identity")
+    params :: MCPInitializeParams.new(MCPRevision.Stable20251125, MCPCapabilities.empty(), Val(client_info))
+    server_info :: MCPImplementation.new("server", "1") ?? panic("server identity")
+    _ :: &peer.initialize(params, server_info, MCPCapabilities.empty()) ?? panic("initialize")
     &peer.initialized() ?? panic("initialized")
     peer.shutdown() ?? panic("shutdown")
     peer.exit() ?? panic("exit")
-    assert_eq(peer.state(), McpLifecycleState.Closed)
-    assert_eq(peer.audit_facts().as_map()["mcp.protocol_version"], @MCP_STABLE_REVISION)
+    assert_eq(peer.state(), MCPLifecycleState.Closed)
+    assert_eq(peer.audit_facts().as_map()["mcp.protocol_version"], MCP_STABLE_REVISION)
 }
 
 #Test("mcp stateless preview revision refuses session initialize") {
-    preview := McpPeer.server(McpPolicy.stable_and([McpRevision]{McpRevision.Preview20260728}))
-    _ :: preview.negotiate([String]{@MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
-    server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
-    if &preview.initialize(McpInitializeParams.new(McpRevision.Preview20260728, McpCapabilities.empty(), None), server_info, McpCapabilities.empty()) == {
+    preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
+    _ :: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    server_info :: MCPImplementation.new("server", "1") ?? panic("server identity")
+    if &preview.initialize(MCPInitializeParams.new(MCPRevision.Preview20260728, MCPCapabilities.empty(), None), server_info, MCPCapabilities.empty()) == {
         .Ok(_) -> panic("stateless revisions have no session initialize")
-        .Err(error) -> assert_eq(error, McpLifecycleError.StatelessRevision)
+        .Err(error) -> assert_eq(error, MCPLifecycleError.StatelessRevision)
     }
     preview.exit() ?? panic("stateless exit")
 }
 
 #Test("mcp codecs round trip messages and enforce bounds") {
     request :: pkg_test_mcp_list_request(7, DataTree.Object([String: DataTree]{}))
-    codec :: McpCodec.Stable20251125
-    encoded :: codec.encode_message(request, McpLimits.defaults()) ?? panic("encode")
-    assert_eq(codec.decode_message(encoded, McpLimits.defaults()) ?? panic("decode"), request)
-    tiny := McpLimits.defaults()
+    codec :: MCPCodec.Stable20251125
+    encoded :: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")
+    assert_eq(codec.decode_message(encoded, MCPLimits.defaults()) ?? panic("decode"), request)
+    tiny := MCPLimits.defaults()
     tiny.max_message_bytes = 1
     if codec.encode_message(request, tiny) == {
         .Ok(_) -> panic("one byte cannot hold a request")
@@ -57,25 +57,25 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
 
 #Test("mcp codec rejects invalid limits and malformed json") {
     request :: pkg_test_mcp_list_request(1, DataTree.Object([String: DataTree]{}))
-    codec :: McpCodec.Stable20251125
-    zero := McpLimits.defaults()
+    codec :: MCPCodec.Stable20251125
+    zero := MCPLimits.defaults()
     zero.max_message_bytes = 0
     if codec.encode_message(request, zero) == {
         .Ok(_) -> panic("a zero byte limit is invalid")
         .Err(error) -> assert_eq(pkg_test_mcp_codec_error(error), "InvalidLimit max_message_bytes")
     }
-    if codec.decode_message("{{", McpLimits.defaults()) == {
+    if codec.decode_message("{{", MCPLimits.defaults()) == {
         .Ok(_) -> panic("truncated JSON must not decode")
-        .Err(error) -> assert_eq(error, McpCodecError.InvalidJson)
+        .Err(error) -> assert_eq(error, MCPCodecError.InvalidJSON)
     }
 }
 
 #Test("mcp codec rejects nested values beyond the schema bound") {
     nested :: DataTree.Object(["nested": DataTree.Object(["value": DataTree.Object([String: DataTree]{})])])
     request :: pkg_test_mcp_list_request(2, nested)
-    codec :: McpCodec.Stable20251125
-    encoded :: codec.encode_message(request, McpLimits.defaults()) ?? panic("encode")
-    shallow := McpLimits.defaults()
+    codec :: MCPCodec.Stable20251125
+    encoded :: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")
+    shallow := MCPLimits.defaults()
     shallow.max_schema_depth = 1
     if codec.decode_message(encoded, shallow) == {
         .Ok(_) -> panic("depth two exceeds a bound of one")
@@ -84,23 +84,23 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
 }
 
 #Test("mcp preview requires explicit opt in and uses the stateless profile") {
-    stable := McpPeer.server(McpPolicy.stable())
-    if stable.negotiate([String]{@MCP_PREVIEW_REVISION}) == {
+    stable := MCPPeer.server(MCPPolicy.stable())
+    if stable.negotiate([String]{MCP_PREVIEW_REVISION}) == {
         .Ok(_) -> panic("preview must need opt-in")
-        .Err(error) -> assert_eq(error, McpNegotiationError.PreviewRequiresOptIn)
+        .Err(error) -> assert_eq(error, MCPNegotiationError.PreviewRequiresOptIn)
     }
-    preview := McpPeer.server(McpPolicy.stable_and([McpRevision]{McpRevision.Preview20260728}))
-    selected :: preview.negotiate([String]{@MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
-    assert_eq(selected.lifecycle, McpLifecycleProfile.Stateless)
-    assert_eq(preview.state(), McpLifecycleState.Ready)
+    preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
+    selected :: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    assert_eq(selected.lifecycle, MCPLifecycleProfile.Stateless)
+    assert_eq(preview.state(), MCPLifecycleState.Ready)
     if preview.exit() == {
-        .Ok(_) -> assert_eq(preview.state(), McpLifecycleState.Closed)
+        .Ok(_) -> assert_eq(preview.state(), MCPLifecycleState.Closed)
         .Err(error) -> panic(error.message())
     }
 }
 
 #Test("mcp rejects unknown revisions and lifecycle before negotiation") {
-    peer := McpPeer.server(McpPolicy.stable())
+    peer := MCPPeer.server(MCPPolicy.stable())
     if peer.negotiate([String]{"2099-01-01"}) == {
         .Ok(_) -> panic("unknown revision must not negotiate")
         .Err(error) -> {
@@ -112,6 +112,15 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
     }
     if peer.shutdown() == {
         .Ok(_) -> panic("shutdown needs a negotiated revision")
-        .Err(error) -> assert_eq(error, McpLifecycleError.NotNegotiated)
+        .Err(error) -> assert_eq(error, MCPLifecycleError.NotNegotiated)
     }
+}
+
+// MCP.rs valid_json_number: integers parse as Rust `i64` (Jet `Int` is
+// unbounded, so the bound is explicit) and floats must be finite.
+#Test("mcp json numbers keep the rust i64 and finite float bounds") {
+    accepted :: [String]{"0", "-0", "7", "9223372036854775807", "-9223372036854775808", "1.5", "-2.5e3", "1E+2"}
+    loop text in accepted -> assert(pkg_mcp_valid_json_number(text), "{text} is a valid JSON number")
+    refused :: [String]{"9223372036854775808", "-9223372036854775809", "01", "-", "1.", ".5", "1e", "1e400", "+1", "0x10"}
+    loop text in refused -> assert(!pkg_mcp_valid_json_number(text), "{text} is not a valid JSON number")
 }

@@ -7,7 +7,7 @@ fn provider_index_test_record(name: String) -> PackageIndexEntry {
         name,
         reference: "{name}@default",
         version: "",
-        platforms: @TIER_ONE_OSES,
+        platforms: TIER_ONE_OSES,
         docs: "",
         provenance: "declared",
         tier: "not-registry",
@@ -17,7 +17,7 @@ fn provider_index_test_record(name: String) -> PackageIndexEntry {
 }
 
 #Test("discovery index round trips and searches") {
-    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "default", upstream: "nixpkgs:nixos-24.05", via: ProviderKind.Nix}})
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "default", upstream: "nixpkgs:nixos-24.05", via: ProviderKind.Nix}})
     spec :: RefSpec.classify_in("ripgrep@default", table) ?? panic("ref")
     index := PackageIndex.empty()
     &index.add_package(env_discovery_record_for_ref(spec, "14.1.0", "fixture"))

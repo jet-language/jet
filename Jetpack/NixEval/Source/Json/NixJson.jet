@@ -7,17 +7,17 @@
 
 // ±mantissa * 2^exponent with an odd (or zero) mantissa; zero is unsigned, so
 // structural equality matches IEEE `==`.
-struct NixEvalJsonNumber {
+struct NixEvalJSONNumber {
     negative: Bool
     infinite: Bool
     mantissa: Int
     exponent: Int
 
-    fn zero() -> NixEvalJsonNumber Never! {
-        NixEvalJsonNumber{negative: false, infinite: false, mantissa: 0, exponent: 0}
+    fn zero() -> NixEvalJSONNumber Never! {
+        NixEvalJSONNumber{negative: false, infinite: false, mantissa: 0, exponent: 0}
     }
 
-    fn from_int(value: Int) -> NixEvalJsonNumber Never! {
+    fn from_int(value: Int) -> NixEvalJSONNumber Never! {
         nixeval_json_round(value < 0, if value < 0 -> -value else -> value, 0)
     }
 
@@ -37,29 +37,29 @@ struct NixEvalJsonNumber {
     }
 }
 
-enum NixEvalJsonNode {
+enum NixEvalJSONNode {
     Null
     Bool(Bool)
-    Num(NixEvalJsonNumber)
+    Num(NixEvalJSONNumber)
     Str(String)
     Array([Int])
     Object([String: Int])
 }
 
-struct NixEvalJson {
-    nodes: [NixEvalJsonNode]
+struct NixEvalJSON {
+    nodes: [NixEvalJSONNode]
     root: Int
 
-    fn parse(input: String) -> NixEvalJson NixEvalError! {
-        parser := NixEvalJsonParser{bytes: input.bytes(), position: 0, nodes: [NixEvalJsonNode]{}}
+    fn parse(input: String) -> NixEvalJSON NixEvalError! {
+        parser := NixEvalJSONParser{bytes: input.bytes(), position: 0, nodes: [NixEvalJSONNode]{}}
         &parser.skip_whitespace()
-        root :: parser.value(0)
+        root :: &parser.value(0)
         &parser.skip_whitespace()
-        if parser.position != parser.bytes.len() -> return Err(NixEvalError.Json("trailing characters after JSON value"))
-        Ok(NixEvalJson{nodes: parser.nodes, root})
+        if parser.position != parser.bytes.len() -> return Err(NixEvalError.JSON("trailing characters after JSON value"))
+        Ok(NixEvalJSON{nodes: parser.nodes, root})
     }
 
-    fn node(self, index: Int) -> NixEvalJsonNode Never! {
+    fn node(self, index: Int) -> NixEvalJSONNode Never! {
         self.nodes[index]
     }
 
@@ -84,7 +84,7 @@ struct NixEvalJson {
         }
     }
 
-    fn number(self, index: Int) -> NixEvalJsonNumber? Never! {
+    fn number(self, index: Int) -> NixEvalJSONNumber? Never! {
         if self.nodes[index] == {
             .Num(value) -> Val(value)
             else -> None
@@ -92,7 +92,7 @@ struct NixEvalJson {
     }
 
     // Structural equality of one node here and one node in `other`.
-    fn same(self, index: Int, other: NixEvalJson, other_index: Int) -> Bool Never! {
+    fn same(self, index: Int, other: NixEvalJSON, other_index: Int) -> Bool Never! {
         right :: other.nodes[other_index]
         if self.nodes[index] == {
             .Array(items) -> {
@@ -117,12 +117,12 @@ struct NixEvalJson {
     }
 }
 
-struct NixEvalJsonParser {
+struct NixEvalJSONParser {
     bytes: [U8]
     position: Int
-    nodes: [NixEvalJsonNode]
+    nodes: [NixEvalJSONNode]
 
-    fn add(&self, node: NixEvalJsonNode) -> Int Never! {
+    fn add(&self, node: NixEvalJSONNode) -> Int Never! {
         &self.nodes.push(node)
         self.nodes.len() - 1
     }
@@ -145,15 +145,15 @@ struct NixEvalJsonParser {
     }
 
     fn value(&self, depth: Int) -> Int NixEvalError! {
-        if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.Json("JSON value is too deeply nested"))
+        if depth > NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.JSON("JSON value is too deeply nested"))
         &self.skip_whitespace()
         next :: self.peek()
         if next == {
-            123 -> self.object(depth)
-            91 -> self.array(depth)
+            123 -> &self.object(depth)
+            91 -> &self.array(depth)
             34 -> {
-                text :: self.string()
-                self.add(NixEvalJsonNode.Str(text))
+                text :: &self.string()
+                &self.add(NixEvalJSONNode.Str(text))
             }
             116 | 102 -> &self.boolean()
             110 -> &self.null()
@@ -164,61 +164,61 @@ struct NixEvalJsonParser {
     // A number when `next` can start one; otherwise the reference error for
     // the character at the cursor.
     fn number_or_unexpected(&self, next: Int) -> Int NixEvalError! {
-        if next == 45 || nixeval_is_ascii_digit(next) -> return self.number()
-        if next < 0 -> return Err(NixEvalError.Json("unexpected end of input"))
+        if next == 45 || nixeval_is_ascii_digit(next) -> return &self.number()
+        if next < 0 -> return Err(NixEvalError.JSON("unexpected end of input"))
         width :: nixeval_scalar_width(self.bytes, self.position)
         character :: nixeval_slice(self.bytes, self.position, self.position + width)
-        Err(NixEvalError.Json("unexpected character `{character}`"))
+        Err(NixEvalError.JSON("unexpected character `{character}`"))
     }
 
     fn object(&self, depth: Int) -> Int NixEvalError! {
-        self.bump()
+        _ :: &self.bump()
         fields := [String: Int]{}
         &self.skip_whitespace()
         if self.peek() == 125 {
-            self.bump()
-            return Ok(self.add(NixEvalJsonNode.Object(fields)))
+            _ :: &self.bump()
+            return Ok(&self.add(NixEvalJSONNode.Object(fields)))
         }
         loop {
             &self.skip_whitespace()
-            if self.peek() != 34 -> return Err(NixEvalError.Json("expected a string key in object"))
-            key :: self.string()
+            if self.peek() != 34 -> return Err(NixEvalError.JSON("expected a string key in object"))
+            key :: &self.string()
             &self.skip_whitespace()
-            if self.bump() != 58 -> return Err(NixEvalError.Json("expected `:` after object key"))
-            child :: self.value(depth + 1)
-            if fields.get(key) != None -> return Err(NixEvalError.Json("duplicate object key `{key}`"))
+            if &self.bump() != 58 -> return Err(NixEvalError.JSON("expected `:` after object key"))
+            child :: &self.value(depth + 1)
+            if fields.get(key) != None -> return Err(NixEvalError.JSON("duplicate object key `{key}`"))
             fields[key] = child
             &self.skip_whitespace()
-            separator :: self.bump()
+            separator :: &self.bump()
             if separator == 125 -> break
-            if separator != 44 -> return Err(NixEvalError.Json("expected `,` or `}}` in object"))
+            if separator != 44 -> return Err(NixEvalError.JSON("expected `,` or `}}` in object"))
         }
-        Ok(self.add(NixEvalJsonNode.Object(fields)))
+        Ok(&self.add(NixEvalJSONNode.Object(fields)))
     }
 
     fn array(&self, depth: Int) -> Int NixEvalError! {
-        self.bump()
+        _ :: &self.bump()
         items := [Int]{}
         &self.skip_whitespace()
         if self.peek() == 93 {
-            self.bump()
-            return Ok(self.add(NixEvalJsonNode.Array(items)))
+            _ :: &self.bump()
+            return Ok(&self.add(NixEvalJSONNode.Array(items)))
         }
         loop {
-            &items.push(self.value(depth + 1))
+            &items.push(&self.value(depth + 1))
             &self.skip_whitespace()
-            separator :: self.bump()
+            separator :: &self.bump()
             if separator == 93 -> break
-            if separator != 44 -> return Err(NixEvalError.Json("expected `,` or `]` in array"))
+            if separator != 44 -> return Err(NixEvalError.JSON("expected `,` or `]` in array"))
         }
-        Ok(self.add(NixEvalJsonNode.Array(items)))
+        Ok(&self.add(NixEvalJSONNode.Array(items)))
     }
 
     fn string(&self) -> String NixEvalError! {
         self.position += 1
         out := [U8]{}
         loop {
-            if self.position >= self.bytes.len() -> return Err(NixEvalError.Json("unterminated string"))
+            if self.position >= self.bytes.len() -> return Err(NixEvalError.JSON("unterminated string"))
             value :: nixeval_byte(self.bytes, self.position)
             if value == 34 {
                 self.position += 1
@@ -226,7 +226,7 @@ struct NixEvalJsonParser {
             }
             if value == 92 {
                 self.position += 1
-                escaped :: self.bump()
+                escaped :: &self.bump()
                 if escaped == {
                     34 -> nixeval_push_byte(&out, 34)
                     92 -> nixeval_push_byte(&out, 92)
@@ -237,11 +237,11 @@ struct NixEvalJsonParser {
                     98 -> nixeval_push_byte(&out, 8)
                     102 -> nixeval_push_byte(&out, 12)
                     117 -> nixeval_push_scalar(&out, &self.unicode_escape())
-                    else -> return Err(NixEvalError.Json("invalid escape in string"))
+                    else -> return Err(NixEvalError.JSON("invalid escape in string"))
                 }
                 next
             }
-            if value <= 31 -> return Err(NixEvalError.Json("unescaped control character in string"))
+            if value <= 31 -> return Err(NixEvalError.JSON("unescaped control character in string"))
             &out.push(self.bytes[self.position])
             self.position += 1
         }
@@ -250,22 +250,22 @@ struct NixEvalJsonParser {
     fn unicode_escape(&self) -> Int NixEvalError! {
         codepoint :: &self.hex4()
         if codepoint >= 55296 && codepoint <= 56319 {
-            if self.bump() != 92 || self.bump() != 117 -> return Err(NixEvalError.Json("unpaired surrogate in string"))
+            if &self.bump() != 92 || &self.bump() != 117 -> return Err(NixEvalError.JSON("unpaired surrogate in string"))
             low :: &self.hex4()
-            if low < 56320 || low > 57343 -> return Err(NixEvalError.Json("unpaired surrogate in string"))
+            if low < 56320 || low > 57343 -> return Err(NixEvalError.JSON("unpaired surrogate in string"))
             return Ok(65536 + (codepoint - 55296) * 1024 + (low - 56320))
         }
-        if codepoint >= 56320 && codepoint <= 57343 -> return Err(NixEvalError.Json("unpaired surrogate in string"))
+        if codepoint >= 56320 && codepoint <= 57343 -> return Err(NixEvalError.JSON("unpaired surrogate in string"))
         Ok(codepoint)
     }
 
     fn hex4(&self) -> Int NixEvalError! {
         codepoint := 0
         loop _ in 0..<4 {
-            value :: self.bump()
-            if value < 0 -> return Err(NixEvalError.Json("truncated unicode escape"))
+            value :: &self.bump()
+            if value < 0 -> return Err(NixEvalError.JSON("truncated unicode escape"))
             digit :: nixeval_json_hex_digit(value)
-            if digit < 0 -> return Err(NixEvalError.Json("invalid unicode escape"))
+            if digit < 0 -> return Err(NixEvalError.JSON("invalid unicode escape"))
             codepoint = codepoint * 16 + digit
         }
         Ok(codepoint)
@@ -279,19 +279,19 @@ struct NixEvalJsonParser {
             self.position += 1
         }
         text :: nixeval_slice(self.bytes, start, self.position)
-        number :: nixeval_json_parse_number(text) ?? return Err(NixEvalError.Json("invalid number `{text}`"))
-        Ok(self.add(NixEvalJsonNode.Num(number)))
+        number :: nixeval_json_parse_number(text) ?? return Err(NixEvalError.JSON("invalid number `{text}`"))
+        Ok(&self.add(NixEvalJSONNode.Num(number)))
     }
 
     fn boolean(&self) -> Int NixEvalError! {
-        if &self.literal("true") -> return Ok(self.add(NixEvalJsonNode.Bool(true)))
-        if &self.literal("false") -> return Ok(self.add(NixEvalJsonNode.Bool(false)))
-        Err(NixEvalError.Json("invalid literal"))
+        if &self.literal("true") -> return Ok(&self.add(NixEvalJSONNode.Bool(true)))
+        if &self.literal("false") -> return Ok(&self.add(NixEvalJSONNode.Bool(false)))
+        Err(NixEvalError.JSON("invalid literal"))
     }
 
     fn null(&self) -> Int NixEvalError! {
-        if &self.literal("null") -> return Ok(self.add(NixEvalJsonNode.Null))
-        Err(NixEvalError.Json("invalid literal"))
+        if &self.literal("null") -> return Ok(&self.add(NixEvalJSONNode.Null))
+        Err(NixEvalError.JSON("invalid literal"))
     }
 
     fn literal(&self, expected: String) -> Bool Never! {
@@ -314,7 +314,7 @@ fn nixeval_json_hex_digit(value: Int) -> Int Never! {
 // Decimal float syntax accepted by the reference reader (Rust `f64::from_str`
 // over `[0-9+-.eE]`): an optional sign, digits with an optional fraction and
 // at least one digit, then an optional exponent with at least one digit.
-fn nixeval_json_parse_number(text: String) -> NixEvalJsonNumber? Never! {
+fn nixeval_json_parse_number(text: String) -> NixEvalJSONNumber? Never! {
     bytes :: text.bytes()
     index := 0
     negative := false
@@ -360,11 +360,11 @@ fn nixeval_json_parse_number(text: String) -> NixEvalJsonNumber? Never! {
 }
 
 // Correctly rounded (ties-to-even) binary64 value of ±mantissa * 10^exponent10.
-fn nixeval_json_round(negative: Bool, mantissa: Int, exponent10: Int) -> NixEvalJsonNumber Never! {
-    if mantissa == 0 -> return NixEvalJsonNumber.zero()
+fn nixeval_json_round(negative: Bool, mantissa: Int, exponent10: Int) -> NixEvalJSONNumber Never! {
+    if mantissa == 0 -> return NixEvalJSONNumber.zero()
     digits :: nixeval_decimal_digits(mantissa)
-    if exponent10 + digits - 1 > 309 -> return NixEvalJsonNumber{negative, infinite: true, mantissa: 0, exponent: 0}
-    if exponent10 + digits <= -324 -> return NixEvalJsonNumber.zero()
+    if exponent10 + digits - 1 > 309 -> return NixEvalJSONNumber{negative, infinite: true, mantissa: 0, exponent: 0}
+    if exponent10 + digits <= -324 -> return NixEvalJSONNumber.zero()
     numerator := mantissa
     denominator := 1
     if {
@@ -401,13 +401,13 @@ fn nixeval_json_round(negative: Bool, mantissa: Int, exponent10: Int) -> NixEval
         quotient = low
         exponent += 1
     }
-    if exponent > 971 -> return NixEvalJsonNumber{negative, infinite: true, mantissa: 0, exponent: 0}
-    if quotient == 0 -> return NixEvalJsonNumber.zero()
+    if exponent > 971 -> return NixEvalJSONNumber{negative, infinite: true, mantissa: 0, exponent: 0}
+    if quotient == 0 -> return NixEvalJSONNumber.zero()
     loop quotient % 2 == 0 {
         quotient /%= 2
         exponent += 1
     }
-    NixEvalJsonNumber{negative, infinite: false, mantissa: quotient, exponent}
+    NixEvalJSONNumber{negative, infinite: false, mantissa: quotient, exponent}
 }
 
 // floor(numerator / (denominator * 2^exponent)) for non-negative operands.

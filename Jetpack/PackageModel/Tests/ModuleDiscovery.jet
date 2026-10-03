@@ -31,9 +31,9 @@
 #Test("package jet is excluded from discovery") {
     scratch :: files.temp_dir("discovery-package-jet-excluded") ?? panic("scratch")
     dir :: scratch.path
-    files.write(files.join(dir, @PACKAGE_FILE), "module bogus {{ }}\nname: \"x\"\nversion: \"0.1.0\"\n") ?? panic("write")
+    files.write(files.join(dir, PACKAGE_FILE), "module bogus {{ }}\nname: \"x\"\nversion: \"0.1.0\"\n") ?? panic("write")
     if pkg_discover_module_in(dir, "bogus") == {
-        .Err(error) -> assert(error == DiscoveryError.NotFound("bogus"))
+        .Err(error) -> assert(error == DiscoveryError.NotFound{name: "bogus"})
         .Ok(_) -> panic("the manifest must never be discovered as a module")
     }
 }
@@ -52,7 +52,7 @@
 #Test("deep tree is rejected before discovery descent") {
     scratch :: files.temp_dir("discovery-deep-tree") ?? panic("scratch")
     current := scratch.path
-    loop index in 0..<(@MAX_TREE_DEPTH + 2) {
+    loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir_all(current) ?? panic("depth")
     }
@@ -84,4 +84,19 @@
         }
         .Ok(_) -> panic("two declarations are ambiguous")
     }
+}
+
+#Test("workspace declaration probes share one owned session cache") {
+    cache := WorkspaceDeclarationCache.new()
+    source :: "module workspace {{ members: [] }}\n"
+    assert(pkg_declares_workspace_module(&cache, source))
+    assert(pkg_declares_workspace_members(&cache, source))
+    assert(pkg_declares_workspace_module(&cache, source))
+    assert_eq(cache.lexes, 1)
+    assert(!pkg_declares_workspace_module(&cache, "module dev {{ }}\n"))
+    assert_eq(cache.lexes, 2)
+    independent := WorkspaceDeclarationCache.new()
+    assert(pkg_declares_workspace_members(&independent, source))
+    assert_eq(independent.lexes, 1)
+    assert_eq(cache.lexes, 2)
 }

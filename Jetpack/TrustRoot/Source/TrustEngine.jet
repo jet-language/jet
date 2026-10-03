@@ -4,7 +4,7 @@
 // trusted-time expiry, and signature-stripping rejection.
 
 pub struct TrustEngine {
-    pub root: TufRootMetadata
+    pub root: TUFRootMetadata
     pub root_digest: String
     pub policy: TrustRootPolicy
     // Last accepted monotonic version per role label.
@@ -19,11 +19,11 @@ pub struct TrustEngine {
 
     // Pin and accept the first root; its digest must match `expected_pin`
     // when one is given, and an existing on-disk pin when `roots_dir` is.
-    fn bootstrap(signed_root: SignedMetadata<TufRootMetadata>, keyring: Keyring, policy: TrustRootPolicy, expected_pin: String?, clock: TrustedClock, roots_dir: String?) -[FS, Time]> TrustEngine TrustRootError! {
+    fn bootstrap(signed_root: SignedMetadata<TUFRootMetadata>, keyring: Keyring, policy: TrustRootPolicy, expected_pin: String?, clock: TrustedClock, roots_dir: String?) -[FS, Time]> TrustEngine TrustRootError! {
         canonical :: trust_canonical_root(signed_root.signed)
         trust_enforce_size(MetadataRole.Root, canonical.bytes().len(), policy)
         trust_check_clock(policy, clock)
-        root_role :: signed_root.signed.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold("root metadata missing root role keys"))
+        root_role :: signed_root.signed.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "root metadata missing root role keys"})
         trust_verify_role_signatures(MetadataRole.Root, canonical, signed_root.signatures, root_role, keyring)
         trust_check_expiry(MetadataRole.Root, signed_root.signed.expires_unix, clock)
         digest :: crypto.sha256(canonical.bytes()).hex()
@@ -68,7 +68,7 @@ pub struct TrustEngine {
     }
 
     // Load the existing bootstrap pin and verify an offered root matches it.
-    fn from_bootstrap_pin(roots_dir: String, signed_root: SignedMetadata<TufRootMetadata>, keyring: Keyring, policy: TrustRootPolicy, clock: TrustedClock) -[FS, Time]> TrustEngine TrustRootError! {
+    fn from_bootstrap_pin(roots_dir: String, signed_root: SignedMetadata<TUFRootMetadata>, keyring: Keyring, policy: TrustRootPolicy, clock: TrustedClock) -[FS, Time]> TrustEngine TrustRootError! {
         pin :: RootBootstrap.load(roots_dir)
         engine := TrustEngine.bootstrap(signed_root, keyring, policy, Val(pin.pin_digest), clock, None)
         if engine.root.version < pin.root_version -> return Err(TrustRootError.Rollback{role: MetadataRole.Root, current: pin.root_version, incoming: engine.root.version})
@@ -92,13 +92,13 @@ pub struct TrustEngine {
     // A new root must satisfy both the current and its own root threshold,
     // expire later than now, and strictly advance the version. A pinned
     // engine moves its on-disk pin in the same step.
-    fn update_root(&self, signed_root: SignedMetadata<TufRootMetadata>, clock: TrustedClock) TrustRootError! -[FS, Time]> {
+    fn update_root(&self, signed_root: SignedMetadata<TUFRootMetadata>, clock: TrustedClock) TrustRootError! -[FS, Time]> {
         canonical :: trust_canonical_root(signed_root.signed)
         trust_enforce_size(MetadataRole.Root, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
-        current_role :: self.root.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold("current root missing root role"))
+        current_role :: self.root.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "current root missing root role"})
         trust_verify_role_signatures(MetadataRole.Root, canonical, signed_root.signatures, current_role, self.keyring)
-        incoming_role :: signed_root.signed.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold("incoming root missing root role"))
+        incoming_role :: signed_root.signed.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "incoming root missing root role"})
         trust_verify_role_signatures(MetadataRole.Root, canonical, signed_root.signatures, incoming_role, self.keyring)
         trust_check_expiry(MetadataRole.Root, signed_root.signed.expires_unix, clock)
         current_version :: self.versions.get(MetadataRole.Root.label()) ?? 0
@@ -123,17 +123,17 @@ pub struct TrustEngine {
 
     // Threshold-minus-one recovery drill: a rotation signed by fewer than
     // the current root threshold must fail with `ThresholdUnmet`.
-    fn recovery_drill_threshold_minus_one(self, new_root: TufRootMetadata, signers: [TrustKey], clock: TrustedClock) TrustRootError! -[FS, Time]> {
-        role :: self.root.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold("current root missing root role"))
-        if signers.len() >= role.threshold -> return Err(TrustRootError.RotationRejected("drill requires fewer than threshold signers"))
+    fn recovery_drill_threshold_minus_one(self, new_root: TUFRootMetadata, signers: [TrustKey], clock: TrustedClock) TrustRootError! -[FS, Time]> {
+        role :: self.root.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "current root missing root role"})
+        if signers.len() >= role.threshold -> return Err(TrustRootError.RotationRejected{detail: "drill requires fewer than threshold signers"})
         signed :: trust_sign_root(new_root, signers)
         drill := self.clone_for_drill()
-        if drill.update_root(signed, clock) == {
-            .Ok(_) -> Err(TrustRootError.RotationRejected("threshold-minus-one rotation incorrectly succeeded"))
+        if &drill.update_root(signed, clock) == {
+            .Ok(_) -> return Err(TrustRootError.RotationRejected{detail: "threshold-minus-one rotation incorrectly succeeded"})
             .Err(error) -> {
                 if error == {
-                    .ThresholdUnmet(_, _, _) -> Ok()
-                    else -> Err(TrustRootError.RotationRejected("expected threshold unmet, got: {error.message()}"))
+                    .ThresholdUnmet(_, _, _) -> {}
+                    else -> return Err(TrustRootError.RotationRejected{detail: "expected threshold unmet, got: {error.message()}"})
                 }
             }
         }
@@ -163,7 +163,7 @@ pub struct TrustEngine {
         canonical :: trust_canonical_snapshot(signed.signed)
         trust_enforce_size(MetadataRole.Snapshot, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
-        role :: self.root.role(MetadataRole.Snapshot) ?? return Err(TrustRootError.InvalidThreshold("root missing snapshot role"))
+        role :: self.root.role(MetadataRole.Snapshot) ?? return Err(TrustRootError.InvalidThreshold{detail: "root missing snapshot role"})
         trust_verify_role_signatures(MetadataRole.Snapshot, canonical, signed.signatures, role, self.keyring)
         trust_check_expiry(MetadataRole.Snapshot, signed.signed.expires_unix, clock)
         trust_enforce_monotonic(self, MetadataRole.Snapshot, signed.signed.version)
@@ -185,7 +185,7 @@ pub struct TrustEngine {
         canonical :: trust_canonical_timestamp(signed.signed)
         trust_enforce_size(MetadataRole.Timestamp, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
-        role :: self.root.role(MetadataRole.Timestamp) ?? return Err(TrustRootError.InvalidThreshold("root missing timestamp role"))
+        role :: self.root.role(MetadataRole.Timestamp) ?? return Err(TrustRootError.InvalidThreshold{detail: "root missing timestamp role"})
         trust_verify_role_signatures(MetadataRole.Timestamp, canonical, signed.signatures, role, self.keyring)
         trust_check_expiry(MetadataRole.Timestamp, signed.signed.expires_unix, clock)
         trust_enforce_monotonic(self, MetadataRole.Timestamp, signed.signed.version)
@@ -212,7 +212,7 @@ pub struct TrustEngine {
             }
             .None -> {}
         }
-        role :: self.root.role(MetadataRole.Targets) ?? return Err(TrustRootError.InvalidThreshold("root missing targets role"))
+        role :: self.root.role(MetadataRole.Targets) ?? return Err(TrustRootError.InvalidThreshold{detail: "root missing targets role"})
         Ok(role)
     }
 
@@ -221,14 +221,14 @@ pub struct TrustEngine {
         loop delegation in self.root.delegations {
             if delegation.allows_path(path) -> return
         }
-        Err(TrustRootError.DelegationDenied{path, detail: "no delegation path prefix matches"})
+        return Err(TrustRootError.DelegationDenied{path, detail: "no delegation path prefix matches"})
     }
 }
 
 // Signatures from the role's allowed keys that verify, counted once per key,
 // must reach the threshold. Unknown keys and bad signatures do not count.
 fn trust_verify_role_signatures(role: MetadataRole, canonical: String, signatures: [TrustSignature], role_keys: RoleKeys, keyring: Keyring) TrustRootError! {
-    if signatures.len() == 0 -> return Err(TrustRootError.SignatureStripped(role))
+    if signatures.len() == 0 -> return Err(TrustRootError.SignatureStripped{role: role})
     valid := [String]{}
     loop signature in signatures {
         if !role_keys.key_ids.contains(signature.key_id) -> next
@@ -297,7 +297,7 @@ fn trust_check_clock(policy: TrustRootPolicy, clock: TrustedClock) TrustRootErro
 
 // The keys and root of a fixture threshold root.
 pub struct TrustFixtureRoot {
-    pub root: TufRootMetadata
+    pub root: TUFRootMetadata
     pub keyring: Keyring
     // root-1, root-2, root-3, targets, snapshot, timestamp.
     pub keys: [TrustKey]
@@ -312,7 +312,7 @@ pub fn trust_fixture_threshold_root(version: Int, expires_unix: Int) -> TrustFix
     public_key_ids := [String: String]{}
     loop key in keys {
         &keyring.insert(key)
-        public_key_ids[key.key_id] = @TRUST_ALG_HMAC_SHA256
+        public_key_ids[key.key_id] = TRUST_ALG_HMAC_SHA256
     }
     roles := [String: RoleKeys]{}
     roles[MetadataRole.Root.label()] = RoleKeys.new([String]{keys[0].key_id, keys[1].key_id, keys[2].key_id}, 2)
@@ -320,6 +320,6 @@ pub fn trust_fixture_threshold_root(version: Int, expires_unix: Int) -> TrustFix
     roles[MetadataRole.Snapshot.label()] = RoleKeys.new([String]{keys[4].key_id}, 1)
     roles[MetadataRole.Timestamp.label()] = RoleKeys.new([String]{keys[5].key_id}, 1)
     delegation :: Delegation{name: "jetsrc", role: RoleKeys.new([String]{keys[3].key_id}, 1), path_prefixes: [String]{"jetsrc/"}, terminating: true}
-    root :: TufRootMetadata{version, expires_unix, consistent_snapshot: true, roles, delegations: [Delegation]{delegation}, public_key_ids}
+    root :: TUFRootMetadata{version, expires_unix, consistent_snapshot: true, roles, delegations: [Delegation]{delegation}, public_key_ids}
     Ok(TrustFixtureRoot{root, keyring, keys})
 }

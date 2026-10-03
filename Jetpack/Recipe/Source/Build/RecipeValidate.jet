@@ -9,7 +9,7 @@
 
 // The helper version recipe actions pin (Rust `env!("CARGO_PKG_VERSION")` of
 // the jetpack crate).
-@RECIPE_HELPER_VERSION :: "0.1.0"
+RECIPE_HELPER_VERSION :: prep { "0.1.0" }
 
 // What a recipe run needs, and where its confinement boundaries are.
 pub struct RecipeBuildContext {
@@ -105,7 +105,7 @@ pub fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String
                     .with_cap(.Net)
                     .with_env("SOURCE_DATE_EPOCH", "0")
                     .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
-                    .with_helper_version("jet-fetch", @RECIPE_HELPER_VERSION)
+                    .with_helper_version("jet-fetch", RECIPE_HELPER_VERSION)
                     .with_label("recipe.step", "fetch")
                     .with_label("fetch.url", url)
                     .with_label("fetch.sha256", sha256)
@@ -132,7 +132,7 @@ pub fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String
                     .with_cap(.FS)
                     .with_env("SOURCE_DATE_EPOCH", "0")
                     .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
-                    .with_helper_version("jet-install", @RECIPE_HELPER_VERSION)
+                    .with_helper_version("jet-install", RECIPE_HELPER_VERSION)
                     .with_label("recipe.step", "install")
                     .with_label("install.dest", dest)
             }
@@ -143,7 +143,7 @@ pub fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String
                     .with_cap(.FS)
                     .with_env("SOURCE_DATE_EPOCH", "0")
                     .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
-                    .with_helper_version("jet-install-tree", @RECIPE_HELPER_VERSION)
+                    .with_helper_version("jet-install-tree", RECIPE_HELPER_VERSION)
                     .with_label("recipe.step", "install-tree")
                     .with_label("install.dest", dest)
             }

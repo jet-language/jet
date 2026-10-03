@@ -5,31 +5,31 @@
 // PackageModel's `pkg_bytes_*` helpers; ASCII whitespace is Rust's
 // `u8::is_ascii_whitespace` set.
 
-@TRUST_TAB :: 9
-@TRUST_NEWLINE :: 10
-@TRUST_FORM_FEED :: 12
-@TRUST_CARRIAGE_RETURN :: 13
-@TRUST_SPACE :: 32
-@TRUST_QUOTE :: 34
-@TRUST_HASH :: 35
-@TRUST_AMPERSAND :: 38
-@TRUST_APOSTROPHE :: 39
-@TRUST_OPEN_PAREN :: 40
-@TRUST_CLOSE_PAREN :: 41
-@TRUST_COMMA :: 44
-@TRUST_DASH :: 45
-@TRUST_DOT :: 46
-@TRUST_SLASH :: 47
-@TRUST_COLON :: 58
-@TRUST_SEMICOLON :: 59
-@TRUST_EQUALS :: 61
-@TRUST_QUESTION :: 63
-@TRUST_OPEN_SQUARE :: 91
-@TRUST_BACKSLASH :: 92
-@TRUST_CLOSE_SQUARE :: 93
-@TRUST_UNDERSCORE :: 95
-@TRUST_OPEN_BRACE :: 123
-@TRUST_CLOSE_BRACE :: 125
+TRUST_TAB :: prep { 9 }
+TRUST_NEWLINE :: prep { 10 }
+TRUST_FORM_FEED :: prep { 12 }
+TRUST_CARRIAGE_RETURN :: prep { 13 }
+TRUST_SPACE :: prep { 32 }
+TRUST_QUOTE :: prep { 34 }
+TRUST_HASH :: prep { 35 }
+TRUST_AMPERSAND :: prep { 38 }
+TRUST_APOSTROPHE :: prep { 39 }
+TRUST_OPEN_PAREN :: prep { 40 }
+TRUST_CLOSE_PAREN :: prep { 41 }
+TRUST_COMMA :: prep { 44 }
+TRUST_DASH :: prep { 45 }
+TRUST_DOT :: prep { 46 }
+TRUST_SLASH :: prep { 47 }
+TRUST_COLON :: prep { 58 }
+TRUST_SEMICOLON :: prep { 59 }
+TRUST_EQUALS :: prep { 61 }
+TRUST_QUESTION :: prep { 63 }
+TRUST_OPEN_SQUARE :: prep { 91 }
+TRUST_BACKSLASH :: prep { 92 }
+TRUST_CLOSE_SQUARE :: prep { 93 }
+TRUST_UNDERSCORE :: prep { 95 }
+TRUST_OPEN_BRACE :: prep { 123 }
+TRUST_CLOSE_BRACE :: prep { 125 }
 
 // The two halves around one separator byte.
 struct TrustTextSplit {
@@ -137,10 +137,10 @@ fn trust_text_lines(text: String) -> [String] Never! {
     lines := [String]{}
     start := 0
     loop start < raw.len() {
-        newline :: trust_text_find_byte(raw, @TRUST_NEWLINE, start)
+        newline :: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end :: if newline < 0 -> raw.len() else -> newline
         content_end := end
-        if newline >= 0 && content_end > start && Int.from_u8(raw[content_end - 1]) == @TRUST_CARRIAGE_RETURN -> content_end -= 1
+        if newline >= 0 && content_end > start && Int.from_u8(raw[content_end - 1]) == TRUST_CARRIAGE_RETURN -> content_end -= 1
         &lines.push(pkg_bytes_text(raw, start, content_end))
         start = end + 1
     }
@@ -183,7 +183,7 @@ fn trust_text_replace_all(text: String, needle: String, replacement: String) -> 
 
 // Rust `u8::is_ascii_whitespace`.
 fn trust_text_is_ascii_space(code: Int) -> Bool Never! {
-    code == @TRUST_SPACE || code == @TRUST_TAB || code == @TRUST_NEWLINE || code == @TRUST_FORM_FEED || code == @TRUST_CARRIAGE_RETURN
+    code == TRUST_SPACE || code == TRUST_TAB || code == TRUST_NEWLINE || code == TRUST_FORM_FEED || code == TRUST_CARRIAGE_RETURN
 }
 
 // The first offset at or after `at` that is not ASCII whitespace.

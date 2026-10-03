@@ -6,7 +6,7 @@
 // names the one command that fixes it.
 
 // Objects unused for longer than this are stale (30 days, in seconds).
-@DOCTOR_STALE_AFTER :: 2592000
+DOCTOR_STALE_AFTER :: prep { 2592000 }
 
 // Overall health, ordered: the report takes the worst check.
 pub enum DoctorHealth {
@@ -63,10 +63,10 @@ pub struct DoctorReport {
     pub checks: [DoctorCheck]
 
     // Run every check against the resolved Jetpack root and `project`.
-    fn run(project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
+    fn run(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
         roots :: pkg_resolve_roots()
         DoctorReport{checks: [DoctorCheck]{
-            cli_doctor_check_hangar(roots),
+            cli_doctor_check_hangar(&verification, roots),
             cli_doctor_check_leases(roots),
             cli_doctor_check_registry(online),
             cli_doctor_check_locks(project, roots),
@@ -146,7 +146,7 @@ fn cli_doctor_io_kind(error: IOError) -> String Never! {
 
 // ── Hangar ──
 
-fn cli_doctor_check_hangar(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
+fn cli_doctor_check_hangar(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
     hangar :: roots.hangar_dir()
     // A fresh machine has no Hangar yet; that is normal, not a health
     // problem — the first realize creates it.
@@ -165,7 +165,7 @@ fn cli_doctor_check_hangar(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
     graph := ClosureGraph.empty()
     closure_error := ""
     closure_failed := false
-    if store_closure_graph_read_only(roots) == {
+    if store_closure_graph_read_only(&verification, roots) == {
         .Ok(loaded) -> graph = loaded
         .Err(error) -> {
             closure_failed = true
@@ -195,7 +195,7 @@ fn cli_doctor_check_hangar(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
             .None -> {}
         }
         if !files.exists(entry.out) -> return DoctorCheck.degraded("hangar", "object `{id}` points to a missing output", "realize the package again")
-        if store_try_entry_output_hash(roots, entry) == {
+        if store_try_entry_output_hash(&verification, roots, entry) == {
             .Ok(actual) -> {
                 if entry.envelope.output_hash == "" || actual != entry.envelope.output_hash {
                     return DoctorCheck.degraded("hangar", "object `{id}` failed its content digest", "remove the corrupt object with `jetpack hangar clean`, then realize it again")
@@ -319,7 +319,6 @@ fn cli_doctor_git_registry_probe(url: String) DoctorRegistryFailure! -[Env, Exec
     receipt :: process.run_spec(spec) ?? return Err(DoctorRegistryFailure.ClientUnavailable)
     if receipt.timed_out -> return Err(DoctorRegistryFailure.TimedOut)
     if !receipt.success -> return Err(DoctorRegistryFailure.Rejected)
-    Ok()
 }
 
 // Query strings, fragments, and user-info in the authority are refused.
@@ -373,7 +372,7 @@ fn cli_doctor_check_cache(roots: HangarRoots) -[Time]> DoctorCheck Never! {
     stale := 0
     entries :: store_list_read_only(roots)
     loop entry in entries {
-        if entry.last_used_at == 0 || now - entry.last_used_at > @DOCTOR_STALE_AFTER -> stale = stale + 1
+        if entry.last_used_at == 0 || now - entry.last_used_at > DOCTOR_STALE_AFTER -> stale = stale + 1
     }
     if stale == 0 -> return DoctorCheck.ok("cache", "no objects unused for more than 30 days")
     DoctorCheck.degraded("cache", "{stale} object(s) unused for more than 30 days", "run `jetpack hangar clean` to review and collect stale objects")

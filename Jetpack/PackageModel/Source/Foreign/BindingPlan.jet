@@ -224,7 +224,7 @@ pub struct BindingInputs {
     }
 
     fn digest(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         &identity.field("target", self.target.bytes())
         &identity.field("generator", self.generator.bytes())
         &identity.field("artifact", self.artifact.bytes())
@@ -425,8 +425,8 @@ pub struct BindingPlan {
     }
 
     fn frozen_drift(self, recorded_digest: String) BindingPlanError! {
-        if self.digest == recorded_digest -> return Ok()
-        Err(BindingPlanError.FrozenDrift{recorded: recorded_digest, candidate: self.digest})
+        if self.digest == recorded_digest -> return
+        return Err(BindingPlanError.FrozenDrift{recorded: recorded_digest, candidate: self.digest})
     }
 }
 
@@ -496,7 +496,7 @@ fn pkg_plan_sorted_strings(values: [String]) -> [String] Never! {
 }
 
 fn pkg_plan_digest(operation: BindingOperation, library: String, shape: BindingShape, boundary_digest: String, input_digest: String, checked_obligations: [String], semantics: PlanSemantics) -> String Never! {
-    identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+    identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     &identity.field("library", library.bytes())
     &identity.field("operation", operation.name.bytes())
     &identity.field("native-signature", operation.native_signature.bytes())

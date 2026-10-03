@@ -1,0 +1,457 @@
+// JP-PUB-TUF. Tuf.rs has no embedded Rust tests. Original composed claims:
+// tests/pkg.rs:6781-6872,6874-6979,6981-7272,7274-7401 retained without skips.
+// Pure wire tests are not composed/native acceptance. Providers #3593/#3598,
+// crypto entropy #3597 and complete publication/fetch composition #4262 gate it.
+use core.process as publication_tuf_test_process
+
+fn publication_tuf_test_entry(name: String, version: String, yanked: Bool) -> PublicationIndexEntry Never! {
+    PublicationIndexEntry{name: name, version: version, content_hash: "sha256-tree", fingerprint: "sha256-fp", yanked: yanked, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}
+}
+fn publication_tuf_test_digest() -> String Never! { "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+fn publication_tuf_test_checkpoint(sequence: Int, root: String) -> PublicationCheckpoint Never! {
+    PublicationCheckpoint{sequence: sequence, root: root, public_key: "aa", signature: "sig"}
+}
+fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/publication-tuf-{label}-{sys.pid()}")
+    files.remove_all(root).drop("a stale fixture may be absent")
+    files.create_dir_all(root) ?? panic("create TUF fixture")
+    root
+}
+
+#Test("publication tuf safe field append has no partial mutation") {
+    output := [String]{"prefix\n"}
+    assert(publication_tuf_append_line(&output, "key", "a=b"))
+    assert_eq(output.join(""), "prefix\nkey=a=b\n")
+    carriage :: String.from_bytes([U8]{97, 13, 98}) ?? panic("CR fixture")
+    loop key in ([String]{"", "a=b", "a\nb", carriage}) -> assert(!publication_tuf_append_line(&output, key, "value"))
+    loop value in ([String]{"a\nb", carriage}) -> assert(!publication_tuf_append_line(&output, "key", value))
+    assert_eq(output.join(""), "prefix\nkey=a=b\n")
+}
+#Test("publication tuf checkpoint exact unsigned wire") {
+    assert_eq(publication_tuf_checkpoint_unsigned(12, "sha256-root", "é"), "jet-transparency-checkpoint-v1\nsequence=12\nroot=sha256-root\npublic_key=c3a9\n")
+    // Rust unsigned construction deliberately ignores line's refusal.
+    assert_eq(publication_tuf_checkpoint_unsigned(0, "bad\nroot", ""), "jet-transparency-checkpoint-v1\nsequence=0\npublic_key=\n")
+}
+#Test("publication tuf sparse empty exact unsigned wire") {
+    assert_eq(publication_tuf_sparse_unsigned("é", [PublicationIndexEntry]{}, [String: String]{}, "root", "aa"), "jet-tuf-sparse-v2\nname=c3a9\ncheckpoint=726f6f74\npublic_key=6161\n")
+}
+#Test("publication tuf sparse referrers follow entries not map insertion order") {
+    entries :: [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "1", false)}
+    referrers := [String: String]{}
+    referrers["1"] = "sha256-a"
+    referrers["2"] = "sha256-b"
+    unsigned :: publication_tuf_sparse_unsigned("p", entries, referrers, "root", "aa")
+    assert(unsigned.ends_with("referrer=32097368613235362d62\nreferrer=31097368613235362d61\n"))
+    assert_eq(unsigned.split("entry=").to_list().len(), 3)
+    assert(!unsigned.contains("signature="))
+}
+#Test("publication tuf log record unsigned binding and exact empty log") {
+    entry :: publication_tuf_test_entry("p", "1", false)
+    unsigned :: publication_tuf_log_record_unsigned(3, "migrate", entry, "previous")
+    assert(unsigned.starts_with("jet-transparency-log-v1-record\nsequence=3\noperation=migrate\nentry="))
+    assert(unsigned.ends_with("\nprevious=previous\n"))
+    assert_eq(publication_tuf_log_text([PublicationLogRecord]{}), "jet-transparency-log-v1\n")
+    record :: PublicationLogRecord{sequence: 3, operation: "migrate", entry: entry, previous: "prev", leaf: "leaf"}
+    wire :: publication_tuf_log_text([PublicationLogRecord]{record})
+    assert(wire.starts_with("jet-transparency-log-v1\n3\tmigrate\t"))
+    assert(wire.ends_with("\tprev\tleaf\n"))
+}
+#Test("publication tuf empty log domain separation SHA256 vector") {
+    assert_eq(publication_tuf_empty_log_root(), "sha256-a0abafd6a519dfe08969c2cf7305d4fb45bbda61c4eebaee5334ddb37716fa40")
+}
+#Test("publication tuf sequence is Rust u64 not unbounded Int") {
+    assert_eq(publication_tuf_sequence("18446744073709551615"), Val(Int{18446744073709551615}))
+    assert_eq(publication_tuf_sequence("18446744073709551616"), None)
+    assert_eq(publication_tuf_sequence("+00012"), Val(Int{12}))
+    loop invalid in ([String]{"", "+", "-1", " 1", "1 ", "1_0", "١", "1.0"}) -> assert_eq(publication_tuf_sequence(invalid), None)
+}
+#Test("publication tuf metadata and log bound constants") {
+    assert_eq(PUBLICATION_TUF_MAX_METADATA_BYTES, 4 * 1024 * 1024)
+    assert_eq(PUBLICATION_TUF_MAX_LOG_BYTES, 64 * 1024 * 1024)
+}
+
+#Test("publication tuf sparse entries sort lexically and refuse duplicates and other names") {
+    entries := [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "10", false)}
+    publication_tuf_validate_entries("p", &entries) ?? panic("valid entries")
+    assert_eq(entries[0].version, "10")
+    &entries.push(publication_tuf_test_entry("p", "10", true))
+    if publication_tuf_validate_entries("p", &entries) == .Ok(_) -> panic("duplicate version accepted")
+    other := [PublicationIndexEntry]{publication_tuf_test_entry("q", "1", false)}
+    if publication_tuf_validate_entries("p", &other) == .Ok(_) -> panic("another package accepted")
+    empty := [PublicationIndexEntry]{}
+    if publication_tuf_validate_entries("", &empty) == .Ok(_) -> panic("empty name accepted")
+}
+#Test("publication tuf exact signed referrer set is mandatory") {
+    entries :: [PublicationIndexEntry]{publication_tuf_test_entry("p", "1", false)}
+    good :: [String: String]{"1": publication_tuf_test_digest()}
+    publication_tuf_validate_referrers(entries, good) ?? panic("valid referrer projection")
+    if publication_tuf_validate_referrers(entries, [String: String]{}) == .Ok(_) -> panic("missing projection accepted")
+    if publication_tuf_validate_referrers(entries, [String: String]{"2": publication_tuf_test_digest()}) == .Ok(_) -> panic("wrong version accepted")
+    loop invalid in ([String]{"", "sha256-a", "SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-gaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) {
+        if publication_tuf_validate_referrers(entries, [String: String]{"1": invalid}) == .Ok(_) -> panic("invalid referrer digest accepted")
+    }
+    publication_tuf_validate_referrers(entries, [String: String]{"1": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}) ?? panic("Rust accepts mixed-case hex")
+}
+#Test("publication tuf sparse parser roundtrip and hostile fields") {
+    entries :: [PublicationIndexEntry]{publication_tuf_test_entry("p", "1", false)}
+    referrers :: [String: String]{"1": publication_tuf_test_digest()}
+    wire :: "{publication_tuf_sparse_unsigned("p", entries, referrers, "root", "aa")}signature=sig\n"
+    parsed :: publication_tuf_parse_sparse_metadata(wire, "p") ?? panic("sparse roundtrip")
+    assert_eq(parsed.entries, entries)
+    assert_eq(parsed.referrers, referrers)
+    assert_eq(parsed.signature, "sig")
+    if publication_tuf_parse_sparse_metadata(wire, "q") == .Ok(_) -> panic("name substitution accepted")
+    loop hostile in ([String]{wire.replace("jet-tuf-sparse-v2", "unknown"), "{wire}name=70\n", "{wire}future=x\n", "{wire}malformed\n", wire.replace("name=70", "name=ff"), wire.replace("name=70", "name=0"), wire.replace("name=70\n", ""), "{wire}referrer={publication_tuf_hex.encode("1\tdifferent".bytes())}\n"}) {
+        if publication_tuf_parse_sparse_metadata(hostile, "p") == .Ok(_) -> panic("hostile sparse wire accepted")
+    }
+}
+#Test("publication tuf checkpoint parser required duplicate unknown and u64 refusal") {
+    wire :: "{publication_tuf_checkpoint_unsigned(1, "root", "aa")}signature=sig\n"
+    parsed :: publication_tuf_parse_checkpoint(wire) ?? panic("checkpoint roundtrip")
+    assert_eq(parsed.sequence, 1)
+    assert_eq(parsed.public_key, "aa")
+    assert_eq(parsed.root, "root")
+    loop hostile in ([String]{wire.replace("jet-transparency-checkpoint-v1", "wrong"), "{wire}root=again\n", "{wire}future=x\n", "{wire}malformed\n", wire.replace("sequence=1", "sequence=18446744073709551616"), wire.replace("signature=sig\n", ""), wire.replace("public_key=6161", "public_key=ff")}) {
+        if publication_tuf_parse_checkpoint(hostile) == .Ok(_) -> panic("hostile checkpoint accepted")
+    }
+}
+#Test("publication tuf log publish yank migrate and immutable chain refusals") {
+    entry :: publication_tuf_test_entry("p", "1", false)
+    first :: publication_tuf_next_log_record([PublicationLogRecord]{}, "publish", entry) ?? panic("publish record")
+    records := [PublicationLogRecord]{first}
+    publication_tuf_validate_log(records) ?? panic("valid publish")
+    yanked := ~entry
+    yanked.yanked = true
+    second :: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("yank record")
+    &records.push(second)
+    publication_tuf_validate_log(records) ?? panic("valid publish then yank")
+    assert_eq(publication_tuf_parse_log(publication_tuf_log_text(records)) ?? panic("log roundtrip"), records)
+    duplicate :: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("duplicate yank construction")
+    &records.push(duplicate)
+    if publication_tuf_validate_log(records) == {
+        .Ok(_) -> panic("second identical yank reused an immutable identity (Main Rust tandem)")
+        .Err(error) -> assert("{error}".contains("registry transparency log reuses or changes an immutable package version"))
+    }
+    changed := ~entry
+    changed.content_hash = "sha256-other"
+    mutation :: publication_tuf_next_log_record([PublicationLogRecord]{first}, "yank", changed) ?? panic("mutation record")
+    if publication_tuf_validate_log([PublicationLogRecord]{first, mutation}) == .Ok(_) -> panic("immutable mutation accepted")
+    unpublished :: publication_tuf_next_log_record([PublicationLogRecord]{}, "yank", yanked) ?? panic("unpublished yank")
+    if publication_tuf_validate_log([PublicationLogRecord]{unpublished}) == .Ok(_) -> panic("unpublished yank accepted")
+    migrate :: publication_tuf_next_log_record([PublicationLogRecord]{}, "migrate", yanked) ?? panic("migration may begin with yanked history")
+    publication_tuf_validate_log([PublicationLogRecord]{migrate}) ?? panic("valid historical migration")
+    forged := ~first
+    forged.leaf = "sha256-forged"
+    if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("forged leaf accepted")
+    forged = ~first
+    forged.sequence = 2
+    if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("noncontiguous sequence accepted")
+    forged = ~first
+    forged.previous = "different"
+    if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("wrong predecessor accepted")
+    forged = ~first
+    forged.entry.yanked = true
+    if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) -> panic("already yanked publish accepted")
+    if publication_tuf_parse_log(publication_tuf_log_text([PublicationLogRecord]{first}).replace("\tpublish\t", "\tunknown\t")) == .Ok(_) -> panic("unknown operation accepted")
+}
+#Test("publication tuf next witness sequence refuses u64 overflow") {
+    last :: PublicationLogRecord{sequence: 18446744073709551615, operation: "publish", entry: publication_tuf_test_entry("p", "1", false), previous: "prev", leaf: "leaf"}
+    if publication_tuf_next_log_record([PublicationLogRecord]{last}, "publish", publication_tuf_test_entry("p", "2", false)) == {
+        .Ok(_) -> panic("u64 overflow accepted")
+        .Err(error) -> assert("{error}".contains("registry transparency log sequence is invalid"))
+    }
+    edge := ~last
+    edge.sequence = 18446744073709551614
+    record :: publication_tuf_next_log_record([PublicationLogRecord]{edge}, "publish", publication_tuf_test_entry("p", "2", false)) ?? panic("max sequence is representable")
+    assert_eq(record.sequence, Int{18446744073709551615})
+}
+#Test("publication tuf accepted checkpoint rollback fork and ancestry") {
+    empty :: publication_tuf_empty_log_root()
+    checkpoint :: publication_tuf_test_checkpoint(2, "two")
+    first :: PublicationLogRecord{sequence: 1, operation: "publish", entry: publication_tuf_test_entry("p", "1", false), previous: empty, leaf: "one"}
+    records :: [PublicationLogRecord]{first}
+    assert(!(publication_tuf_check_accepted_checkpoint(0, empty, checkpoint, records) ?? panic("advance from empty")))
+    assert(!(publication_tuf_check_accepted_checkpoint(1, "one", checkpoint, records) ?? panic("advance from witnessed ancestor")))
+    assert(publication_tuf_check_accepted_checkpoint(2, "two", checkpoint, records) ?? panic("same checkpoint"))
+    if publication_tuf_check_accepted_checkpoint(3, "three", checkpoint, records) == .Ok(_) -> panic("rollback accepted")
+    if publication_tuf_check_accepted_checkpoint(2, "fork", checkpoint, records) == .Ok(_) -> panic("same sequence fork accepted")
+    if publication_tuf_check_accepted_checkpoint(1, "fork", checkpoint, records) == .Ok(_) -> panic("forked ancestor accepted")
+    if publication_tuf_check_accepted_checkpoint(1, "one", checkpoint, [PublicationLogRecord]{}) == .Ok(_) -> panic("missing ancestor accepted")
+}
+#Test("publication tuf real signature binds payload and rejects substitution") {
+    // Real Ed25519 Core seed; entropy generation remains independently #3597.
+    seed :: publication_tuf_hex.decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("RFC8032 seed")
+    public_key :: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    payload :: publication_tuf_checkpoint_unsigned(1, "root", public_key)
+    message :: "sha256-{publication_tuf_crypto.sha256(payload.bytes()).hex()}"
+    signature :: publication_sign_bytes(seed, message) ?? panic("real deterministic signature")
+    publication_tuf_verify_payload(public_key, payload, signature) ?? panic("verify signed checkpoint")
+    if publication_tuf_verify_payload(public_key, "{payload}tamper", signature) == .Ok(_) -> panic("payload substitution accepted")
+    if publication_tuf_verify_payload("0000000000000000000000000000000000000000000000000000000000000000", payload, signature) == .Ok(_) -> panic("key substitution accepted")
+}
+#Test("publication tuf diagnostic referrer recovery is explicit") {
+    error :: publication_tuf_metadata_diagnostic("OCI referrer index digest disagrees with signed sparse metadata")
+    assert_eq(error.diagnostic.code, "E2607")
+    assert(error.diagnostic.fix.contains("restore the immutable OCI referrer set"))
+    assert(publication_tuf_metadata_diagnostic("unknown format").diagnostic.fix.contains("documented parser contract"))
+}
+#Test("publication tuf protected metadata bound and regular file policy") {
+    root :: publication_tuf_test_root("bounds")
+    path :: files.join(root, "input")
+    files.write(path, "abc") ?? panic("fixture")
+    assert_eq(publication_tuf_read_bounded(root, path, 3, "registry metadata exceeds its size limit") ?? panic("exact bound"), "abc")
+    if publication_tuf_read_bounded(root, path, 2, "registry metadata exceeds its size limit") == .Ok(_) -> panic("size overflow accepted")
+    if publication_tuf_read_bounded(root, root, 3, "registry metadata exceeds its size limit") == .Ok(_) -> panic("directory accepted")
+    link :: files.join(root, "linked")
+    files.symlink(path, link) ?? panic("fixture symlink")
+    if publication_tuf_read_bounded(root, link, 3, "registry metadata exceeds its size limit") == .Ok(_) -> panic("symlink accepted")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication tuf snapshot rollback restores original bytes and removes newly created files") {
+    root :: publication_tuf_test_root("rollback")
+    old :: files.join(root, "old")
+    fresh :: files.join(root, "fresh")
+    files.write(old, "original") ?? panic("fixture")
+    snapshots :: [PublicationMetadataFileSnapshot]{publication_tuf_snapshot_file(root, old) ?? panic("snapshot old"), publication_tuf_snapshot_file(root, fresh) ?? panic("snapshot absent")}
+    publication_tuf_atomic_write(root, old, "replacement".bytes()) ?? panic("replace")
+    publication_tuf_atomic_write(root, fresh, "new".bytes()) ?? panic("create")
+    publication_tuf_restore_snapshots(root, snapshots) ?? panic("rollback")
+    assert_eq(files.read(old) ?? panic("read restored"), "original")
+    assert(!files.exists(fresh))
+    loop entry in (files.list_dir(root) ?? panic("list stages")) -> assert(!entry.name.starts_with(".jet-lock-"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Original CLI claims use the real rebuilt engine named by JET_BIN, never a
+// helper/mock binary. Core process/provider #3593/#3594 and composition #4262.
+fn publication_tuf_test_git(cwd: String, args: [String]) -[Exec, Time]> ProcessReceipt Never! {
+    argv := [String]{"git"}
+    &argv.extend(args)
+    receipt :: publication_tuf_test_process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).run() ?? panic("git fixture")
+    assert(receipt.success, "git fixture failed: {receipt.errors}")
+    receipt
+}
+fn publication_tuf_test_manifest(name: String, version: String) -> String Never! {
+    "name: \"{name}\"\nversion: \"{version}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
+}
+fn publication_tuf_test_project(root: String, name: String, version: String) Never! -[FS, Exec, Time]> {
+    files.create_dir_all(root) ?? panic("create project")
+    files.write(files.join(root, "package.jet"), publication_tuf_test_manifest(name, version)) ?? panic("manifest")
+    files.write(files.join(root, "run.jet"), "#Test(\"smoke\") {{ assert(1 == 1) }}\nfn run() {{ print(\"hi\") }}\n") ?? panic("entry")
+    loop args in ([[String]]{[String]{"init", "-b", "main"}, [String]{"config", "user.email", "test@jet.test"}, [String]{"config", "user.name", "Jet Test"}, [String]{"add", "."}, [String]{"commit", "-m", "init"}}) -> _ :: publication_tuf_test_git(root, args)
+}
+fn publication_tuf_test_registry(root: String, name: String, version: String) -[FS, Exec, Time]> String Never! {
+    bare :: files.join(root, "registry.git")
+    _ :: publication_tuf_test_git(root, [String]{"init", "--bare", bare})
+    _ :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main"})
+    work :: files.join(root, "review")
+    _ :: publication_tuf_test_git(root, [String]{"clone", "file://{bare}", work})
+    review :: files.join(files.join(files.join(work, "reviews"), name), "{version}.review")
+    files.create_dir_all(files.dirname(review)) ?? panic("review parent")
+    files.write(review, "jet-registry-core-review-v1\npackage={name}\nversion={version}\nreviewer=test-maintainer\ndecision=approved\n") ?? panic("review receipt")
+    loop args in ([[String]]{[String]{"config", "user.email", "test@jet.test"}, [String]{"config", "user.name", "Jet Test"}, [String]{"add", "."}, [String]{"commit", "-m", "approve core package"}, [String]{"push", "origin", "HEAD:main"}}) -> _ :: publication_tuf_test_git(work, args)
+    files.remove_all(work) ?? panic("cleanup review")
+    bare
+}
+fn publication_tuf_test_command(root: String, project: String, bare: String, store: String, args: [String]) -[Env, Exec]> ProcessSpec Never! {
+    argv := [String]{sys.get("JET_BIN") ?? panic("JET_BIN must name the real rebuilt Jet publication/fetch engine (#4262)")}
+    &argv.extend(args)
+    publication_tuf_test_process.cmd(argv).cwd(project).stdout(.Capture).stderr(.Capture)
+        .env("JET_REGISTRY_URL", "file://{bare}").env("JET_REGISTRY_CACHE_DIR", files.join(root, "cache"))
+        .env("JET_PACKAGE_STORE_DIR", store).env("JET_KEYS_DIR", files.join(root, "keys"))
+        .env("JETPACK_ROOT", files.join(root, "jetpack-root"))
+}
+#Test("publication tuf original cli_publish_pushes_index_and_enforces_immutability_e1234") {
+    root :: publication_tuf_test_root("pub-push")
+    project :: files.join(root, "project")
+    publication_tuf_test_project(project, "textkit", "1.2.0")
+    bare :: publication_tuf_test_registry(root, "textkit", "1.2.0")
+    store :: files.join(root, "store")
+    files.create_dir_all(store) ?? panic("store")
+    output :: publication_tuf_test_command(root, project, bare, store, [String]{"registry", "publish"}).run() ?? panic("publish")
+    assert(output.success, "publish failed: {output.errors}")
+    index :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "show", "HEAD:index/textkit/textkit.jsonl"}).output
+    assert(index.contains("\"name\":\"textkit\""))
+    assert(index.contains("\"version\":\"1.2.0\""))
+    assert(index.contains("\"yanked\":false"))
+    entry :: publication_index_parse_line(index.lines()[0]) ?? panic("published index")
+    _ :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "cat-file", "-e", "HEAD:referrers/{entry.content_hash}/index.json"})
+    _ :: publication_tuf_test_git(project, [String]{"add", "."})
+    _ :: publication_tuf_test_git(project, [String]{"commit", "-m", "snapshot api"})
+    duplicate :: publication_tuf_test_command(root, project, bare, store, [String]{"registry", "publish"}).run() ?? panic("republish")
+    assert(!duplicate.success)
+    assert(duplicate.errors.contains("E1234"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication tuf original cli_concurrent_publish_keeps_one_immutable_version") {
+    root :: publication_tuf_test_root("concurrent")
+    left :: files.join(root, "left")
+    right :: files.join(root, "right")
+    publication_tuf_test_project(left, "racekit", "1.0.0")
+    publication_tuf_test_project(right, "racekit", "1.0.0")
+    files.write(files.join(right, "run.jet"), "#Test(\"smoke\") {{ assert(1 == 1) }}\nfn run() {{ print(\"different bytes\") }}\n") ?? panic("different source")
+    _ :: publication_tuf_test_git(right, [String]{"add", "."})
+    _ :: publication_tuf_test_git(right, [String]{"commit", "-m", "different source"})
+    bare :: publication_tuf_test_registry(root, "racekit", "1.0.0")
+    keygen :: publication_tuf_test_command(root, left, bare, files.join(root, "left-store"), [String]{"registry", "keygen"}).run() ?? panic("keygen")
+    assert(keygen.success, "shared publish keygen failed: {keygen.errors}")
+    left_child :: publication_tuf_test_command(root, left, bare, files.join(root, "left-store"), [String]{"registry", "publish"}).spawn() ?? panic("spawn left")
+    right_child :: publication_tuf_test_command(root, right, bare, files.join(root, "right-store"), [String]{"registry", "publish"}).spawn() ?? panic("spawn right")
+    a :: left_child.wait() ?? panic("wait left")
+    b :: right_child.wait() ?? panic("wait right")
+    assert(a.success != b.success, "exactly one concurrent immutable publish must win")
+    loser :: if a.success -> b else -> a
+    assert(loser.errors.contains("E1234"))
+    index :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "show", "HEAD:index/racekit/racekit.jsonl"}).output
+    count := 0
+    loop line in index.lines() {
+        if line.contains("\"version\":\"1.0.0\"") -> count += 1
+    }
+    assert_eq(count, 1)
+    loop path in ([String]{"artifacts/racekit/1.0.0/package.jet", "metadata/racekit.json", "transparency/log", "transparency/checkpoint"}) -> _ :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "cat-file", "-e", "HEAD:{path}"})
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication tuf original registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest") {
+    verification := StoreVerification.new()
+    root :: publication_tuf_test_root("referrer-tamper")
+    publisher :: files.join(root, "publisher")
+    consumer :: files.join(root, "consumer")
+    publication_tuf_test_project(publisher, "refkit", "1.2.0")
+    bare :: publication_tuf_test_registry(root, "refkit", "1.2.0")
+    store :: files.join(root, "store")
+    files.create_dir_all(store) ?? panic("store")
+    publish :: publication_tuf_test_command(root, publisher, bare, store, [String]{"registry", "publish"}).run() ?? panic("publish")
+    assert(publish.success, "publish failed: {publish.errors}")
+    index :: publication_tuf_test_git(root, [String]{"--git-dir", bare, "show", "HEAD:index/refkit/refkit.jsonl"}).output
+    entry :: publication_index_parse_line(index.lines()[0]) ?? panic("published index")
+    tamper :: files.join(root, "tamper")
+    _ :: publication_tuf_test_git(root, [String]{"clone", "file://{bare}", tamper})
+    referrer_index :: files.join(files.join(files.join(tamper, "referrers"), entry.content_hash), "index.json")
+    bytes := files.read_bytes(referrer_index) ?? panic("read referrer")
+    &bytes.push(U8{10})
+    files.write_bytes(referrer_index, bytes) ?? panic("tamper referrer")
+    loop args in ([[String]]{[String]{"config", "user.email", "test@jet.test"}, [String]{"config", "user.name", "Jet Test"}, [String]{"add", "."}, [String]{"commit", "-m", "tamper referrer index"}, [String]{"push", "origin", "HEAD:main"}}) -> _ :: publication_tuf_test_git(tamper, args)
+    files.create_dir_all(consumer) ?? panic("consumer")
+    files.write(files.join(consumer, "package.jet"), "{publication_tuf_test_manifest("ref-consumer", "0.1.0")}\ndeps: {{\n    refkit: refkit#1.2.0,\n}}\n") ?? panic("consumer manifest")
+    denied :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("fetch")
+    assert(!denied.success)
+    assert(denied.errors.contains("E1207"))
+    assert(denied.errors.contains("restore the immutable OCI referrer set") || denied.errors.contains("OCI referrer index digest"))
+    roots :: HangarRoots.at(files.join(root, "jetpack-root"))
+    loop stored in store_list(&verification, roots) -> assert(!(stored.name == "refkit" && stored.version == "1.2.0"), "tampered registry evidence must not reach Hangar")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/pkg.rs:6981-7272. Compose through the real CLI, and inspect the SAME
+// canonical lock/Hangar models as Rust rather than accept a second cache path.
+#Test("publication tuf original registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it") {
+    verification := StoreVerification.new()
+    root :: publication_tuf_test_root("locked-reuse")
+    publisher :: files.join(root, "publisher")
+    consumer :: files.join(root, "consumer")
+    publication_tuf_test_project(publisher, "textkit", "1.2.0")
+    bare :: publication_tuf_test_registry(root, "textkit", "1.2.0")
+    store :: files.join(root, "legacy-store")
+    files.create_dir_all(store) ?? panic("legacy store")
+    published :: publication_tuf_test_command(root, publisher, bare, store, [String]{"registry", "publish"}).run() ?? panic("publish")
+    assert(published.success, published.errors)
+    files.create_dir_all(consumer) ?? panic("consumer")
+    manifest_path :: files.join(consumer, "package.jet")
+    dependencies :: "{publication_tuf_test_manifest("consumer", "0.1.0")}\ndeps: {{\n    textkit: textkit#1.2.0,\n}}\n"
+    allowed :: "{dependencies}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"jet\"] }} }}\n"
+    denied_manifest :: "{dependencies}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"other\"] }} }}\n"
+    files.write(manifest_path, denied_manifest) ?? panic("denied manifest")
+    denied :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("denied fetch")
+    assert(!denied.success)
+    loop detail in ([String]{"E1207", "source authority", "consumer -> textkit#1.2.0", "package `consumer`", "use an allowed source"}) -> assert(denied.errors.contains(detail))
+    roots :: HangarRoots.at(files.join(root, "jetpack-root"))
+    loop stored in store_list(&verification, roots) -> assert(!(stored.name == "textkit" && stored.version == "1.2.0"))
+    files.write(manifest_path, allowed) ?? panic("allowed manifest")
+    fetched :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("fetch")
+    assert(fetched.success, fetched.errors)
+    installed := StoreEntry?{None}
+    loop stored in store_list(&verification, roots) {
+        if stored.name == "textkit" && stored.version == "1.2.0" -> installed = Val(stored)
+    }
+    entry :: installed ?? panic("registry fetch must register immutable Hangar metadata")
+    assert(entry.out.starts_with(files.join(files.join(roots.root, "hangar"), "objects")))
+    assert(files.is_file(files.join(entry.out, "package.jet")))
+    assert(!entry.out.starts_with(store))
+    lock_path :: files.join(files.join(consumer, ".jet"), "lock")
+    lock :: pkg_lock_parse(files.read(lock_path) ?? panic("read lock")) ?? panic("parse canonical lock")
+    locked_package := LockedPackage?{None}
+    loop package in lock.packages {
+        if package.name == "textkit" -> locked_package = Val(package)
+    }
+    package :: locked_package ?? panic("registry package must be locked")
+    if package.source == {
+        .Registry(_, _, _, _, _, _, _, _) -> {}
+        else -> panic("registry dependency must retain registry lock identity")
+    }
+    assert_eq(entry.cache_identity.source_fingerprint, package.content_hash ?? panic("registry source hash"))
+    assert(entry.envelope.provenance.contains("package=textkit#1.2.0"))
+    assert(entry.envelope.provenance.contains("package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"))
+    assert(entry.cache_identity.policy_fingerprint.starts_with("sha256-"))
+    facts :: PackageFacts.parse(allowed, manifest_path) ?? panic("canonical policy")
+    // Mandatory JP-PUB-POLICY dependency (#4262), not a local encoder.
+    assert_eq(entry.cache_identity.policy_fingerprint, publication_policy_fingerprint(facts.policy))
+    assert(entry.envelope.provenance.contains("oci-referrers=subject="))
+    updated :: publication_tuf_test_command(root, consumer, bare, store, [String]{"update", "textkit"}).run() ?? panic("targeted update")
+    assert(updated.success, updated.errors)
+    semantic_lock :: files.read(lock_path) ?? panic("semantic lock")
+    loop field in ([String]{"adapter-id = \"registry.pubgrub\"", "update-command = \"jet update textkit\"", "exact = \"textkit#1.2.0\"", "package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-", "pattern = \"textkit\"", "sources = [\"jet\"]"}) -> assert(semantic_lock.contains(field))
+    locked :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch", "--locked"}).run() ?? panic("locked fetch")
+    assert(locked.success, locked.errors)
+    same := String?{None}
+    loop stored in store_list(&verification, roots) {
+        if stored.name == "textkit" && stored.version == "1.2.0" -> same = Val(stored.out)
+    }
+    assert_eq(same, Val(entry.out), "locked consumption must reuse the same immutable Hangar object")
+    offline :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch", "--offline"}).env("JET_REGISTRY_URL", "file://{root}/must-not-be-read.git").run() ?? panic("offline fetch")
+    assert(offline.success, offline.errors)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication tuf actual 4MiB and 64MiB read bounds are inclusive") {
+    root :: publication_tuf_test_root("exact-bounds")
+    chunk := [U8]{}
+    loop index in 0..<65536 -> &chunk.push(U8{97})
+    loop limit in ([Int]{PUBLICATION_TUF_MAX_METADATA_BYTES, PUBLICATION_TUF_MAX_LOG_BYTES}) {
+        path :: files.join(root, "bounded-{limit}")
+        writer :: files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
+        loop index in 0..<(limit /% chunk.len()) -> writer.write_all(chunk) ?? panic("write bound fixture")
+        writer.fsync() ?? panic("fsync bound")
+        close(^writer)
+        text :: publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") ?? panic("inclusive exact bound")
+        assert_eq(text.bytes().len(), limit)
+        extra :: files.append(path) ?? panic("append excess byte")
+        extra.write_all([U8]{97}) ?? panic("append excess")
+        close(^extra)
+        if publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") == {
+            .Ok(_) -> panic("one byte over bound accepted")
+            .Err(error) -> assert("{error}".contains("registry metadata exceeds its size limit"))
+        }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication tuf checkpoint lock cleanup preserves action refusal") {
+    root :: publication_tuf_test_root("checkpoint-lock")
+    state :: files.join(root, "accepted.state")
+    action :: () -> {
+        files.write(state, "accepted")
+    }
+    publication_tuf_with_checkpoint_lock(state, action) ?? panic("checkpoint lock")
+    assert_eq(files.read(state) ?? panic("read accepted"), "accepted")
+    assert(!files.exists(files.join(root, "accepted.lock")))
+    refusal :: () -> {
+        return Err(publication_tuf_invalid("deliberate checkpoint action refusal"))
+    }
+    if publication_tuf_with_checkpoint_lock(state, refusal) == {
+        .Ok(_) -> panic("checkpoint action refusal suppressed")
+        .Err(error) -> assert("{error}".contains("deliberate checkpoint action refusal"))
+    }
+    assert(!files.exists(files.join(root, "accepted.lock")))
+    assert_eq(files.read(state) ?? panic("original accepted state retained"), "accepted")
+    files.remove_all(root) ?? panic("cleanup")
+}

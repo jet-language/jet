@@ -1231,7 +1231,6 @@ fn jet_codegen_core_call_row(record: CoreCallRecord) -> MIRCoreCall Never! {
         aot_direct: record.aot_direct,
         jit_direct: record.jit_direct,
         jit_symbol: record.jit_symbol,
-        native_int_result: record.native_int_result,
         marker: record.marker,
     }
 }
@@ -1313,7 +1312,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
     if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol || left.native_int_result != right.native_int_result -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol -> return false
     if !jet_codegen_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !jet_codegen_core_completion_equal(left.frame_completion, right.frame_completion) || !jet_codegen_core_capability_equal(left.capability, right.capability) || !jet_codegen_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
     jet_codegen_authority_decisions_equal(left.authority, right.authority) && jet_codegen_core_markers_equal(left.marker, right.marker)
 }
@@ -2138,6 +2137,9 @@ fn jet_codegen_comptime_item_function(request: SemaComptimeItemRequest, modules:
 // and closure method set change, never a whole-program walk.
 pub struct JetCodegenComptimeSession {
     builder: JetCodegenBuilder
+    // The staged modules' constant rows (jet_codegen_lower_constant_rows),
+    // lowered once per session; each item's program takes a copy.
+    constants: [MIRConstantDef]
 }
 
 pub struct JetCodegenComptimeLowering {
@@ -2149,11 +2151,12 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
+    constants := jet_codegen_lower_constant_rows(modules)
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
     builder := jet_codegen_new_builder(first, ^function_index, ^modules, ^field_symbols, source_files, ^source_index)
     builder.owners.closure_only = true
-    JetCodegenComptimeSession{builder: ^builder}
+    JetCodegenComptimeSession{builder: ^builder, constants: ^constants}
 }
 
 // The temporary interpreter lowering of one comptime item: its checked
@@ -2168,7 +2171,8 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, request: Sema
     session.builder.owners.closure_methods = ^closure_methods
     session.builder.function_index = jet_codegen_function_index(functions)
     rows := jet_codegen_lower_each_function(&session.builder, functions, None)
-    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, true)
+    constants := session.constants
+    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, true, ^constants)
     item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
     item := jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None)
     JetCodegenComptimeLowering{functions: lowered, item: item}
@@ -2798,7 +2802,8 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
         builder := jet_codegen_new_builder(functions[0], ^builder_index, ^builder_modules, ^field_symbols, source_files, ^source_index)
         lowered_rows = jet_codegen_lower_each_function(&builder, functions, trace_sink)
     }
-    jet_codegen_functions_from_rows(lowered_rows, functions, function_index, modules, false)
+    constants := jet_codegen_lower_constant_rows(modules)
+    jet_codegen_functions_from_rows(lowered_rows, functions, function_index, modules, false, ^constants)
 }
 
 // Lowers each of `functions`, in order, on one builder.
@@ -2820,10 +2825,11 @@ fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, functions: [TFun
 }
 
 // The program rows of `functions`, lowered as `lowered_rows`: their merged
-// function, callback and call rows, plus every module's type, trait, impl and
-// constant rows. With `closure_only`, `functions` is a comptime closure and
-// type rows list only its methods (jet_codegen_type_method_ids).
-fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool) -> JetCodegenFunctions {
+// function, callback and call rows, plus every module's type, trait and impl
+// rows, with `constants` (jet_codegen_lower_constant_rows of `modules`). With
+// `closure_only`, `functions` is a comptime closure and type rows list only
+// its methods (jet_codegen_type_method_ids).
+fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
@@ -2952,18 +2958,10 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     jet_codegen_ensure_referenced_traits(&traits, impls, all_function_rows, types)
     jet_codegen_sort_trait_definitions(&traits)
 
-    constants := [MIRConstantDef]{}
-    loop semantic_module in modules {
-        loop definition in semantic_module.declarations.constants {
-            value := jet_codegen_lower_constant_definition(definition, modules)
-            if value != None -> &constants.push(value ?? panic("lowered constant lost its MIR row"))
-        }
-    }
     jet_codegen_sort_functions(&lowered_functions)
     jet_codegen_sort_functions(&nested_functions)
     jet_codegen_sort_callback_adapters(&callbacks)
     jet_codegen_sort_impl_definitions(&impls)
-    jet_codegen_sort_constant_definitions(&constants)
     jet_codegen_sort_core_calls(&core_calls)
     jet_codegen_sort_prelude_calls(&prelude_calls)
     jet_codegen_sort_used_core(&used_core)
@@ -2983,6 +2981,20 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         prelude_calls: prelude_calls,
         used_core: used_core,
     }
+}
+
+// Every module's constant rows in canonical order. They read only `modules`,
+// so a comptime session lowers them once for all of its items.
+fn jet_codegen_lower_constant_rows(modules: [SemaGraphModuleResult]) -> [MIRConstantDef] {
+    constants := [MIRConstantDef]{}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.constants {
+            value := jet_codegen_lower_constant_definition(definition, modules)
+            if value != None -> &constants.push(value ?? panic("lowered constant lost its MIR row"))
+        }
+    }
+    jet_codegen_sort_constant_definitions(&constants)
+    constants
 }
 fn jet_codegen_foreign_target_applicability(target: MIRArtifactTarget) -> MIRTargetApplicability Never! {
     if target == {

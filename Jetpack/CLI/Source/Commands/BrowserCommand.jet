@@ -10,27 +10,28 @@ pub enum BrowserVerb {
 
     fn parse(text: String) -> BrowserVerb? Never! {
         if text == {
-            @BROWSER_VERB_LOCK -> Val(BrowserVerb.Lock)
-            @BROWSER_VERB_PROVISION -> Val(BrowserVerb.Provision)
-            @BROWSER_VERB_RESOLVE -> Val(BrowserVerb.Resolve)
-            @BROWSER_VERB_LIST -> Val(BrowserVerb.List)
+            BROWSER_VERB_LOCK -> Val(BrowserVerb.Lock)
+            BROWSER_VERB_PROVISION -> Val(BrowserVerb.Provision)
+            BROWSER_VERB_RESOLVE -> Val(BrowserVerb.Resolve)
+            BROWSER_VERB_LIST -> Val(BrowserVerb.List)
             else -> None
         }
     }
 }
 
-pub fn cli_cmd_browser(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_browser(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     raw :: parsed.positional.get(0) ?? {
-        theme.error("`jetpack browser` needs a verb", "verbs are: {@BROWSER_VERBS.join(", ")} — lock or provision a project-pinned browser binary.", "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.")
-        return @EXIT_USAGE
+        theme.error("`jetpack browser` needs a verb", "verbs are: {BROWSER_VERBS.join(", ")} — lock or provision a project-pinned browser binary.", "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.")
+        return EXIT_USAGE
     }
     verb :: BrowserVerb.parse(raw) ?? {
-        theme.error("`{raw}` is not a jetpack browser verb", "`jetpack browser` verbs are: {@BROWSER_VERBS.join(", ")}.", "try `jetpack browser lock chromium --binary /path/to/chromium`.")
-        return @EXIT_USAGE
+        theme.error("`{raw}` is not a jetpack browser verb", "`jetpack browser` verbs are: {BROWSER_VERBS.join(", ")}.", "try `jetpack browser lock chromium --binary /path/to/chromium`.")
+        return EXIT_USAGE
     }
     if verb == {
         .Lock -> cli_browser_lock(theme, parsed)
-        .Provision -> cli_browser_provision(theme, parsed)
+        .Provision -> cli_browser_provision(&verification, &cache, theme, parsed)
         .Resolve -> cli_browser_resolve(theme, parsed)
         .List -> cli_browser_list(theme)
     }
@@ -43,11 +44,11 @@ fn cli_browser_project_root() -[FS, Env]> String Never! {
 
 // A browser flag from the parsed flags, else `name <value>` among the
 // positional arguments.
-fn cli_browser_flag_value(parsed: CliParsed, name: String) -> String? Never! {
+fn cli_browser_flag_value(parsed: CLIParsed, name: String) -> String? Never! {
     parsed_value :: if name == {
-        @BROWSER_FLAG_BINARY -> parsed.flags.browser_binary
-        @BROWSER_FLAG_VERSION -> parsed.flags.browser_version
-        @BROWSER_FLAG_PROTOCOL -> parsed.flags.browser_protocol
+        BROWSER_FLAG_BINARY -> parsed.flags.browser_binary
+        BROWSER_FLAG_VERSION -> parsed.flags.browser_version
+        BROWSER_FLAG_PROTOCOL -> parsed.flags.browser_protocol
         else -> None
     }
     if parsed_value != None -> return parsed_value
@@ -59,112 +60,112 @@ fn cli_browser_flag_value(parsed: CliParsed, name: String) -> String? Never! {
     None
 }
 
-fn cli_browser_protocol(parsed: CliParsed) -> String Never! {
-    cli_browser_flag_value(parsed, @BROWSER_FLAG_PROTOCOL) ?? @BROWSER_DEFAULT_PROTOCOL
+fn cli_browser_protocol(parsed: CLIParsed) -> String Never! {
+    cli_browser_flag_value(parsed, BROWSER_FLAG_PROTOCOL) ?? BROWSER_DEFAULT_PROTOCOL
 }
 
-fn cli_browser_lock(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_browser_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     engine :: parsed.positional.get(1) ?? {
-        theme.error("`jetpack browser lock` needs an engine", "engines are: {@BROWSER_ENGINES.join(", ")}.", "try `jetpack browser lock chromium --binary /usr/bin/chromium`.")
-        return @EXIT_USAGE
+        theme.error("`jetpack browser lock` needs an engine", "engines are: {BROWSER_ENGINES.join(", ")}.", "try `jetpack browser lock chromium --binary /usr/bin/chromium`.")
+        return EXIT_USAGE
     }
-    binary :: cli_browser_flag_value(parsed, @BROWSER_FLAG_BINARY) ?? {
+    binary :: cli_browser_flag_value(parsed, BROWSER_FLAG_BINARY) ?? {
         theme.error("`jetpack browser lock` needs --binary <path>", "locking pins an exact on-disk browser for automation; PATH lookups are rejected.", "try `jetpack browser lock chromium --binary /nix/store/.../bin/chromium`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    version :: cli_browser_flag_value(parsed, @BROWSER_FLAG_VERSION) ?? env_browser_read_version_label(binary)
+    version :: cli_browser_flag_value(parsed, BROWSER_FLAG_VERSION) ?? env_browser_read_version_label(binary)
     if env_browser_lock_binary(cli_browser_project_root(), engine, binary, version, cli_browser_protocol(parsed), "locked from {binary}") == {
         .Ok(locked) -> {
             theme.status("locked {theme.bold(locked.engine)} {theme.bold(locked.version)} -> {locked.binary} ({locked.envelope.output_hash})")
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             theme.error("browser lock failed", error.message(), "fix the binary path and retry.")
-            @EXIT_USAGE
+            EXIT_USAGE
         }
     }
 }
 
-fn cli_browser_provision(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_browser_provision(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(1) ?? {
         theme.error("`jetpack browser provision` needs a package ref", "provision realizes one browser package and locks its binary into `.jet/lock`.", "try `jetpack browser provision chromium@nixpkgs`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    spec :: cli_classify_or_report(theme, raw) ?? return @EXIT_USAGE
+    spec :: cli_classify_or_report(&cache, theme, raw) ?? return EXIT_USAGE
     engine :: env_browser_normalize_engine(spec.short_name()) ?? {
-        theme.error("browser provision needs a supported engine package", err.message(), "package short name must be one of: {@BROWSER_ENGINES.join(", ")}.")
-        return @EXIT_USAGE
+        theme.error("browser provision needs a supported engine package", err.message(), "package short name must be one of: {BROWSER_ENGINES.join(", ")}.")
+        return EXIT_USAGE
     }
     roots :: pkg_resolve_roots()
     plan :: RunPlan{
         project_root: cli_current_dir(),
         refs: [RefSpec]{spec},
         adapters: [AdapterPlan]{},
-        table: cli_cwd_table(),
-        label: @JETPACK_PROMPT_LABEL,
+        table: cli_cwd_table(&cache),
+        label: JETPACK_PROMPT_LABEL,
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
         dev_services: [DevServicePlan]{},
         secrets: [SecretSpec]{},
         environment: EnvironmentFacts{},
     }
-    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? {
+    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? {
         if err == .Reported(code) -> return code
         theme.error("couldn't compose the browser environment", err.message(), "retry the provision after fixing the reported problem.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     lease :: env.cache_leases.get(0) ?? {
         theme.error("`{spec.raw}` realized with no output to lock", "browser provision needs a package output that contains an engine binary.", "pick chromium, firefox, or webkit from a realizable source.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     output :: lease.stable_path(lease.original_output()) ?? {
         store_report_integrity(theme, lease.consumption_failure(err))
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     binary :: env_browser_find_engine_binary(output, engine) ?? {
         theme.error("could not find the browser binary in the realized package", err.message(), "the package must ship an executable under bin/.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    version :: cli_browser_flag_value(parsed, @BROWSER_FLAG_VERSION) ?? env_browser_read_version_label(binary)
+    version :: cli_browser_flag_value(parsed, BROWSER_FLAG_VERSION) ?? env_browser_read_version_label(binary)
     if env_browser_lock_binary(cli_browser_project_root(), engine, binary, version, cli_browser_protocol(parsed), "{spec.raw} via jetpack browser provision") == {
         .Ok(locked) -> {
             theme.status("provisioned {theme.bold(locked.engine)} {theme.bold(locked.version)} -> {locked.binary} ({locked.envelope.output_hash})")
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             theme.error("browser provision lock failed", error.message(), "the realized binary could not be pinned; check permissions on `.jet/lock`.")
-            @EXIT_USAGE
+            EXIT_USAGE
         }
     }
 }
 
-fn cli_browser_resolve(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+fn cli_browser_resolve(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
     engine :: parsed.positional.get(1) ?? {
-        theme.error("`jetpack browser resolve` needs an engine", "engines are: {@BROWSER_ENGINES.join(", ")}.", "try `jetpack browser resolve chromium`.")
-        return @EXIT_USAGE
+        theme.error("`jetpack browser resolve` needs an engine", "engines are: {BROWSER_ENGINES.join(", ")}.", "try `jetpack browser resolve chromium`.")
+        return EXIT_USAGE
     }
     if env_browser_resolve(cli_browser_project_root(), engine) == {
         .Ok(locked) -> {
             print("engine={locked.engine}\nversion={locked.version}\nbinary={locked.binary}\nprotocol={locked.protocol}\noutput-hash={locked.envelope.output_hash}\nplatform={locked.envelope.platform}\nsize={locked.size}")
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             theme.error("browser resolve failed", error.message(), "run `jetpack browser lock` or `jetpack browser provision` first.")
-            @EXIT_USAGE
+            EXIT_USAGE
         }
     }
 }
 
-fn cli_browser_list(theme: Theme) -[IO, FS, Env]> Int Never! {
+fn cli_browser_list(theme: Theme) -[IO, FS, Env, Time.Wait]> Int Never! {
     browsers :: env_browser_list(cli_browser_project_root())
     if browsers.len() == 0 {
         theme.status("no locked browsers yet.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     print("ENGINE    VERSION  PROTOCOL     HASH")
     loop browser in browsers {
         version :: if browser.version == "" -> "-" else -> browser.version
         print("{terminal_pad_end(browser.engine, 9)} {terminal_pad_end(version, 8)} {terminal_pad_end(browser.protocol, 12)} {browser.envelope.output_hash}")
     }
-    @EXIT_OK
+    EXIT_OK
 }

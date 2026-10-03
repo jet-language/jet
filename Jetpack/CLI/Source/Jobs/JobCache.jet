@@ -35,13 +35,13 @@ fn cli_sha256_hex(bytes: [U8]) -> String Never! {
 }
 
 // The strict job cache key (`jet-job-cache-v2`).
-fn cli_task_cache_key(project_dir: String, entry: String, job: String, compiler_path: String, metadata: JobMetadata, task_args: [String], refs: [RefSpec], table: SourceTable, environment_hash: String) -[FS, Env]> String CliError! {
+fn cli_task_cache_key(project_dir: String, entry: String, job: String, compiler_path: String, metadata: JobMetadata, task_args: [String], refs: [RefSpec], table: SourceTable, environment_hash: String) -[FS, Env]> String CLIError! {
     identity := "jet-job-cache-v2\n{job}\n"
-    identity = "{identity}compiler={@COMPILER_VERSION}\n"
-    compiler_build :: foundation_sha256_file_hex(compiler_path) ?? return Err(CliError.Other("couldn't hash compiler `{compiler_path}`: {err}"))
+    identity = "{identity}compiler={COMPILER_VERSION}\n"
+    compiler_build :: foundation_sha256_file_hex(compiler_path) ?? return Err(CLIError.Other("couldn't hash compiler `{compiler_path}`: {err}"))
     identity = "{identity}compiler-build={compiler_build}\n"
     identity = "{identity}platform={pkg_host_platform()}\n"
-    entry_hash :: foundation_sha256_file_hex(entry) ?? return Err(CliError.Other("couldn't hash job entry: {err}"))
+    entry_hash :: foundation_sha256_file_hex(entry) ?? return Err(CLIError.Other("couldn't hash job entry: {err}"))
     identity = "{identity}{entry_hash}\n"
     identity = "{identity}args={cli_debug_str_list(task_args)}\n"
     identity = "{identity}environment={environment_hash}\n"
@@ -54,25 +54,25 @@ fn cli_task_cache_key(project_dir: String, entry: String, job: String, compiler_
     loop limit in cli_sorted_limits(metadata.limits) -> identity = "{identity}limit={limit.key}:{limit.value}\n"
     loop reference in refs -> identity = "{identity}ref={reference.raw}\n"
     loop decl in table.declarations() -> identity = "{identity}source={decl.name}:{decl.upstream}:{decl.via.label()}\n"
-    project_inputs :: [String]{@ENV_FILE, @UNIFIED_LOCK_FILE}
+    project_inputs :: [String]{ENV_FILE, UNIFIED_LOCK_FILE}
     loop relative in project_inputs {
         path :: files.join(project_dir, relative)
         if files.is_file(path) {
-            digest :: foundation_sha256_file_hex(path) ?? return Err(CliError.Other("couldn't hash `{relative}`: {err}"))
+            digest :: foundation_sha256_file_hex(path) ?? return Err(CLIError.Other("couldn't hash `{relative}`: {err}"))
             identity = "{identity}project-input={relative}:{digest}\n"
         }
     }
     if metadata.inputs.len() == 0 -> identity = "{identity}inputs=<none>\n"
     loop input in metadata.inputs {
         path :: cli_job_path(project_dir, Val(input), "input", false)
-        info :: files.stat(path) ?? return Err(CliError.Other("couldn't inspect job input `{input}`: {err}"))
-        if info.is_symlink -> return Err(CliError.Other("job input `{input}` may not be a symlink"))
-        if !info.is_dir && !info.is_file -> return Err(CliError.Other("job input `{input}` is not a regular file or directory"))
+        info :: files.stat(path) ?? return Err(CLIError.Other("couldn't inspect job input `{input}`: {err}"))
+        if info.is_symlink -> return Err(CLIError.Other("job input `{input}` may not be a symlink"))
+        if !info.is_dir && !info.is_file -> return Err(CLIError.Other("job input `{input}` is not a regular file or directory"))
         digest := ""
         if info.is_dir {
             digest = foundation_tree_hash(path)
         } else {
-            digest = foundation_sha256_file_hex(path) ?? return Err(CliError.Other("couldn't hash job input `{input}`: {err}"))
+            digest = foundation_sha256_file_hex(path) ?? return Err(CLIError.Other("couldn't hash job input `{input}`: {err}"))
         }
         identity = "{identity}input={input}:{digest}\n"
     }
@@ -116,10 +116,10 @@ fn cli_task_environment_hash_with_vars(refs: [RefSpec], table: SourceTable, secr
 // A strict cached job declares at least one input, keeps inputs and outputs
 // out of secret-bearing or Jet state, and never overlaps an input with an
 // output.
-fn cli_validate_cached_job_metadata(project_dir: String, metadata: JobMetadata) CliError! -[FS, Env]> {
-    if metadata.cache == JobCachePolicy.Uncached -> return Ok()
+fn cli_validate_cached_job_metadata(project_dir: String, metadata: JobMetadata) CLIError! -[FS, Env]> {
+    if metadata.cache == JobCachePolicy.Uncached -> return
     if metadata.inputs.len() == 0 {
-        return Err(CliError.Other("strict cached jobs must declare at least one project input; undeclared reads cannot be proven safe"))
+        return Err(CLIError.Other("strict cached jobs must declare at least one project input; undeclared reads cannot be proven safe"))
     }
     outputs := [(name: String, path: String)]{}
     loop output in metadata.outputs {
@@ -139,66 +139,61 @@ fn cli_validate_cached_job_metadata(project_dir: String, metadata: JobMetadata) 
     loop output in outputs {
         loop input in inputs {
             if input.path == output.path || cli_path_starts_with(input.path, output.path) || cli_path_starts_with(output.path, input.path) {
-                return Err(CliError.Other("cached job input `{input.name}` overlaps output `{output.name}`"))
+                return Err(CLIError.Other("cached job input `{input.name}` overlaps output `{output.name}`"))
             }
         }
     }
     loop input in inputs {
-        if !files.exists(input.path) -> return Err(CliError.Other("job input `{input.name}` does not exist"))
+        if !files.exists(input.path) -> return Err(CLIError.Other("job input `{input.name}` does not exist"))
     }
-    Ok()
 }
 
 // Secret values are never cache inputs.
-fn cli_validate_cached_job_environment(plan: RunPlan, env: ShellEnv) CliError! {
+fn cli_validate_cached_job_environment(plan: RunPlan, env: ShellEnv) CLIError! {
     if plan.secrets.len() > 0 {
-        return Err(CliError.Other("strict cached jobs cannot use declared secrets; secret values are never cache inputs"))
+        return Err(CLIError.Other("strict cached jobs cannot use declared secrets; secret values are never cache inputs"))
     }
     loop dotenv in plan.environment.lifecycle.dotenv {
-        if dotenv.secrets.len() > 0 -> return Err(CliError.Other("strict cached jobs cannot use secret dotenv variables from `{dotenv.file}`"))
+        if dotenv.secrets.len() > 0 -> return Err(CLIError.Other("strict cached jobs cannot use secret dotenv variables from `{dotenv.file}`"))
     }
     names := env.vars.keys().to_list()
     &names.sort()
     loop name in names {
-        if cli_is_sensitive_environment_name(name) -> return Err(CliError.Other("strict cached jobs cannot use secret-bearing environment variable `{name}`"))
+        if cli_is_sensitive_environment_name(name) -> return Err(CLIError.Other("strict cached jobs cannot use secret-bearing environment variable `{name}`"))
     }
-    Ok()
 }
 
-fn cli_reject_cache_sensitive_path(relative: String, field: String) CliError! {
-    if cli_is_cache_sensitive_path(relative) -> return Err(CliError.Other("cached job {field} `{relative}` is secret-bearing or Jet state"))
-    Ok()
+fn cli_reject_cache_sensitive_path(relative: String, field: String) CLIError! {
+    if cli_is_cache_sensitive_path(relative) -> return Err(CLIError.Other("cached job {field} `{relative}` is secret-bearing or Jet state"))
 }
 
-fn cli_reject_cache_sensitive_resolved_path(project_dir: String, path: String, declared: String, field: String) CliError! -[FS, Env]> {
-    root :: files.canonicalize(project_dir) ?? return Err(CliError.Other("couldn't resolve cached job project root: {err}"))
-    if !cli_path_starts_with(path, root) -> return Err(CliError.Other("cached job {field} `{declared}` escapes the project"))
+fn cli_reject_cache_sensitive_resolved_path(project_dir: String, path: String, declared: String, field: String) CLIError! -[FS, Env]> {
+    root :: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve cached job project root: {err}"))
+    if !cli_path_starts_with(path, root) -> return Err(CLIError.Other("cached job {field} `{declared}` escapes the project"))
     relative :: path.removeprefix(root).removeprefix("/")
     if cli_is_cache_sensitive_path(relative) {
-        return Err(CliError.Other("cached job {field} `{declared}` resolves into secret-bearing or Jet state `{relative}`"))
+        return Err(CLIError.Other("cached job {field} `{declared}` resolves into secret-bearing or Jet state `{relative}`"))
     }
-    Ok()
 }
 
-fn cli_reject_cache_sensitive_descendants(root: String, relative: String, field: String) CliError! -[FS]> {
-    if !files.is_dir(root) -> return Ok()
-    entries :: files.list_dir(root) ?? return Err(CliError.Other("couldn't inspect cached job {field} `{relative}`: {err}"))
+fn cli_reject_cache_sensitive_descendants(root: String, relative: String, field: String) CLIError! -[FS]> {
+    if !files.is_dir(root) -> return
+    entries :: files.list_dir(root) ?? return Err(CLIError.Other("couldn't inspect cached job {field} `{relative}`: {err}"))
     loop item in entries {
         child :: files.join(relative, item.name)
         if cli_is_cache_sensitive_path(child) {
-            return Err(CliError.Other("cached job {field} `{relative}` contains secret-bearing or Jet state `{child}`"))
+            return Err(CLIError.Other("cached job {field} `{relative}` contains secret-bearing or Jet state `{child}`"))
         }
-        info :: files.stat(item.path) ?? return Err(CliError.Other("{err}"))
-        if info.is_symlink -> return Err(CliError.Other("strict cached job {field} `{relative}` contains unsupported symlink `{child}`"))
+        info :: files.stat(item.path) ?? return Err(CLIError.Other("{err}"))
+        if info.is_symlink -> return Err(CLIError.Other("strict cached job {field} `{relative}` contains unsupported symlink `{child}`"))
         if info.is_dir -> cli_reject_cache_sensitive_descendants(item.path, child, field)
     }
-    Ok()
 }
 
 // A digest of every project file outside declared outputs, `.git`,
 // `target`, and secret-bearing or Jet state, so an unlisted file change
 // invalidates the strict key (`jet-job-project-scope-v1`).
-fn cli_task_project_scope_fingerprint(project_dir: String, metadata: JobMetadata) -[FS]> String CliError! {
+fn cli_task_project_scope_fingerprint(project_dir: String, metadata: JobMetadata) -[FS]> String CLIError! {
     found := [(path: String, digest: String)]{}
     cli_collect_job_scope_files(project_dir, project_dir, metadata, &found)
     &found.sort_by((left: (path: String, digest: String), right: (path: String, digest: String)) -> left.path <=> right.path)
@@ -207,25 +202,24 @@ fn cli_task_project_scope_fingerprint(project_dir: String, metadata: JobMetadata
     Ok(cli_sha256_hex(identity.bytes()))
 }
 
-fn cli_collect_job_scope_files(root: String, directory: String, metadata: JobMetadata, found: &[(path: String, digest: String)]) CliError! -[FS]> {
-    entries :: files.list_dir(directory) ?? return Err(CliError.Other("couldn't read job cache scope `{directory}`: {err}"))
+fn cli_collect_job_scope_files(root: String, directory: String, metadata: JobMetadata, found: &[(path: String, digest: String)]) CLIError! -[FS]> {
+    entries :: files.list_dir(directory) ?? return Err(CLIError.Other("couldn't read job cache scope `{directory}`: {err}"))
     loop item in entries {
         relative :: item.path.removeprefix(root).removeprefix("/")
         first :: relative.split("/").to_list()[0]
         if cli_is_cache_sensitive_path(relative) || first == ".git" || first == "target" -> next
         if cli_path_covered(relative, metadata.outputs) -> next
-        info :: files.stat(item.path) ?? return Err(CliError.Other("{err}"))
+        info :: files.stat(item.path) ?? return Err(CLIError.Other("{err}"))
         if {
-            info.is_symlink -> return Err(CliError.Other("strict cached job scope contains unsupported symlink `{relative}`"))
+            info.is_symlink -> return Err(CLIError.Other("strict cached job scope contains unsupported symlink `{relative}`"))
             info.is_dir -> cli_collect_job_scope_files(root, item.path, metadata, found)
             info.is_file -> {
-                digest :: foundation_sha256_file_hex(item.path) ?? return Err(CliError.Other("couldn't hash job scope `{relative}`: {err}"))
+                digest :: foundation_sha256_file_hex(item.path) ?? return Err(CLIError.Other("couldn't hash job scope `{relative}`: {err}"))
                 &found.push((path: relative.replace("\\", "/"), digest: digest))
             }
             else -> {}
         }
     }
-    Ok()
 }
 
 fn cli_is_cache_sensitive_path(relative: String) -> Bool Never! {
@@ -268,7 +262,7 @@ fn cli_is_secret_word(word: String) -> Bool Never! {
 // for `.Shared`.
 fn cli_job_cache_path(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) -> String Never! {
     if metadata.cache == {
-        .Local -> files.join(files.join(files.join(project_dir, @SOURCE_ROOT_DIR), "jobs"), "{key}.done")
+        .Local -> files.join(files.join(files.join(project_dir, SOURCE_ROOT_DIR), "jobs"), "{key}.done")
         .Shared -> files.join(files.join(roots.root, "jobs"), "{key}.done")
         .Uncached -> ""
     }
@@ -292,13 +286,12 @@ fn cli_task_cache_hit(project_dir: String, roots: HangarRoots, metadata: JobMeta
 
 // Record a finished strict job: write a temporary, then rename it over the
 // record.
-fn cli_write_job_cache(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) CliError! -[FS, Env]> {
+fn cli_write_job_cache(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) CLIError! -[FS, Env]> {
     path :: cli_job_cache_path(project_dir, roots, metadata, key)
     parent :: files.dirname(path)
-    if parent == "" -> return Err(CliError.Other("job cache has no parent directory"))
-    files.create_dir_all(parent) ?? return Err(CliError.Other("{err}"))
+    if parent == "" -> return Err(CLIError.Other("job cache has no parent directory"))
+    files.create_dir_all(parent) ?? return Err(CLIError.Other("{err}"))
     temporary :: files.join(parent, ".{key}.{sys.pid()}.tmp")
-    files.write(temporary, "{key}\n") ?? return Err(CliError.Other("{err}"))
-    files.rename(temporary, path) ?? return Err(CliError.Other("{err}"))
-    Ok()
+    files.write(temporary, "{key}\n") ?? return Err(CLIError.Other("{err}"))
+    files.rename(temporary, path) ?? return Err(CLIError.Other("{err}"))
 }

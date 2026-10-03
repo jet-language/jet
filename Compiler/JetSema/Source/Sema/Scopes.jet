@@ -363,6 +363,11 @@ pub struct SemaCheckContext {
     pub unsafe_depth: Int
     pub borrow_ctx: Bool
     pub allow_string_view_read: Bool
+    // Rust `suppress_partial_move_root_read`: the expression being checked
+    // is the base of a deeper place (`state` in `state.x`, `&s`, `s.x = v`)
+    // whose complete place the caller checks, so a bare name read here
+    // answers only for a move of the whole name.
+    pub suppress_partial_move_root_read: Bool
     pub allow_fixed_constructor: Bool
     pub generic_params: [TGenericParam]
     pub lambda_escapes: Bool?
@@ -653,6 +658,7 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         unsafe_depth: 0,
         borrow_ctx: false,
         allow_string_view_read: false,
+        suppress_partial_move_root_read: false,
         allow_fixed_constructor: false,
         generic_params: [TGenericParam]{},
         lambda_escapes: Val(true),
@@ -707,6 +713,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         unsafe_depth: source.unsafe_depth,
         borrow_ctx: source.borrow_ctx,
         allow_string_view_read: source.allow_string_view_read,
+        suppress_partial_move_root_read: source.suppress_partial_move_root_read,
         allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: ~source.generic_params,
         lambda_escapes: source.lambda_escapes,
@@ -820,6 +827,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             unsafe_depth: context.unsafe_depth,
             borrow_ctx: context.borrow_ctx,
             allow_string_view_read: context.allow_string_view_read,
+            suppress_partial_move_root_read: context.suppress_partial_move_root_read,
             allow_fixed_constructor: context.allow_fixed_constructor,
             generic_params: ~context.generic_params,
             lambda_escapes: context.lambda_escapes,
@@ -908,6 +916,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.unsafe_depth = saved.unsafe_depth
     context.borrow_ctx = saved.borrow_ctx
     context.allow_string_view_read = saved.allow_string_view_read
+    context.suppress_partial_move_root_read = saved.suppress_partial_move_root_read
     context.allow_fixed_constructor = saved.allow_fixed_constructor
     context.generic_params = ~saved.generic_params
     context.lambda_escapes = saved.lambda_escapes

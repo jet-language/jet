@@ -5,9 +5,9 @@
 // record plus native cache admission).
 
 // A Nix store path basename starts with this many hash characters.
-@PROVIDER_NIX_HASH_LEN :: 32
-@PROVIDER_NIX_OUTPUT_SUFFIXES :: [String]{"-bin", "-dev", "-lib", "-doc", "-man", "-info", "-out"}
-@PROVIDER_NIXPKGS_EXACT_PREFIX :: "github:NixOS/nixpkgs#"
+PROVIDER_NIX_HASH_LEN :: prep { 32 }
+PROVIDER_NIX_OUTPUT_SUFFIXES :: prep { [String]{"-bin", "-dev", "-lib", "-doc", "-man", "-info", "-out"} }
+PROVIDER_NIXPKGS_EXACT_PREFIX :: prep { "github:NixOS/nixpkgs#" }
 
 // Immutable Nix identity prepared from the resolved request and the output
 // bytes. The Store receives the same facts through the realization record; no
@@ -51,7 +51,7 @@ fn provider_validate_project_lock_layout(project: String) ProviderError! -[FS]> 
             if info.is_symlink || !info.is_dir -> return Err(ProviderError.BadOutput("project managed directory `{managed}` is not a real directory"))
         }
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Ok()
+            if store_io_is_not_found(error) -> return
             return Err(ProviderError.BadOutput("could not inspect project managed directory `{managed}`: {error}"))
         }
     }
@@ -80,30 +80,30 @@ fn provider_primary_nix_output_digest(digests: [String: String]) -> String? Neve
 // The authenticated admission digest of an output this provider just
 // substituted, when its path is exactly the sealed Hangar object. Admission
 // already enforced the object-shape law (directory, file, or symlink root).
-fn provider_admitted_output_digest(ctx: ProviderCtx, realized: Realized, name: String, path: String) -[FS, Env]> String? Never! {
+fn provider_admitted_output_digest(verification: &StoreVerification, ctx: ProviderCtx, realized: Realized, name: String, path: String) -[FS, Env]> String? Never! {
     if realized.producer.provider != "nix" || realized.source_state != SourceState.Substituted -> return None
     digest :: realized.producer.facts.get("nix.output.{name}.digest") ?? return None
     roots :: ctx.nix_roots ?? return None
     hangar :: roots.hangar_dir()
-    expected :: files.join(files.join(hangar, @STORE_OBJECTS_DIR), digest)
+    expected :: files.join(files.join(hangar, STORE_OBJECTS_DIR), digest)
     if files.stat(expected) == {
         .Ok(_) -> {}
         .Err(_) -> return None
     }
-    sealed :: store_check_seal(expected, hangar) ?? return None
+    sealed :: store_check_seal(&verification, expected, hangar) ?? return None
     if path == expected && digest != "" && sealed == Val(digest) -> return Val(digest)
     None
 }
 
 // Hash realized output bytes. Hangar objects use the sealed stat manifest and
 // the Nix shape law; everything else keeps the strict native law.
-fn provider_hash_output_bytes(ctx: ProviderCtx, path: String) -[FS, Env]> String ProviderReason! {
+fn provider_hash_output_bytes(verification: &StoreVerification, ctx: ProviderCtx, path: String) -[FS, Env]> String ProviderReason! {
     if ctx.nix_roots == {
         .Val(roots) -> {
             hangar :: roots.hangar_dir()
-            objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+            objects :: files.join(hangar, STORE_OBJECTS_DIR)
             if path == objects || path.starts_with("{objects}/") {
-                digest :: store_verified_output_hash_persistent(path, Val(hangar), false) ?? return Err(ProviderReason{message: err.message()})
+                digest :: store_verified_output_hash_persistent(&verification, path, Val(hangar), false) ?? return Err(ProviderReason{message: err.message()})
                 return Ok(digest)
             }
         }
@@ -116,14 +116,14 @@ fn provider_hash_output_bytes(ctx: ProviderCtx, path: String) -[FS, Env]> String
 // Prepare the Nix identity from the authenticated admission digest when this
 // provider just substituted the object; other paths hash current bytes. An
 // existing project lock pins the primary digest.
-pub fn provider_prepare_nix_identity(spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[FS, Env]> PreparedNixIdentity ProviderError! {
+pub fn provider_prepare_nix_identity(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[FS, Env]> PreparedNixIdentity ProviderError! {
     digests := [String: String]{}
     loop name in provider_sorted_keys(realized.named_outputs) {
         path :: realized.named_outputs[name]
         if name.trim() == "" || path.trim() == "" -> return Err(ProviderError.BadOutput("Nix provider returned an empty named output `{name}`"))
-        digest :: if provider_admitted_output_digest(ctx, realized, name, path) == {
+        digest :: if provider_admitted_output_digest(&verification, ctx, realized, name, path) == {
             .Val(admitted) -> admitted
-            .None -> provider_hash_output_bytes(ctx, path) ?? return Err(ProviderError.Ingest("Nix output `{name}` at `{path}` could not be hashed from its bytes: {err.message}"))
+            .None -> provider_hash_output_bytes(&verification, ctx, path) ?? return Err(ProviderError.Ingest("Nix output `{name}` at `{path}` could not be hashed from its bytes: {err.message}"))
         }
         if digest.trim() == "" -> return Err(ProviderError.BadOutput("Nix output `{name}` at `{path}` has an empty byte digest"))
         digests[name] = digest
@@ -230,7 +230,7 @@ pub fn provider_nix_build_facts_record() -> [String: String] Never! {
 
 // A Nix producer must carry every fixed build fact unchanged.
 pub fn provider_validate_nix_build_facts(producer: ProducerRecord) ProviderError! {
-    if producer.provider != "nix" -> return Ok()
+    if producer.provider != "nix" -> return
     expected :: provider_nix_build_facts_record()
     loop key in provider_sorted_keys(expected) {
         if (producer.facts.get(key) ?? "") != expected[key] || !producer.facts.has_key(key) -> return Err(ProviderError.BadOutput("Nix producer fact `{key}` is missing or changed"))
@@ -257,7 +257,7 @@ fn provider_is_local_native(facts: [String: String], provider: String) -> Bool N
 // Store registration.
 pub fn provider_validate_nix_lock_before_store(ctx: ProviderCtx, realized: Realized) ProviderError! -[FS]> {
     local_native :: provider_is_local_native(realized.producer.facts, realized.producer.provider)
-    if realized.producer.provider != "nix" && !local_native -> return Ok()
+    if realized.producer.provider != "nix" && !local_native -> return
     expected :: realized.producer.facts.get("nix.lock.digest") ?? return Err(ProviderError.BadOutput("Nix realization is missing its prepared lock digest"))
     if ctx.project_dir == {
         .Val(project) -> {
@@ -306,12 +306,12 @@ pub fn provider_nix_closure_record(entry: StoreEntry, producer: ProducerRecord, 
 
 // Publish Nix lock state only after Store returned a registered entry. A
 // missing or non-directory project root intentionally does nothing.
-pub fn provider_record_nix_lock_after_store(ctx: ProviderCtx, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry ProviderError! {
+pub fn provider_record_nix_lock_after_store(verification: &StoreVerification, ctx: ProviderCtx, roots: HangarRoots, entry: StoreEntry) -[IO, FS, Env, Exec, Time, Time.Wait]> StoreEntry ProviderError! {
     project :: ctx.project_dir ?? return Ok(entry)
     if !files.is_dir(project) -> return Ok(entry)
     if entry.reference == "" || entry.envelope.output_hash == "" -> return Ok(entry)
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Ok(entry)
-    nix_realization :: producer.provider == "nix" && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes())
+    nix_realization :: producer.provider == "nix" && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes())
     local_native :: producer.facts.has_key("nix.fallback.provenance") || provider_is_local_native(producer.facts, producer.provider)
     if !nix_realization && !local_native -> return Ok(entry)
 
@@ -339,7 +339,7 @@ pub fn provider_record_nix_lock_after_store(ctx: ProviderCtx, roots: HangarRoots
         pkg_lock_record_registry_realization(project, "jetpackage", entry.name, entry.version, entry.reference, entry.envelope.output_hash, source_hash, repository, authority, [String]{}, envelope)
         return Ok(entry)
     }
-    project_cas_bundle :: store_publish_nix_cas_bundle(project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
+    project_cas_bundle :: store_publish_nix_cas_bundle(&verification, project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
     nix_closure :: provider_nix_closure_record(entry, producer, project_cas_bundle)
     local_import :: producer.facts.has_key("nix.fallback.provenance")
     catalog_tier :: producer.facts.get("nix.index.tier") ?? (if local_import -> "local-import" else -> "")
@@ -377,7 +377,7 @@ pub fn provider_record_nix_lock_after_store(ctx: ProviderCtx, roots: HangarRoots
     }
     pkg_lock_record_nix_realization(project, lock_entry.name, lock_entry.version, lock_entry.reference, lock_entry.envelope.output_hash, nix_closure, lock_envelope) ?? return Err(ProviderError.BadOutput(err.message()))
     published_digest :: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
-    refreshed :: store_refresh_lock_digest(roots, lock_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
+    refreshed :: store_refresh_lock_digest(&verification, roots, lock_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
     Ok(refreshed)
 }
 
@@ -400,15 +400,15 @@ pub fn provider_host_nix_system() -[Env]> String? Never! {
 fn provider_locked_nix_index_key_for_project(spec: RefSpec, table: SourceTable, project_dir: String?, host_system: String) -[FS]> NixIndexKey ProviderError! {
     source_name :: if spec.source == {
         .Named(name) -> name
-        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         else -> { return Err(ProviderError.Unsupported("Nix index lookup does not support `{spec.source.label()}` as a Nix source")) }
     }
     project :: project_dir ?? return Err(ProviderError.Channel("Nix source `{source_name}` has no project lock containing an exact channel pin"))
-    locked :: pkg_lock_locked_source_channel(project, source_name) ?? (pkg_lock_locked_source_channel(project, @REF_SOURCE_NIXPKGS) ?? return Err(ProviderError.Channel("Nix source `{source_name}` has no exact lock entry; run `jetpack update` first")))
-    if !locked.exact.starts_with(@PROVIDER_NIXPKGS_EXACT_PREFIX) {
+    locked :: pkg_lock_locked_source_channel(project, source_name) ?? (pkg_lock_locked_source_channel(project, REF_SOURCE_NIXPKGS) ?? return Err(ProviderError.Channel("Nix source `{source_name}` has no exact lock entry; run `jetpack update` first")))
+    if !locked.exact.starts_with(PROVIDER_NIXPKGS_EXACT_PREFIX) {
         return Err(ProviderError.Unsupported("Nix source `{source_name}` uses unsupported exact input `{locked.exact}`; the signed index accepts only github:NixOS/nixpkgs#<revision>"))
     }
-    revision :: locked.exact.removeprefix(@PROVIDER_NIXPKGS_EXACT_PREFIX)
+    revision :: locked.exact.removeprefix(PROVIDER_NIXPKGS_EXACT_PREFIX)
     if !provider_is_lower_hex(revision, 40) -> return Err(ProviderError.Channel("Nix source `{source_name}` has malformed exact revision `{revision}`"))
     // `NixOS/nixpkgs/nixos-unstable@github#auto` -> `nixos-unstable`. Read the
     // original spelling, not the live upstream: applying the lock rewrites the
@@ -466,42 +466,42 @@ fn provider_is_lower_hex(value: String, count: Int) -> Bool Never! {
 
 // Realize a true local catalog miss through the one-shot interactive Nix
 // compatibility fallback; the result remains Jetpack-owned.
-fn provider_realize_from_local_nix(spec: RefSpec, table: SourceTable, ctx: ProviderCtx, key: NixIndexKey) -[FS, Env, Exec, Time, Time.Wait]> Realized ProviderError! {
+fn provider_realize_from_local_nix(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, key: NixIndexKey) -[IO, FS, Env, Exec, Time, Time.Wait]> Realized ProviderError! {
     project :: ctx.project_dir ?? return Err(ProviderError.Unsupported("local Nix fallback requires a project with an exact source lock"))
     source_name :: if spec.source == {
         .Named(name) -> name
-        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         else -> { return Err(ProviderError.Unsupported("local Nix fallback requires a Jetpack-backed Nix source")) }
     }
     invocation :: nix_fallback_run(project, source_name, key.revision, key.system, key.attrpath, ctx.offline) ?? return Err(ProviderError.BuildFailed("local Nix fallback failed: {err.message()}"))
     realized := provider_parse_realization(spec, invocation.stdout)
-    realized.producer.facts[@PROVIDER_NIX_NATIVE_FORMAT] = "jet-local-nix-v1"
-    realized.producer.facts[@PROVIDER_NIX_NATIVE_DOCUMENT] = invocation.stdout
+    realized.producer.facts[PROVIDER_NIX_NATIVE_FORMAT] = "jet-local-nix-v1"
+    realized.producer.facts[PROVIDER_NIX_NATIVE_DOCUMENT] = invocation.stdout
     loop key_name in provider_sorted_keys(invocation.facts) -> realized.producer.facts[key_name] = invocation.facts[key_name]
     if realized.producer.facts.get("nix.fallback.provenance") == {
         .Val(provenance) -> realized.envelope.provenance = "local-nix:{provenance}"
         .None -> {}
     }
-    provider_finalize_nix_realization(spec, table, ctx, realized)
+    provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
 }
 
 // A native cache admission failure as E1350, naming the missing Nix
 // reference when a registered Nix entry no longer hashes to its record.
-fn provider_nix_cache_error(roots: HangarRoots, error: NixCacheError) -[FS, Env]> ProviderError Never! {
+fn provider_nix_cache_error(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env]> ProviderError Never! {
     detail := "{error.code()}: {error.what()}; why: {error.why()}; fix: {error.fix()}"
-    if provider_missing_nix_store_path(roots) == {
+    if provider_missing_nix_store_path(&verification, roots) == {
         .Val(store_path) -> detail = "{detail}; missing Nix reference `{store_path}`"
         .None -> {}
     }
     ProviderError.NixCache(detail)
 }
 
-fn provider_missing_nix_store_path(roots: HangarRoots) -[FS, Env]> String? Never! {
-    entries :: store_list_checked(roots) ?? return None
+fn provider_missing_nix_store_path(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> String? Never! {
+    entries :: store_list_checked(&verification, roots) ?? return None
     loop entry in entries {
         producer :: ProducerRecord.decode(entry.producer_record) ?? next
         store_path :: producer.facts.get("nix.store-path") ?? next
-        matches :: if store_try_entry_output_hash(roots, entry) == {
+        matches :: if store_try_entry_output_hash(&verification, roots, entry) == {
             .Ok(digest) -> digest == entry.envelope.output_hash
             .Err(_) -> false
         }
@@ -512,12 +512,12 @@ fn provider_missing_nix_store_path(roots: HangarRoots) -[FS, Env]> String? Never
 
 // Bind a Nix realization to its prepared identity: cache identity, prepared
 // facts in both the producer facts and the replay plan, and the policy facts.
-fn provider_finalize_nix_realization(spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[FS, Env]> Realized ProviderError! {
+fn provider_finalize_nix_realization(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[IO, FS, Env, Time.Wait]> Realized ProviderError! {
     if ctx.progress == {
         .Val(progress) -> progress.phase("Registering")
         .None -> {}
     }
-    identity :: provider_prepare_nix_identity(spec, table, ctx, realized)
+    identity :: provider_prepare_nix_identity(&verification, spec, table, ctx, realized)
     finalized := realized
     finalized.cache_identity = identity.cache_identity
     previous :: realized.producer
@@ -576,8 +576,8 @@ pub fn provider_realization_from_index(spec: RefSpec, key: NixIndexKey, verified
         "nix.reference": spec.raw,
         "build.sandbox": "non-executing",
         "build.sandbox_policy": catalog_policy,
-        @PROVIDER_NIX_NATIVE_FORMAT: "jet-nixpkgs-index-v1",
-        @PROVIDER_NIX_NATIVE_DOCUMENT: record.canonical_json(),
+        PROVIDER_NIX_NATIVE_FORMAT: "jet-nixpkgs-index-v1",
+        PROVIDER_NIX_NATIVE_DOCUMENT: record.canonical_json(),
         "nix.index.tier": verified.trust.label(),
         "nix.index.trust": verified.trust.trust(),
         "nix.index.signature-chain": verified.trust.signature_chain(),
@@ -633,7 +633,7 @@ pub fn provider_realization_from_index(spec: RefSpec, key: NixIndexKey, verified
     envelope.output_hash = primary_object.hangar_digest
     provisional :: CacheIdentity{
         source_fingerprint: envelope.output_hash,
-        recipe_fingerprint: pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes()),
+        recipe_fingerprint: pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes()),
         policy_fingerprint: env_cache_policy_fingerprint(false),
         platform: pkg_host_platform(),
     }
@@ -697,7 +697,7 @@ pub fn provider_parse_realization(spec: RefSpec, stdout: String) -[FS]> Realized
     envelope :: Envelope.for_output(out, spec.raw, "nix")
     provisional :: CacheIdentity{
         source_fingerprint: envelope.output_hash,
-        recipe_fingerprint: pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes()),
+        recipe_fingerprint: pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes()),
         policy_fingerprint: env_cache_policy_fingerprint(false),
         platform: pkg_host_platform(),
     }
@@ -762,12 +762,12 @@ pub fn provider_nix_store_version(out: String, name: String) -> String Never! {
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     base :: trimmed.cut_last("/")?.after ?? trimmed
     raw :: base.bytes()
-    if raw.len() < @PROVIDER_NIX_HASH_LEN -> return ""
-    rest := String.from_bytes(raw[@PROVIDER_NIX_HASH_LEN..<raw.len()]) ?? return ""
+    if raw.len() < PROVIDER_NIX_HASH_LEN -> return ""
+    rest := String.from_bytes(raw[PROVIDER_NIX_HASH_LEN..<raw.len()]) ?? return ""
     if rest.starts_with("-") -> rest = rest.removeprefix("-")
     if !rest.starts_with("{name}-") -> return ""
     version := rest.removeprefix("{name}-")
-    loop suffix in @PROVIDER_NIX_OUTPUT_SUFFIXES {
+    loop suffix in PROVIDER_NIX_OUTPUT_SUFFIXES {
         if version.ends_with(suffix) {
             version = version.removesuffix(suffix)
             break

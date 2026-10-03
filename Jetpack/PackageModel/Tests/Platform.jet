@@ -1,19 +1,19 @@
 #Test("tier one os set is linux macos windows") {
-    assert_eq(@TIER_ONE_OSES, [String]{@OS_LINUX, @OS_MACOS, @OS_WINDOWS})
+    assert_eq(TIER_ONE_OSES, [String]{OS_LINUX, OS_MACOS, OS_WINDOWS})
 }
 
 #Test("platform key renders arch dash os") {
-    key :: PlatformKey.new(@ARCH_X64, @OS_WINDOWS) ?? panic("tier-one key")
+    key :: PlatformKey.new(ARCH_X64, OS_WINDOWS) ?? panic("tier-one key")
     assert_eq(key.envelope_key(), "x86_64-windows")
     assert(key.is_tier_one())
-    assert(PlatformKey.new("sparc", @OS_LINUX) == None)
+    assert(PlatformKey.new("sparc", OS_LINUX) == None)
 }
 
 #Test("platform path and exe rules are explicit") {
-    assert_eq(pkg_path_separator_for_os(@OS_WINDOWS), ";")
-    assert_eq(pkg_path_separator_for_os(@OS_LINUX), ":")
-    assert_eq(pkg_path_separator_for_os(@OS_MACOS), ":")
-    assert_eq(pkg_exe_suffix_for_os(@OS_WINDOWS), ".exe")
-    assert_eq(pkg_exe_suffix_for_os(@OS_LINUX), "")
-    assert_eq(pkg_exe_suffix_for_os(@OS_MACOS), "")
+    assert_eq(pkg_path_separator_for_os(OS_WINDOWS), ";")
+    assert_eq(pkg_path_separator_for_os(OS_LINUX), ":")
+    assert_eq(pkg_path_separator_for_os(OS_MACOS), ":")
+    assert_eq(pkg_exe_suffix_for_os(OS_WINDOWS), ".exe")
+    assert_eq(pkg_exe_suffix_for_os(OS_LINUX), "")
+    assert_eq(pkg_exe_suffix_for_os(OS_MACOS), "")
 }

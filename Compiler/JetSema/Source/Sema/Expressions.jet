@@ -56,6 +56,7 @@ use jet_foundation.[
     ast_comptime_value_type,
     ast_empty_call_arg_flags,
     core_call_typed_signature,
+    core_module_export,
     dimension_display_name,
     dimension_identity,
     expr_span,
@@ -2511,16 +2512,40 @@ fn sema_expr_canonical_type_binding(name: String, scopes: SemaScopeTable) -> Boo
     sema_scope_binding_is_compiler_builtin(binding, name)
 }
 
-fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    alias := ""
+struct SemaExprCoreReceiverPath {
+    alias: String
+    alias_span: Span
+    leaves: [String]
+}
+
+// A Core call receiver: an import alias, or a field chain over one
+// (`core.math` in `core.math.fabs(n)`); the leaves name submodules.
+fn sema_expr_core_module_receiver_path(receiver: Expr) -> SemaExprCoreReceiverPath? Never! {
     if receiver == {
-        .Ident(name, _) -> alias = name
-        else -> return SemaMethodSpecialCheck{handled: false, value: None}
+        .Ident(name, span) -> return Val(SemaExprCoreReceiverPath{alias: name, alias_span: span, leaves: [String]{}})
+        .Field(base, leaf, _) -> {
+            path := sema_expr_core_module_receiver_path(base) ?? return None
+            &path.leaves.push(leaf)
+            return Val(path)
+        }
+        else -> return None
     }
-    alias_span :: if receiver == {.Ident(_, span) -> span else -> method_span}
+}
+
+fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    path :: sema_expr_core_module_receiver_path(receiver) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    alias :: path.alias
+    alias_span :: path.alias_span
     if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    module_name :: sema_call_core_import_module(environment, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if sema_call_core_variadic_print(environment, scopes, alias, method, args.len(), alias_span, &context) {
+    module_name := sema_call_core_import_module(environment, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    // Rust `core_module_path_from_receiver`: `alias.leaf.method(...)` calls
+    // into the known Core submodule `<alias module>.leaf`.
+    loop leaf in path.leaves {
+        module_name = "{module_name}.{leaf}"
+        if core_module_export(module_name) == None -> return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    nested :: path.leaves.len() > 0
+    if !nested && sema_call_core_variadic_print(environment, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }
@@ -2530,7 +2555,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -2868,7 +2893,8 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
             if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
         }
     }
-    if !sema_ownership_check_use(&state, expr, scopes, &diagnostics) -> return None
+    use_checked :: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(&state, expr, scopes, &diagnostics) else -> sema_ownership_check_use(&state, expr, scopes, &diagnostics)
+    if !use_checked -> return None
     if !sema_hardware_note_cpu_use(expr, scopes, &state, &context, &diagnostics) -> return None
     sema_string_view_check_read(name, span, scopes, state, context, &diagnostics)
     binding_index :: sema_scope_resolve_index(scopes, name) ?? return Val(value)
@@ -3093,12 +3119,32 @@ fn sema_expr_wants_expected_form(expr: Expr) -> Bool Never! {
     }
 }
 
+// Rust passes the left operand's type to such a right operand only as an
+// inference hint, then lifts the plain side of `==`/`!=` (D-OPT-LIFT1=A). An
+// optional builder (`Val(x)`, `None`) compared with a plain left operand
+// (a flow-refined `x` after `if x == None -> …`) is built at the lifted `T?`.
+fn sema_expr_rhs_hint(op: BinOp, left: Type, right: Expr) -> Type Never! {
+    if op != BinOp.Eq && op != BinOp.Ne -> return ~left
+    if sema_expr_unwrap_tag(left) == .Option(_) -> return ~left
+    if !sema_expr_optional_builder(right) -> return ~left
+    Type.Option{inner: ~left}
+}
+
+fn sema_expr_optional_builder(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> sema_expr_optional_builder(inner)
+        .Absent(_) -> true
+        .EnumLit(type_name, variant, _, args, _, _) -> type_name == "" && ((variant == "Val" && args.len() == 1) || (variant == "None" && args.len() == 0))
+        else -> false
+    }
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &tail_store, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
     if {
         sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment)
-        sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> rhs_expected = Val(checked_lhs.ty)
+        sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> rhs_expected = Val(sema_expr_rhs_hint(op, checked_lhs.ty, right))
         else -> {}
     }
     checked_rhs :: sema_check_expression(right, rhs_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None

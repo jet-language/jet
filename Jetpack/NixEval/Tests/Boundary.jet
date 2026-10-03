@@ -1,12 +1,12 @@
 // Oracle manifest, pinned inventory and internal stage claims ported from
 // crates/jet-nix-eval/src/tests.rs.
 
-@NIXEVAL_TEST_ZERO_SRI :: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-@NIXEVAL_TEST_X86_64_LINUX_BUILD :: "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y="
-@NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE :: "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
+NIXEVAL_TEST_ZERO_SRI :: prep { "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+NIXEVAL_TEST_X86_64_LINUX_BUILD :: prep { "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=" }
+NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE :: prep { "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ=" }
 
 // tests/fixtures/nix-compat/pinned-inventory.json
-@NIXEVAL_TEST_PINNED_INVENTORY_JSON :: ``{
+NIXEVAL_TEST_PINNED_INVENTORY_JSON :: prep { ``{
   "schema": 1,
   "nix_version": "2.34.8",
   "nixpkgs_revision": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
@@ -32,7 +32,7 @@
     {"surface": "ifd", "status": "skipped", "class": "skipped", "reason": "import-from-derivation requires a separate authority grant"}
   ]
 }
-``
+`` }
 
 // Replace the first occurrence of `needle` (Rust `replacen(needle, with, 1)`).
 fn nixeval_replace_first(text: String, needle: String, replacement: String) -> String Never! {
@@ -62,7 +62,7 @@ fn nixeval_replace_all(text: String, needle: String, replacement: String) -> Str
 }
 
 fn nixeval_test_manifest_with_identities(status: String, corpus_status: String) -> String {
-    ready :: nixeval_replace_all(@NIXEVAL_ORACLE_JSON, "\"status\": \"ready\"", "\"status\": \"{status}\"")
+    ready :: nixeval_replace_all(NIXEVAL_ORACLE_JSON, "\"status\": \"ready\"", "\"status\": \"{status}\"")
     nixeval_replace_all(ready, "bit_exact", corpus_status)
 }
 
@@ -113,56 +113,56 @@ fn nixeval_test_manifest_reason(error: NixEvalError) -> String {
 
 #Test("nixeval embedded pin is exact and missing build identity blocks") {
     manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded manifest must validate")
-    assert_eq(manifest.nix_version, @NIXEVAL_NIX_VERSION)
-    assert_eq(manifest.nix_tag_object, @NIXEVAL_NIX_TAG_OBJECT)
-    assert_eq(manifest.nix_source_commit, @NIXEVAL_NIX_SOURCE_COMMIT)
-    assert_eq(manifest.nixpkgs_revision, @NIXEVAL_NIXPKGS_REVISION)
-    assert_eq(manifest.nixpkgs_last_modified, @NIXEVAL_NIXPKGS_LAST_MODIFIED)
-    assert_eq(manifest.nixpkgs_nar_hash, @NIXEVAL_NIXPKGS_NAR_HASH)
+    assert_eq(manifest.nix_version, NIXEVAL_NIX_VERSION)
+    assert_eq(manifest.nix_tag_object, NIXEVAL_NIX_TAG_OBJECT)
+    assert_eq(manifest.nix_source_commit, NIXEVAL_NIX_SOURCE_COMMIT)
+    assert_eq(manifest.nixpkgs_revision, NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(manifest.nixpkgs_last_modified, NIXEVAL_NIXPKGS_LAST_MODIFIED)
+    assert_eq(manifest.nixpkgs_nar_hash, NIXEVAL_NIXPKGS_NAR_HASH)
     assert_eq(manifest.systems(), nixeval_required_systems())
     assert(manifest.product_ready())
     loop system in nixeval_required_systems() {
-        observed :: NixEvalOracleIdentity.new(system, @NIXEVAL_NIXPKGS_NAR_HASH, @NIXEVAL_TEST_ZERO_SRI) ?? panic("observed identity must use canonical SRI")
+        observed :: NixEvalOracleIdentity.new(system, NIXEVAL_NIXPKGS_NAR_HASH, NIXEVAL_TEST_ZERO_SRI) ?? panic("observed identity must use canonical SRI")
         assert(nixeval_test_mismatch_field(nixeval_test_oracle_error(manifest, observed)) != "")
     }
 }
 
 #Test("nixeval exact ready identity verifies") {
     manifest :: nixeval_test_ready_manifest()
-    verified :: manifest.verify_oracle(nixeval_test_identity(@NIXEVAL_TEST_X86_64_LINUX_BUILD, @NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE)) ?? panic("exact ready identity must verify")
+    verified :: manifest.verify_oracle(nixeval_test_identity(NIXEVAL_TEST_X86_64_LINUX_BUILD, NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE)) ?? panic("exact ready identity must verify")
     assert_eq(verified.system, "x86_64-linux")
     assert(manifest.product_ready())
 }
 
 #Test("nixeval build and executable mismatches fail closed") {
     manifest :: nixeval_test_ready_manifest()
-    build_error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(@NIXEVAL_TEST_ZERO_SRI, @NIXEVAL_TEST_ZERO_SRI))
+    build_error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(NIXEVAL_TEST_ZERO_SRI, NIXEVAL_TEST_ZERO_SRI))
     assert_eq(nixeval_test_mismatch_field(build_error), "build_nar_hash")
-    executable_error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(@NIXEVAL_TEST_X86_64_LINUX_BUILD, @NIXEVAL_NIXPKGS_NAR_HASH))
+    executable_error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(NIXEVAL_TEST_X86_64_LINUX_BUILD, NIXEVAL_NIXPKGS_NAR_HASH))
     assert_eq(nixeval_test_mismatch_field(executable_error), "executable_nar_hash")
 }
 
 #Test("nixeval matching identity remains blocked when build status is blocked") {
     manifest :: NixEvalOracleManifest.parse_and_validate(nixeval_test_manifest_with_identities("blocked", "bit_exact")) ?? panic("blocked manifest with identities must validate")
-    error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(@NIXEVAL_TEST_X86_64_LINUX_BUILD, @NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE))
+    error :: nixeval_test_oracle_error(manifest, nixeval_test_identity(NIXEVAL_TEST_X86_64_LINUX_BUILD, NIXEVAL_TEST_X86_64_LINUX_EXECUTABLE))
     assert_eq(error, NixEvalError.OracleBuildBlocked{system: "x86_64-linux", status: "blocked"})
 }
 
 #Test("nixeval every fixed pin field is validated") {
-    exact_pins :: [String]{@NIXEVAL_NIX_VERSION, @NIXEVAL_NIX_TAG_OBJECT, @NIXEVAL_NIX_SOURCE_COMMIT, @NIXEVAL_NIXPKGS_REVISION, "1782723713", @NIXEVAL_NIXPKGS_NAR_HASH}
-    mutations :: [String]{"2.34.7", "a6769c588f60b3e762f73d3a8cf60294df078ccd", "a3f1c3c5b8ad91850e0f7c590cf177f7ab022024", "a5aa0fbd538984f6e3d201be0005b4463d8b09f8", "1782723712", @NIXEVAL_TEST_ZERO_SRI}
+    exact_pins :: [String]{NIXEVAL_NIX_VERSION, NIXEVAL_NIX_TAG_OBJECT, NIXEVAL_NIX_SOURCE_COMMIT, NIXEVAL_NIXPKGS_REVISION, "1782723713", NIXEVAL_NIXPKGS_NAR_HASH}
+    mutations :: [String]{"2.34.7", "a6769c588f60b3e762f73d3a8cf60294df078ccd", "a3f1c3c5b8ad91850e0f7c590cf177f7ab022024", "a5aa0fbd538984f6e3d201be0005b4463d8b09f8", "1782723712", NIXEVAL_TEST_ZERO_SRI}
     loop index in 0..<exact_pins.len() {
-        changed :: nixeval_replace_first(@NIXEVAL_ORACLE_JSON, exact_pins[index], mutations[index])
-        assert(changed != @NIXEVAL_ORACLE_JSON)
+        changed :: nixeval_replace_first(NIXEVAL_ORACLE_JSON, exact_pins[index], mutations[index])
+        assert(changed != NIXEVAL_ORACLE_JSON)
         nixeval_test_manifest_error(changed)
     }
 }
 
 #Test("nixeval duplicate keys are rejected at every depth") {
-    root_duplicate :: nixeval_replace_first(@NIXEVAL_ORACLE_JSON, "\"schema\": 1,", "\"schema\": 1, \"schema\": 1,")
+    root_duplicate :: nixeval_replace_first(NIXEVAL_ORACLE_JSON, "\"schema\": 1,", "\"schema\": 1, \"schema\": 1,")
     root_reason :: nixeval_test_manifest_reason(nixeval_test_manifest_error(root_duplicate))
     assert(root_reason.contains("duplicate object key `schema`"))
-    build_duplicate :: nixeval_replace_first(@NIXEVAL_ORACLE_JSON, "\"status\": \"ready\"", "\"status\": \"ready\", \"status\": \"blocked\"")
+    build_duplicate :: nixeval_replace_first(NIXEVAL_ORACLE_JSON, "\"status\": \"ready\"", "\"status\": \"ready\", \"status\": \"blocked\"")
     build_reason :: nixeval_test_manifest_reason(nixeval_test_manifest_error(build_duplicate))
     assert(build_reason.contains("duplicate object key `status`"))
 }
@@ -176,28 +176,28 @@ fn nixeval_test_manifest_reason(error: NixEvalError) -> String {
         "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     }
     loop malformed in malformed_values {
-        if NixEvalOracleIdentity.new("x86_64-linux", malformed, @NIXEVAL_TEST_ZERO_SRI) == {
+        if NixEvalOracleIdentity.new("x86_64-linux", malformed, NIXEVAL_TEST_ZERO_SRI) == {
             .Ok(_) -> panic("malformed SRI must be rejected")
-            .Err(error) -> assert_eq(error, NixEvalError.MalformedSri("build_nar_hash"))
+            .Err(error) -> assert_eq(error, NixEvalError.MalformedSRI("build_nar_hash"))
         }
-        changed :: nixeval_replace_first(@NIXEVAL_ORACLE_JSON, "\"build_nar_hash\": \"sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=\"", "\"build_nar_hash\": \"{malformed}\"")
+        changed :: nixeval_replace_first(NIXEVAL_ORACLE_JSON, "\"build_nar_hash\": \"sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=\"", "\"build_nar_hash\": \"{malformed}\"")
         nixeval_test_manifest_error(changed)
     }
 }
 
 #Test("nixeval unknown oracle system fails closed") {
     manifest :: nixeval_test_ready_manifest()
-    observed :: NixEvalOracleIdentity.new("riscv64-linux", @NIXEVAL_NIXPKGS_NAR_HASH, @NIXEVAL_TEST_ZERO_SRI) ?? panic("observed identity must use canonical SRI")
+    observed :: NixEvalOracleIdentity.new("riscv64-linux", NIXEVAL_NIXPKGS_NAR_HASH, NIXEVAL_TEST_ZERO_SRI) ?? panic("observed identity must use canonical SRI")
     assert_eq(nixeval_test_oracle_error(manifest, observed), NixEvalError.UnsupportedOracleSystem("riscv64-linux"))
 }
 
 #Test("nixeval pinned inventory has no implicit skip reason") {
     inventory :: nixeval_pinned_inventory()
-    document :: nixeval_test_json(@NIXEVAL_TEST_PINNED_INVENTORY_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_PINNED_INVENTORY_JSON)
     object :: nixeval_test_object(document, document.root)
     assert_eq(nixeval_test_integer(document, nixeval_test_get(object, "schema")), 1)
-    assert_eq(nixeval_test_text(document, object, "nix_version"), @NIXEVAL_NIX_VERSION)
-    assert_eq(nixeval_test_text(document, object, "nixpkgs_revision"), @NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(nixeval_test_text(document, object, "nix_version"), NIXEVAL_NIX_VERSION)
+    assert_eq(nixeval_test_text(document, object, "nixpkgs_revision"), NIXEVAL_NIXPKGS_REVISION)
     assert_eq(nixeval_test_strings(document, nixeval_test_get(object, "systems")), nixeval_required_systems())
     entries :: nixeval_test_array(document, nixeval_test_get(object, "entries"))
     assert_eq(entries.len(), 17)

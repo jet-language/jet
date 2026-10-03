@@ -1,13 +1,14 @@
 # One unqualified Jetpack unit. This list is the only assembly order; do not glob sources into the unit.
 # Order follows the dependency graph: shared Compiler front end (referenced, never copied), package and
 # environment models, Nix evaluation, store, trust, providers, environments/services/images/recipes, CLI.
-# JetOS is out of scope for this port; no JetOS source or hook belongs in this unit.
+# JetOS shares these models and provider/store engines; its sources precede CLI.
 # Each area appends only under its own section header. Test sources live in tests.list.
 
 # == Compiler hash (referenced from Compiler/, never copied) ==
 Compiler/JetFoundation/Source/Hash/SHA256.jet
 
 # == Compiler front end (referenced from Compiler/, never copied) ==
+Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet
 Compiler/JetLexer/Source/Lexer/Scan.jet
 Compiler/JetLexer/Source/Lexer/Terminators.jet
 Compiler/JetLexer/Source/Lexer/Tokens.jet
@@ -17,6 +18,8 @@ Compiler/JetFoundation/Source/Registry/CoreModules.jet
 Compiler/JetFoundation/Source/Registry/CoreCallRows.jet
 Compiler/JetFoundation/Source/Registry/Diagnostics.jet
 Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet
+Compiler/JetFoundation/Source/Diagnostics/Render.jet
+Compiler/JetFoundation/Source/Registry/Explain.jet
 Compiler/JetFoundation/Source/Types/Types.jet
 Compiler/JetFoundation/Source/Types/IntegerKinds.jet
 Compiler/JetFoundation/Source/Types/TupleNames.jet
@@ -39,11 +42,11 @@ Compiler/JetFoundation/Source/Registry/CoreSignatures.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
-Compiler/JetAst/Source/AST/Expressions.jet
-Compiler/JetAst/Source/AST/Patterns.jet
-Compiler/JetAst/Source/AST/Statements.jet
-Compiler/JetAst/Source/AST/Items.jet
-Compiler/JetAst/Source/AST/Comptime.jet
+Compiler/JetFoundation/Source/AST/Expressions.jet
+Compiler/JetFoundation/Source/AST/Patterns.jet
+Compiler/JetFoundation/Source/AST/Statements.jet
+Compiler/JetFoundation/Source/AST/Items.jet
+Compiler/JetFoundation/Source/AST/Comptime.jet
 Compiler/JetParser/Source/Parser/State.jet
 Compiler/JetParser/Source/Parser/Types.jet
 Compiler/JetParser/Source/Parser/Declarations/Foreign.jet
@@ -60,11 +63,14 @@ Compiler/JetParser/Source/Parser/Patterns.jet
 Compiler/JetParser/Source/Parser/Statements.jet
 Compiler/JetParser/Source/Parser/Items.jet
 Compiler/JetParser/Source/Parser/Entry.jet
+Compiler/JetParser/Source/Parser/FencedNames.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/ResultHandlers.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/Loops.jet
 Compiler/JetParser/Source/Parser/DeclarationMarkers.jet
 Compiler/JetParser/Source/Parser/Declarations/Migrations.jet
+Compiler/JetParser/Source/Parser/Declarations/Policies.jet
+Compiler/JetParser/Source/Parser/AuthorityScopes.jet
 
 # == Foundation ==
 Jetpack/Foundation/Source/CoreImports.jet
@@ -81,6 +87,8 @@ Jetpack/Foundation/Source/NativeSandbox.jet
 Jetpack/Foundation/Source/SandboxPolicy.jet
 Jetpack/Foundation/Source/DevelopmentReceipt.jet
 Jetpack/Foundation/Source/SourceRoot.jet
+Jetpack/Foundation/Source/Net/FetchError.jet
+Jetpack/Foundation/Source/Net/PublicDestination.jet
 
 # == PackageModel ==
 Jetpack/PackageModel/Source/Text/ByteText.jet
@@ -206,7 +214,26 @@ Jetpack/PackageModel/Source/Policy/EffectBudget.jet
 Jetpack/PackageModel/Source/Artifacts/JetLibStamp.jet
 Jetpack/PackageModel/Source/Artifacts/JetLibTrust.jet
 Jetpack/PackageModel/Source/Public/PackageViews.jet
-Jetpack/PackageModel/Source/Model/ModelPackage.jet
+Jetpack/PackageModel/Source/Manifest/EntryCarrier.jet
+
+# == Publication ==
+Jetpack/Publication/Source/SemVer.jet
+Jetpack/Publication/Source/Diff.jet
+Jetpack/Publication/Source/Tier.jet
+Jetpack/Publication/Source/NamePolicy.jet
+Jetpack/Publication/Source/Index.jet
+Jetpack/Publication/Source/Resolve.jet
+Jetpack/Publication/Source/Sign.jet
+Jetpack/Publication/Source/SBOM.jet
+Jetpack/Publication/Source/Advisory.jet
+Jetpack/Publication/Source/RegistryTransport.jet
+Jetpack/Publication/Source/Registry/Trust.jet
+Jetpack/Publication/Source/Registry/Cache.jet
+Jetpack/Publication/Source/Tuf.jet
+Jetpack/Publication/Source/Registry/OCI.jet
+Jetpack/Publication/Source/Policy.jet
+Jetpack/Publication/Source/Registry/Metadata.jet
+Jetpack/Publication/Source/Registry/Verify.jet
 
 # == EnvModel ==
 Jetpack/EnvModel/Source/Environment/FactReaders.jet
@@ -456,6 +483,12 @@ Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet
 Jetpack/Recipe/Source/Toolchain/ChannelManifest.jet
 Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet
 Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet
+
+# == JetOS ==
+Jetpack/JetOS/Source/Types.jet
+Jetpack/JetOS/Source/OptionsRendering.jet
+Jetpack/JetOS/Source/Identity.jet
+Jetpack/JetOS/Source/EtcBootFacts.jet
 
 # == CLI ==
 Jetpack/CLI/Source/CliError.jet

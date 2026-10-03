@@ -1,0 +1,220 @@
+// Registry.rs:3177-3337; original tests/pkg.rs:9027-9145 and credential
+// diagnostic assertions :7964-8029. Real Sign/Index/Tuf dependencies only.
+// Native keygen/takeover and registry composition retain #3593/#3597/#4262.
+use core.crypto as publication_verify_test_crypto
+use core.encoding.hex as publication_verify_test_hex
+
+fn publication_verify_test_entry(name: String, version: String, hash: String, key: String, signature: String) -> PublicationIndexEntry Never! {
+    PublicationIndexEntry{name: name, version: version, content_hash: hash, fingerprint: "sha256-fp", yanked: false, tier: .Core, gate_status: publication_core_reviewed(), public_key: key, signature: signature}
+}
+fn publication_verify_test_seed(byte: U8) -> [U8] Never! {
+    seed := [U8]{}
+    loop index in 0..<32 -> &seed.push(byte)
+    seed
+}
+fn publication_verify_test_public(seed: [U8]) -> String Never! {
+    key :: publication_verify_test_crypto.SigningKey.from_bytes(seed) ?? panic("fixture seed")
+    publication_verify_test_hex.encode(key.public_key().bytes)
+}
+fn publication_verify_test_refusal(all: [PublicationIndexEntry], entry: PublicationIndexEntry, required: Bool, code: String) Never! {
+    if publication_verify_index_entry(all, entry, required, "jet") == {
+        .Err(error) -> assert_eq(error.diagnostic.code, code)
+        .Ok(_) -> panic("untrusted entry accepted")
+    }
+}
+
+#Test("publication registry require_signed_unsigned_entry_e1247") {
+    unsigned :: publication_verify_test_entry("corpkit", "1.0.0", "sha256-abc", "", "")
+    publication_verify_test_refusal([PublicationIndexEntry]{unsigned}, unsigned, true, "E1247")
+    assert_eq(publication_verify_index_entry([PublicationIndexEntry]{unsigned}, unsigned, false, "corp") ?? panic("optional unsigned"), [String]{})
+    whitespace := ~unsigned
+    whitespace.signature = " \t\n"
+    publication_verify_test_refusal([PublicationIndexEntry]{whitespace}, whitespace, true, "E1247")
+}
+#Test("publication registry signed entry without discoverable pin is E1246") {
+    signed :: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", "", "nonempty")
+    publication_verify_test_refusal([PublicationIndexEntry]{signed}, signed, false, "E1246")
+    candidate := ~signed
+    candidate.public_key = "candidate-key"
+    publication_verify_test_refusal([PublicationIndexEntry]{signed}, candidate, false, "E1246")
+}
+#Test("publication registry unsigned takeover is refused even when signing optional") {
+    old :: publication_verify_test_entry("textkit", "1.0.0", "sha256-old", "first-key", "")
+    candidate :: publication_verify_test_entry("textkit", "2.0.0", "sha256-new", "second-key", " \n")
+    publication_verify_test_refusal([PublicationIndexEntry]{old, candidate}, candidate, false, "E1247")
+}
+#Test("publication registry sign_verify_roundtrip_and_tamper_e1246") {
+    seed :: publication_verify_test_seed(U8{17})
+    public_key :: publication_verify_test_public(seed)
+    hash :: "sha256-0011223344556677"
+    signature :: publication_sign_bytes(seed, hash) ?? panic("sign")
+    good :: publication_verify_test_entry("textkit", "1.0.0", hash, public_key, signature)
+    assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
+    assert(publication_verify(public_key, hash, signature) ?? panic("direct verify"))
+    bad := ~good
+    bad.content_hash = "sha256-TAMPEREDdeadbeef"
+    publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
+}
+#Test("publication registry yanked first key remains pin and takeover verifies declared key") {
+    seed_a :: publication_verify_test_seed(U8{17})
+    seed_b :: publication_verify_test_seed(U8{29})
+    public_a :: publication_verify_test_public(seed_a)
+    public_b :: publication_verify_test_public(seed_b)
+    assert(public_a != public_b)
+    old := publication_verify_test_entry("textkit", "1.0.0", "sha256-old", " {public_a} ", publication_sign_bytes(seed_a, "sha256-old") ?? panic("sign old"))
+    old.yanked = true
+    hash :: "sha256-new"
+    wrong :: publication_verify_test_entry("textkit", "2.0.0", hash, public_b, publication_sign_bytes(seed_a, hash) ?? panic("old signer"))
+    takeover :: publication_verify_test_entry("textkit", "2.0.0", hash, public_b, publication_sign_bytes(seed_b, hash) ?? panic("new signer"))
+    all :: [PublicationIndexEntry]{old, takeover}
+    assert_eq(publication_pinned_public_key(all), Val(public_a))
+    publication_verify_test_refusal(all, wrong, false, "E1246")
+    assert_eq(publication_verify_index_entry(all, takeover, false, "jet") ?? panic("takeover"), [String]{})
+    // Omitted declaration is not a takeover; the original pin still verifies.
+    pinned :: publication_verify_test_entry("textkit", "3.0.0", hash, "", publication_sign_bytes(seed_a, hash) ?? panic("pinned signer"))
+    assert_eq(publication_verify_index_entry(all, pinned, false, "jet") ?? panic("yank-inclusive pin"), [String]{})
+}
+#Test("publication registry malformed signature is hard E1246") {
+    seed :: publication_verify_test_seed(U8{17})
+    entry :: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", publication_verify_test_public(seed), "not-base64!")
+    publication_verify_test_refusal([PublicationIndexEntry]{entry}, entry, false, "E1246")
+}
+#Test("publication registry core bypasses community gates but community requires all four") {
+    entry := publication_verify_test_entry("communitykit", "1.0.0", "sha256-abc", "", "")
+    publication_verify_entry_tier(entry) ?? panic("core")
+    entry.tier = .Community
+    entry.gate_status = publication_community_with_name(.Blocked, .Blocked, .Blocked)
+    if publication_verify_entry_tier(entry) == {
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E2105")
+            loop gate in ([String]{"#935", "#431", "#1912", "#1913"}) -> assert(error.diagnostic.what.contains(gate))
+        }
+        .Ok(_) -> panic("closed community accepted")
+    }
+    entry.gate_status = PublicationGateStatus{signature: .Passed, audit: .Passed, name: .Passed, liveness: .Passed, review: .NotRequired}
+    publication_verify_entry_tier(entry) ?? panic("open community")
+    loop gate in 0..<4 {
+        closed := ~entry
+        if gate == 0 -> closed.gate_status.signature = .NotRequired
+        if gate == 1 -> closed.gate_status.audit = .Blocked
+        if gate == 2 -> closed.gate_status.name = .NotRequired
+        if gate == 3 -> closed.gate_status.liveness = .Blocked
+        if publication_verify_entry_tier(closed) == {
+            .Err(error) -> assert_eq(error.diagnostic.code, "E2105")
+            .Ok(_) -> panic("one closed gate accepted")
+        }
+    }
+}
+#Test("publication registry exact verification and immutability diagnostics") {
+    signature :: publication_e1246("textkit", "1.0.0")
+    assert_eq(signature.code, "E1246")
+    assert_eq(signature.what, "Signature verification failed for `textkit` 1.0.0: the signature doesn't match the recorded public key")
+    assert_eq(signature.why, "This means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out.")
+    assert_eq(signature.fix, "Do not use this version. Re-run `jet store fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry.")
+    unsigned :: publication_e1247("corp", "corpkit", "1.0.0")
+    assert_eq(unsigned.code, "E1247")
+    assert_eq(unsigned.what, "Registry `corp` requires signed packages (`require_signed: true`) but `corpkit` 1.0.0 has no signature")
+    assert_eq(unsigned.why, "This registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy.")
+    assert_eq(unsigned.fix, "Use a different registry, or ask the package author to publish a signed release (`jet registry publish` auto-signs by default — they likely used `--no-sign`).")
+    immutable :: publication_e1234("textkit", "1.0.0")
+    assert_eq(immutable.code, "E1234")
+    assert_eq(immutable.what, "`textkit` 1.0.0 is already reserved in the registry index")
+    assert_eq(immutable.why, "Published versions are immutable (D-VERSION1) — a version can never be overwritten or reused after a yank, so anyone who already locked it keeps building the exact same bytes.")
+    assert_eq(immutable.fix, "Bump the version in `package.jet` and publish again, or `jet registry yank 1.0.0` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse).")
+}
+#Test("publication registry exact E1235 discards raw git detail") {
+    diagnostic :: publication_e1235("https://user:super-secret@example.invalid/registry.git?token=hidden", "git helper failed after receiving password super-secret")
+    assert_eq(diagnostic.code, "E1235")
+    assert_eq(diagnostic.what, "Couldn't reach the registry index at `https://example.invalid/registry.git`")
+    assert_eq(diagnostic.why, "The git operation against the registry failed (network, auth, or a stale local clone)")
+    assert_eq(diagnostic.fix, "Check network access and credentials for `https://example.invalid/registry.git`, or set `JET_REGISTRY_URL` to a reachable mirror.")
+    assert(!diagnostic.what.contains("super-secret"))
+    assert(!diagnostic.fix.contains("hidden"))
+}
+
+#Test("publication registry original takeover_requires_review_and_resigning") {
+    // tests/pkg.rs:9082-9145. Full protected FS and CSPRNG acceptance retained.
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/registry-verify-takeover-{sys.pid()}")
+    files.remove_all(root).drop("fixture absent")
+    files.create_dir_all(root) ?? panic("root")
+    previous_keys :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", files.join(root, "keys"))
+    key_a :: publication_keygen("jet", false) ?? panic("keygen a")
+    original_seed :: files.read_bytes(key_a.seed_path) ?? panic("original seed")
+    key_b :: publication_keygen("other", false) ?? panic("keygen b")
+    assert(key_a.public_key_hex != key_b.public_key_hex)
+    hash1 :: "sha256-v1v1v1"
+    hash2 :: "sha256-v2v2v2"
+    v1 :: publication_verify_test_entry("textkit", "1.0.0", hash1, key_a.public_key_hex, publication_sign(key_a.seed_path, hash1) ?? panic("sign1"))
+    wrong :: publication_verify_test_entry("textkit", "2.0.0", hash2, key_b.public_key_hex, publication_sign(key_a.seed_path, hash2) ?? panic("wrong sign"))
+    v2 :: publication_verify_test_entry("textkit", "2.0.0", hash2, key_b.public_key_hex, publication_sign(key_b.seed_path, hash2) ?? panic("sign2"))
+    repo :: files.join(root, "registry")
+    files.create_dir_all(repo) ?? panic("repo")
+    publication_write_index_entry(repo, v1) ?? panic("write1")
+    if publication_write_index_entry(repo, v2) == {
+        .Err(error) -> assert("{error}".contains("no approved registry review"))
+        .Ok(_) -> panic("unreviewed takeover accepted")
+    }
+    review :: files.join(repo, "reviews/textkit/2.0.0.review")
+    files.create_dir_all(files.dirname(review)) ?? panic("review dir")
+    files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
+    if publication_write_index_entry(repo, wrong) == {
+        .Err(error) -> assert("{error}".contains("Signature verification failed"))
+        .Ok(_) -> panic("old signer takeover accepted")
+    }
+    publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")
+    all :: publication_read_entries(repo, "textkit") ?? panic("read")
+    assert_eq(publication_verify_index_entry(all, v2, false, "jet") ?? panic("verify takeover"), [String]{})
+    assert_eq(files.read_bytes(key_a.seed_path) ?? panic("unchanged seed"), original_seed)
+    if previous_keys == {
+        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication registry original keygen sign_verify_roundtrip_and_tamper_e1246") {
+    // tests/pkg.rs:9027-9064; the pure deterministic test above is additional,
+    // not a replacement for generated-key/held-source acceptance (#3593/#3597).
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/registry-verify-roundtrip-{sys.pid()}")
+    files.remove_all(root).drop("fixture absent")
+    files.create_dir_all(root) ?? panic("root")
+    previous_keys :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", files.join(root, "keys"))
+    generated :: publication_keygen("jet", false) ?? panic("keygen")
+    hash :: "sha256-0011223344556677"
+    signature :: publication_sign(generated.seed_path, hash) ?? panic("sign")
+    good :: publication_verify_test_entry("textkit", "1.0.0", hash, generated.public_key_hex, signature)
+    assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
+    assert(publication_verify(generated.public_key_hex, hash, signature) ?? panic("direct verify"))
+    bad := ~good
+    bad.content_hash = "sha256-TAMPEREDdeadbeef"
+    publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
+    if previous_keys == {
+        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication registry original transport rejects and redacts embedded credentials") {
+    // tests/pkg.rs:7964-8029. RegistryTransport and protected clone service are
+    // queued mandatory dependencies (#4262/#3593/#3594); no test skip or mock.
+    loop url in ([String]{
+        "https://user:super-secret@example.invalid/registry.git",
+        "https://example.invalid/registry.git?access_token=super-secret",
+        "file:///registry.git?access_token=super-secret"
+    }) {
+        registry :: PublicationRegistryConfig{name: "scratch", url: url, mirror: false, require_signed: false, tier: .Core}
+        if publication_ensure_index_clone(registry) == {
+            .Err(error) -> {
+                rendered :: diagnostic_render(error.diagnostic, "package.jet", "", false)
+                assert(rendered.contains("E1235"))
+                assert(!rendered.contains("super-secret"))
+            }
+            .Ok(_) -> panic("credential-bearing transport accepted")
+        }
+    }
+    detail :: publication_e1235("https://example.invalid/registry.git", "git helper failed after receiving password super-secret")
+    assert(!diagnostic_render(detail, "package.jet", "", false).contains("super-secret"))
+}

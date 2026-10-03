@@ -22,11 +22,11 @@ pub fn pkg_dep_display(source: DepSource) -> String Never! {
         .Version(value) -> value
         .Provider(provider, target) -> if provider == {
             .Path -> target
-            else -> "{target}{@REF_PROVIDER_AT}{provider.label()}"
+            else -> "{target}{REF_PROVIDER_AT}{provider.label()}"
         }
         .Git(url, selector) -> "{{ git: {pkg_debug_str(url)}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
         .CLib(target) -> "lib: {target}"
-        .Foreign(language, reference) -> "{language.root()}{@REF_PROVIDER_AT}{pkg_debug_str(reference)}"
+        .Foreign(language, reference) -> "{language.root()}{REF_PROVIDER_AT}{pkg_debug_str(reference)}"
     }
 }
 
@@ -127,7 +127,7 @@ fn pkg_parse_dep_value(name: String, trimmed: String) -> DepSource PackageParseE
     }
     // Bare legacy tokens and the ratified quoted spelling read the same.
     unquoted :: pkg_unquote(trimmed)
-    if pkg_is_bare_path(unquoted) || unquoted.contains(@REF_PROVIDER_AT) {
+    if pkg_is_bare_path(unquoted) || unquoted.contains(REF_PROVIDER_AT) {
         if ProviderRef.classify(unquoted) == {
             .Ok(parsed) -> return Ok(DepSource.Provider{provider: parsed.provider, target: parsed.target})
             .Err(error) -> return Err(pkg_dep_ref_error(name, error))
@@ -154,15 +154,15 @@ pub fn pkg_validate_dependency_name(name: String) -> Bool Never! {
 
 // A native C-library link ref: `c@system` or `c@"vendor/path"`.
 fn pkg_parse_c_lib_ref(value: String) -> String? Never! {
-    parts :: value.split_once(@REF_PROVIDER_AT) ?? return None
-    if parts.before.trim() != @DEP_PROVIDER_C -> return None
+    parts :: value.split_once(REF_PROVIDER_AT) ?? return None
+    if parts.before.trim() != DEP_PROVIDER_C -> return None
     Val(pkg_unquote(parts.after))
 }
 
 // The D-FFI-UNIFY1 project-tier shape `lang@"provider ref"`; C stays owned by
 // the native `c@target` form.
 fn pkg_parse_foreign_ref(name: String, value: String) -> DepSource? PackageParseError! {
-    parts :: value.split_once(@REF_PROVIDER_AT) ?? return Ok(None)
+    parts :: value.split_once(REF_PROVIDER_AT) ?? return Ok(None)
     language :: ForeignLanguage.from_root(parts.before.trim()) ?? return Ok(None)
     if language == ForeignLanguage.C -> return Ok(None)
     reference :: parts.after.trim()
@@ -174,10 +174,10 @@ fn pkg_parse_foreign_ref(name: String, value: String) -> DepSource? PackageParse
 
 // `git: "<url>", tag/branch/rev: "<value>"` with exactly one selector.
 fn pkg_parse_git_dep(name: String, body: String) -> DepSource PackageParseError! {
-    url := None
-    tag_value := None
-    branch_value := None
-    rev_value := None
+    url := String?{None}
+    tag_value := String?{None}
+    branch_value := String?{None}
+    rev_value := String?{None}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) -> return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
