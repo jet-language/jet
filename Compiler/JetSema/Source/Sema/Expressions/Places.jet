@@ -258,25 +258,24 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         if owner == None -> owner = sema_expression_carrier_type_symbol(environment, owner_name)
         if owner == .Val(owner_symbol) {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
-            declaration :: sema_scope_resolve_declaration(environment, owner_symbol.id)
-            if declaration == .Val(found) {
-                if found == .Struct(struct_def) {
-                    names :: loop param in struct_def.type_params -> param.name
-                    loop field in struct_def.fields {
-                        if field.name == member {
-                            field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner_symbol.module_name, field.ty, names), names, owner_args)
-                            field_id :: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
-                            field_symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
-                            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
-                            reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
-                            reference.boxed = sema_scope_environment_boxed_edge(environment, owner_symbol.id, member)
-                            value :: sema_tir_expr(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
-                            return sema_expr_expected(value, expected, environment, &diagnostics)
-                        }
+            // The struct's fields, read at the declaration without copying
+            // its methods.
+            if sema_scope_declaration_struct(environment, owner_symbol.id) == .Val(struct_def) {
+                names :: loop param in struct_def.type_params -> param.name
+                loop field in struct_def.fields {
+                    if field.name == member {
+                        field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner_symbol.module_name, field.ty, names), names, owner_args)
+                        field_id :: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
+                        field_symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+                        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
+                        reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
+                        reference.boxed = sema_scope_environment_boxed_edge(environment, owner_symbol.id, member)
+                        value :: sema_tir_expr(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
+                        return sema_expr_expected(value, expected, environment, &diagnostics)
                     }
-                    &diagnostics.push(sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", "use one of the declared field names"))
-                    return None
                 }
+                &diagnostics.push(sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", "use one of the declared field names"))
+                return None
             }
         }
     }

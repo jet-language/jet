@@ -24,10 +24,12 @@ use jet_foundation.[
     MIRDataPlan,
     Span,
     StrPart,
+    SymbolID,
     SymbolKind,
     TExpr,
     TExprKind,
     TFailureCarrier,
+    TGenericParam,
     TStmt,
     Type,
     core_call,
@@ -154,9 +156,20 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
         function :: graph.modules[owner_index].functions[index]
         if found < 0 && function.symbol.id.key == export.symbol.id.key -> found = index
     }
-    if found >= 0 -> return sema_call_direct_target_from_registration(graph.modules[owner_index].functions[found], environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
-    &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
-    None
+    if found < 0 {
+        &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
+        return None
+    }
+    registered :: graph.modules[owner_index].functions[found]
+    target := sema_call_direct_target_from_registration(registered, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics) ?? return None
+    // Rust `owner_type_for_reader`, as for a field: the signature names types
+    // as the owning module sees them (`Stat` is `core.files`' own), so it
+    // resolves there with its type parameters kept, before the caller's
+    // explicit type arguments are substituted.
+    generics :: loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+    owner_signature :: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, generics)
+    target.signature = if target.generic_substitutions.len() == 0 -> owner_signature else -> sema_inference_substitute_type_bindings(owner_signature, target.generic_substitutions)
+    Val(target)
 }
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name: String) -> String? {

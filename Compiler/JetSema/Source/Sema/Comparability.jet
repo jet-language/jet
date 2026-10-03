@@ -90,7 +90,9 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, tr
     if trait_name != "Equatable" -> return false
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
     row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
-    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
     false
 }
 

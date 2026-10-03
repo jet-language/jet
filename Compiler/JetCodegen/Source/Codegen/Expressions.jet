@@ -2662,9 +2662,10 @@ fn jet_codegen_expression_call_return_type(builder: JetCodegenBuilder, expressio
             target := TFunc?{None}
             if !dynamic_trait -> target = jet_codegen_method_function(builder, method)
             if target == None && method.trait_owner != None -> dynamic_trait = true
-            if dynamic_trait -> return Val(jet_codegen_resolve_trait_method(builder, method).method.return_type)
-            function :: target ?? panic("checked method call has no TFunc target")
-            return Val(jet_codegen_checked_method_return_type(builder, function, receiver.ty, type_args))
+            call_type :: if dynamic_trait -> jet_codegen_resolve_trait_method(builder, method).method.return_type else -> jet_codegen_checked_method_return_type(builder, target ?? panic("checked method call has no TFunc target"), receiver.ty, type_args)
+            // A propagated trait carrier hands over the checked success value.
+            if jet_codegen_trait_call_propagates(method, call_type, expression.ty) -> return Val(expression.ty)
+            return Val(call_type)
         }
         .IndirectCall(_, _, _, signature) -> return Val(jet_codegen_callable_return_type(signature))
         .FnValue(kind) -> if kind == {
@@ -2674,6 +2675,20 @@ fn jet_codegen_expression_call_return_type(builder: JetCodegenBuilder, expressio
         else -> return None
     }
 }
+// Rust `tir_to_mir_expr` MethodCall: sema types every trait-owned call (a
+// trait object, or a bounded generic dispatched to its concrete impl) by the
+// method's declared success value, while the trait ABI returns the method's
+// effective failure carrier. That carrier is propagated at the call, as
+// module calls do, so no tier sees it where the success value belongs.
+fn jet_codegen_trait_call_propagates(method: TMethodRef, call_return_type: Type, checked_type: Type) -> Bool Never! {
+    if method.trait_owner == None -> return false
+    if call_return_type == {
+        .Result(_, _) -> return !(checked_type == .Result(_, _))
+        .Option(_) -> return !(checked_type == .Option(_))
+        else -> return false
+    }
+}
+
 fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MIRValueID {
     dynamic_trait := jet_codegen_method_trait_dispatch(builder, receiver, method)
     target := TFunc?{None}
@@ -2713,7 +2728,9 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
     lowered_types := [MIRType]{}
     loop ty in type_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
     resolved_callee := callee ?? panic("checked method call has no resolved MIR callee")
-    jet_codegen_emit_value(&builder, expression.span, call_return_type, MIROperation.Call{callee: resolved_callee, args: lowered_args, type_args: lowered_types})
+    value := jet_codegen_emit_value(&builder, expression.span, call_return_type, MIROperation.Call{callee: resolved_callee, args: lowered_args, type_args: lowered_types})
+    if !jet_codegen_trait_call_propagates(method, call_return_type, expression.ty) -> return value
+    jet_codegen_lower_try_value(&builder, expression, value, call_return_type, expression.span, None, TTryConvert.NoConversion, None, 0, None, false)
 }
 
 fn jet_codegen_numeric_constant_int(builder: &JetCodegenBuilder, span: Span, value: Int) -> MIRValueID Never! {

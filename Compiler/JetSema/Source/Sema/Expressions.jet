@@ -12,7 +12,6 @@ use jet_foundation.[
     Diagnostic,
     Dimension,
     DimensionAxis,
-    DistinctDef,
     Expr,
     Func,
     IntegerWidth,
@@ -1311,13 +1310,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes:
         else -> return None
     }
     owner := sema_expression_type_symbol(&scopes, environment, name) ?? return None
-    declaration := sema_scope_resolve_declaration(environment, owner.id) ?? return None
-    definition := DistinctDef?{None}
-    if declaration == {
-        .Distinct(value) -> definition = Val(value)
-        else -> {}
-    }
-    definition_value :: definition ?? return None
+    definition_value :: sema_scope_declaration_distinct(environment, owner.id) ?? return None
     if definition_value.quantity != None -> return None
     numeric := false
     loop marker in definition_value.derives {

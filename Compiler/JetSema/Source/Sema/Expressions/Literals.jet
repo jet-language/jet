@@ -793,7 +793,9 @@ fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnviron
     }
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
     row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
-    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).printable
     false
 }
 
@@ -842,17 +844,14 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> B
 // D-CAPBUNDLE1: the bundle markers of a distinct type named in this scope.
 fn sema_expression_distinct_bundles(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> [String]? {
     owner :: sema_expression_type_symbol(&scopes, environment, name) ?? return None
-    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
-    if declaration == .Distinct(definition) {
-        derives :: loop marker in definition.derives -> marker.name
-        granted := [String]{}
-        if sema_serde_has_name(derives, "Numeric") -> &granted.push("#Numeric")
-        if sema_serde_has_name(derives, "Comparable") -> &granted.push("#Comparable")
-        if sema_serde_has_name(derives, "Printable") -> &granted.push("#Printable")
-        if sema_serde_has_name(derives, "Encode") -> &granted.push("#CodableAsBase")
-        return Val(granted)
-    }
-    None
+    definition :: sema_scope_declaration_distinct(environment, owner.id) ?? return None
+    derives :: loop marker in definition.derives -> marker.name
+    granted := [String]{}
+    if sema_serde_has_name(derives, "Numeric") -> &granted.push("#Numeric")
+    if sema_serde_has_name(derives, "Comparable") -> &granted.push("#Comparable")
+    if sema_serde_has_name(derives, "Printable") -> &granted.push("#Printable")
+    if sema_serde_has_name(derives, "Encode") -> &granted.push("#CodableAsBase")
+    Val(granted)
 }
 
 // Rust `one_pass_materializer`: the call that turns a one-pass source into

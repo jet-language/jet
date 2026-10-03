@@ -1788,17 +1788,21 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 &diagnostics.push(sema_error("E0073", lambda.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
                 return None
             }
-            if expected_ret == .Val(.List(expected_item)) && !type_identity_equal(item_type, expected_item) {
-                updated_item_type := item_type
-                common :: sema_expr_numeric_join(updated_item_type, expected_item) ?? {
-                    &diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: updated_item_type}, lambda.span))
-                    return None
+            // A declared `module::Name` slot and a written `Name` item are one
+            // type: both sides are compared in their resolved form.
+            if expected_ret == .Val(.List(expected_item)) {
+                resolved_expected :: sema_expr_expected_type(expected_item, environment)
+                resolved_item :: sema_expr_expected_type(item_type, environment)
+                if !type_identity_equal(resolved_item, resolved_expected) {
+                    common :: sema_expr_numeric_join(resolved_item, resolved_expected) ?? {
+                        &diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span))
+                        return None
+                    }
+                    if !type_identity_equal(common, resolved_expected) {
+                        &diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span))
+                        return None
+                    }
                 }
-                if !type_identity_equal(common, expected_item) {
-                    &diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: updated_item_type}, lambda.span))
-                    return None
-                }
-                updated_item_type = expected_item
             }
             lambda_work.meta.collect_item_type = Val(item_type)
             body_result_ty = Type.List{element: item_type}

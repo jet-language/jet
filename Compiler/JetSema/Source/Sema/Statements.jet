@@ -3935,7 +3935,12 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
         else -> {}
     }
     known_type :: sema_stmt_return_known_type(value, scopes) ?? return false
-    sema_stmt_return_types_are_carriers(known_type, required)
+    if sema_stmt_return_types_are_carriers(known_type, required) -> return true
+    // A call root propagates its failure (D-FAILURE-FOUNDATION1=A), so a
+    // `T? !E` callee (`T? Never!` included) meets a `T?` slot with its own
+    // `T?` success, as Rust `check_return_expr` infers it against the slot.
+    if normalized == .Option(_) && sema_expression_propagating_call(value) && sema_expr_unwrap_tag(known_type) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok) == .Option(_)
+    false
 }
 // A value `if` that builds the `T !E` carrier on some arm, through nested
 // decision levels and grouping.
@@ -4225,6 +4230,18 @@ fn sema_stmt_scope_form_label(statement: Stmt) -> String Never! {
     }
 }
 
+// Rust `check_value_tail` on an unreachable value line infers it with the
+// promised type only as context (`infer_with_expected`): the value is never
+// compared against that type, handed back, or treated as a discarded result.
+// A value that only fails against the promised type is checked on its own.
+fn sema_stmt_check_dead_value_tail(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(tail, return_type, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
+    expected := Type?{None}
+    if probed != None && !sema_has_error_since(probe_diagnostics, 0) -> expected = return_type
+    sema_check_expression(tail, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) != None
+}
+
 pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     // D-COMPILE-STACK1=A (E1403): a statement list is one source nesting level
     // below its owner, as each of its statements is in the Rust checker.
@@ -4260,10 +4277,20 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             dead_state := sema_ownership_state_snapshot(state)
             dead_mark :: sema_check_context_mark(&context)
             // A dead last line is checked for its own diagnostics, never as the
-            // value the function hands back.
+            // value the function hands back. Rust `check_value_tail`
+            // (CheckerCore/blocks.rs:257-274): a dead value line keeps the
+            // promised type as context (so a bare `None` still types).
+            dead_value_tail := false
+            if index + 1 == statements.len() && statement == .Expr(tail) && context.value_tail_span == (Val(expr_span(tail))) && !sema_stmt_refutable_expr_diverges(tail) {
+                dead_value_tail = true
+                context.value_tail_span = None
+                if !sema_stmt_check_dead_value_tail(tail, return_type, environment, &scopes, &dead_state, &tail_store, &context, &diagnostics) -> complete = false
+            }
             context.value_tail_span = None
-            dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, &scopes, &dead_state, &tail_store, &context, &diagnostics, loop_depth)
-            if !dead_result.complete -> complete = false
+            if !dead_value_tail {
+                dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, &scopes, &dead_state, &tail_store, &context, &diagnostics, loop_depth)
+                if !dead_result.complete -> complete = false
+            }
             dead_edges := [String]{}
             loop edge_index in dead_mark.failure_edges..<context.failure_edges.len() -> &dead_edges.push(context.failure_edges[edge_index])
             dead_direct_source :: context.failure_direct_source

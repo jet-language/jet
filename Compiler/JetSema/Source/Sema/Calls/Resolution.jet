@@ -10,7 +10,6 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
-    Item,
     Span,
     Symbol,
     SymbolID,
@@ -20,7 +19,6 @@ use jet_foundation.[
     TGenericParam,
     TMethodRef,
     Type,
-    TypeParam,
     type_name,
 ]
 
@@ -121,14 +119,6 @@ pub fn sema_call_facts(signature: Type, type_args: [Type], binding: SemaCallBind
     }
 }
 
-fn sema_call_function_type_params(item: Item?) -> [TypeParam] Never! {
-    value :: item ?? return [TypeParam]{}
-    if value == {
-        .Func(func) -> func.type_params
-        else -> [TypeParam]{}
-    }
-}
-
 fn sema_call_unknown_function(name: String, span: Span) -> Diagnostic {
     sema_error("E0102", span, "nothing named `{name}` exists here", "only a registered callable can be invoked", "define `{name}` first, or call a name that exists")
 }
@@ -177,8 +167,8 @@ pub fn sema_call_resolve_direct(name: String, type_args: [Type], environment: Se
         return None
     }
 
-    declaration :: sema_scope_resolve_declaration(environment, symbol.id)
-    generic_params_source :: sema_call_function_type_params(declaration)
+    // Only the callee's type parameters: its declaration is never copied.
+    generic_params_source :: sema_scope_declaration_function_type_params(environment, symbol.id)
     generic_params :: sema_inference_type_params(generic_params_source)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
@@ -402,13 +392,28 @@ fn sema_call_trait_signature_with_receiver(signature: Type, receiver_type: Type)
     }
 }
 
+// Rust `infer_method_call` (trait-object and bounded-generic dispatch, via
+// `check_trait_method_args`): the call exposes the method's declared success
+// value, as `checked_return_types(..).0`. The trait ABI keeps the effective
+// failure carrier, which MIR lowering propagates at the call (Rust
+// `tir_to_mir_expr` MethodCall), so a declared `-> Bool` never auto-propagates
+// an implicit `Err` in the caller. With no written return the call keeps the
+// registered `Unit Err!` (or a raw protocol's `Unit`).
+fn sema_call_trait_dispatch_signature(signature: Type, declared_return: Type?) -> Type Never! {
+    declared :: declared_return ?? return ~signature
+    if signature == {
+        .Fn(params, _, effects, contract, metadata, provenance) -> Type.Fn{params: params, ret: Val(declared), effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        else -> ~signature
+    }
+}
+
 fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGraph, trait_nominal: SemaRegistrationNominal, method: SemaRegistrationTraitMethod, receiver_type: Type, type_args: [Type], caller_module: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if type_args.len() > 0 {
         &diagnostics.push(sema_error("E0119", span, "`{method.declaration.name}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
     if method.parameters.len() == 0 || method.declaration.params.len() == 0 || method.declaration.params[0].name != "self" -> return None
-    declared_signature :: sema_type_resolve_declared_with_generics(graph, method.signature, caller_module, generic_params)
+    declared_signature :: sema_type_resolve_declared_with_generics(graph, sema_call_trait_dispatch_signature(method.signature, method.declaration.return_type), caller_module, generic_params)
     signature :: sema_call_trait_signature_with_receiver(declared_signature, receiver_type) ?? return None
     reference :: TMethodRef{symbol: method.symbol.id, name: method.declaration.name, mangled: false, trait_owner: Val(trait_nominal.symbol.id), operator_identity: None}
     SemaCallMethodCandidate{

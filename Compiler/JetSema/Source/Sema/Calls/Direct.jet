@@ -164,7 +164,9 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment) -> B
     if resolved.symbol.kind != SymbolKind.Type -> return false
     module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
     row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
-    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
     false
 }
 

@@ -10,7 +10,6 @@ use jet_foundation.[
     ExprField,
     ExprPair,
     Field,
-    Item,
     MIRTargetHardwareUse,
     MIRTypedHeadKind,
     ParamZone,
@@ -76,9 +75,7 @@ fn sema_expression_names_enum(name: String, environment: SemaScopeEnvironment, s
     if sema_fact_enum_menu(Type.Named{name: name}, environment) != None -> return true
     owner := sema_expression_type_symbol(&scopes, environment, name)
     if owner == .Val(symbol) {
-        if sema_scope_resolve_declaration(environment, symbol.id) == .Val(declaration) {
-            if declaration == .Enum(_) -> return true
-        }
+        if sema_scope_declaration_is(environment, symbol.id, SemaScopeDeclarationKind.Enum) -> return true
     }
     sema_expression_core_enum_name(name)
 }
@@ -164,14 +161,7 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
 fn sema_expression_enum_declares_variant(enum_name: String, variant: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> Bool {
     owner :: sema_expression_type_symbol(&scopes, environment, enum_name)
     if owner == .Val(symbol) {
-        if sema_scope_resolve_declaration(environment, symbol.id) == .Val(declaration) {
-            if declaration == .Enum(enum_def) {
-                loop candidate in enum_def.variants {
-                    if candidate.name == variant -> return true
-                }
-                return false
-            }
-        }
+        if sema_scope_declaration_is(environment, symbol.id, SemaScopeDeclarationKind.Enum) -> return sema_scope_declaration_enum_declares(environment, symbol.id, variant)
     }
     core_enum_variant_payload(enum_name, variant) != None
 }
@@ -336,16 +326,15 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     owner := resolved.owner
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     result_ty := resolved.ty
-    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? {
+    // The struct's fields and type parameters, read at the declaration
+    // without copying its methods.
+    if sema_scope_declaration_kind(environment, owner.id) == None {
         &diagnostics.push(sema_error("E0119", span, "struct `{type_name(result_ty)}` has no declaration metadata", "a struct literal must check every declared field before lowering", "use a registered struct declaration"))
         return None
     }
-    struct_def :: if declaration == {
-        .Struct(value) -> value
-        else -> {
-            &diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
-            return None
-        }
+    struct_def :: sema_scope_declaration_struct(environment, owner.id) ?? {
+        &diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
+        return None
     }
     names :: loop parameter in struct_def.type_params -> parameter.name
     args := type_args
@@ -485,17 +474,8 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     }
     if type_name == "" {
         inferred_owner :: sema_expression_type_symbol(&scopes, environment, resolved_name)
-        inferred_declaration := Item?{None}
-        if inferred_owner == .Val(owner_symbol) {
-            inferred_declaration = sema_scope_resolve_declaration(environment, owner_symbol.id)
-        }
-        inferred_is_enum :: if inferred_declaration == {
-            .Val(inferred) -> if inferred == {
-                .Enum(_) -> true
-                else -> false
-            }
-            .None -> false
-        }
+        inferred_is_enum := false
+        if inferred_owner == .Val(owner_symbol) -> inferred_is_enum = sema_scope_declaration_is(environment, owner_symbol.id, SemaScopeDeclarationKind.Enum)
         if !inferred_is_enum {
             &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "add a type annotation, or write the full form `EnumName.{variant}`"))
             return None
@@ -506,16 +486,15 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         return None
     }
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
-    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? {
+    // The enum's variants, groups and type parameters, read at the
+    // declaration without copying its methods.
+    if sema_scope_declaration_kind(environment, owner.id) == None {
         &diagnostics.push(sema_error("E0119", span, "enum `{resolved_name}` has no declaration metadata", "an enum constructor must check its variant payload", "use a registered enum declaration"))
         return None
     }
-    enum_def :: if declaration == {
-        .Enum(value) -> value
-        else -> {
-            &diagnostics.push(sema_error("E0119", span, "`{resolved_name}` is not an enum", "enum literal syntax only constructs enum declarations", "use a struct literal for a struct type"))
-            return None
-        }
+    enum_def :: sema_scope_declaration_enum(environment, owner.id) ?? {
+        &diagnostics.push(sema_error("E0119", span, "`{resolved_name}` is not an enum", "enum literal syntax only constructs enum declarations", "use a struct literal for a struct type"))
+        return None
     }
     selected := Variant?{None}
     loop candidate in enum_def.variants {
@@ -1206,14 +1185,7 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, s
     parts :: path.split(".").to_list()
     if parts.len() != 2 -> return None
     owner :: sema_expression_type_symbol(&scopes, environment, parts[0]) ?? return None
-    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
-    declares_variant :: if declaration == {
-        .Enum(value) -> loop candidate in value.variants {
-            if candidate.name == parts[1] -> break true
-        } ?? false
-        else -> false
-    }
-    if declares_variant -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
+    if sema_scope_declaration_enum_declares(environment, owner.id, parts[1]) -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
 }
 
 // D-DIST1/D-DIST3 (E0128): a distinct head never re-types its base value;
