@@ -18,7 +18,6 @@ use jet_foundation.[
     MIRPlaceID,
     MIRPreludeCall,
     MIRPreludeCallID,
-    MIRProgram,
     MIRType,
     MIRValueID,
     MIRVectorAccess,
@@ -123,60 +122,56 @@ fn mir_pass_loop_place(function: MIRFunction, analysis: MIRPassLoopAnalysis, id:
     Val(function.places[position])
 }
 
-fn mir_pass_derive_loop_and_vector_facts(program: &MIRProgram) -> MIRLoopVectorCounts Never! {
+// One function's canonical loop and vector facts.
+fn mir_pass_function_loop_and_vector_facts(function: &MIRFunction, prelude_calls: [MIRPreludeCall]) -> MIRLoopVectorCounts Never! {
     counts := MIRLoopVectorCounts{loops: 0, vectors: 0}
-    function_index := 0
-    loop function_index < program.functions.len() {
-        function :: program.functions[function_index]
-        previous_vectors :: function.optimization.vector_facts
-        loops := [MIRLoopFact]{}
-        vectors := [MIRVectorFact]{}
-        // A function without a loop test has no loop shape; skip its analysis.
-        if mir_pass_function_has_loop_test(function) {
-            analysis :: mir_pass_loop_analysis(function)
-            loop shape in mir_pass_loop_shapes(function, analysis) {
-                reduction :: mir_pass_loop_reduction(function, analysis, shape)
-                copy_cost :: mir_pass_loop_copy_cost(function, analysis, shape)
-                loop_decision :: if {
-                    shape.trip_count == None && shape.form != .Unconditional -> MIROptimizationDecision.Rejected{reason: .DynamicTripCount}
-                    shape.canonical -> MIROptimizationDecision.Eligible
-                    else -> MIROptimizationDecision.Rejected{reason: .MissingProof}
-                }
-                &loops.push(MIRLoopFact{
-                    header: shape.header,
-                    body: shape.body,
-                    exit: shape.exit,
-                    form: shape.form,
-                    trip_count: shape.trip_count,
-                    copy_cost: copy_cost,
-                    canonical: shape.canonical,
-                    span: shape.span,
-                    decision: loop_decision,
-                })
-                vector :: mir_pass_loop_vector_fact(function, analysis, shape, reduction, copy_cost, program.prelude_calls)
-                &vectors.push(vector)
+    previous_vectors :: function.optimization.vector_facts
+    loops := [MIRLoopFact]{}
+    vectors := [MIRVectorFact]{}
+    // A function without a loop test has no loop shape; skip its analysis.
+    if mir_pass_function_has_loop_test(function) {
+        analysis :: mir_pass_loop_analysis(function)
+        loop shape in mir_pass_loop_shapes(function, analysis) {
+            reduction :: mir_pass_loop_reduction(function, analysis, shape)
+            copy_cost :: mir_pass_loop_copy_cost(function, analysis, shape)
+            loop_decision :: if {
+                shape.trip_count == None && shape.form != .Unconditional -> MIROptimizationDecision.Rejected{reason: .DynamicTripCount}
+                shape.canonical -> MIROptimizationDecision.Eligible
+                else -> MIROptimizationDecision.Rejected{reason: .MissingProof}
             }
+            &loops.push(MIRLoopFact{
+                header: shape.header,
+                body: shape.body,
+                exit: shape.exit,
+                form: shape.form,
+                trip_count: shape.trip_count,
+                copy_cost: copy_cost,
+                canonical: shape.canonical,
+                span: shape.span,
+                decision: loop_decision,
+            })
+            vector :: mir_pass_loop_vector_fact(function, analysis, shape, reduction, copy_cost, prelude_calls)
+            &vectors.push(vector)
         }
-        loop vector in previous_vectors {
-            if vector.fixed_reduction != None && !mir_pass_vector_header_seen(vectors, vector.loop_header) && mir_pass_fixed_reduction_fact_current(function, vector, program.prelude_calls) -> &vectors.push(vector)
-        }
-        program.functions[function_index].optimization.loop_facts = loops
-        program.functions[function_index].optimization.vector_facts = vectors
-        program.functions[function_index].optimization.checked_vector_facts = mir_pass_checked_vectors(vectors)
-        program.functions[function_index].optimization.auto_vectorizable = false
-        program.functions[function_index].optimization.no_aliasing = vectors.len() > 0
-        program.functions[function_index].optimization.no_early_exit = vectors.len() > 0
-        program.functions[function_index].optimization.no_cross_iteration_dependencies = vectors.len() > 0
-        loop vector in vectors {
-            counts.vectors += 1
-            program.functions[function_index].optimization.auto_vectorizable = program.functions[function_index].optimization.auto_vectorizable || vector.decision == .Eligible
-            program.functions[function_index].optimization.no_aliasing = program.functions[function_index].optimization.no_aliasing && vector.no_aliasing
-            program.functions[function_index].optimization.no_early_exit = program.functions[function_index].optimization.no_early_exit && vector.no_early_exit
-            program.functions[function_index].optimization.no_cross_iteration_dependencies = program.functions[function_index].optimization.no_cross_iteration_dependencies && vector.no_cross_iteration_dependencies
-        }
-        counts.loops += loops.len()
-        function_index += 1
     }
+    loop vector in previous_vectors {
+        if vector.fixed_reduction != None && !mir_pass_vector_header_seen(vectors, vector.loop_header) && mir_pass_fixed_reduction_fact_current(function, vector, prelude_calls) -> &vectors.push(vector)
+    }
+    function.optimization.loop_facts = loops
+    function.optimization.vector_facts = vectors
+    function.optimization.checked_vector_facts = mir_pass_checked_vectors(vectors)
+    function.optimization.auto_vectorizable = false
+    function.optimization.no_aliasing = vectors.len() > 0
+    function.optimization.no_early_exit = vectors.len() > 0
+    function.optimization.no_cross_iteration_dependencies = vectors.len() > 0
+    loop vector in vectors {
+        counts.vectors += 1
+        function.optimization.auto_vectorizable = function.optimization.auto_vectorizable || vector.decision == .Eligible
+        function.optimization.no_aliasing = function.optimization.no_aliasing && vector.no_aliasing
+        function.optimization.no_early_exit = function.optimization.no_early_exit && vector.no_early_exit
+        function.optimization.no_cross_iteration_dependencies = function.optimization.no_cross_iteration_dependencies && vector.no_cross_iteration_dependencies
+    }
+    counts.loops += loops.len()
     counts
 }
 

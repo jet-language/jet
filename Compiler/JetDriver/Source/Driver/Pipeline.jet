@@ -1,6 +1,7 @@
 // Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
 use jet_foundation.[
     AccessConvention,
+    CompilerThreads,
     CompilerTraceSink,
     DIAGNOSTIC_ERROR,
     Diagnostic,
@@ -2603,7 +2604,7 @@ fn jet_driver_keep_going_trap_emission(kg: &JetDriverKeepGoingLog, program: &MIR
 // function it rejects in the program as it stands; all of them become traps
 // together and the optimizer runs again on the program, so reruns grow with
 // the failing checks rather than with the failing functions.
-fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool) -> MIROptimizationResult {
+fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
     optimization := ^first
     attempts := 0
     traps := 0
@@ -2630,7 +2631,7 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
         if trapped == 0 -> break
         traps += trapped
         attempts += 1
-        optimization = optimize_mir_program(&program, full_verification)
+        optimization = optimize_mir_program(&program, full_verification, threads)
     }
     if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {traps} keep-going traps in {attempts} reruns; emission runs on the program as the optimizer left it", "-")
     optimization
@@ -3143,9 +3144,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // every compile and every pass when the request asks for full verification.
     function_owners_for_errors := jet_driver_mir_function_owners(program_value)
     if request.trace_sink == .Val(sink) -> sink.begin("optimize", "", -1, -1)
-    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass)
+    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads)
     if kg.enabled {
-        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass)
+        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     if request.trace_sink == .Val(sink) -> sink.end("optimize", function_owners_for_errors.len())

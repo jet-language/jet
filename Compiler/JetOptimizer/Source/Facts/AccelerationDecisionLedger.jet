@@ -17,16 +17,6 @@ use jet_foundation.[
     stable_id,
 ]
 
-fn mir_pass_refresh_acceleration_facts(program: &MIRProgram) -> Int Never! {
-    count := 0
-    loop function_index in 0..<program.functions.len() {
-        facts :: mir_pass_function_acceleration_facts(program.functions[function_index])
-        count += facts.len()
-        program.functions[function_index].optimization.acceleration_facts = facts
-    }
-    count
-}
-
 fn mir_pass_function_acceleration_facts(function: MIRFunction) -> [MIRAccelerationFact] Never! {
     facts := [MIRAccelerationFact]{}
     loop vector in function.optimization.vector_facts {

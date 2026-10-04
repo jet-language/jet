@@ -22,12 +22,13 @@ use jet_foundation.[
 pub enum JetCLIPlan {
     // The command finished: write these bytes and exit with this status.
     Done(output: JetDriverVerbOutput)
-    // `jet check <file>`: the entry as the user typed it, its bytes, and the
-    // output policy. The host compiles it and renders the outcome.
-    Check(file: String, source: String, color: Bool, quiet: Bool)
+    // `jet check <file>`: the entry as the user typed it, its bytes, the
+    // output policy, and the `--threads` cap. The host compiles it and
+    // renders the outcome.
+    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?)
     // `jet build <file>`: the entry and its bytes; `release` selects the
     // rustc/LLVM backend, otherwise the Jet-native backend builds it.
-    Build(file: String, source: String, color: Bool, release: Bool)
+    Build(file: String, source: String, color: Bool, release: Bool, threads: Int?)
 }
 
 // Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
@@ -48,7 +49,7 @@ JET_CLI_SEPARATE_VALUE_FLAGS :: [String]{
     "--token", "--base-receipt", "--receipt", "--head-receipt", "--after-receipt", "--canvas-host",
     "--canvas-port", "--canvas-transport", "--canvas-authority", "--where", "--capture",
     "--browser", "--browser-retries", "--browser-reporter", "--filter", "--shuffle", "--verify",
-    "--template", "--sort",
+    "--template", "--sort", "--threads",
 }
 
 // `--name=value` spellings that never become positional words.
@@ -56,7 +57,7 @@ JET_CLI_VALUE_PREFIXES :: [String]{
     "--verify=", "--output=", "--where=", "--capture=", "--endpoint=", "--channel=",
     "--platform=", "--trust-key=", "--set=", "--scope=", "--kind=", "--live=", "--replay=",
     "--target=", "--app=", "--share=", "--token=", "--canvas-host=", "--canvas-port=",
-    "--canvas-transport=", "--canvas-authority=",
+    "--canvas-transport=", "--canvas-authority=", "--threads=",
 }
 
 // Flags an external formatter accepts with `jet fmt --lang`.
@@ -273,10 +274,45 @@ fn jet_cli_looks_like_source(argument: String) -[FS]> Bool Never! {
     cli_files.exists("{argument}.jet")
 }
 
+// D-JOBS1=A: the commands that compile, and so take `--threads N`.
+JET_CLI_THREADS_COMMANDS :: [String]{"build", "run", "check", "test", "dev", "inspect"}
+
+// `--threads N` (or `--threads=N`) before `--`: `None` when absent, else the
+// cap, or the usage error that names the flag.
+// `--jobs` and `-j`, the spelling other build tools use, are refused on the
+// compiling commands with a pointer to `--threads`; `jet jobs` is unchanged.
+fn jet_cli_threads(jet_argv: [String], command: String, color: Bool) -> JetCLIThreads Never! {
+    compiling :: JET_CLI_THREADS_COMMANDS.contains(command)
+    loop (index, argument) in jet_argv {
+        jobs_flag :: argument == "--jobs" || argument.starts_with("--jobs=") || argument == "-j" || (argument.starts_with("-j") && argument.len() > 2)
+        if compiling && jobs_flag {
+            return JetCLIThreads.Refused{plan: jet_cli_fail("E2102", "`{argument.split("=").to_list()[0]}` isn't a flag jet understands", "`jet jobs` runs your project's named jobs; the compiler's thread cap is `--threads`", "write `--threads N` to cap the compiler at N threads", color, JET_DRIVER_EXIT_USAGE)}
+        }
+        value := String?{None}
+        if argument.starts_with("--threads=") -> value = Val(argument.slice(10..<argument.len()))
+        if argument == "--threads" -> value = Val(if index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> "")
+        text :: value ?? next
+        if !compiling {
+            return JetCLIThreads.Refused{plan: jet_cli_fail("E2102", "`--threads` is only valid with a command that compiles", jet_cli_why("E2102"), "use it with `jet build`, `run`, `check`, `test`, `dev`, or `inspect`", color, JET_DRIVER_EXIT_USAGE)}
+        }
+        count :: Int.parse(text) ?? 0
+        if count < 1 {
+            return JetCLIThreads.Refused{plan: jet_cli_fail("E2104", "`--threads` needs a whole number of compiler threads, at least 1, not `{text}`", jet_cli_why("E2104"), "write `--threads 1` for one compiler thread, or leave the flag out to let jet choose", color, JET_DRIVER_EXIT_USAGE)}
+        }
+        return JetCLIThreads.Cap{threads: Val(count)}
+    }
+    JetCLIThreads.Cap{threads: None}
+}
+
+enum JetCLIThreads {
+    Cap(threads: Int?)
+    Refused(plan: JetCLIPlan)
+}
+
 // `jet check [<file>]` / `jet build [<file>]`: the bare form needs a project;
 // a file target is read as the user typed it (or with `.jet` appended), and a
 // missing file is E2105.
-fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if args.len() < 2 {
         directory :: cli_files.cwd() ?? "."
         if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported(command, color)
@@ -292,7 +328,7 @@ fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool) -[FS
         fix :: if default_entry && jet_cli_has_manifest_above(parent) -> "create `main.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
         return jet_cli_fail("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet}
+    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads}
 }
 
 // Build flags whose Jet port has not landed: refused, never ignored.
@@ -304,7 +340,7 @@ JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
 // `jet build <file>`: `--release` (or `--profile release`) builds through
 // rustc/LLVM; the default and `--profile debug` build through the Jet-native
 // backend. Other profiles and the flags above are not ported yet.
-fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     release := jet_argv.contains("--release")
     loop (index, argument) in jet_argv {
         head :: argument.split("=").to_list()[0]
@@ -322,9 +358,9 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -
             else -> return jet_cli_not_ported("build --profile {profile}", color)
         }
     }
-    entry :: jet_cli_check(args, "build", color, quiet)
+    entry :: jet_cli_check(args, "build", color, quiet, threads)
     if entry == {
-        .Check(file, source, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release}
+        .Check(file, source, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads}
         else -> {}
     }
     entry
@@ -481,6 +517,11 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     owns_flags :: JET_CLI_OWNS_FLAGS.contains(command)
     bespoke_help :: command == "bind" || command == "diff" || command == "merge" || command == "perf"
     if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) -> return jet_cli_done(jet_cli_command_help(command), "", JET_DRIVER_EXIT_OK)
+    threads := Int?{None}
+    if jet_cli_threads(jet_argv, command, color) == {
+        .Refused(refusal) -> return refusal
+        .Cap(cap) -> threads = cap
+    }
     if !owns_flags {
         if jet_cli_check_flags(jet_argv, command, color) == .Val(refusal) -> return refusal
     }
@@ -499,8 +540,8 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
             return jet_cli_done(jet_cli_usage_page(order), "", JET_DRIVER_EXIT_OK)
         }
         "explain" -> return jet_cli_explain(jet_argv, args, color)
-        "check" -> return jet_cli_check(args, "check", color, quiet)
-        "build" -> return jet_cli_build(jet_argv, args, color, quiet)
+        "check" -> return jet_cli_check(args, "check", color, quiet, threads)
+        "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
         else -> {}
     }
     jet_cli_not_ported(command, color)
