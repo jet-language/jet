@@ -1706,6 +1706,9 @@ or one real diverging tail: `return`, `return expr`, `next`, `break`, or
 `panic(...)`. The tail `return expr` is a function return; it is no longer
 reinterpreted as the block's value. A value-bearing block keeps the success
 payload type, while a diverging block types the binding at that payload type.
+For a call that returns nothing, run the call as a statement and put `()` last
+to continue, or put `return` last to leave the enclosing function. Braces alone
+do not turn that call into a value.
 Fallible blocks retain the ambient `err` from D-FAIL-BIND1; optional blocks do
 not gain it. Direct `?? return`/`?? next`/`?? break` routes and `?` propagation
 are unchanged. D-CHOOSE-TEST1 routes may use the block form only when its tail
@@ -8810,6 +8813,9 @@ layout.
   file reports once and parsing resumes at the next statement. Explicit and
   inserted terminators share `TokKind::Semi`; the diagnostic dispatches on a
   non-empty source span, and the E0373 row carries `fix_edits`.
+  The Jet parser contract fixtures in
+  `Compiler/JetParser/Tests/ContractFixtures.jet` pin both edits and statement
+  recovery through the production parser.
 - **D-MARKERSHAPE1=B —** One bare rule, one list for several, E0999 with the
   rewrite otherwise. The audit found no new evidence; the surface does not
   change.

@@ -1097,7 +1097,9 @@ print("padded still readable: {padded}")
 
 A local view may chain another string-view operation, be interpolated, be placed
 in a view-typed aggregate, or be copied with `~`. An owning destination copies it
-by default. At a named boundary, `View<str>` states the owner-tied contract;
+by default; returning that owned copy does not move the original owner. A
+returned window likewise retains its owner's provenance rather than consuming
+the owner's storage. At a named boundary, `View<str>` states the owner-tied contract;
 E2307 rejects a temporary or unstable owner, or an explicit-copy policy that was
 not satisfied. See
 [`string_view.jet`](../../Examples/features/memory/string_view.jet) and
