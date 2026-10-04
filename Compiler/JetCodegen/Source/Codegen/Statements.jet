@@ -2240,15 +2240,16 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                         if write_alias -> &builder.window_aliases.push(local.name)
                     } else {
                         // D-MEM-COPYSEM1: an immutable binding of a read
-                        // parameter's place (or of its payload past a
-                        // diverging `??`) aliases the place. The parameter
-                        // cannot change while the function runs, so the alias
-                        // reads exactly what a copy would hold.
+                        // parameter's place (a field path or a list element
+                        // below it, or its payload past a diverging `??`)
+                        // aliases the place. The parameter cannot change
+                        // while the function runs, so the alias reads exactly
+                        // what a copy would hold.
                         read_alias := MIRPlaceID?{None}
                         if binds_init_type && !local.mutable && !local.generated && !gc_root_requested {
                             read_alias = if init.kind == {
                                 .OrFallback(subject, fallback, ambient_err) -> jet_codegen_lower_or_fallback_window(&builder, init, subject, fallback, ambient_err)
-                                else -> jet_codegen_read_window_place(&builder, init)
+                                else -> jet_codegen_read_binding_place(&builder, init)
                             }
                         }
                         if read_alias == .Val(read_place) {

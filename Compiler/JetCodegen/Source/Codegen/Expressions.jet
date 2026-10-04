@@ -5560,6 +5560,76 @@ fn jet_codegen_read_window_place(builder: &JetCodegenBuilder, expression: TExpr)
     Val(place)
 }
 
+// D-MEM-COPYSEM1 (Rust `check_binding` read window over a maximal place):
+// the place an immutable binding of `expression` aliases. Beyond a read
+// window, a list element below a read parameter's place
+// (`row :: graph.modules[i]`, `item :: row.items[j].field`) is aliased in
+// place: the parameter cannot change while the function runs, so each read of
+// the element holds exactly what a copy made at the binding would, and
+// binding it never copies the element. The index operands are evaluated once,
+// here, as reading the value would; the bounds check runs where the element is
+// read, as MIRRust renders the window place at each use.
+fn jet_codegen_read_binding_place(builder: &JetCodegenBuilder, expression: TExpr) -> MIRPlaceID? {
+    window :: jet_codegen_read_window_place(&builder, expression)
+    if window != None -> return window
+    element := expression
+    if expression.kind == .Clone(inner, _) -> element = inner
+    if !jet_codegen_is_element_place_chain(builder, element) -> return None
+    // Settle the root before lowering anything: lowering the place evaluates
+    // its index operands, so a refusal after it would evaluate them twice.
+    root :: jet_codegen_element_place_root(element) ?? return None
+    local_place := jet_codegen_lower_local_place(&builder, root)
+    root_place := jet_codegen_place_access(&builder, local_place, MIRAccess.Read)
+    if !jet_codegen_read_parameter_place(builder, root_place) -> return None
+    // Every link below the root is a stored field or a List index, so the
+    // lowered place stays rooted at the read parameter.
+    jet_codegen_lower_expression_place(&builder, element, MIRAccess.Read)
+}
+
+// A chain of stored struct fields and plain List reads (each indexed base a
+// List place, under at most a compiler-inserted clone of a plain place) down
+// to a non-persistent local, with no `Pin` on the way. Lowering it as a place
+// evaluates only its index operands.
+fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, expression: TExpr) -> Bool Never! {
+    if expression.ty == {
+        .Apply(name, args) -> {
+            if name == "Pin" && args.len() == 1 -> return false
+        }
+        else -> {}
+    }
+    if expression.kind == {
+        .Local(local) -> local.persist_key == None
+        .Field(receiver, reference) -> jet_codegen_is_element_place_chain(builder, receiver) && jet_codegen_is_stored_struct_field(builder, receiver.ty, reference)
+        .Index(base, _, kind, access, checked_call, _) -> {
+            if access != AccessConvention.Read || checked_call != None -> return false
+            if kind == {
+                .List | .Unknown -> {}
+                else -> return false
+            }
+            if base.ty == {
+                .List(_) -> {}
+                else -> return false
+            }
+            if base.kind == .Clone(inner, _) -> return jet_codegen_plain_place_path(inner) && jet_codegen_is_element_place_chain(builder, inner)
+            jet_codegen_is_element_place_chain(builder, base)
+        }
+        else -> false
+    }
+}
+
+// The local a jet_codegen_is_element_place_chain chain is rooted at.
+fn jet_codegen_element_place_root(expression: TExpr) -> TLocal? {
+    if expression.kind == {
+        .Local(local) -> Val(local)
+        .Field(receiver, _) -> jet_codegen_element_place_root(receiver)
+        .Index(base, _, _, _, _, _) -> {
+            if base.kind == .Clone(inner, _) -> return jet_codegen_element_place_root(inner)
+            jet_codegen_element_place_root(base)
+        }
+        else -> None
+    }
+}
+
 // D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
 // field, payload, and list-index projections only. A read parameter cannot
 // change while the function runs, so reading such a place in place is
