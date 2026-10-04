@@ -216,7 +216,7 @@ under `.agents/skills` and `Tools/tower/skills`.
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
-disk under `~/.cache/jet-test-scratch` and `~/.cache/jet-luna`, never in
+disk under `~/.cache/jet-dev/scratch` and `~/.cache/jet-dev`, never in
 `/tmp`, which is RAM-backed. Share one bounded Cargo target and respect the default
 `JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except in the
 orchestrator's lock-serialized build targets, which opt in with
