@@ -1,5 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot,
+  evidenceMedia, acceptanceReadiness,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -506,7 +507,6 @@ function acceptanceContent(card, ballot) {
 const PROOF_INLINE_MAX = 2;
 // Stored board identifier prefix (see store.mjs); `/media/` serves the file.
 const VISUAL_MEDIA_ROOT = 'docs/proposals/visual-acceptance/media/';
-const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
 const mediaUrl = path => `/media/${String(path).slice(VISUAL_MEDIA_ROOT.length).split('/').map(encodeURIComponent).join('/')}`;
 
 // Captured evidence. Screenshots open a gallery scoped to this card or
@@ -607,17 +607,13 @@ function dutyVerify(card, ballot) {
   const media = evidenceMedia(card, ballot);
   const inline = content.proof.slice(0, PROOF_INLINE_MAX);
   const rest = content.proof.slice(PROOF_INLINE_MAX);
-  const hasOpenCriteria = (card.criteria || []).some(i => !['met', 'verified'].includes(i.status));
-  const waitingOnAgent = card.needsAcceptance && (!ballot || hasOpenCriteria);
-  const capturePending = media.length === 0;
-  const notReady = waitingOnAgent || capturePending;
-  const yourCheck = waitingOnAgent
-    ? 'The agents are still finishing the computer checks. You can look now, but you can accept only after those checks finish.'
-    : content.visualCheck || 'Try the screen yourself. Check that it looks right and is easy to use. The agents have already checked that it works.';
+  // ownerVerifyQueue admits only ready cards: the D-ACCEPT ballot exists, agent
+  // criteria are met, and the screen capture is attached.
+  const yourCheck = content.visualCheck || 'Try the screen yourself. Check that it looks right and is easy to use. The agents have already checked that it works.';
   const node = el(`<div class="duty duty--verify">
       <div class="duty__top"><span class="duty__kind">Visual check</span>
         <span class="num">${ticket(card)}</span>
-        <span class="duty__meta">${ballot ? esc(ballot.id) : 'waiting for the agents to prepare your check'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
+        <span class="duty__meta">${esc(ballot.id)}</span>${ageChip(ballot.created)}</div>
       <h2 class="duty__title">${esc(card.title)}</h2>
       <div class="verifyblock">
         <div class="verifyblock__h">What agents already proved</div>
@@ -628,8 +624,8 @@ function dutyVerify(card, ballot) {
       </div>
       ${capturedEvidence(media)}
       <div class="duty__actions">
-        <button class="btn btn--amber btn--sm" data-accept ${notReady ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for computer checks' : capturePending ? 'Waiting for a screen capture' : 'Accept — looks right'}</button>
-        <button class="btn btn--ghost btn--sm" data-bounce ${waitingOnAgent ? 'disabled' : ''}>Bounce</button>
+        <button class="btn btn--amber btn--sm" data-accept>Accept — looks right</button>
+        <button class="btn btn--ghost btn--sm" data-bounce>Bounce</button>
         <button class="btn btn--ghost btn--sm" data-open>Open card</button>
       </div>
       <div class="bouncebox" hidden>
@@ -637,18 +633,15 @@ function dutyVerify(card, ballot) {
         <button class="btn btn--amber btn--sm" data-bounce-send>Send bounce</button>
       </div>
     </div>`);
-  const doAccept = () => ballot
-    ? ownerAcceptance(ballot.id, 'accept')
-    : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' });
+  const doAccept = () => ownerAcceptance(ballot.id, 'accept');
   $('[data-accept]', node).addEventListener('click', doAccept);
-  node.__primary = notReady ? () => showDetail(card.id) : doAccept;
+  node.__primary = doAccept;
   $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
   const box = $('.bouncebox', node);
   $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
   $('[data-bounce-send]', node).addEventListener('click', () => {
     const comment = $('textarea', box).value.trim();
-    if (ballot) ownerAcceptance(ballot.id, 'bounce', comment);
-    else api('card/update', { id: card.id, phase: 'building', logEntry: `Bounced back to building: ${comment || '(no comment)'}`, by: 'owner' });
+    ownerAcceptance(ballot.id, 'bounce', comment);
   });
   bindCapturedEvidence(node, media);
   return node;
@@ -1180,10 +1173,8 @@ function renderDetail(c) {
   const phaseText = phaseLabel(phase);
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const acceptanceBallot = openAcceptanceBallot(c);
-  const hasOpenCriteria = (c.criteria || []).some(i => !['met', 'verified'].includes(i.status));
-  const waitingOnAgent = phase === 'verify' && c.needsAcceptance && (!acceptanceBallot || hasOpenCriteria);
   const media = evidenceMedia(c, acceptanceBallot);
-  const capturePending = c.needsAcceptance && media.length === 0;
+  const { waitingOnAgent, capturePending } = acceptanceReadiness(c, acceptanceBallot);
   // Owner CTA only for needsAcceptance visual/UX cards. Bare verify is agent work.
   const cta = phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
     : (phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent || capturePending ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : capturePending ? 'Capture pending' : 'Accept — looks right'}</button>` : '';

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot } from '../app/ui/board-state.js';
+import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness } from '../app/ui/board-state.js';
 
 const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
@@ -82,11 +82,13 @@ test('show closed adds finished epochs that the active radar omits', () => {
   });
 });
 
+const capture = [{ kind: 'image', path: 'docs/proposals/visual-acceptance/media/360/screen.png', alt: 'Settings screen', caption: 'after' }];
+
 test('ownerVerifyQueue: ONLY needsAcceptance verify cards — bare verify is agent work', () => {
   const bare = card(710, 'verify', 'verify', { needsAcceptance: false });
   const visual = card(360, 'verify', 'verify', {
     needsAcceptance: true,
-    decisions: [{ id: 'D-ACCEPT-360', status: 'open' }],
+    decisions: [{ id: 'D-ACCEPT-360', status: 'open', visualMedia: capture }],
   });
   const building = card(1, 'building', 'building', { needsAcceptance: true });
   const q = ownerVerifyQueue([bare, visual, building]);
@@ -94,6 +96,25 @@ test('ownerVerifyQueue: ONLY needsAcceptance verify cards — bare verify is age
   assert.equal(q[0].card.num, 360);
   assert.equal(openAcceptanceBallot(q[0].card)?.id, 'D-ACCEPT-360');
   assert.equal(ownerVerifyQueue([bare]).length, 0);
+});
+
+// Owner 2026-10-04: a visual check waiting for a screen capture showed no
+// Accept button. Cards the owner cannot act on stay agent work.
+test('ownerVerifyQueue: a capture-pending or agent-pending visual card is not an owner duty', () => {
+  const noCapture = card(361, 'verify', 'verify', {
+    needsAcceptance: true,
+    decisions: [{ id: 'D-ACCEPT-361', status: 'open' }],
+  });
+  const openCriteria = card(362, 'verify', 'verify', {
+    needsAcceptance: true,
+    criteria: [{ text: 'golden passes', status: 'open' }],
+    decisions: [{ id: 'D-ACCEPT-362', status: 'open', visualMedia: capture }],
+  });
+  const noBallot = card(363, 'verify', 'verify', { needsAcceptance: true, visualMedia: capture });
+  assert.equal(ownerVerifyQueue([noCapture, openCriteria, noBallot]).length, 0);
+  assert.deepEqual(acceptanceReadiness(noCapture, openAcceptanceBallot(noCapture)), { waitingOnAgent: false, capturePending: true, ready: false });
+  assert.deepEqual(acceptanceReadiness(openCriteria, openAcceptanceBallot(openCriteria)), { waitingOnAgent: true, capturePending: false, ready: false });
+  assert.equal(acceptanceReadiness(noBallot, null).waitingOnAgent, true);
 });
 
 test('milestone filter narrows to one milestone and sorts unassigned last', () => {

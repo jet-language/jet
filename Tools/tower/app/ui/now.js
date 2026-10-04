@@ -8,9 +8,12 @@ const links = (items = []) => items.length ? `<div class="report__links">${items
   `<button class="btn btn--ghost btn--sm" ${link.decision ? `data-report-decision="${esc(link.decision)}"` : ''} ${link.card || link.cardId ? `data-report-card="${esc(link.card || link.cardId)}"` : ''}>${esc(link.label || link.card || link.decision)} →</button>`
 ).join('')}</div>` : '';
 
+// A visual check is an owner action only once its screen capture is attached
+// (the same rule as board-state.js ownerVerifyQueue).
 export function buildOwnerActions({ statusSnapshot, decisions = [] } = {}) {
   return [
-    ...decisions.filter(d => d.status !== 'ratified' && !d.draft).map(d => ({
+    ...decisions.filter(d => d.status !== 'ratified' && !d.draft
+      && (d.group !== 'acceptance' || (d.visualMedia || []).length)).map(d => ({
       text: `${d.group === 'acceptance' ? 'Visual check' : 'Vote'}: ${d.title}`,
       links: [{ decision: d.id, label: d.id }],
     })),

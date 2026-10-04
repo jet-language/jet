@@ -12,15 +12,27 @@ export const workflowRank = (card) => {
   return 5;
 };
 
-// Owner Now/beacon review queue: ONLY needsAcceptance cards.
-// Bare phase=verify is a legacy agent state, not an owner duty.
+// Owner Now/beacon review queue: ONLY needsAcceptance cards the owner can act
+// on. Bare phase=verify is a legacy agent state, not an owner duty, and so is
+// a visual card still waiting on agent criteria or on its screen capture:
+// every card in the owner's lane offers both Accept and Bounce.
 export const openAcceptanceBallot = (card) =>
   (card.decisions || []).find(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified') || null;
+
+export const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
+
+export function acceptanceReadiness(card, ballot) {
+  const hasOpenCriteria = (card.criteria || []).some(i => !['met', 'verified'].includes(i.status));
+  const waitingOnAgent = !!card.needsAcceptance && (!ballot || hasOpenCriteria);
+  const capturePending = !!card.needsAcceptance && evidenceMedia(card, ballot).length === 0;
+  return { waitingOnAgent, capturePending, ready: !waitingOnAgent && !capturePending };
+}
 
 export function ownerVerifyQueue(cards) {
   return (cards || [])
     .filter(c => c.phase === 'verify' && !!c.needsAcceptance)
-    .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }));
+    .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }))
+    .filter(({ card, ballot }) => acceptanceReadiness(card, ballot).ready);
 }
 
 export function cardNumberQuery(text) {

@@ -23,12 +23,15 @@ const invalid = fn => assert.throws(fn, error => error.code === 'E_INVALID');
 function board() {
   const s = db.empty('Now');
   const card = db.addCard(s, { title: 'Report work', by: 'Pip' }, DEFAULTS);
-  // Projection fixtures: open, ratified, draft and owner-acceptance decisions.
+  // Projection fixtures: open, ratified, draft and owner-acceptance decisions;
+  // D-WAIT is a visual check still waiting for its screen capture.
   s.decisions.push(
     { id: 'D-OPEN', cardId: card.id, title: 'Pick behavior', status: 'open' },
     { id: 'D-DONE', cardId: card.id, title: 'Already voted', status: 'ratified' },
     { id: 'D-DRAFT', cardId: card.id, title: 'Not ready', status: 'open', draft: true },
-    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance' },
+    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance',
+      visualMedia: [{ kind: 'image', path: 'docs/proposals/visual-acceptance/media/now/screen.png', alt: 'Now page briefing', caption: 'after' }] },
+    { id: 'D-WAIT', cardId: card.id, title: 'Capture missing', status: 'open', group: 'acceptance' },
   );
   return { s: db.normalize(s), card };
 }
