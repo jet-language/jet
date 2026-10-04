@@ -32,6 +32,7 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TComptimeValue,
+    TConstantDef,
     TContract,
     TDeclarationFacts,
     TEffectFacts,
@@ -2892,6 +2893,39 @@ pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, 
         module_index += 1
     }
     modules
+}
+
+// The rows sema_comptime_modules_with_values adds for the values at `from`
+// and after in `values`, checked against `resolved_graph`, which already
+// carries every one of `values`. A staged value changes only its own
+// constant's row among the module declarations (sema_checked_declaration_facts
+// reads values only for constant rows, and applying a value only types
+// constant rows of the graph, which no other declaration reads), so a run
+// joins these rows to its staged modules instead of rechecking every module.
+// As there, the first value of a constant key wins.
+pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
+    rows := [TConstantDef]{}
+    // Staging diagnostics are never reported (as for the module rechecks).
+    diagnostics := [Diagnostic]{}
+    loop index in from..<values.len() {
+        value :: values[index]
+        if value.kind != SemaComptimeItemKind.Constant -> next
+        earlier := false
+        loop previous in 0..<index {
+            if values[previous].kind == SemaComptimeItemKind.Constant && values[previous].module_identity == value.module_identity && values[previous].key == value.key -> earlier = true
+        }
+        if earlier -> next
+        module_index :: sema_registration_module_index(resolved_graph, value.module_identity) ?? next
+        module_row :: resolved_graph.modules[module_index]
+        staged_values := [String:SemaComptimeItemValue]{}
+        staged_values[value.key] = value
+        loop constant in module_row.constants {
+            if constant.symbol.id.key != value.key -> next
+            row :: sema_checked_constant_with_values(resolved_graph, module_row, constant, staged_values, &diagnostics) ?? next
+            &rows.push(row)
+        }
+    }
+    rows
 }
 
 // The one environment of a staging run: it owns the graph with `values`

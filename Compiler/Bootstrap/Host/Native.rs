@@ -2054,11 +2054,15 @@ pub fn __jet_bootstrap_compile_with_native(
         if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
             return Err("numeric callable template differs from the exact checked config field".to_string());
         }
+        let __jet_image_execution = __jet_compiler_image.program
+            .sealed_execution_identity(Some(__jet_compiler_image.header.artifact))
+            .map_err(|error| error.to_string())?;
         let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
             &__jet_root_lease,
             None,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
+            &__jet_image_execution,
             vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
             @new.JetEvalNativeBindingIdentity.Callable@{ binding: @s.JetEvalNativeCallableBinding@{
                 key: __jet_numeric_identity.key.clone(),
