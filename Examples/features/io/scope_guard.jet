@@ -20,20 +20,20 @@ fn with_guards(succeed: Bool) -> Int Fail! {
     Err(Fail.Bad)  // final failure result also cleans up
 }
 
-fn question_path() -> Int Fail! {
-    _cleanup :: scope.guard(() -> print("cleanup before ?"))
-    // A plain fallible call propagates Fail.Bad from with_guards. The `return`
-    // below is reached only on success, so this function's failure exit still
+fn propagation_path() -> Int Fail! {
+    _cleanup :: scope.guard(() -> print("cleanup before fallback"))
+    // A plain fallible call propagates Fail.Bad from with_guards. The final
+    // Ok below is reached only on success, so this function's failure exit still
     // runs its own guard.
     parsed_value :: with_guards(false)
     Ok(parsed_value)
 }
 
 fn run() {
-    // `??` handles question_path's propagated failure at this boundary; it
+    // `??` handles propagation_path's propagated failure at this boundary; it
     // does not suppress the cleanup that happened while unwinding scopes.
     normal_result :: with_guards(true) ?? 0
     print(normal_result)
-    propagated_result :: question_path() ?? -1
+    propagated_result :: propagation_path() ?? -1
     print(propagated_result)
 }
