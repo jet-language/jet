@@ -728,6 +728,15 @@ Whole-file and metadata functions:
 `is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 
+The retired raw-String `read_dir` helper is not a reserved method name:
+user struct and trait methods named `read_dir` participate in normal resolution.
+
+Mapped windows have byte element type `View<U8>`: `window` and `window_len`
+return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
+Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
+parameter imported as `files.FileScope` retains its checked `read` method;
+source qualification does not change its capability dispatch.
+
 Streaming constructors keep memory bounded:
 
 ```jet
@@ -1721,6 +1730,7 @@ fn run() {
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value: Int)` / `math.abs_float(value: Float)` | `Int` / `Float` | Absolute value for integer or floating-point input. |
+| `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
 | `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2737,6 +2747,9 @@ standard-library vocabulary.
 metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
 rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
+
+The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
+`UI.Pointer`; capability checks and runtime support use the same spelling.
 
 | Signature | Result | Description |
 |---|---|---|

@@ -2035,6 +2035,26 @@ fn bootstrap_private_self_compile_harness() {
             REGISTRY_ROWS_FIXTURE_SOURCE,
             REGISTRY_ROWS_FIXTURE_EXPECTED,
         ),
+        (
+            "annotated_tuple_empty_list",
+            include_str!("../../Examples/features/basics/tuple_empty_list.jet"),
+            include_str!("../../Examples/features/expected/basics/tuple_empty_list.out"),
+        ),
+        (
+            "prelude_assert_eq_shadow",
+            include_str!("../../Examples/features/traits/prelude_assert_eq_shadow.jet"),
+            include_str!("../../Examples/features/expected/traits/prelude_assert_eq_shadow.out"),
+        ),
+        (
+            "user_read_dir",
+            include_str!("../../Examples/features/traits/user_read_dir.jet"),
+            include_str!("../../Examples/features/expected/traits/user_read_dir.out"),
+        ),
+        (
+            "math_copy",
+            include_str!("../../Examples/features/math/copy.jet"),
+            include_str!("../../Examples/features/expected/math/copy.out"),
+        ),
     ] {
         let project = session.join(label);
         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
@@ -2046,6 +2066,78 @@ fn bootstrap_private_self_compile_harness() {
             &project,
             expected,
         );
+    }
+    let scoped_files_project = session.join("scoped-mapped-files");
+    let scoped_files_path = scoped_files_project.join("inside.txt");
+    let scoped_files_source = format!(r#"
+use core.files as files
+fn scoped_read(scope: files.FileScope) -> String {{
+    scope.read("inside.txt") ?? panic("scope")
+}}
+fn run() {{
+    scope :: files.scope(Authority.from_rights(["FS.Read:{}"]))
+    print(scoped_read(scope))
+    mapped :: files.map(Path.from("{}")) ?? panic("map")
+    window :: mapped.window_len(0, 1) ?? panic("window")
+    print(Int.from_u8(window[0]))
+    loop line in mapped.lines() {{
+        print(Int.from_u8(line[0]))
+        print(String.from_bytes(~line) ?? panic("utf8"))
+    }}
+}}
+"#, scoped_files_project.display(), scoped_files_path.display());
+    write_source_fixture_project(&scoped_files_project, SOURCE_FIXTURE_MANIFEST, &scoped_files_source);
+    fs::write(&scoped_files_path, "mapped\n").expect("write scoped mapped fixture");
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "scoped-mapped-files",
+        &scoped_files_project,
+        "mapped\n\n109\n109\nmapped\n",
+    );
+    for (label, source, code) in [
+        (
+            "generic-concrete-bound-report",
+            "trait Shape { fn area(self) -> Int }\nstruct Token {}\nfn area<T: Shape>(value: T) -> Int { value.area() }\nfn run() { _ :: area<Token>(Token{}) }\n",
+            "E0905",
+        ),
+        (
+            "generic-forward-bound-report",
+            include_str!("../../tests/ui/generic_bound_forward_missing.jet"),
+            "E0905",
+        ),
+        (
+            "retired-raw-directory-report",
+            include_str!("../../tests/ui/path_raw_string_error.jet"),
+            "E0340",
+        ),
+    ] {
+        let code_field = format!("\"code\":\"{code}\"");
+        let project = session.join(label);
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
+        let output = session.join(format!("{label}.rs"));
+        let receipt = session.join(format!("{label}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "invalid fixture reached Rust emission");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        let source_closure = vec![(entry.clone(), source.to_string())];
+        let reference = rust_reference_reports(&entry, source, &source_closure)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{code} fixture must fail in sema");
+        assert_eq!(generated, reference, "{code} registry reports must agree");
     }
     for receiver in ["^self", "&self"] {
         for inline in [false, true] {

@@ -217,6 +217,11 @@ user-defined types described below. Local inference keeps the type on a value
 head when needed; a headed literal whose fields or elements do not match its
 head is an ordinary type error.
 
+An expected tuple type flows to its fields by position or by field name.
+For example, a declared `(lines: [String], at: Int, message: String)` return
+type gives an empty `lines: []` field the element type `String`; it does not
+default that field to `[Int]`. The same contextual rule applies at call arguments.
+
 An executable entry is `fn run`. An executable `run` has no parameters, or has
 one parameter whose type is a CLI-derived program struct; it returns `()` or a
 unit-fallible result. `run` is not `pub`. The checker gives an omitted entry
@@ -889,6 +894,10 @@ nonnegative destination decimal places, and the rounded rational must be
 exactly representable by the destination. Imported `Quantity<Dimension, Kind>`
 retains its concrete unit through checking, API freeze, semantic inspection,
 Codable, AOT, and JIT lowering (D-QUAL3, D-QUANTITY-DECL1).
+
+Dimension identities retain raw UTF-8 axis names. Their percent escapes protect
+only the separators `%`, `;`, and `:`; decoding does not reinterpret non-ASCII
+UTF-8 bytes as separate characters.
 
 ## Ownership and borrowing
 

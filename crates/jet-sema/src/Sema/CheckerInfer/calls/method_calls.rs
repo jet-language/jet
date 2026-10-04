@@ -1273,21 +1273,6 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // D-PATHFS1 / E0340: `read_dir` is not a Jet API — teach the typed path path.
-        if method == "read_dir" {
-            self.infer(receiver); // still type-check the receiver
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            self.diags.push(Diagnostic::error(
-                "E0340",
-                "`read_dir` is not a method in Jet".to_string(),
-                "Jet uses typed paths; raw-string directory helpers are not exposed".to_string(),
-                "write `Path.from(path).walk()` to list a directory recursively".to_string(),
-                Some(span),
-            ));
-            return None;
-        }
         // D-CAP2 (D-MEM1/S4): `.clone()` is not user-typable Jet syntax — `clone`
         // falls through to the ordinary "no such method" path below like any
         // other unrecognized name (I8: `copy x` is the one copy spelling).
@@ -4937,7 +4922,11 @@ impl<'a> Checker<'a> {
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
-                *recv_type_out = Some(handle_ty.clone());
+                *recv_type_out = Some(
+                    crate::Sema::core_file_handle_dispatch_name(handle_ty)
+                        .unwrap_or(handle_ty)
+                        .to_string(),
+                );
                 if crate::Sema::is_mapped_file_view_method(handle_ty, method) {
                     if let Some(ret_ty) = ret.as_ref() {
                         *resolved_ret_out = Some(ret_ty.clone());
@@ -7985,6 +7974,15 @@ impl<'a> Checker<'a> {
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
+            return None;
+        }
+        // Only the retired raw-string Core helper is refused. User trait and
+        // nominal methods named `read_dir` use ordinary checked resolution.
+        if method == "read_dir" && recv_ty == Type::String {
+            for argument in args.iter_mut() {
+                self.infer(&mut argument.expr);
+            }
+            self.diags.push(Diagnostic::from_row("E0340", &[], Some(span)));
             return None;
         }
         // Built-in value types have no user `struct`/`enum` registry entry,

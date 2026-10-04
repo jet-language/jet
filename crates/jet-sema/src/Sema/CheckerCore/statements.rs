@@ -1000,14 +1000,15 @@ impl<'a> Checker<'a> {
                                     .to_string(),
                                 format!(
                                     "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
-                                     There's no borrow-return in v1 — to share the value without a full \
-                                     copy, store an owned field, or reach for `Shared<T>`/`ID<T>` \
-                                     once a real program needs shared ownership",
+                                     To return borrowed data, declare `-> View<T> from {}` and \
+                                     return a view derived from `{}`",
                                     Syntax::SIGIL_COPY,
                                     n,
                                     n,
                                     Syntax::SIGIL_MOVE,
-                                    display_type
+                                    display_type,
+                                    n,
+                                    n
                                 ),
                                 Some(nspan),
                             );

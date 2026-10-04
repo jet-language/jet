@@ -391,6 +391,10 @@ pub fn sema_call_resolve_method_with_inference(receiver_type: Type, method: Stri
         }
     }
     if shape_matches.len() == 0 {
+        if sema_call_retired_raw_directory_error(receiver_type, method, span) == .Val(diagnostic) {
+            &diagnostics.push(diagnostic)
+            return None
+        }
         &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method on this value", "method resolution found no candidate with a compatible receiver and argument shape", "use a registered method for this receiver type"))
         return None
     }
