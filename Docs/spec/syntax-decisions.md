@@ -3265,8 +3265,9 @@ JIT is the dev-loop tier-1 over the interpreter tier-0, behind the
 **D-DEVMODE1 hard rule**: dev-runtime output must be byte-identical to the
 release build — divergence is a release blocker.
 
-**D-PLUGIN1 / D-DEP-WASM1**: `target: plugin` compiles to a sandboxed WASM
-module (wasmtime + Component Model, typed `.wit` contract), safe by default.
+**D-PLUGIN1 / D-DEP-WASM1**, naming amended by **D-ONCE-SANDBOX1=A**:
+`target: sandbox` compiles to a sandboxed WASM module (wasmtime + Component
+Model, typed `.wit` contract), safe by default.
 Plugin target support is shipped for the v1 scope: homogeneous `Int`, `Float`,
 `Bool`, or `Text`
 exported functions, deny-by-default plugin effects, `.wit` emission, component
@@ -3293,7 +3294,7 @@ semantic authority (I2/I3). Later parse or codegen capabilities extend the
 same negotiated protocol — they do not invent a second plugin system (I8).
 Exact user-facing registration spelling remains a later ballot if new syntax
 is needed. Distinct from PATH `jet-*` helpers (D-DX5) and application
-`target: plugin` / `core.plugin` (D-PLUGIN1).
+`target: sandbox` / `core.plugin` (D-PLUGIN1, D-ONCE-SANDBOX1).
 **Wire contract (Tower #549 C3):** deterministic JSON snapshot/response
 (`protocol=1`, `stage=typed`, capability negotiation, exact
 types/symbols/effects/spans/provenance fields, validated findings/edits,
@@ -5925,7 +5926,7 @@ is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named 
 rename objects (`<plan.json> --dry-run`, `apply <plan.json>`, `undo <log.json>`) and replay logs. **D-DX5**: PATH `jet-*`
 helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
 compiler-extension WASM components (typed post-sema snapshot; see above) —
-not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
+not PATH helpers and not `target: sandbox`. **D-REF3**: borrowed-return +
 cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completion and hover
 for package names and typed option fields from a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>` reports Store identity, provider
