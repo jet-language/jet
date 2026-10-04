@@ -1,1677 +1,867 @@
-// PORT-PENDING 0369 crates-jet-sema-src-sema-checkercore-blocks: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1-1673
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-//RS use crate::Sema::Captures::stmt_refs_name;
-//RS use crate::Sema::Checker;
-//RS use crate::Sema::Diagnostics::block_definitely_returns;
-//RS use crate::AST::{AccessConvention, BinOp, Expr, LValue, Stmt, StrPart, Type};
-//RS 
-//RS /// E0114: when a value block ends in `if cond -> return …` guards with no
-//RS /// `else`, name the case none of them covers. Guards that compare one name
-//RS /// with the same whole number from both sides (`n > 0`, `n < 0`) leave that
-//RS /// number; any other guard set leaves "none of `…` is true".
-//RS fn uncovered_guard_path(stmts: &[Stmt], source: &str) -> Option<String> {
-//RS     let mut conds = Vec::new();
-//RS     for stmt in stmts.iter().rev() {
-//RS         let Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body: None,
-//RS             span,
-//RS         } = stmt
-//RS         else {
-//RS             break;
-//RS         };
-//RS         if !crate::AST::is_subjectless_guard(subject, *span)
-//RS             || arms.is_empty()
-//RS             || !arms.iter().all(|arm| block_definitely_returns(&arm.body))
-//RS         {
-//RS             break;
-//RS         }
-//RS         conds.extend(arms.iter().rev().map(|arm| &arm.cond));
-//RS     }
-//RS     if conds.is_empty() {
-//RS         return None;
-//RS     }
-//RS     conds.reverse();
-//RS     let mut point: Option<(&str, i64)> = None;
-//RS     let (mut below, mut above, mut single_point) = (false, false, true);
-//RS     for cond in &conds {
-//RS         let comparison = match cond {
-//RS             Expr::Binary(op, left, right, _) => match (left.as_ref(), right.as_ref()) {
-//RS                 (Expr::Ident(name, _), Expr::Int(value, ..)) => Some((*op, name.as_str(), *value)),
-//RS                 (Expr::Int(value, ..), Expr::Ident(name, _)) => {
-//RS                     let flipped = match op {
-//RS                         BinOp::Lt => BinOp::Gt,
-//RS                         BinOp::Gt => BinOp::Lt,
-//RS                         other => *other,
-//RS                     };
-//RS                     Some((flipped, name.as_str(), *value))
-//RS                 }
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         };
-//RS         let Some((op, name, value)) = comparison else {
-//RS             single_point = false;
-//RS             break;
-//RS         };
-//RS         if point.is_some_and(|known| known != (name, value)) {
-//RS             single_point = false;
-//RS             break;
-//RS         }
-//RS         point = Some((name, value));
-//RS         match op {
-//RS             BinOp::Lt => below = true,
-//RS             BinOp::Gt => above = true,
-//RS             BinOp::Ne => (below, above) = (true, true),
-//RS             _ => {
-//RS                 single_point = false;
-//RS                 break;
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some((name, value)) = point.filter(|_| single_point && below && above) {
-//RS         return Some(format!("`{name}` is `{value}`"));
-//RS     }
-//RS     let texts = conds
-//RS         .iter()
-//RS         .map(|cond| {
-//RS             let span = cond.span();
-//RS             source
-//RS                 .get(span.start..span.end)
-//RS                 .map(|text| format!("`{}`", text.trim()))
-//RS         })
-//RS         .collect::<Option<Vec<_>>>()?;
-//RS     Some(if texts.len() == 1 {
-//RS         format!("{} is false", texts[0])
-//RS     } else {
-//RS         format!("none of {} is true", texts.join(", "))
-//RS     })
-//RS }
-//RS impl<'a> Checker<'a> {
-//RS     // --- statements -----------------------------------------------------
-//RS 
-//RS     pub(crate) fn check_block(&mut self, stmts: &mut [Stmt], new_scope: bool) {
-//RS         self.check_block_inner(stmts, new_scope, None);
-//RS     }
-//RS 
-//RS     /// Check a block whose final unadorned expression is its value. The AST
-//RS     /// keeps that expression as `Stmt::Expr`; the shared return-value checker
-//RS     /// validates its ownership, views, fallibility, and expected-type
-//RS     /// conversions without changing the source node's statement kind.
-//RS     pub(crate) fn check_value_block(
-//RS         &mut self,
-//RS         stmts: &mut [Stmt],
-//RS         expected: &Type,
-//RS         new_scope: bool,
-//RS         block_span: Span,
-//RS     ) {
-//RS         self.check_block_inner(stmts, new_scope, Some((expected, block_span)));
-//RS     }
-//RS 
-//RS     fn check_block_inner(
-//RS         &mut self,
-//RS         stmts: &mut [Stmt],
-//RS         new_scope: bool,
-//RS         value_tail: Option<(&Type, Span)>,
-//RS     ) {
-//RS         let redundant_tail_span = value_tail
-//RS             .and_then(|_| Self::redundant_arm_table_parts(stmts).map(|(_, span, _, _)| span));
-//RS         if redundant_tail_span.is_some() {
-//RS             self.check_redundant_arm_table_return(stmts);
-//RS         }
-//RS         self.check_adjacent_subject_dispatch_lint(stmts);
-//RS         self.prepare_stdlib_lint_block(stmts);
-//RS         if new_scope {
-//RS             self.push_scope();
-//RS         }
-//RS         // E0209 liveness gate: before checking each statement,
-//RS         // record the tail of the current block (statements that follow it).
-//RS         // The helper `is_name_live_after` reads this to word the E0209 fix
-//RS         // menu (move vs. copy/reorder). We push the previous frame onto the
-//RS         // liveness_frames stack so `is_name_live_after` can walk enclosing
-//RS         // scopes; on exit we pop and restore.
-//RS         let saved_ptr = self.stmt_tail_ptr;
-//RS         let saved_len = self.stmt_tail_len;
-//RS         // Push the caller's frame as an enclosing scope (non-null only).
-//RS         let pushed_frame = !saved_ptr.is_null();
-//RS         if pushed_frame {
-//RS             self.liveness_frames.push((saved_ptr, saved_len));
-//RS         }
-//RS         // D-FLOWTYPE1=A: exiting `x == None` guards whose payload proof
-//RS         // continues past them. They are rewritten once the whole block is
-//RS         // checked, so the checks of later statements still see the guards.
-//RS         let mut exit_guards = Vec::new();
-//RS         for i in 0..stmts.len() {
-//RS             if i > 0 {
-//RS                 self.emit_unreachable_after_loop(&stmts[i - 1], &stmts[i]);
-//RS             }
-//RS             // tail = stmts[i+1..], i.e. the statements after index i.
-//RS             let tail = &stmts[i + 1..];
-//RS             self.stmt_tail_ptr = tail.as_ptr();
-//RS             self.stmt_tail_len = tail.len();
-//RS             self.views_used_in_stmt.clear();
-//RS             self.scoped_loan_read_reported = false;
-//RS             if i + 1 == stmts.len() {
-//RS                 if let Some((expected, _block_span)) = value_tail {
-//RS                     let uncovered = uncovered_guard_path(&stmts[..=i], self.source);
-//RS                     self.check_value_tail(&mut stmts[i], expected, uncovered);
-//RS                 } else {
-//RS                     self.check_stmt(&mut stmts[i]);
-//RS                 }
-//RS             } else {
-//RS                 let diagnostics_start = self.diags.len();
-//RS                 let exit_guard = self.optional_exit_guard_subject(&stmts[i]);
-//RS                 self.check_stmt(&mut stmts[i]);
-//RS                 if let Some(name) = exit_guard {
-//RS                     if self.flow.narrow.get_at(&name, self.scope_depth()).is_some() {
-//RS                         exit_guards.push((i, name));
-//RS                     }
-//RS                 }
-//RS                 if i + 2 == stmts.len() {
-//RS                     if let Some(span) = redundant_tail_span {
-//RS                         let checked = self.diags.split_off(diagnostics_start);
-//RS                         self.diags.extend(checked.into_iter().filter(|diagnostic| {
-//RS                             !(diagnostic.code == "E0003" && diagnostic.span == Some(span))
-//RS                         }));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for (i, name) in exit_guards {
-//RS             self.rewrite_optional_exit_guard(&mut stmts[i], &name);
-//RS         }
-//RS         if stmts.is_empty() {
-//RS             if let Some((expected, block_span)) = value_tail {
-//RS                 self.report_missing_block_value(expected, block_span);
-//RS             }
-//RS         }
-//RS         if pushed_frame {
-//RS             self.liveness_frames.pop();
-//RS         }
-//RS         self.stmt_tail_ptr = saved_ptr;
-//RS         self.stmt_tail_len = saved_len;
-//RS         if new_scope {
-//RS             self.pop_scope();
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check a statement run inside a scope its owner already opened (loop
-//RS     /// bodies share the loop-variable scope). Exiting `x == None` guards are
-//RS     /// rewritten afterwards exactly as in `check_block_inner` (D-FLOWTYPE1=A).
-//RS     pub(crate) fn check_stmts_in_scope(&mut self, stmts: &mut [Stmt]) {
-//RS         let mut exit_guards = Vec::new();
-//RS         let last = stmts.len().saturating_sub(1);
-//RS         for (i, stmt) in stmts.iter_mut().enumerate() {
-//RS             let exit_guard = if i < last {
-//RS                 self.optional_exit_guard_subject(stmt)
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             self.check_stmt(stmt);
-//RS             if let Some(name) = exit_guard {
-//RS                 if self.flow.narrow.get_at(&name, self.scope_depth()).is_some() {
-//RS                     exit_guards.push((i, name));
-//RS                 }
-//RS             }
-//RS         }
-//RS         for (i, name) in exit_guards {
-//RS             self.rewrite_optional_exit_guard(&mut stmts[i], &name);
-//RS         }
-//RS     }
-//RS     fn tail_has_authored_semicolon(&self, span: Span) -> bool {
-//RS         find_authored_semicolon(self.source, span.end).is_some()
-//RS     }
-//RS     /// L0530 / D-TAIL-RETURN1: a value block's final expression is already
-//RS     /// its implicit return. A final explicit return therefore only adds
-//RS     /// syntax; early returns remain outside this tail check. Offer one safe
-//RS     /// edit for the keyword plus a second edit for an authored terminator.
-//RS     fn check_redundant_final_return(&mut self, _value: &Expr, return_span: Span) {
-//RS         // Imported/generated Core bodies may retain their own source offsets,
-//RS         // which are outside this user module's source map. Never expose a
-//RS         // source lint with an unappliable range; authored user returns still
-//RS         // receive the normal L0530 diagnostic below.
-//RS         if self.compiler_generated || return_span.end > self.source.len() {
-//RS             return;
-//RS         }
-//RS         // Remove the keyword together with the blanks that separated it from
-//RS         // the value, so `return r` becomes `r` at the statement's indent.
-//RS         let keyword_gap = self.source[return_span.end..]
-//RS             .bytes()
-//RS             .take_while(|byte| matches!(byte, b' ' | b'\t'))
-//RS             .count();
-//RS         let mut diagnostic = Diagnostic::from_row("L0530", &[], Some(return_span))
-//RS             .with_edit(TextEdit {
-//RS                 span: Span::new(return_span.start, return_span.end + keyword_gap),
-//RS                 new_text: String::new(),
-//RS             });
-//RS         if let Some(semicolon) = find_authored_semicolon(self.source, return_span.end) {
-//RS             diagnostic = diagnostic.with_alternative_edit(TextEdit {
-//RS                 span: Span::new(semicolon, semicolon + 1),
-//RS                 new_text: String::new(),
-//RS             });
-//RS         }
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type, uncovered: Option<String>) {
-//RS         if !self.flow.reachable {
-//RS             // Source after an earlier exit is still checked for its own
-//RS             // diagnostics, but cannot be the block's reachable value tail.
-//RS             // A dead value line keeps the promised type as context (so a
-//RS             // bare `None` still types) without being compared against it
-//RS             // or treated as a discarded statement value. A dead diverging
-//RS             // line such as `panic(...)` stays statement-shaped, exactly as
-//RS             // on the reachable path.
-//RS             match stmt {
-//RS                 Stmt::Expr(expr)
-//RS                     if !self.tail_has_authored_semicolon(expr.span())
-//RS                         && !self.is_diverging_tail(expr) =>
-//RS                 {
-//RS                     self.infer_with_expected(expr, expected);
-//RS                 }
-//RS                 _ => self.check_stmt(stmt),
-//RS             }
-//RS             return;
-//RS         }
-//RS         match stmt {
-//RS             Stmt::Expr(expr)
-//RS                 if !self.tail_has_authored_semicolon(expr.span())
-//RS                     && !self.is_diverging_tail(expr) =>
-//RS             {
-//RS                 let span = expr.span();
-//RS                 let mut value = Some(std::mem::replace(expr, Expr::Absent(span)));
-//RS                 self.check_return_expr(&mut value, &span, Some(expected.clone()));
-//RS                 if let Some(value) = value.as_mut() {
-//RS                     self.lift_value_tail_into_return_carrier(value, expected);
-//RS                 }
-//RS                 if let Some(value) = value {
-//RS                     *expr = value;
-//RS                 }
-//RS             }
-//RS             Stmt::Expr(expr) if self.is_diverging_tail(expr) => {
-//RS                 // Diverging expressions such as `panic(...)` and `todo` do
-//RS                 // not need to produce the promised value.
-//RS                 self.check_stmt(stmt);
-//RS             }
-//RS             Stmt::Expr(expr) => {
-//RS                 let span = expr.span();
-//RS                 self.check_stmt(stmt);
-//RS                 self.report_missing_block_value(expected, span);
-//RS             }
-//RS             Stmt::Return(Some(value), return_span) => {
-//RS                 self.check_redundant_final_return(value, *return_span);
-//RS                 // An explicit return is an early exit. Its existing checker
-//RS                 // owns both its value type and its divergence semantics.
-//RS                 self.check_stmt(stmt);
-//RS             }
-//RS             Stmt::Return(None, _) => {
-//RS                 // A bare return remains an early exit, including in a
-//RS                 // fallible function or generator.
-//RS                 self.check_stmt(stmt);
-//RS             }
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS             } => {
-//RS                 // D-CHOOSE-HEADS1=A: a folded multi-head table is a Switch
-//RS                 // whose arms are the value of the callable.
-//RS                 let diagnostics_start = self.diags.len();
-//RS                 self.check_switch(subject, arms, else_body, *span, Some(expected));
-//RS                 // The switch reports a missing tail value without seeing the
-//RS                 // guards before it; name the uncovered case when they are
-//RS                 // all returning guards.
-//RS                 if let Some(path) = uncovered.as_deref() {
-//RS                     if let Some(index) = self.diags[diagnostics_start..]
-//RS                         .iter()
-//RS                         .rposition(|diagnostic| diagnostic.code == "E0114")
-//RS                     {
-//RS                         let reported = self.diags.remove(diagnostics_start + index);
-//RS                         let span = reported.span.unwrap_or(*span);
-//RS                         self.report_missing_block_value_on_path(expected, span, Some(path));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {
-//RS                 let span = stmt.span();
-//RS                 self.check_stmt(stmt);
-//RS                 if self.flow.reachable && !block_definitely_returns(std::slice::from_ref(stmt)) {
-//RS                     self.report_missing_block_value_on_path(expected, span, uncovered.as_deref());
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn report_missing_block_value(&mut self, expected: &Type, span: Span) {
-//RS         self.report_missing_block_value_on_path(expected, span, None);
-//RS     }
-//RS 
-//RS     /// E0114 names the case that falls through when the block ends in guards
-//RS     /// that each leave with `return` (`uncovered` is that case in words).
-//RS     fn report_missing_block_value_on_path(
-//RS         &mut self,
-//RS         expected: &Type,
-//RS         span: Span,
-//RS         uncovered: Option<&str>,
-//RS     ) {
-//RS         let expected_name = expected.show();
-//RS         let (what, fix) = match uncovered {
-//RS             Some(path) => (
-//RS                 format!(
-//RS                     "when {path}, `{}` reaches the end without a value",
-//RS                     self.fn_name
-//RS                 ),
-//RS                 format!(
-//RS                     "add a last line that produces {expected_name} for that case, or turn the last guard into an `else`"
-//RS                 ),
-//RS             ),
-//RS             None => (
-//RS                 format!(
-//RS                     "this block promises to produce {expected_name}, but its last line produces no value"
-//RS                 ),
-//RS                 format!(
-//RS                     "end the block with an expression that produces {expected_name}, or `return` a value on every path"
-//RS                 ),
-//RS             ),
-//RS         };
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0114",
-//RS             what,
-//RS             format!(
-//RS                 "a block that promises {expected_name} must end with a value of that type, or leave through `return` on every path"
-//RS             ),
-//RS             fix,
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// D-FAILURE-FOUNDATION1=A: named callable bodies are checked against
-//RS     /// their source success type, while the callable itself carries the
-//RS     /// shared `Result` rail. Lift that checked tail through the same `Ok`
-//RS     /// constructor used by an explicit `return` before lowering.
-//RS     fn lift_value_tail_into_return_carrier(&mut self, value: &mut Expr, expected: &Type) {
-//RS         if matches!(expected, Type::Result { .. })
-//RS             || !matches!(self.ret.as_ref(), Some(Type::Result { .. }))
-//RS             || matches!(value.without_parens(), Expr::Ok(..) | Expr::Err(..))
-//RS         {
-//RS             return;
-//RS         }
-//RS         let span = value.span();
-//RS         let inner = std::mem::replace(value, Expr::Absent(span));
-//RS         *value = Expr::Ok(Box::new(inner), span);
-//RS         let saved_expected = self.expected_type.clone();
-//RS         self.expected_type = self.ret.clone();
-//RS         self.infer(value);
-//RS         self.expected_type = saved_expected;
-//RS     }
-//RS 
-//RS     fn is_diverging_tail(&self, expr: &Expr) -> bool {
-//RS         self.expr_diverges(expr)
-//RS     }
-//RS 
-//RS     /// L0514 / D-BRANCH-LINT1: adjacent classic guards over one stable
-//RS     /// categorical subject are one ordered table in disguise. The parser has
-//RS     /// already normalized each classic `if` to a subjectless `Stmt::Switch`;
-//RS     /// this pass only joins that existing AST shape and never scans source
-//RS     /// text to rediscover branch conditions.
-//RS     fn check_adjacent_subject_dispatch_lint(&mut self, stmts: &[Stmt]) {
-//RS         let mut index = 0;
-//RS         while index < stmts.len() {
-//RS             let Some(first) = Self::adjacent_dispatch_guard(&stmts[index], self.source) else {
-//RS                 index += 1;
-//RS                 continue;
-//RS             };
-//RS             let mut run = vec![first];
-//RS             let mut end = index + 1;
-//RS             while end < stmts.len() {
-//RS                 let Some(next) = Self::adjacent_dispatch_guard(&stmts[end], self.source) else {
-//RS                     break;
-//RS                 };
-//RS                 if next.subject_key != run[0].subject_key {
-//RS                     break;
-//RS                 }
-//RS                 run.push(next);
-//RS                 end += 1;
-//RS             }
-//RS             if run.len() >= 3
-//RS                 && Self::dispatch_values_are_exclusive(&run)
-//RS                 && !run.iter().any(|guard| {
-//RS                     Self::statements_write_subject(guard.body, &guard.subject_dependencies)
-//RS                 })
-//RS             {
-//RS                 let span = run[0].span;
-//RS                 let subject = self
-//RS                     .source
-//RS                     .get(run[0].subject_span.start..run[0].subject_span.end)
-//RS                     .map(str::trim)
-//RS                     .filter(|subject| !subject.is_empty())
-//RS                     .map_or_else(|| run[0].subject.join("."), str::to_string);
-//RS                 let mut diagnostic =
-//RS                     Diagnostic::from_row("L0514", &[("subject", subject.as_str())], Some(span));
-//RS                 if let Some(edit) = self.adjacent_dispatch_edit(&run) {
-//RS                     diagnostic = diagnostic.with_edit(edit);
-//RS                 }
-//RS                 self.diags.push(diagnostic);
-//RS                 index = end;
-//RS             } else {
-//RS                 index += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn adjacent_dispatch_guard<'b>(
-//RS         stmt: &'b Stmt,
-//RS         source: &str,
-//RS     ) -> Option<AdjacentDispatchGuard<'b>> {
-//RS         let Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body: None,
-//RS             span,
-//RS             ..
-//RS         } = stmt
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if !crate::AST::is_subjectless_guard(subject, *span)
-//RS             || arms.len() != 1
-//RS             || !crate::AST::uses_classic_if_spelling(source, *span, arms[0].cond.span())
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let condition_span = arms[0].cond.span();
-//RS         let (subject_path, subject_span, subject_key, subject_dependencies, values) =
-//RS             Self::dispatch_condition_values(&arms[0].cond, source)?;
-//RS         Some(AdjacentDispatchGuard {
-//RS             subject: subject_path,
-//RS             subject_key,
-//RS             subject_dependencies,
-//RS             subject_span,
-//RS             values,
-//RS             body: &arms[0].body,
-//RS             condition_span,
-//RS             span: *span,
-//RS         })
-//RS     }
-//RS 
-//RS     fn dispatch_condition_values(
-//RS         condition: &Expr,
-//RS         source: &str,
-//RS     ) -> Option<(
-//RS         Vec<String>,
-//RS         Span,
-//RS         String,
-//RS         Vec<Vec<String>>,
-//RS         Vec<DispatchValue>,
-//RS     )> {
-//RS         fn collect(
-//RS             condition: &Expr,
-//RS             source: &str,
-//RS             subject: &mut Option<DispatchSubject>,
-//RS             values: &mut Vec<DispatchValue>,
-//RS         ) -> bool {
-//RS             match condition.without_parens() {
-//RS                 Expr::Binary(BinOp::Or, left, right, _) => {
-//RS                     collect(left, source, subject, values)
-//RS                         && collect(right, source, subject, values)
-//RS                 }
-//RS                 Expr::Binary(BinOp::Eq, left, right, _) => {
-//RS                     // Each side is classified once: a non-path subject key
-//RS                     // lexes its own source text, so recomputing it per
-//RS                     // comparison would repeat that work.
-//RS                     let (current, value_expr) = match (
-//RS                         Checker::dispatch_subject(left, source),
-//RS                         Checker::dispatch_subject(right, source),
-//RS                     ) {
-//RS                         (Some(current), None) => (current, right),
-//RS                         (None, Some(current)) => (current, left),
-//RS                         _ => return false,
-//RS                     };
-//RS                     let Some(value) = Checker::dispatch_literal(value_expr) else {
-//RS                         return false;
-//RS                     };
-//RS                     if let Some(existing) = subject.as_ref() {
-//RS                         if existing.key != current.key {
-//RS                             return false;
-//RS                         }
-//RS                     } else {
-//RS                         *subject = Some(current);
-//RS                     }
-//RS                     values.push(value);
-//RS                     true
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         let mut subject = None;
-//RS         let mut values = Vec::new();
-//RS         if !collect(condition, source, &mut subject, &mut values) || values.is_empty() {
-//RS             return None;
-//RS         }
-//RS         let subject = subject?;
-//RS         if values.iter().any(|value| value.kind != values[0].kind) {
-//RS             return None;
-//RS         }
-//RS         Some((
-//RS             subject.path,
-//RS             subject.span,
-//RS             subject.key,
-//RS             subject.dependencies,
-//RS             values,
-//RS         ))
-//RS     }
-//RS 
-//RS     fn dispatch_subject(expr: &Expr, source: &str) -> Option<DispatchSubject> {
-//RS         let source_span = expr.span();
-//RS         let expr = expr.without_parens();
-//RS         if !Self::dispatch_subject_is_call_free(expr) {
-//RS             return None;
-//RS         }
-//RS         let span = expr.span();
-//RS         let path = Self::dispatch_subject_path(expr).unwrap_or_default();
-//RS         let key = if path.is_empty() {
-//RS             Self::dispatch_subject_key(source, span)?
-//RS         } else {
-//RS             path.join(".")
-//RS         };
-//RS         let dependencies = Self::dispatch_subject_dependencies(expr);
-//RS         if dependencies.is_empty() {
-//RS             return None;
-//RS         }
-//RS         Some(DispatchSubject {
-//RS             path,
-//RS             // Keep authored parentheses in the replacement. The normalized
-//RS             // span above is only for subject identity; using it as source
-//RS             // text could change precedence for expressions such as
-//RS             // `(left && right)`.
-//RS             span: source_span,
-//RS             key,
-//RS             dependencies,
-//RS         })
-//RS     }
-//RS 
-//RS     fn dispatch_subject_is_call_free(expr: &Expr) -> bool {
-//RS         let mut call_free = true;
-//RS         expr.for_each_expr(|nested| {
-//RS             if matches!(
-//RS                 nested.without_parens(),
-//RS                 Expr::Call(_)
-//RS                     | Expr::MethodCall { .. }
-//RS                     | Expr::CallValue { .. }
-//RS                     | Expr::Lambda(_)
-//RS                     | Expr::Try(..)
-//RS                     | Expr::OrFallback { .. }
-//RS                     | Expr::If { .. }
-//RS                     | Expr::Place(..)
-//RS                     | Expr::Deref(..)
-//RS                     | Expr::RawOf(..)
-//RS                     | Expr::PtrFromAddr { .. }
-//RS             ) {
-//RS                 call_free = false;
-//RS             }
-//RS         });
-//RS         call_free
-//RS     }
-//RS 
-//RS     /// Identity of a non-path subject such as `items[index]`: its token kinds.
-//RS     /// Lex only the subject's own text. Lexing the whole unit here made every
-//RS     /// such guard cost O(unit size), which is quadratic on a large unit.
-//RS     fn dispatch_subject_key(source: &str, span: Span) -> Option<String> {
-//RS         let text = source.get(span.start..span.end)?;
-//RS         let (tokens, _) = crate::Lexer::lex(text);
-//RS         let mut key = String::new();
-//RS         for token in tokens {
-//RS             if matches!(
-//RS                 &token.kind,
-//RS                 crate::Lexer::TokKind::LineComment(_)
-//RS                     | crate::Lexer::TokKind::BlockComment(_)
-//RS                     | crate::Lexer::TokKind::Eof
-//RS             ) {
-//RS                 continue;
-//RS             }
-//RS             key.push_str(&format!("{:?};", token.kind));
-//RS         }
-//RS         (!key.is_empty()).then_some(key)
-//RS     }
-//RS 
-//RS     fn dispatch_subject_dependencies(expr: &Expr) -> Vec<Vec<String>> {
-//RS         let mut paths = Vec::new();
-//RS         expr.for_each_expr(|nested| {
-//RS             if let Some(path) = Self::dispatch_subject_path(nested) {
-//RS                 paths.push(path);
-//RS             }
-//RS         });
-//RS         paths.sort_by_key(|path| std::cmp::Reverse(path.len()));
-//RS         paths.dedup();
-//RS         let longest_paths = paths.clone();
-//RS         paths.retain(|path| {
-//RS             !longest_paths
-//RS                 .iter()
-//RS                 .any(|other| other.len() > path.len() && other.starts_with(path))
-//RS         });
-//RS         paths
-//RS     }
-//RS 
-//RS     fn dispatch_subject_path(expr: &Expr) -> Option<Vec<String>> {
-//RS         match expr.without_parens() {
-//RS             Expr::Ident(name, _) if !name.starts_with('\0') => Some(vec![name.clone()]),
-//RS             Expr::Field(base, field, _) => {
-//RS                 let mut path = Self::dispatch_subject_path(base)?;
-//RS                 path.push(field.clone());
-//RS                 Some(path)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn dispatch_literal(expr: &Expr) -> Option<DispatchValue> {
-//RS         let expr = expr.without_parens();
-//RS         let (kind, key, span) = match expr {
-//RS             Expr::Str(parts, span) => {
-//RS                 let [StrPart::Lit(value)] = parts.as_slice() else {
-//RS                     return None;
-//RS                 };
-//RS                 (DispatchLiteralKind::String, value.clone(), *span)
-//RS             }
-//RS             Expr::Int(value, span, ..) => (DispatchLiteralKind::Int, value.to_string(), *span),
-//RS             Expr::Bool(value, span) => (DispatchLiteralKind::Bool, value.to_string(), *span),
-//RS             Expr::Char(value, span) => (DispatchLiteralKind::Char, value.to_string(), *span),
-//RS             Expr::EnumLit {
-//RS                 type_name,
-//RS                 variant,
-//RS                 args,
-//RS                 span,
-//RS                 ..
-//RS             } if args.is_empty() => (
-//RS                 DispatchLiteralKind::Enum,
-//RS                 format!("{type_name}.{variant}"),
-//RS                 *span,
-//RS             ),
-//RS             _ => return None,
-//RS         };
-//RS         Some(DispatchValue { kind, key, span })
-//RS     }
-//RS 
-//RS     fn dispatch_values_are_exclusive(run: &[AdjacentDispatchGuard<'_>]) -> bool {
-//RS         let mut seen = Vec::new();
-//RS         for guard in run {
-//RS             for value in &guard.values {
-//RS                 if seen.iter().any(|existing: &DispatchValue| {
-//RS                     existing.kind == value.kind && existing.key == value.key
-//RS                 }) {
-//RS                     return false;
-//RS                 }
-//RS                 seen.push(value.clone());
-//RS             }
-//RS         }
-//RS         true
-//RS     }
-//RS 
-//RS     fn statements_write_subject(stmts: &[Stmt], subject: &[Vec<String>]) -> bool {
-//RS         stmts
-//RS             .iter()
-//RS             .any(|stmt| Self::statement_writes_subject(stmt, subject))
-//RS     }
-//RS 
-//RS     fn statement_writes_subject(stmt: &Stmt, subject: &[Vec<String>]) -> bool {
-//RS         match stmt {
-//RS             Stmt::Assign { target, value, .. } => {
-//RS                 Self::lvalue_writes_subject(target, subject)
-//RS                     || Self::expression_writes_subject(value, subject)
-//RS             }
-//RS             Stmt::Expr(expr)
-//RS             | Stmt::Return(Some(expr), _)
-//RS             | Stmt::BreakValue(expr, _)
-//RS             | Stmt::Yield(expr, _)
-//RS             | Stmt::BreakLabelValue(_, _, expr, _) => {
-//RS                 Self::expression_writes_subject(expr, subject)
-//RS             }
-//RS             Stmt::Val(binding) => {
-//RS                 Self::name_writes_subject(&binding.name, subject)
-//RS                     || Self::expression_writes_subject(&binding.init, subject)
-//RS             }
-//RS             Stmt::While { body, .. }
-//RS             | Stmt::For { body, .. }
-//RS             | Stmt::Loop { body, .. }
-//RS             | Stmt::Unsafe { body, .. }
-//RS             | Stmt::Impure { body, .. }
-//RS             | Stmt::Reactive { body, .. }
-//RS             | Stmt::Shield { body, .. }
-//RS             | Stmt::Switched { body, .. }
-//RS             | Stmt::Region { body, .. }
-//RS             | Stmt::Policy { body, .. }
-//RS             | Stmt::Layout { body, .. }
-//RS             | Stmt::AuthorityScope { body, .. }
-//RS             | Stmt::ComptimeBlock { body, .. }
-//RS             | Stmt::Live { body, .. }
-//RS             | Stmt::Transact { body, .. }
-//RS             | Stmt::ScopeMember { body, .. } => Self::statements_write_subject(body, subject),
-//RS             Stmt::Switch {
-//RS                 arms, else_body, ..
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 arms, else_body, ..
-//RS             } => {
-//RS                 arms.iter()
-//RS                     .any(|arm| Self::statements_write_subject(&arm.body, subject))
-//RS                     || else_body
-//RS                         .as_ref()
-//RS                         .is_some_and(|body| Self::statements_write_subject(body, subject))
-//RS             }
-//RS             Stmt::CountedLoop {
-//RS                 init, step, body, ..
-//RS             } => {
-//RS                 Self::name_writes_subject(&init.name, subject)
-//RS                     || step
-//RS                         .as_deref()
-//RS                         .is_some_and(|stmt| Self::statement_writes_subject(stmt, subject))
-//RS                     || Self::statements_write_subject(body, subject)
-//RS             }
-//RS             Stmt::TaskGroup { limit, body, .. } => {
-//RS                 limit
-//RS                     .as_ref()
-//RS                     .is_some_and(|expr| Self::expression_writes_subject(expr, subject))
-//RS                     || Self::statements_write_subject(body, subject)
-//RS             }
-//RS             Stmt::ContextBlock { fields, body, .. } => {
-//RS                 fields
-//RS                     .iter()
-//RS                     .any(|(_, value, _)| Self::expression_writes_subject(value, subject))
-//RS                     || Self::statements_write_subject(body, subject)
-//RS             }
-//RS             Stmt::ComptimeIf {
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 Self::statements_write_subject(then_body, subject)
-//RS                     || else_body
-//RS                         .as_ref()
-//RS                         .is_some_and(|body| Self::statements_write_subject(body, subject))
-//RS             }
-//RS             Stmt::AssumeDet { body, .. } => Self::statements_write_subject(body, subject),
-//RS             Stmt::DeferClose { close, .. } => Self::expression_writes_subject(close, subject),
-//RS             Stmt::Return(None, _)
-//RS             | Stmt::Break(_)
-//RS             | Stmt::Continue(_)
-//RS             | Stmt::BreakLabel(..)
-//RS             | Stmt::ContinueLabel(..) => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn expression_writes_subject(expr: &Expr, subject: &[Vec<String>]) -> bool {
-//RS         let mut writes = false;
-//RS         expr.for_each_expr(|nested| match nested.without_parens() {
-//RS             Expr::Place(inner, access, _) if *access == crate::AST::PlaceAccess::Write => {
-//RS                 writes |= Self::expr_path(inner)
-//RS                     .is_some_and(|path| Self::path_writes_subject(&path, subject));
-//RS             }
-//RS             Expr::MethodCall { receiver, args, .. } => {
-//RS                 writes |= Self::expr_path(receiver)
-//RS                     .is_some_and(|path| Self::path_writes_subject(&path, subject));
-//RS                 writes |= Self::call_args_write_subject(args, subject);
-//RS             }
-//RS             Expr::Call(call) => {
-//RS                 writes |= Self::call_args_write_subject(&call.args, subject);
-//RS             }
-//RS             Expr::CallValue { callee, args, .. } => {
-//RS                 writes |= Self::expr_path(callee)
-//RS                     .is_some_and(|path| Self::path_writes_subject(&path, subject));
-//RS                 writes |= Self::call_args_write_subject(args, subject);
-//RS             }
-//RS             Expr::OrFallback { fallback, .. } => {
-//RS                 if let crate::AST::OrFallback::Block { body, .. } = fallback {
-//RS                     writes |= Self::statements_write_subject(body, subject);
-//RS                 }
-//RS             }
-//RS             Expr::If {
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 writes |= Self::statements_write_subject(then_body, subject);
-//RS                 writes |= Self::statements_write_subject(else_body, subject);
-//RS             }
-//RS             Expr::Lambda(lambda) => {
-//RS                 if let crate::AST::LambdaBody::Block(body) = &lambda.body {
-//RS                     writes |= Self::statements_write_subject(body, subject);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         });
-//RS         writes
-//RS     }
-//RS 
-//RS     fn call_args_write_subject(args: &[crate::AST::CallArg], subject: &[Vec<String>]) -> bool {
-//RS         args.iter().any(|arg| {
-//RS             matches!(
-//RS                 arg.convention,
-//RS                 AccessConvention::Write | AccessConvention::Move
-//RS             ) && Self::argument_path(&arg.expr)
-//RS                 .is_some_and(|path| Self::path_writes_subject(&path, subject))
-//RS         })
-//RS     }
-//RS 
-//RS     fn argument_path(expr: &Expr) -> Option<Vec<String>> {
-//RS         match expr.without_parens() {
-//RS             Expr::Place(inner, ..) => Self::expr_path(inner),
-//RS             _ => Self::expr_path(expr),
-//RS         }
-//RS     }
-//RS 
-//RS     fn expr_path(expr: &Expr) -> Option<Vec<String>> {
-//RS         Self::dispatch_subject_path(expr)
-//RS     }
-//RS 
-//RS     fn lvalue_writes_subject(target: &LValue, subject: &[Vec<String>]) -> bool {
-//RS         let path = match target {
-//RS             LValue::Local { name, .. } => vec![name.clone()],
-//RS             LValue::Field { base, field, .. } => {
-//RS                 if Self::expression_writes_subject(base, subject) {
-//RS                     return true;
-//RS                 }
-//RS                 let Some(mut path) = Self::expr_path(base) else {
-//RS                     return false;
-//RS                 };
-//RS                 path.push(field.clone());
-//RS                 path
-//RS             }
-//RS             LValue::Index { base, index, .. } => {
-//RS                 if Self::expression_writes_subject(base, subject)
-//RS                     || Self::expression_writes_subject(index, subject)
-//RS                 {
-//RS                     return true;
-//RS                 }
-//RS                 let Some(path) = Self::expr_path(base) else {
-//RS                     return false;
-//RS                 };
-//RS                 path
-//RS             }
-//RS         };
-//RS         Self::path_writes_subject(&path, subject)
-//RS     }
-//RS 
-//RS     fn name_writes_subject(name: &str, subject: &[Vec<String>]) -> bool {
-//RS         subject
-//RS             .iter()
-//RS             .any(|path| path.first().is_some_and(|root| root == name))
-//RS     }
-//RS 
-//RS     fn path_writes_subject(path: &[String], subject: &[Vec<String>]) -> bool {
-//RS         subject
-//RS             .iter()
-//RS             .any(|candidate| Self::paths_overlap(path, candidate))
-//RS     }
-//RS 
-//RS     fn paths_overlap(left: &[String], right: &[String]) -> bool {
-//RS         left.starts_with(right) || right.starts_with(left)
-//RS     }
-//RS 
-//RS     fn adjacent_dispatch_edit(&self, run: &[AdjacentDispatchGuard<'_>]) -> Option<TextEdit> {
-//RS         let extents = run
-//RS             .iter()
-//RS             .map(|guard| {
-//RS                 source_if_extent(self.source, guard.span, guard.condition_span, guard.body)
-//RS             })
-//RS             .collect::<Option<Vec<_>>>()?;
-//RS         let start = extents.first()?.start;
-//RS         let end = extents.last()?.end;
-//RS         if extents.windows(2).any(|pair| pair[0].end > pair[1].start)
-//RS             || source_has_comment(self.source, start, end)
-//RS         {
-//RS             return None;
-//RS         }
-//RS         if extents
-//RS             .iter()
-//RS             .zip(run)
-//RS             .any(|(extent, guard)| extent.braced && statements_contain_multiline_string(guard.body))
-//RS         {
-//RS             // The braced-body reindent below operates on source lines. A raw
-//RS             // multiline string is source data, not code indentation; decline
-//RS             // the edit rather than changing that data while still reporting
-//RS             // the advisory lint.
-//RS             return None;
-//RS         }
-//RS         let indent = source_line_indent(self.source, start);
-//RS         let subject = self
-//RS             .source
-//RS             .get(run[0].subject_span.start..run[0].subject_span.end)?
-//RS             .trim();
-//RS         if subject.is_empty() || subject.contains('\n') {
-//RS             return None;
-//RS         }
-//RS         // The statement span starts at `if`, after its existing line indent.
-//RS         // Keep that prefix outside the replacement so applying the edit does
-//RS         // not double-indent the whole rewritten table.
-//RS         let mut replacement = format!("if {subject} == {{");
-//RS         for (guard, extent) in run.iter().zip(extents.iter()) {
-//RS             replacement.push('\n');
-//RS             replacement.push_str(&indent);
-//RS             replacement.push_str("    ");
-//RS             for (index, value) in guard.values.iter().enumerate() {
-//RS                 if index > 0 {
-//RS                     replacement.push_str(" | ");
-//RS                 }
-//RS                 replacement.push_str(self.source.get(value.span.start..value.span.end)?.trim());
-//RS             }
-//RS             replacement.push_str(" ->");
-//RS             let body = self.source.get(extent.body_start..extent.body_end)?.trim();
-//RS             if body.is_empty() {
-//RS                 replacement.push_str(" {}");
-//RS             } else if extent.braced {
-//RS                 replacement.push_str(" {");
-//RS                 for line in body.lines() {
-//RS                     if !line.trim().is_empty() {
-//RS                         replacement.push('\n');
-//RS                         replacement.push_str(&indent);
-//RS                         replacement.push_str("        ");
-//RS                         replacement.push_str(line.trim());
-//RS                     }
-//RS                 }
-//RS                 replacement.push('\n');
-//RS                 replacement.push_str(&indent);
-//RS                 replacement.push_str("    }");
-//RS             } else {
-//RS                 replacement.push(' ');
-//RS                 replacement.push_str(body);
-//RS             }
-//RS         }
-//RS         replacement.push('\n');
-//RS         replacement.push_str(&indent);
-//RS         replacement.push_str("    else -> {}");
-//RS         replacement.push('\n');
-//RS         replacement.push('}');
-//RS         let formatted = crate::Formatter::format_source(&replacement).ok()?;
-//RS         let mut indented = String::new();
-//RS         for (line_index, line) in formatted.trim_end_matches('\n').lines().enumerate() {
-//RS             if line_index > 0 {
-//RS                 indented.push('\n');
-//RS                 indented.push_str(&indent);
-//RS             }
-//RS             indented.push_str(line);
-//RS         }
-//RS         Some(TextEdit {
-//RS             span: Span::new(start, end),
-//RS             new_text: indented,
-//RS         })
-//RS     }
-//RS 
-//RS     /// by a default return is the old spelling of one value table. The probe
-//RS     /// is deliberately strict: every arm must be a direct return, the table
-//RS     /// must have no explicit fallback, and the default must be the block tail.
-//RS     /// The shared probe behind both L0513 and its E0003 suppression: the last
-//RS     /// two statements must be a fallback-free statement arm table whose arms
-//RS     /// all return directly, followed by a default return. Both callers must
-//RS     /// agree on what counts, so neither re-derives it.
-//RS     fn redundant_arm_table_parts(
-//RS         stmts: &[Stmt],
-//RS     ) -> Option<(&[crate::AST::SwitchArm], Span, &Expr, Span)> {
-//RS         let [.., Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body: None,
-//RS             span,
-//RS             ..
-//RS         }, Stmt::Return(Some(default), default_return_span)] = stmts
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         // Subjectless guards (including readiness tables) are effect/control
-//RS         // tables, not value dispatch. Adding an `else` body would change the
-//RS         // statement shape instead of merely moving the fallback value into
-//RS         // the table, so the rewrite is not equivalent.
-//RS         if crate::AST::is_subjectless_guard(subject, *span)
-//RS             || arms
-//RS                 .iter()
-//RS                 .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
-//RS         {
-//RS             return None;
-//RS         }
-//RS         if arms.is_empty()
-//RS             || !arms
-//RS                 .iter()
-//RS                 .all(|arm| matches!(arm.body.as_slice(), [Stmt::Return(Some(_), _)]))
-//RS         {
-//RS             return None;
-//RS         }
-//RS         Some((arms, *span, default, *default_return_span))
-//RS     }
-//RS 
-//RS     fn check_redundant_arm_table_return(&mut self, stmts: &[Stmt]) {
-//RS         let Some((arms, span, default, default_return_span)) =
-//RS             Self::redundant_arm_table_parts(stmts)
-//RS         else {
-//RS             return;
-//RS         };
-//RS         let Some(edit) = self.redundant_arm_table_edit(arms, span, default, default_return_span)
-//RS         else {
-//RS             return;
-//RS         };
-//RS         let mut diagnostic = Diagnostic::from_row("L0513", &[], Some(span));
-//RS         diagnostic.set_structured_edit(edit);
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn redundant_arm_table_edit(
-//RS         &self,
-//RS         arms: &[crate::AST::SwitchArm],
-//RS         switch_span: Span,
-//RS         default: &Expr,
-//RS         default_return_span: Span,
-//RS     ) -> Option<TextEdit> {
-//RS         let source = self.source;
-//RS         let mut edits: Vec<(usize, usize, String)> = Vec::new();
-//RS         for arm in arms {
-//RS             let [Stmt::Return(Some(value), return_span)] = arm.body.as_slice() else {
-//RS                 return None;
-//RS             };
-//RS             if return_span.start > return_span.end {
-//RS                 return None;
-//RS             }
-//RS             // Remove only the keyword and an authored terminator. Any comment
-//RS             // or spacing around the value remains in the source edit.
-//RS             edits.push((return_span.start, return_span.end, String::new()));
-//RS             if let Some(semicolon) = find_authored_semicolon(source, value.span().end) {
-//RS                 edits.push((semicolon, semicolon + 1, String::new()));
-//RS             }
-//RS         }
-//RS 
-//RS         let close = find_switch_close(source, switch_span.start)?;
-//RS         let default_text = source.get(default.span().start..default.span().end)?;
-//RS         let prefix =
-//RS             if close > switch_span.start && !source.as_bytes()[close - 1].is_ascii_whitespace() {
-//RS                 " "
-//RS             } else {
-//RS                 ""
-//RS             };
-//RS         edits.push((
-//RS             close,
-//RS             close,
-//RS             format!("{prefix}else -> {{ {default_text} }}"),
-//RS         ));
-//RS 
-//RS         edits.push((
-//RS             default_return_span.start,
-//RS             default_return_span.end,
-//RS             String::new(),
-//RS         ));
-//RS         edits.push((default.span().start, default.span().end, String::new()));
-//RS 
-//RS         let mut end = default.span().end;
-//RS         if let Some(semicolon) = find_authored_semicolon(source, end) {
-//RS             // The semicolon belongs to the removed fallback statement. Keep
-//RS             // any whitespace/comments around it, but do not leave a stray
-//RS             // statement terminator after the new value table.
-//RS             end = semicolon + 1;
-//RS             edits.push((semicolon, semicolon + 1, String::new()));
-//RS         }
-//RS         let start = switch_span.start;
-//RS         let mut replacement = source.get(start..end)?.to_string();
-//RS         edits.sort_by_key(|(edit_start, _, _)| *edit_start);
-//RS         for (edit_start, edit_end, new_text) in edits.into_iter().rev() {
-//RS             if edit_start < start || edit_end > end || edit_start > edit_end {
-//RS                 return None;
-//RS             }
-//RS             replacement.replace_range(edit_start - start..edit_end - start, &new_text);
-//RS         }
-//RS         Some(TextEdit {
-//RS             span: Span::new(start, end),
-//RS             new_text: replacement,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Check a body that may not run at all: a lambda or `task { … }` body,
-//RS     /// or a `??` fallback block. A `return` inside such a body still returns
-//RS     /// the enclosing function (that targeting is correct and the corpus
-//RS     /// depends on it), but only when the body runs — so it is a CONDITIONAL
-//RS     /// return, not an unconditional one. Statements after the construct stay
-//RS     /// reachable.
-//RS     ///
-//RS     /// Without this, `check_stmt` sees `flow.reachable == false` for every
-//RS     /// following statement and restores the pre-statement facts, discarding
-//RS     /// each later declaration and reporting it as `nothing named X exists
-//RS     /// here`. One `return` inside a task body buried its own real error under
-//RS     /// eleven phantom E0107/E0003 reports (card #2006).
-//RS     ///
-//RS     /// Inline bodies (`#Unsafe`, `region`, `policy`, comptime blocks) run
-//RS     /// unconditionally and deliberately keep `check_block`; loop bodies and
-//RS     /// switch arms already isolate reachability through their own joins
-//RS     /// (`FlowFacts::after_loop`, `merge_states`).
-//RS     pub(crate) fn check_conditional_block(&mut self, stmts: &mut [Stmt], new_scope: bool) {
-//RS         let reachable = self.flow.reachable;
-//RS         self.check_block(stmts, new_scope);
-//RS         self.flow.reachable = reachable;
-//RS     }
-//RS 
-//RS     /// E0209 liveness gate: returns `true` when `name` is
-//RS     /// referenced in any statement that follows the current statement in the
-//RS     /// innermost block. E0209 fires either way now (no clone is ever silent),
-//RS     /// but this decides its fix menu: live-after means `^` would break that
-//RS     /// later use, so the menu offers copy/reorder; dead-after means `^` is
-//RS     /// safe (this is the value's last use).
-//RS     ///
-//RS     /// Checks the current block's tail AND all enclosing block tails pushed
-//RS     /// by `check_block`, so a clone inside a nested `if` body is not flagged
-//RS     /// when the value is used again in the enclosing block after the `if`.
-//RS     pub(crate) fn is_name_live_after(&self, name: &str) -> bool {
-//RS         // Check the innermost block's tail first.
-//RS         if !self.stmt_tail_ptr.is_null() && self.stmt_tail_len > 0 {
-//RS             // SAFETY: stmt_tail_ptr + stmt_tail_len describe a valid slice that was
-//RS             // set from `&stmts[i+1..]` just before the current check_stmt call.
-//RS             // The slice's data lives in the Program AST, which is `&mut Program`
-//RS             // at the call site and outlives the Checker.  We only read (no writes)
-//RS             // and only during `check_stmt`, so no aliasing issues.
-//RS             let tail =
-//RS                 unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) };
-//RS             if tail.iter().any(|s| stmt_refs_name(s, name)) {
-//RS                 return true;
-//RS             }
-//RS         }
-//RS         // Walk enclosing frames (innermost pushed last) — if the name appears
-//RS         // in any enclosing block after the point this nested block was entered,
-//RS         // the clone is necessary.
-//RS         for &(ptr, len) in self.liveness_frames.iter().rev() {
-//RS             if !ptr.is_null() && len > 0 {
-//RS                 // SAFETY: same as above — each frame was set from a block slice
-//RS                 // in the Program AST that outlives the Checker.
-//RS                 let frame = unsafe { std::slice::from_raw_parts(ptr, len) };
-//RS                 if frame.iter().any(|s| stmt_refs_name(s, name)) {
-//RS                     return true;
-//RS                 }
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     pub(crate) fn lexical_tail_len(&self) -> usize {
-//RS         self.stmt_tail_len
-//RS             + self
-//RS                 .liveness_frames
-//RS                 .iter()
-//RS                 .map(|(_, len)| *len)
-//RS                 .sum::<usize>()
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum DispatchLiteralKind {
-//RS     String,
-//RS     Int,
-//RS     Bool,
-//RS     Char,
-//RS     Enum,
-//RS }
-//RS 
-//RS struct DispatchSubject {
-//RS     path: Vec<String>,
-//RS     span: Span,
-//RS     key: String,
-//RS     dependencies: Vec<Vec<String>>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct DispatchValue {
-//RS     kind: DispatchLiteralKind,
-//RS     key: String,
-//RS     span: Span,
-//RS }
-//RS 
-//RS struct AdjacentDispatchGuard<'a> {
-//RS     subject: Vec<String>,
-//RS     subject_key: String,
-//RS     subject_dependencies: Vec<Vec<String>>,
-//RS     subject_span: Span,
-//RS     values: Vec<DispatchValue>,
-//RS     body: &'a [Stmt],
-//RS     condition_span: Span,
-//RS     span: Span,
-//RS }
-//RS 
-//RS struct SourceIfExtent {
-//RS     start: usize,
-//RS     end: usize,
-//RS     body_start: usize,
-//RS     body_end: usize,
-//RS     braced: bool,
-//RS }
-//RS 
-//RS fn source_if_extent(
-//RS     source: &str,
-//RS     span: Span,
-//RS     condition_span: Span,
-//RS     body: &[Stmt],
-//RS ) -> Option<SourceIfExtent> {
-//RS     let first_open = find_source_char(source, condition_span.end, b'{');
-//RS     let arrow = find_source_sequence(source, condition_span.end, b"->");
-//RS     // A lambda or struct literal in an arrow body may contain braces. Treat
-//RS     // the first brace as the guard body only when it is the authored body
-//RS     // opener: before an arrow for classic syntax, or immediately after one
-//RS     // for the braced arrow spelling.
-//RS     let open = match (first_open, arrow) {
-//RS         (Some(open), Some(arrow)) if open < arrow => Some(open),
-//RS         (Some(open), None) => Some(open),
-//RS         (Some(open), Some(arrow)) => source
-//RS             .get(arrow + 2..open)
-//RS             .is_some_and(|between| between.trim().is_empty())
-//RS             .then_some(open),
-//RS         (None, _) => None,
-//RS     };
-//RS     if let Some(open) = open {
-//RS         let close = find_switch_close(source, open)?;
-//RS         let mut end = close + 1;
-//RS         if let Some(semicolon) = find_authored_semicolon(source, end) {
-//RS             end = semicolon + 1;
-//RS         }
-//RS         return Some(SourceIfExtent {
-//RS             start: span.start,
-//RS             end,
-//RS             body_start: open + 1,
-//RS             body_end: close,
-//RS             braced: true,
-//RS         });
-//RS     }
-//RS     let arrow = arrow?;
-//RS     let body_start = arrow + 2;
-//RS     let body_end = body
-//RS         .last()
-//RS         .and_then(|stmt| statement_source_end(source, body_start, stmt.span().end))?;
-//RS     let mut end = body_end;
-//RS     if let Some(semicolon) = find_authored_semicolon(source, end) {
-//RS         end = semicolon + 1;
-//RS     }
-//RS     Some(SourceIfExtent {
-//RS         start: span.start,
-//RS         end,
-//RS         body_start,
-//RS         body_end,
-//RS         braced: false,
-//RS     })
-//RS }
-//RS 
-//RS /// Source end of an arrow guard body that starts at `start`. Lexing the whole
-//RS /// unit tail per guard was O(unit size) (#3661), so this lexes growing windows
-//RS /// of whole lines, starting with the lines through `fallback` (the last body
-//RS /// statement's end). A window's answer is final once `settled_statement_semi`
-//RS /// shows the rest of the source cannot change it; after a few growth rounds
-//RS /// the full tail is lexed.
-//RS fn statement_source_end(source: &str, start: usize, fallback: usize) -> Option<usize> {
-//RS     let Some(tail) = source.get(start..) else {
-//RS         return Some(fallback.max(start));
-//RS     };
-//RS     let body_end = fallback.max(start) - start;
-//RS     for extra_lines in [0, 2, 8, 32] {
-//RS         let Some(len) = end_of_lines(tail, body_end, extra_lines + 1) else {
-//RS             break;
-//RS         };
-//RS         if let Some(end) = settled_statement_semi(&tail[..len]) {
-//RS             return Some(start + end);
-//RS         }
-//RS     }
-//RS     let (tokens, _) = crate::Lexer::lex(tail);
-//RS     Some(
-//RS         statement_semi_index(&tokens)
-//RS             .map_or(fallback.max(start), |index| start + tokens[index].span.start),
-//RS     )
-//RS }
-//RS 
-//RS /// Offset just past the `count`-th newline at or after `from` in `text`.
-//RS fn end_of_lines(text: &str, from: usize, count: usize) -> Option<usize> {
-//RS     text.as_bytes()
-//RS         .get(from..)?
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter(|(_, byte)| **byte == b'\n')
-//RS         .nth(count - 1)
-//RS         .map(|(offset, _)| from + offset + 1)
-//RS }
-//RS 
-//RS /// The first depth-zero `;` of `window` (a prefix of a longer source that
-//RS /// ends with a newline), when lexing the longer source would find the same
-//RS /// one. Tokens that end before the window's final newline lex the same either
-//RS /// way, so an authored `;` is settled. A synthetic terminator is decided by
-//RS /// the code token it precedes plus at most two more raw tokens. The one
-//RS /// exception is a decider that can continue a leading-dot arm or scope-member
-//RS /// head from the line before (`.`, `(`, `|`): those heads scan ahead without
-//RS /// bound. Otherwise the terminator is settled once the decider and the two
-//RS /// tokens after it end before the final newline. Terminators before it were
-//RS /// decided inside the window too: at a depth-zero `;` every delimiter those
-//RS /// scans balance has already closed.
-//RS fn settled_statement_semi(window: &str) -> Option<usize> {
-//RS     use crate::Lexer::TokKind;
-//RS     let (tokens, _) = crate::Lexer::lex(window);
-//RS     let index = statement_semi_index(&tokens)?;
-//RS     let semi = &tokens[index];
-//RS     if semi.span.end > semi.span.start {
-//RS         return Some(semi.span.start);
-//RS     }
-//RS     let final_newline = window.len().checked_sub(1)?;
-//RS     let mut following = tokens[index + 1..]
-//RS         .iter()
-//RS         .filter(|token| {
-//RS             !(matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end)
-//RS         })
-//RS         .skip_while(|token| crate::Lexer::is_comment(&token.kind));
-//RS     let decider = following.next()?;
-//RS     if matches!(decider.kind, TokKind::Dot | TokKind::LParen | TokKind::Pipe) {
-//RS         return None;
-//RS     }
-//RS     let settled = std::iter::once(decider)
-//RS         .chain(following.take(2))
-//RS         .filter(|token| !matches!(token.kind, TokKind::Eof) && token.span.end <= final_newline)
-//RS         .count()
-//RS         == 3;
-//RS     settled.then_some(semi.span.start)
-//RS }
-//RS 
-//RS /// Index of the first depth-zero `;` after some statement text in `tokens`.
-//RS fn statement_semi_index(tokens: &[crate::Lexer::Token]) -> Option<usize> {
-//RS     let mut parens = 0usize;
-//RS     let mut brackets = 0usize;
-//RS     let mut braces = 0usize;
-//RS     let mut saw_body = false;
-//RS 
-//RS     for (index, token) in tokens.iter().enumerate() {
-//RS         match token.kind {
-//RS             crate::Lexer::TokKind::LineComment(_) | crate::Lexer::TokKind::BlockComment(_) => {}
-//RS             crate::Lexer::TokKind::Semi
-//RS                 if saw_body && parens == 0 && brackets == 0 && braces == 0 =>
-//RS             {
-//RS                 return Some(index);
-//RS             }
-//RS             crate::Lexer::TokKind::LParen => {
-//RS                 parens += 1;
-//RS                 saw_body = true;
-//RS             }
-//RS             crate::Lexer::TokKind::RParen if parens > 0 => parens -= 1,
-//RS             crate::Lexer::TokKind::LBracket => {
-//RS                 brackets += 1;
-//RS                 saw_body = true;
-//RS             }
-//RS             crate::Lexer::TokKind::RBracket if brackets > 0 => brackets -= 1,
-//RS             crate::Lexer::TokKind::LBrace => {
-//RS                 braces += 1;
-//RS                 saw_body = true;
-//RS             }
-//RS             crate::Lexer::TokKind::RBrace if braces > 0 => braces -= 1,
-//RS             crate::Lexer::TokKind::Eof => break,
-//RS             _ => saw_body = true,
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn source_line_indent(source: &str, start: usize) -> String {
-//RS     let line_start = source[..start.min(source.len())]
-//RS         .rfind('\n')
-//RS         .map_or(0, |newline| newline + 1);
-//RS     source[line_start..start.min(source.len())]
-//RS         .chars()
-//RS         .take_while(|character| *character == ' ' || *character == '\t')
-//RS         .collect()
-//RS }
-//RS 
-//RS fn source_has_comment(source: &str, start: usize, end: usize) -> bool {
-//RS     let bytes = source.as_bytes();
-//RS     let mut index = start.min(bytes.len());
-//RS     let end = end.min(bytes.len());
-//RS     while index < end {
-//RS         match bytes[index] {
-//RS             b'/' if bytes.get(index + 1) == Some(&b'/') => return true,
-//RS             b'/' if bytes.get(index + 1) == Some(&b'*') => return true,
-//RS             b'"' => {
-//RS                 let triple = bytes.get(index..index + 3) == Some(b"\"\"\"");
-//RS                 index += if triple { 3 } else { 1 };
-//RS                 while index < end {
-//RS                     if triple && bytes.get(index..index + 3) == Some(b"\"\"\"") {
-//RS                         index += 3;
-//RS                         break;
-//RS                     }
-//RS                     if !triple && bytes[index] == b'"' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     }
-//RS                     if !triple && bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(end);
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             b'\'' => {
-//RS                 index += 1;
-//RS                 while index < end {
-//RS                     if bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(end);
-//RS                     } else if bytes[index] == b'\'' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => index += 1,
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn statements_contain_multiline_string(stmts: &[Stmt]) -> bool {
-//RS     stmts.iter().any(|stmt| {
-//RS         let mut found = false;
-//RS         stmt.for_each_expr(|expr| {
-//RS             if let Expr::Str(parts, _) = expr.without_parens() {
-//RS                 found |= parts
-//RS                     .iter()
-//RS                     .any(|part| matches!(part, StrPart::Lit(text) if text.contains('\n')));
-//RS             }
-//RS         });
-//RS         found
-//RS     })
-//RS }
-//RS 
-//RS fn find_source_char(source: &str, start: usize, wanted: u8) -> Option<usize> {
-//RS     let bytes = source.as_bytes();
-//RS     let mut index = start.min(bytes.len());
-//RS     while index < bytes.len() {
-//RS         match bytes[index] {
-//RS             b'/' if bytes.get(index + 1) == Some(&b'/') => {
-//RS                 index += 2;
-//RS                 while index < bytes.len() && bytes[index] != b'\n' {
-//RS                     index += 1;
-//RS                 }
-//RS             }
-//RS             b'/' if bytes.get(index + 1) == Some(&b'*') => {
-//RS                 index += 2;
-//RS                 while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
-//RS                 {
-//RS                     index += 1;
-//RS                 }
-//RS                 index = (index + 2).min(bytes.len());
-//RS             }
-//RS             b'"' => {
-//RS                 let triple = bytes.get(index..index + 3) == Some(b"\"\"\"");
-//RS                 index += if triple { 3 } else { 1 };
-//RS                 while index < bytes.len() {
-//RS                     if triple && bytes.get(index..index + 3) == Some(b"\"\"\"") {
-//RS                         index += 3;
-//RS                         break;
-//RS                     }
-//RS                     if !triple && bytes[index] == b'"' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     }
-//RS                     if !triple && bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(bytes.len());
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             b'\'' => {
-//RS                 index += 1;
-//RS                 while index < bytes.len() {
-//RS                     if bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(bytes.len());
-//RS                     } else if bytes[index] == b'\'' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             byte if byte == wanted => return Some(index),
-//RS             _ => index += 1,
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_source_sequence(source: &str, start: usize, wanted: &[u8]) -> Option<usize> {
-//RS     if wanted.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let bytes = source.as_bytes();
-//RS     let mut index = start.min(bytes.len());
-//RS     while index + wanted.len() <= bytes.len() {
-//RS         match bytes[index] {
-//RS             b'/' if bytes.get(index + 1) == Some(&b'/') => {
-//RS                 index += 2;
-//RS                 while index < bytes.len() && bytes[index] != b'\n' {
-//RS                     index += 1;
-//RS                 }
-//RS             }
-//RS             b'/' if bytes.get(index + 1) == Some(&b'*') => {
-//RS                 index += 2;
-//RS                 while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
-//RS                 {
-//RS                     index += 1;
-//RS                 }
-//RS                 index = (index + 2).min(bytes.len());
-//RS             }
-//RS             b'"' | b'\'' => {
-//RS                 let quote = bytes[index];
-//RS                 index += 1;
-//RS                 while index < bytes.len() {
-//RS                     if bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(bytes.len());
-//RS                     } else if bytes[index] == quote {
-//RS                         index += 1;
-//RS                         break;
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ if bytes[index..].starts_with(wanted) => return Some(index),
-//RS             _ => index += 1,
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_switch_close(source: &str, start: usize) -> Option<usize> {
-//RS     let bytes = source.as_bytes();
-//RS     let mut depth = 0usize;
-//RS     let mut index = start;
-//RS     while index < bytes.len() {
-//RS         match bytes[index] {
-//RS             b'/' if bytes.get(index + 1) == Some(&b'/') => {
-//RS                 index += 2;
-//RS                 while index < bytes.len() && bytes[index] != b'\n' {
-//RS                     index += 1;
-//RS                 }
-//RS             }
-//RS             b'/' if bytes.get(index + 1) == Some(&b'*') => {
-//RS                 index += 2;
-//RS                 while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
-//RS                 {
-//RS                     index += 1;
-//RS                 }
-//RS                 index = (index + 2).min(bytes.len());
-//RS             }
-//RS             b'"' => {
-//RS                 let triple = bytes.get(index..index + 3) == Some(b"\"\"\"");
-//RS                 index += if triple { 3 } else { 1 };
-//RS                 while index < bytes.len() {
-//RS                     if triple && bytes.get(index..index + 3) == Some(b"\"\"\"") {
-//RS                         index += 3;
-//RS                         break;
-//RS                     }
-//RS                     if !triple && bytes[index] == b'"' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     }
-//RS                     if bytes[index] == b'\\' && !triple {
-//RS                         index = (index + 2).min(bytes.len());
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             b'\'' => {
-//RS                 index += 1;
-//RS                 while index < bytes.len() {
-//RS                     if bytes[index] == b'\\' {
-//RS                         index = (index + 2).min(bytes.len());
-//RS                     } else if bytes[index] == b'\'' {
-//RS                         index += 1;
-//RS                         break;
-//RS                     } else {
-//RS                         index += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             b'{' => {
-//RS                 depth += 1;
-//RS                 index += 1;
-//RS             }
-//RS             b'}' if depth == 1 => return Some(index),
-//RS             b'}' if depth > 1 => {
-//RS                 depth -= 1;
-//RS                 index += 1;
-//RS             }
-//RS             _ => index += 1,
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_authored_semicolon(source: &str, mut at: usize) -> Option<usize> {
-//RS     let bytes = source.as_bytes();
-//RS     at = at.min(bytes.len());
-//RS     loop {
-//RS         while at < bytes.len() && bytes[at].is_ascii_whitespace() {
-//RS             at += 1;
-//RS         }
-//RS         if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"//")) {
-//RS             at += 2;
-//RS             while at < bytes.len() && bytes[at] != b'\n' {
-//RS                 at += 1;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"/*")) {
-//RS             at += 2;
-//RS             while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
-//RS                 at += 1;
-//RS             }
-//RS             at = (at + 2).min(bytes.len());
-//RS             continue;
-//RS         }
-//RS         return (bytes.get(at) == Some(&b';')).then_some(at);
-//RS     }
-//RS }
-// END-PORT-PENDING 0369 crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1-1673
+use jet_foundation.[AST]
+use jet_foundation.AST.[AccessConvention, BinOp, Expr, LValue, Stmt, StrPart, Type]
+use jet_foundation.Diagnostics.[Diagnostic, Span, TextEdit]
+use jet_foundation.[TEXT_NUL]
+use jet_lexer.Lexer as Lexer
+use jet_parser.Formatter as Formatter
+use JetSema.Sema.[Checker]
+use JetSema.Sema.Captures.[stmt_refs_name]
+use JetSema.Sema.Diagnostics.[block_definitely_returns]
+use std.mem
+use std.slice
 
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:11
+fn uncovered_guard_path(stmts: [Stmt], source: String) -> String? Never! {
+    conds := [Expr]{}
+    loop stmt in stmts.iter().rev() {
+        if stmt is .Switch{subject, arms, else_body: None, span} {
+            if !AST.is_subjectless_guard(subject, span) || arms.is_empty() || !arms.iter().all(fn(arm) { block_definitely_returns(arm.body) }) -> break
+            loop arm in arms.iter().rev() -> conds.push(arm.cond)
+        } else -> break
+    }
+    if conds.is_empty() -> return None
+    conds.reverse()
+    point := None as (String, I64)?
+    below := false
+    above := false
+    single_point := true
+    loop cond in conds {
+        comparison := None as (BinOp, String, I64)?
+        if cond is .Binary(op, left, right, _) {
+            if (left, right) == {
+                (.Ident(name, _), .Int(value, ..)) -> { comparison = Val((op, name, value)) }
+                (.Int(value, ..), .Ident(name, _)) -> {
+                    flipped :: if op == { .Lt -> BinOp.Gt .Gt -> BinOp.Lt else -> op }
+                    comparison = Val((flipped, name, value))
+                }
+                else -> {}
+            }
+        }
+        if comparison is (op, name, value) {
+            if point.map(fn(known) { known != (name, value) }) == Val(true) {
+                single_point = false
+                break
+            }
+            point = Val((name, value))
+            if op == {
+                .Lt -> { below = true }
+                .Gt -> { above = true }
+                .Ne -> { below = true; above = true }
+                else -> { single_point = false; break }
+            }
+        } else {
+            single_point = false
+            break
+        }
+    }
+    if point is (name, value) && single_point && below && above -> return Val("`{name}` is `{value}`")
+    texts := [String]{}
+    loop cond in conds {
+        span :: cond.span()
+        text :: source.get(span.start..<span.end) ?? return None
+        trimmed := text.trim() // #4303
+        texts.push("`{trimmed}`")
+    }
+    Val(if texts.len() == 1 { "{texts[0]} is false" } else { "none of {texts.join(\", \")} is true" })
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:93
+    pub fn check_block(&self, stmts: &[Stmt], new_scope: Bool) { self.check_block_inner(stmts, new_scope, None) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:101
+    pub fn check_value_block(&self, stmts: &[Stmt], expected: Type, new_scope: Bool, block_span: Span) { self.check_block_inner(stmts, new_scope, Val((expected, block_span))) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:111
+    fn check_block_inner(&self, stmts: &[Stmt], new_scope: Bool, value_tail: (Type, Span)?) {
+        redundant_tail_span :: value_tail.and_then(fn(_) { Checker.redundant_arm_table_parts(stmts).map(fn(parts) { parts.1 }) })
+        if redundant_tail_span != None -> self.check_redundant_arm_table_return(stmts)
+        self.check_adjacent_subject_dispatch_lint(stmts)
+        self.prepare_stdlib_lint_block(stmts)
+        if new_scope -> self.push_scope()
+        saved_ptr :: self.stmt_tail_ptr
+        saved_len :: self.stmt_tail_len
+        pushed_frame :: !saved_ptr.is_null()
+        if pushed_frame -> self.liveness_frames.push((saved_ptr, saved_len))
+        exit_guards := [(USize, String)]{}
+        loop i in 0..<stmts.len() {
+            if i > 0 -> self.emit_unreachable_after_loop(stmts[i - 1], stmts[i])
+            // GATE #4494: borrowed AST tail pointer, read only during this check.
+            #Unsafe("AST statement storage outlives this checker frame; tail is only read") {
+                self.stmt_tail_ptr = stmts[i + 1..].as_ptr()
+            }
+            self.stmt_tail_len = stmts.len() - i - 1
+            self.views_used_in_stmt.clear()
+            self.scoped_loan_read_reported = false
+            if i + 1 == stmts.len() {
+                if value_tail is (expected, _) {
+                    uncovered :: uncovered_guard_path(stmts[0..=i], self.source)
+                    self.check_value_tail(&stmts[i], expected, uncovered)
+                } else -> self.check_stmt(&stmts[i])
+            } else {
+                diagnostics_start :: self.diags.len()
+                exit_guard :: self.optional_exit_guard_subject(stmts[i])
+                self.check_stmt(&stmts[i])
+                if exit_guard is name && self.flow.narrow.get_at(name, self.scope_depth()) != None -> exit_guards.push((i, name))
+                if i + 2 == stmts.len() {
+                    if redundant_tail_span is span {
+                        checked :: self.diags.split_off(diagnostics_start)
+                        self.diags.extend(checked.into_iter().filter(fn(diagnostic) { !(diagnostic.code == "E0003" && diagnostic.span == Val(span)) }))
+                    }
+                }
+            }
+        }
+        loop (i, name) in exit_guards -> self.rewrite_optional_exit_guard(&stmts[i], name)
+        if stmts.is_empty() {
+            if value_tail is (expected, block_span) -> self.report_missing_block_value(expected, block_span)
+        }
+        if pushed_frame -> self.liveness_frames.pop()
+        self.stmt_tail_ptr = saved_ptr
+        self.stmt_tail_len = saved_len
+        if new_scope -> self.pop_scope()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:201
+    pub fn check_stmts_in_scope(&self, stmts: &[Stmt]) {
+        exit_guards := [(USize, String)]{}
+        last :: stmts.len().saturating_sub(1)
+        loop (i, stmt) in &stmts.enumerate() {
+            exit_guard :: if i < last { self.optional_exit_guard_subject(stmt) } else { None }
+            self.check_stmt(stmt)
+            if exit_guard is name && self.flow.narrow.get_at(name, self.scope_depth()) != None -> exit_guards.push((i, name))
+        }
+        loop (i, name) in exit_guards -> self.rewrite_optional_exit_guard(&stmts[i], name)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:221
+    fn tail_has_authored_semicolon(self, span: Span) -> Bool Never! { find_authored_semicolon(self.source, span.end) != None }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:228
+    fn check_redundant_final_return(&self, _value: Expr, return_span: Span) {
+        if self.compiler_generated || return_span.end > self.source.len() -> return
+        keyword_gap :: self.source[return_span.end..].bytes().take_while(fn(byte) { byte == 32 || byte == 9 }).count()
+        diagnostic := Diagnostic.from_row("L0530", [], Val(return_span)).with_edit(TextEdit{span: Span.new(return_span.start, return_span.end + keyword_gap), new_text: ""})
+        if find_authored_semicolon(self.source, return_span.end) is semicolon -> diagnostic = diagnostic.with_alternative_edit(TextEdit{span: Span.new(semicolon, semicolon + 1), new_text: ""})
+        self.diags.push(^diagnostic)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:256
+    fn check_value_tail(&self, stmt: &Stmt, expected: Type, uncovered: String?) {
+        if !self.flow.reachable {
+            if stmt is .Expr(expr) && !self.tail_has_authored_semicolon(expr.span()) && !self.is_diverging_tail(expr) {
+                self.infer_with_expected(expr, expected)
+            } else -> self.check_stmt(stmt)
+            return
+        }
+        if stmt == {
+            .Expr(expr) -> {
+                if !self.tail_has_authored_semicolon(expr.span()) && !self.is_diverging_tail(expr) {
+                    span :: expr.span()
+                    value := Val(mem.replace(expr, Expr.Absent(span)))
+                    self.check_return_expr(&value, span, Val(expected.clone()))
+                    if value is &inner -> self.lift_value_tail_into_return_carrier(inner, expected)
+                    if value is inner -> expr = ^inner
+                } else if self.is_diverging_tail(expr) {
+                    self.check_stmt(stmt)
+                } else {
+                    span :: expr.span()
+                    self.check_stmt(stmt)
+                    self.report_missing_block_value(expected, span)
+                }
+            }
+            .Return(Val(value), return_span) -> {
+                self.check_redundant_final_return(value, return_span)
+                self.check_stmt(stmt)
+            }
+            .Return(None, _) -> { self.check_stmt(stmt) }
+            .Switch{subject, arms, else_body, span} | .ComptimeSwitch{subject, arms, else_body, span} -> {
+                diagnostics_start :: self.diags.len()
+                self.check_switch(subject, arms, else_body, span, Val(expected))
+                if uncovered is path {
+                    if self.diags[diagnostics_start..].iter().rposition(fn(diagnostic) { diagnostic.code == "E0114" }) is index {
+                        reported :: self.diags.remove(diagnostics_start + index)
+                        self.report_missing_block_value_on_path(expected, reported.span ?? span, Val(path))
+                    }
+                }
+            }
+            else -> {
+                span :: stmt.span()
+                self.check_stmt(stmt)
+                if self.flow.reachable && !block_definitely_returns(slice.from_ref(stmt)) -> self.report_missing_block_value_on_path(expected, span, uncovered)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:352
+    pub fn report_missing_block_value(&self, expected: Type, span: Span) { self.report_missing_block_value_on_path(expected, span, None) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:358
+    fn report_missing_block_value_on_path(&self, expected: Type, span: Span, uncovered: String?) {
+        expected_name :: expected.show()
+        (what, fix) :: if uncovered is path {
+            ("when {path}, `{self.fn_name}` reaches the end without a value", "add a last line that produces {expected_name} for that case, or turn the last guard into an `else`")
+        } else {
+            ("this block promises to produce {expected_name}, but its last line produces no value", "end the block with an expression that produces {expected_name}, or `return` a value on every path")
+        }
+        self.diags.push(Diagnostic.error("E0114", what, "a block that promises {expected_name} must end with a value of that type, or leave through `return` on every path", fix, Val(span)))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:399
+    fn lift_value_tail_into_return_carrier(&self, value: &Expr, expected: Type) {
+        if expected is .Result{..} || self.ret.map(fn(ret) { if ret is .Result{..} -> true else -> false }) != Val(true) || value.without_parens() == { .Ok(..) | .Err(..) -> true else -> false } -> return
+        span :: value.span()
+        inner :: mem.replace(value, Expr.Absent(span))
+        value = Expr.Ok(^inner, span)
+        saved_expected :: self.expected_type.clone()
+        self.expected_type = self.ret.clone()
+        self.infer(value)
+        self.expected_type = ^saved_expected
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:415
+    fn is_diverging_tail(self, expr: Expr) -> Bool Never! { self.expr_diverges(expr) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:424
+    fn check_adjacent_subject_dispatch_lint(&self, stmts: [Stmt]) {
+        index := 0
+        loop index < stmts.len() {
+            first :: Checker.adjacent_dispatch_guard(stmts[index], self.source)
+            if first is guard {
+                run := [AdjacentDispatchGuard]{guard}
+                end := index + 1
+                loop end < stmts.len() {
+                    following :: Checker.adjacent_dispatch_guard(stmts[end], self.source) ?? break
+                    if following.subject_key != run[0].subject_key -> break
+                    run.push(following)
+                    end += 1
+                }
+                if run.len() >= 3 && Checker.dispatch_values_are_exclusive(run) && !run.iter().any(fn(g) { Checker.statements_write_subject(g.body, g.subject_dependencies) }) {
+                    span :: run[0].span
+                    subject := run[0].subject.join(".")
+                    if self.source.get(run[0].subject_span.start..<run[0].subject_span.end) is text {
+                        trimmed := text.trim() // #4303
+                        if !trimmed.is_empty() -> subject = trimmed.to_string()
+                    }
+                    diagnostic := Diagnostic.from_row("L0514", [("subject", subject)], Val(span))
+                    if self.adjacent_dispatch_edit(run) is edit -> diagnostic = diagnostic.with_edit(edit)
+                    self.diags.push(^diagnostic)
+                    index = end
+                } else -> index += 1
+            } else -> index += 1
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:469
+    fn adjacent_dispatch_guard(stmt: Stmt, source: String) -> AdjacentDispatchGuard? Never! {
+        if stmt is .Switch{subject, arms, else_body: None, span, ..} {
+            if !AST.is_subjectless_guard(subject, span) || arms.len() != 1 || !AST.uses_classic_if_spelling(source, span, arms[0].cond.span()) -> return None
+            condition_span :: arms[0].cond.span()
+            (subject_path, subject_span, subject_key, subject_dependencies, values) :: Checker.dispatch_condition_values(arms[0].cond, source) ?? return None
+            return Val(AdjacentDispatchGuard{subject: subject_path, subject_key: subject_key, subject_dependencies: subject_dependencies, subject_span: subject_span, values: values, body: arms[0].body.view(), condition_span: condition_span, span: span})
+        }
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:504
+    fn dispatch_condition_values(condition: Expr, source: String) -> ([String], Span, String, [[String]], [DispatchValue])? Never! {
+        // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:514
+        fn collect(condition: Expr, source: String, subject: &DispatchSubject?, values: &[DispatchValue]) -> Bool Never! {
+            if condition.without_parens() == {
+                .Binary(.Or, left, right, _) -> collect(left, source, subject, values) && collect(right, source, subject, values)
+                .Binary(.Eq, left, right, _) -> {
+                    left_subject :: Checker.dispatch_subject(left, source)
+                    right_subject :: Checker.dispatch_subject(right, source)
+                    current := None as DispatchSubject?
+                    value_expr := None as Expr?
+                    if (left_subject, right_subject) == {
+                        (Val(found), None) -> { current = Val(found); value_expr = Val(right) }
+                        (None, Val(found)) -> { current = Val(found); value_expr = Val(left) }
+                        else -> return false
+                    }
+                    found :: current ?? return false
+                    value :: Checker.dispatch_literal(value_expr ?? return false) ?? return false
+                    if subject is existing {
+                        if existing.key != found.key -> return false
+                    } else -> subject = Val(^found)
+                    values.push(^value)
+                    true
+                }
+                else -> false
+            }
+        }
+        subject := None as DispatchSubject?
+        values := [DispatchValue]{}
+        if !collect(condition, source, &subject, &values) || values.is_empty() -> return None
+        found :: subject ?? return None
+        if values.iter().any(fn(value) { value.kind != values[0].kind }) -> return None
+        Val((found.path, found.span, found.key, found.dependencies, ^values))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:572
+    fn dispatch_subject(expr: Expr, source: String) -> DispatchSubject? Never! {
+        source_span :: expr.span()
+        unwrapped :: expr.without_parens()
+        if !Checker.dispatch_subject_is_call_free(unwrapped) -> return None
+        span :: unwrapped.span()
+        path :: Checker.dispatch_subject_path(unwrapped) ?? [String]{}
+        key :: if path.is_empty() { Checker.dispatch_subject_key(source, span) ?? return None } else { path.join(".") }
+        dependencies :: Checker.dispatch_subject_dependencies(unwrapped)
+        if dependencies.is_empty() -> return None
+        Val(DispatchSubject{path: path, span: source_span, key: key, dependencies: dependencies})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:601
+    fn dispatch_subject_is_call_free(expr: Expr) -> Bool Never! {
+        call_free := true
+        expr.for_each_expr(fn(nested) {
+            if nested.without_parens() == {
+                .Call(_) | .MethodCall{..} | .CallValue{..} | .Lambda(_) | .Try(..) | .OrFallback{..} | .If{..} | .Place(..) | .Deref(..) | .RawOf(..) | .PtrFromAddr{..} -> { call_free = false }
+                else -> {}
+            }
+        })
+        call_free
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:627
+    fn dispatch_subject_key(source: String, span: Span) -> String? Never! {
+        text :: source.get(span.start..<span.end) ?? return None
+        (tokens, _) :: Lexer.lex(text)
+        key := ""
+        loop token in tokens {
+            if token.kind == { .LineComment(_) | .BlockComment(_) | .Eof -> true else -> false } -> next
+            key += "{token.kind:?};"
+        }
+        if key.is_empty() -> None else -> Val(^key)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:645
+    fn dispatch_subject_dependencies(expr: Expr) -> [[String]] Never! {
+        paths := [[String]]{}
+        expr.for_each_expr(fn(nested) { if Checker.dispatch_subject_path(nested) is path -> paths.push(^path) })
+        paths.sort_by(fn(left, right) { right.len().cmp(left.len()) })
+        paths.dedup()
+        longest_paths :: paths.clone()
+        paths.retain(fn(path) { !longest_paths.iter().any(fn(other) { other.len() > path.len() && other.starts_with(path) }) })
+        paths
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:663
+    fn dispatch_subject_path(expr: Expr) -> [String]? Never! {
+        if expr.without_parens() == {
+            .Ident(name, _) if !name.starts_with(TEXT_NUL) -> Val([String]{name})
+            .Field(base, field, _) -> {
+                path := Checker.dispatch_subject_path(base) ?? return None
+                path.push(field)
+                Val(^path)
+            }
+            else -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:675
+    fn dispatch_literal(expr: Expr) -> DispatchValue? Never! {
+        if expr.without_parens() == {
+            .Str(parts, span) -> {
+                if parts.len() != 1 -> return None
+                if parts[0] is .Lit(value) -> return Val(DispatchValue{kind: .String, key: value, span: span})
+                None
+            }
+            .Int(value, span, ..) -> Val(DispatchValue{kind: .Int, key: value.to_string(), span: span})
+            .Bool(value, span) -> Val(DispatchValue{kind: .Bool, key: value.to_string(), span: span})
+            .Char(value, span) -> Val(DispatchValue{kind: .Char, key: value.to_string(), span: span})
+            .EnumLit{type_name, variant, args, span, ..} if args.is_empty() -> Val(DispatchValue{kind: .Enum, key: "{type_name}.{variant}", span: span})
+            else -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:703
+    fn dispatch_values_are_exclusive(run: [AdjacentDispatchGuard]) -> Bool Never! {
+        seen := [DispatchValue]{}
+        loop guard in run -> loop value in guard.values {
+            if seen.iter().any(fn(existing) { existing.kind == value.kind && existing.key == value.key }) -> return false
+            seen.push(value.clone())
+        }
+        true
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:718
+    fn statements_write_subject(stmts: [Stmt], subject: [[String]]) -> Bool Never! { stmts.iter().any(fn(stmt) { Checker.statement_writes_subject(stmt, subject) }) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:724
+    fn statement_writes_subject(stmt: Stmt, subject: [[String]]) -> Bool Never! {
+        if stmt == {
+            .Assign{target, value, ..} -> Checker.lvalue_writes_subject(target, subject) || Checker.expression_writes_subject(value, subject)
+            .Expr(expr) | .Return(Val(expr), _) | .BreakValue(expr, _) | .Yield(expr, _) | .BreakLabelValue(_, _, expr, _) -> Checker.expression_writes_subject(expr, subject)
+            .Val(binding) -> Checker.name_writes_subject(binding.name, subject) || Checker.expression_writes_subject(binding.init, subject)
+            .While{body, ..} | .For{body, ..} | .Loop{body, ..} | .Unsafe{body, ..} | .Impure{body, ..} | .Reactive{body, ..} | .Shield{body, ..} | .Switched{body, ..} | .Region{body, ..} | .Policy{body, ..} | .Layout{body, ..} | .AuthorityScope{body, ..} | .ComptimeBlock{body, ..} | .Live{body, ..} | .Transact{body, ..} | .ScopeMember{body, ..} -> Checker.statements_write_subject(body, subject)
+            .Switch{arms, else_body, ..} | .ComptimeSwitch{arms, else_body, ..} -> arms.iter().any(fn(arm) { Checker.statements_write_subject(arm.body, subject) }) || else_body.map(fn(body) { Checker.statements_write_subject(body, subject) }) == Val(true)
+            .CountedLoop{init, step, body, ..} -> Checker.name_writes_subject(init.name, subject) || step.map(fn(stmt) { Checker.statement_writes_subject(stmt, subject) }) == Val(true) || Checker.statements_write_subject(body, subject)
+            .TaskGroup{limit, body, ..} -> limit.map(fn(expr) { Checker.expression_writes_subject(expr, subject) }) == Val(true) || Checker.statements_write_subject(body, subject)
+            .ContextBlock{fields, body, ..} -> fields.iter().any(fn(field) { Checker.expression_writes_subject(field.1, subject) }) || Checker.statements_write_subject(body, subject)
+            .ComptimeIf{then_body, else_body, ..} -> Checker.statements_write_subject(then_body, subject) || else_body.map(fn(body) { Checker.statements_write_subject(body, subject) }) == Val(true)
+            .AssumeDet{body, ..} -> Checker.statements_write_subject(body, subject)
+            .DeferClose{close, ..} -> Checker.expression_writes_subject(close, subject)
+            .Return(None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> false
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:810
+    fn expression_writes_subject(expr: Expr, subject: [[String]]) -> Bool Never! {
+        writes := false
+        expr.for_each_expr(fn(nested) {
+            if nested.without_parens() == {
+                .Place(inner, access, _) if access == AST.PlaceAccess.Write -> { writes = writes || Checker.expr_path(inner).map(fn(path) { Checker.path_writes_subject(path, subject) }) == Val(true) }
+                .MethodCall{receiver, args, ..} -> { writes = writes || Checker.expr_path(receiver).map(fn(path) { Checker.path_writes_subject(path, subject) }) == Val(true); writes = writes || Checker.call_args_write_subject(args, subject) }
+                .Call(call) -> { writes = writes || Checker.call_args_write_subject(call.args, subject) }
+                .CallValue{callee, args, ..} -> { writes = writes || Checker.expr_path(callee).map(fn(path) { Checker.path_writes_subject(path, subject) }) == Val(true); writes = writes || Checker.call_args_write_subject(args, subject) }
+                .OrFallback{fallback, ..} -> { if fallback is .Block{body, ..} -> writes = writes || Checker.statements_write_subject(body, subject) }
+                .If{then_body, else_body, ..} -> { writes = writes || Checker.statements_write_subject(then_body, subject); writes = writes || Checker.statements_write_subject(else_body, subject) }
+                .Lambda(lambda) -> { if lambda.body is .Block(body) -> writes = writes || Checker.statements_write_subject(body, subject) }
+                else -> {}
+            }
+        })
+        writes
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:853
+    fn call_args_write_subject(args: [AST.CallArg], subject: [[String]]) -> Bool Never! {
+        args.iter().any(fn(arg) { (arg.convention == AccessConvention.Write || arg.convention == AccessConvention.Move) && Checker.argument_path(arg.expr).map(fn(path) { Checker.path_writes_subject(path, subject) }) == Val(true) })
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:863
+    fn argument_path(expr: Expr) -> [String]? Never! {
+        if expr.without_parens() is .Place(inner, ..) -> Checker.expr_path(inner) else -> Checker.expr_path(expr)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:870
+    fn expr_path(expr: Expr) -> [String]? Never! { Checker.dispatch_subject_path(expr) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:874
+    fn lvalue_writes_subject(target: LValue, subject: [[String]]) -> Bool Never! {
+        path :: if target == {
+            .Local{name, ..} -> [String]{name}
+            .Field{base, field, ..} -> {
+                if Checker.expression_writes_subject(base, subject) -> return true
+                found := Checker.expr_path(base) ?? return false
+                found.push(field)
+                ^found
+            }
+            .Index{base, index, ..} -> {
+                if Checker.expression_writes_subject(base, subject) || Checker.expression_writes_subject(index, subject) -> return true
+                Checker.expr_path(base) ?? return false
+            }
+        }
+        Checker.path_writes_subject(path, subject)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:902
+    fn name_writes_subject(name: String, subject: [[String]]) -> Bool Never! { subject.iter().any(fn(path) { path.first() == Val(name) }) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:908
+    fn path_writes_subject(path: [String], subject: [[String]]) -> Bool Never! { subject.iter().any(fn(candidate) { Checker.paths_overlap(path, candidate) }) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:914
+    fn paths_overlap(left: [String], right: [String]) -> Bool Never! { left.starts_with(right) || right.starts_with(left) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:918
+    fn adjacent_dispatch_edit(self, run: [AdjacentDispatchGuard]) -> TextEdit? Never! {
+        extents := [SourceIfExtent]{}
+        loop guard in run -> extents.push(source_if_extent(self.source, guard.span, guard.condition_span, guard.body) ?? return None)
+        start :: (extents.first() ?? return None).start
+        end :: (extents.last() ?? return None).end
+        if extents.windows(2).any(fn(pair) { pair[0].end > pair[1].start }) || source_has_comment(self.source, start, end) -> return None
+        if extents.iter().zip(run).any(fn(pair) { pair.0.braced && statements_contain_multiline_string(pair.1.body) }) -> return None
+        indent :: source_line_indent(self.source, start)
+        subject_view :: self.source.get(run[0].subject_span.start..<run[0].subject_span.end) ?? return None
+        subject := subject_view.trim() // #4303
+        if subject.is_empty() || subject.contains('\n') -> return None
+        replacement := "if {subject} == {{"
+        loop (guard, extent) in run.iter().zip(extents) {
+            replacement += "\n{indent}    "
+            loop (index, value) in guard.values.enumerate() {
+                if index > 0 -> replacement += " | "
+                value_view :: self.source.get(value.span.start..<value.span.end) ?? return None
+                value_text := value_view.trim() // #4303
+                replacement += value_text
+            }
+            replacement += " ->"
+            body_view :: self.source.get(extent.body_start..<extent.body_end) ?? return None
+            body := body_view.trim() // #4303
+            if body.is_empty() {
+                replacement += " {}"
+            } else if extent.braced {
+                replacement += " {"
+                loop line in body.lines() {
+                    trimmed := line.trim() // #4303
+                    if !trimmed.is_empty() -> replacement += "\n{indent}        {trimmed}"
+                }
+                replacement += "\n{indent}    }"
+            } else -> replacement += " {body}"
+        }
+        replacement += "\n{indent}    else -> {{}}\n}"
+        formatted :: Formatter.format_source(replacement) ?? return None
+        indented := ""
+        formatted_view := formatted.trim_end_matches('\n') // #4303
+        loop (line_index, line) in formatted_view.lines().enumerate() {
+            if line_index > 0 -> indented += "\n{indent}"
+            indented += line
+        }
+        Val(TextEdit{span: Span.new(start, end), new_text: ^indented})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1014
+    fn redundant_arm_table_parts(stmts: [Stmt]) -> ([AST.SwitchArm], Span, Expr, Span)? Never! {
+        if stmts.len() < 2 -> return None
+        if stmts[stmts.len() - 2] is .Switch{subject, arms, else_body: None, span, ..} {
+            if stmts[stmts.len() - 1] is .Return(Val(default), default_return_span) {
+                if AST.is_subjectless_guard(subject, span) || arms.iter().any(fn(arm) { AST.readiness_head(arm.cond) != None }) -> return None
+                if arms.is_empty() || !arms.iter().all(fn(arm) {
+                    if arm.body.len() != 1 -> return false
+                    if arm.body[0] is .Return(Val(_), _) -> true else -> false
+                }) -> return None
+                return Val((arms, span, default, default_return_span))
+            }
+        }
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1048
+    fn check_redundant_arm_table_return(&self, stmts: [Stmt]) {
+        (arms, span, default, default_return_span) :: Checker.redundant_arm_table_parts(stmts) ?? return
+        edit :: self.redundant_arm_table_edit(arms, span, default, default_return_span) ?? return
+        diagnostic := Diagnostic.from_row("L0513", [], Val(span))
+        diagnostic.set_structured_edit(edit)
+        self.diags.push(^diagnostic)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1063
+    fn redundant_arm_table_edit(self, arms: [AST.SwitchArm], switch_span: Span, default: Expr, default_return_span: Span) -> TextEdit? Never! {
+        source :: self.source
+        edits := [(USize, USize, String)]{}
+        loop arm in arms {
+            if arm.body.len() != 1 -> return None
+            if arm.body[0] is .Return(Val(value), return_span) {
+                if return_span.start > return_span.end -> return None
+                edits.push((return_span.start, return_span.end, ""))
+                if find_authored_semicolon(source, value.span().end) is semi -> edits.push((semi, semi + 1, ""))
+            } else -> return None
+        }
+        close :: find_switch_close(source, switch_span.start) ?? return None
+        default_text :: source.get(default.span().start..<default.span().end) ?? return None
+        prefix :: if close > switch_span.start && !source.bytes()[close - 1].is_ascii_whitespace() { " " } else { "" }
+        edits.push((close, close, "{prefix}else -> {{ {default_text} }}"))
+        edits.push((default_return_span.start, default_return_span.end, ""))
+        edits.push((default.span().start, default.span().end, ""))
+        end := default.span().end
+        if find_authored_semicolon(source, end) is semi {
+            end = semi + 1
+            edits.push((semi, semi + 1, ""))
+        }
+        start :: switch_span.start
+        replacement := (source.get(start..<end) ?? return None).to_string()
+        edits.sort_by(fn(left, right) { left.0.cmp(right.0) })
+        loop (edit_start, edit_end, new_text) in edits.iter().rev() {
+            if edit_start < start || edit_end > end || edit_start > edit_end -> return None
+            replacement.replace_range(edit_start - start..<edit_end - start, new_text)
+        }
+        Val(TextEdit{span: Span.new(start, end), new_text: ^replacement})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1148
+    pub fn check_conditional_block(&self, stmts: &[Stmt], new_scope: Bool) {
+        reachable :: self.flow.reachable
+        self.check_block(stmts, new_scope)
+        self.flow.reachable = reachable
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1164
+    pub fn is_name_live_after(self, name: String) -> Bool Never! {
+        // GATE #4494: AST tail pointers set only from live statement slices.
+        if !self.stmt_tail_ptr.is_null() && self.stmt_tail_len > 0 {
+            #Unsafe("AST tail storage outlives Checker and is read only during statement checks") {
+                tail :: slice.from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
+                if tail.iter().any(fn(stmt) { stmt_refs_name(stmt, name) }) -> return true
+            }
+        }
+        loop (ptr, len) in self.liveness_frames.iter().rev() {
+            if !ptr.is_null() && len > 0 {
+                #Unsafe("each enclosing frame points at an AST slice that outlives Checker") {
+                    frame :: slice.from_raw_parts(ptr, len)
+                    if frame.iter().any(fn(stmt) { stmt_refs_name(stmt, name) }) -> return true
+                }
+            }
+        }
+        false
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1194
+    pub fn lexical_tail_len(self) -> USize Never! {
+        total := self.stmt_tail_len
+        loop (_, len) in self.liveness_frames -> total += len
+        total
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1204
+#Derive(Clone, Copy, Debug, Equatable)
+enum DispatchLiteralKind { String Int Bool Char Enum }
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1213
+struct DispatchSubject {
+    path: [String]
+    span: Span
+    key: String
+    dependencies: [[String]]
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1220
+#Derive(Clone, Debug, Equatable)
+struct DispatchValue { kind: DispatchLiteralKind, key: String, span: Span }
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1227
+struct AdjacentDispatchGuard {
+    subject: [String]
+    subject_key: String
+    subject_dependencies: [[String]]
+    subject_span: Span
+    values: [DispatchValue]
+    body: View<Stmt>
+    condition_span: Span
+    span: Span
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1238
+struct SourceIfExtent { start: USize, end: USize, body_start: USize, body_end: USize, braced: Bool }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1246
+fn source_if_extent(source: String, span: Span, condition_span: Span, body: [Stmt]) -> SourceIfExtent? Never! {
+    first_open :: find_source_char(source, condition_span.end, 123)
+    arrow :: find_source_sequence(source, condition_span.end, "->".bytes())
+    open := None as USize?
+    if (first_open, arrow) == {
+        (Val(found), Val(arrow_at)) if found < arrow_at -> { open = Val(found) }
+        (Val(found), None) -> { open = Val(found) }
+        (Val(found), Val(arrow_at)) -> {
+            if source.get(arrow_at + 2..<found).map(fn(between) { between.trim().is_empty() }) == Val(true) -> open = Val(found)
+        }
+        (None, _) -> {}
+    }
+    if open is found {
+        close :: find_switch_close(source, found) ?? return None
+        end := close + 1
+        if find_authored_semicolon(source, end) is semi -> end = semi + 1
+        return Val(SourceIfExtent{start: span.start, end: end, body_start: found + 1, body_end: close, braced: true})
+    }
+    arrow_at :: arrow ?? return None
+    body_start :: arrow_at + 2
+    last :: body.last() ?? return None
+    body_end :: statement_source_end(source, body_start, last.span().end) ?? return None
+    end := body_end
+    if find_authored_semicolon(source, end) is semi -> end = semi + 1
+    Val(SourceIfExtent{start: span.start, end: end, body_start: body_start, body_end: body_end, braced: false})
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1305
+fn statement_source_end(source: String, start: USize, fallback: USize) -> USize? Never! {
+    tail :: source.get(start..) ?? return Val(fallback.max(start))
+    body_end :: fallback.max(start) - start
+    loop extra_lines in [USize]{0, 2, 8, 32} {
+        len :: end_of_lines(tail, body_end, extra_lines + 1) ?? break
+        if settled_statement_semi(tail[0..<len]) is end -> return Val(start + end)
+    }
+    (tokens, _) :: Lexer.lex(tail)
+    Val(statement_semi_index(tokens).map(fn(index) { start + tokens[index].span.start }) ?? fallback.max(start))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1326
+fn end_of_lines(text: String, from: USize, count: USize) -> USize? Never! {
+    bytes :: text.bytes().get(from..) ?? return None
+    offset :: bytes.iter().enumerate().filter(fn(pair) { pair.1 == 10 }).nth(count - 1) ?? return None
+    Val(from + offset.0 + 1)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1347
+fn settled_statement_semi(window: String) -> USize? Never! {
+    (tokens, _) :: Lexer.lex(window)
+    index :: statement_semi_index(tokens) ?? return None
+    semi :: tokens[index]
+    if semi.span.end > semi.span.start -> return Val(semi.span.start)
+    final_newline :: window.len().checked_sub(1) ?? return None
+    following := tokens[index + 1..].iter().filter(fn(token) { !(token.kind == Lexer.TokKind.Semi && token.span.start == token.span.end) }).skip_while(fn(token) { Lexer.is_comment(token.kind) })
+    decider :: following.next() ?? return None
+    if decider.kind == { .Dot | .LParen | .Pipe -> true else -> false } -> return None
+    settled := if decider.kind != Lexer.TokKind.Eof && decider.span.end <= final_newline { 1 } else { 0 }
+    loop token in following.take(2) -> if token.kind != Lexer.TokKind.Eof && token.span.end <= final_newline -> settled += 1
+    if settled == 3 -> Val(semi.span.start) else -> None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1375
+fn statement_semi_index(tokens: [Lexer.Token]) -> USize? Never! {
+    parens := 0
+    brackets := 0
+    braces := 0
+    saw_body := false
+    loop (index, token) in tokens.enumerate() {
+        if token.kind == {
+            .LineComment(_) | .BlockComment(_) -> {}
+            .Semi if saw_body && parens == 0 && brackets == 0 && braces == 0 -> return Val(index)
+            .LParen -> { parens += 1; saw_body = true }
+            .RParen if parens > 0 -> { parens -= 1 }
+            .LBracket -> { brackets += 1; saw_body = true }
+            .RBracket if brackets > 0 -> { brackets -= 1 }
+            .LBrace -> { braces += 1; saw_body = true }
+            .RBrace if braces > 0 -> { braces -= 1 }
+            .Eof -> break
+            else -> { saw_body = true }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1411
+fn source_line_indent(source: String, start: USize) -> String Never! {
+    end :: start.min(source.len())
+    line_start :: source[0..<end].rfind('\n').map(fn(newline) { newline + 1 }) ?? 0
+    source[line_start..<end].chars().take_while(fn(character) { character == ' ' || character == '\t' }).collect()
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1421
+fn source_has_comment(source: String, start: USize, end: USize) -> Bool Never! {
+    bytes :: source.bytes()
+    index := start.min(bytes.len())
+    finish :: end.min(bytes.len())
+    loop index < finish {
+        if bytes[index] == {
+            47 if bytes.get(index + 1) == Val(47) -> return true
+            47 if bytes.get(index + 1) == Val(42) -> return true
+            34 -> {
+                triple :: bytes.get(index..<index + 3) == Val("\"\"\"".bytes())
+                index += if triple { 3 } else { 1 }
+                loop index < finish {
+                    if triple && bytes.get(index..<index + 3) == Val("\"\"\"".bytes()) { index += 3; break }
+                    if !triple && bytes[index] == 34 { index += 1; break }
+                    if !triple && bytes[index] == 92 -> index = (index + 2).min(finish) else -> index += 1
+                }
+            }
+            39 -> {
+                index += 1
+                loop index < finish {
+                    if bytes[index] == 92 -> index = (index + 2).min(finish)
+                    else if bytes[index] == 39 { index += 1; break }
+                    else -> index += 1
+                }
+            }
+            else -> { index += 1 }
+        }
+    }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1467
+fn statements_contain_multiline_string(stmts: [Stmt]) -> Bool Never! {
+    stmts.iter().any(fn(stmt) {
+        found := false
+        stmt.for_each_expr(fn(expr) {
+            if expr.without_parens() is .Str(parts, _) -> found = found || parts.iter().any(fn(part) {
+                if part is .Lit(text) -> text.contains('\n') else -> false
+            })
+        })
+        found
+    })
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1481
+fn find_source_char(source: String, start: USize, wanted: U8) -> USize? Never! {
+    bytes :: source.bytes()
+    index := start.min(bytes.len())
+    loop index < bytes.len() {
+        if bytes[index] == {
+            47 if bytes.get(index + 1) == Val(47) -> {
+                index += 2
+                loop index < bytes.len() && bytes[index] != 10 -> index += 1
+            }
+            47 if bytes.get(index + 1) == Val(42) -> {
+                index += 2
+                loop index + 1 < bytes.len() && !(bytes[index] == 42 && bytes[index + 1] == 47) -> index += 1
+                index = (index + 2).min(bytes.len())
+            }
+            34 -> {
+                triple :: bytes.get(index..<index + 3) == Val("\"\"\"".bytes())
+                index += if triple { 3 } else { 1 }
+                loop index < bytes.len() {
+                    if triple && bytes.get(index..<index + 3) == Val("\"\"\"".bytes()) { index += 3; break }
+                    if !triple && bytes[index] == 34 { index += 1; break }
+                    if !triple && bytes[index] == 92 -> index = (index + 2).min(bytes.len()) else -> index += 1
+                }
+            }
+            39 -> {
+                index += 1
+                loop index < bytes.len() {
+                    if bytes[index] == 92 -> index = (index + 2).min(bytes.len())
+                    else if bytes[index] == 39 { index += 1; break }
+                    else -> index += 1
+                }
+            }
+            byte if byte == wanted -> return Val(index)
+            else -> { index += 1 }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1539
+fn find_source_sequence(source: String, start: USize, wanted: View<U8>) -> USize? Never! {
+    if wanted.is_empty() -> return None
+    bytes :: source.bytes()
+    index := start.min(bytes.len())
+    loop index + wanted.len() <= bytes.len() {
+        if bytes[index] == {
+            47 if bytes.get(index + 1) == Val(47) -> {
+                index += 2
+                loop index < bytes.len() && bytes[index] != 10 -> index += 1
+            }
+            47 if bytes.get(index + 1) == Val(42) -> {
+                index += 2
+                loop index + 1 < bytes.len() && !(bytes[index] == 42 && bytes[index + 1] == 47) -> index += 1
+                index = (index + 2).min(bytes.len())
+            }
+            34 | 39 -> {
+                quote :: bytes[index]
+                index += 1
+                loop index < bytes.len() {
+                    if bytes[index] == 92 -> index = (index + 2).min(bytes.len())
+                    else if bytes[index] == quote { index += 1; break }
+                    else -> index += 1
+                }
+            }
+            else -> {
+                if bytes[index..].starts_with(wanted) -> return Val(index)
+                index += 1
+            }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1582
+fn find_switch_close(source: String, start: USize) -> USize? Never! {
+    bytes :: source.bytes()
+    depth := 0
+    index := start
+    loop index < bytes.len() {
+        if bytes[index] == {
+            47 if bytes.get(index + 1) == Val(47) -> {
+                index += 2
+                loop index < bytes.len() && bytes[index] != 10 -> index += 1
+            }
+            47 if bytes.get(index + 1) == Val(42) -> {
+                index += 2
+                loop index + 1 < bytes.len() && !(bytes[index] == 42 && bytes[index + 1] == 47) -> index += 1
+                index = (index + 2).min(bytes.len())
+            }
+            34 -> {
+                triple :: bytes.get(index..<index + 3) == Val("\"\"\"".bytes())
+                index += if triple { 3 } else { 1 }
+                loop index < bytes.len() {
+                    if triple && bytes.get(index..<index + 3) == Val("\"\"\"".bytes()) { index += 3; break }
+                    if !triple && bytes[index] == 34 { index += 1; break }
+                    if bytes[index] == 92 && !triple -> index = (index + 2).min(bytes.len()) else -> index += 1
+                }
+            }
+            39 -> {
+                index += 1
+                loop index < bytes.len() {
+                    if bytes[index] == 92 -> index = (index + 2).min(bytes.len())
+                    else if bytes[index] == 39 { index += 1; break }
+                    else -> index += 1
+                }
+            }
+            123 -> { depth += 1; index += 1 }
+            125 if depth == 1 -> return Val(index)
+            125 if depth > 1 -> { depth -= 1; index += 1 }
+            else -> { index += 1 }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1649
+fn find_authored_semicolon(source: String, at: USize) -> USize? Never! {
+    bytes :: source.bytes()
+    cursor := at.min(bytes.len())
+    loop {
+        loop cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() -> cursor += 1
+        if bytes.get(cursor..).map(fn(tail) { tail.starts_with("//".bytes()) }) == Val(true) {
+            cursor += 2
+            loop cursor < bytes.len() && bytes[cursor] != 10 -> cursor += 1
+            next
+        }
+        if bytes.get(cursor..).map(fn(tail) { tail.starts_with("/*".bytes()) }) == Val(true) {
+            cursor += 2
+            loop cursor + 1 < bytes.len() && bytes[cursor..<cursor + 2] != "*/".bytes() -> cursor += 1
+            cursor = (cursor + 2).min(bytes.len())
+            next
+        }
+        if bytes.get(cursor) == Val(59) -> return Val(cursor)
+        return None
+    }
+}

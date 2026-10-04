@@ -1,1012 +1,455 @@
-// PORT-PENDING 0390 crates-jet-sema-src-sema-checkercorelib-math-layout-module-group: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:1-1008
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::Type;
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: is `name` a built-in math value type (lane or linalg)?
-//RS pub fn is_math_type(name: &str) -> bool {
-//RS     is_simd_lane_type(name) || is_linalg_type(name)
-//RS }
-//RS 
-//RS /// D-SIMD1/D-SIMD2/D-SIMD3: a named portable SIMD lane type.
-//RS pub fn is_simd_lane_type(name: &str) -> bool {
-//RS     crate::Syntax::is_simd_lane_type(name)
-//RS }
-//RS 
-//RS /// D-LINALG1: a linear-algebra value type (vectors + square matrices).
-//RS pub(crate) fn is_linalg_type(name: &str) -> bool {
-//RS     matches!(name, "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
-//RS }
-//RS 
-//RS /// The scalar component type of a math value type. SIMD lanes carry their named
-//RS /// D-SIMD3: the scalar component type of a lane. Linalg types are all
-//RS /// `F64`/`Float`.
-//RS pub fn math_scalar_ty(name: &str) -> Type {
-//RS     match crate::Syntax::simd_lane_layout(name).map(|(kind, _)| kind) {
-//RS         Some(crate::Syntax::SimdLaneKind::F32) => Type::Float32,
-//RS         Some(crate::Syntax::SimdLaneKind::I8) => Type::IntN {
-//RS             signed: true,
-//RS             bits: 8,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::I16) => Type::IntN {
-//RS             signed: true,
-//RS             bits: 16,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::I32) => Type::IntN {
-//RS             signed: true,
-//RS             bits: 32,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::I64) => Type::IntN {
-//RS             signed: true,
-//RS             bits: 64,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::U8) => Type::IntN {
-//RS             signed: false,
-//RS             bits: 8,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::U16) => Type::IntN {
-//RS             signed: false,
-//RS             bits: 16,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::U32) => Type::IntN {
-//RS             signed: false,
-//RS             bits: 32,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::U64) => Type::IntN {
-//RS             signed: false,
-//RS             bits: 64,
-//RS         },
-//RS         Some(crate::Syntax::SimdLaneKind::F64) | None => Type::Float,
-//RS     }
-//RS }
-//RS 
-//RS /// Read a named SIMD type's lane measure from the shared registry projection.
-//RS /// The name remains the surface discriminator; the numeric payload comes from
-//RS /// the same Measure plane used by fixed lists, shapes, and dimensions.
-//RS fn registered_lane_arity(name: &str) -> Option<usize> {
-//RS     Type::Named(name.to_string())
-//RS         .knowledge_vector()
-//RS         .facts(crate::Registry::type_plane("Measure"))
-//RS         .find_map(|fact| match fact {
-//RS             crate::AST::KnowledgeFact::Measure(measure) if measure.kind() == "lane" => measure
-//RS                 .literal_value()
-//RS                 .and_then(|value| usize::try_from(value).ok()),
-//RS             _ => None,
-//RS         })
-//RS }
-//RS 
-//RS /// The number of scalar slots in the positional constructor / `from_array` bridge.
-//RS /// Lanes: the registered measure. Vectors: dimension. Matrices: N*N (column-major flat).
-//RS pub(crate) fn math_arity(name: &str) -> usize {
-//RS     if let Some(arity) = crate::Syntax::simd_lane_arity(name) {
-//RS         return arity;
-//RS     }
-//RS     if let Some(arity) = registered_lane_arity(name) {
-//RS         return arity;
-//RS     }
-//RS     match name {
-//RS         "Vec2" => 2,
-//RS         "Vec3" => 3,
-//RS         "Vec4" => 4,
-//RS         "Mat3" => 9,
-//RS         "Mat4" => 16,
-//RS         _ => 0,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SWIZZLE1: built-in vector/SIMD lane types that support `.xyz` member swizzles.
-//RS /// Matrices are not swizzleable.
-//RS pub fn is_swizzleable_math_type(name: &str) -> bool {
-//RS     matches!(name, "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4")
-//RS }
-//RS 
-//RS /// Outcome of parsing a swizzle member name (`xy`, `wzyx`, …) on a swizzleable type.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum SwizzleParse {
-//RS     /// Valid lane indices in write order (x=0, y=1, z=2, w=3).
-//RS     Ok(Vec<usize>),
-//RS     /// A lane letter is out of range for this type (e.g. `.z` on `Vec2`).
-//RS     InvalidLane { lane: char },
-//RS     /// Not a swizzle pattern (wrong chars or length) — fall through to field lookup.
-//RS     NotSwizzle,
-//RS }
-//RS 
-//RS /// D-SWIZZLE1: parse `member` as a swizzle on `type_name`. Up to four `x`/`y`/`z`/`w`
-//RS /// letters; each must be in range for the type's lane count.
-//RS pub fn parse_swizzle_member(member: &str, type_name: &str) -> SwizzleParse {
-//RS     if !is_swizzleable_math_type(type_name) || member.is_empty() || member.len() > 4 {
-//RS         return SwizzleParse::NotSwizzle;
-//RS     }
-//RS     let max = math_arity(type_name);
-//RS     let mut lanes = Vec::with_capacity(member.len());
-//RS     for c in member.chars() {
-//RS         let idx = match c {
-//RS             'x' => 0,
-//RS             'y' => 1,
-//RS             'z' => 2,
-//RS             'w' => 3,
-//RS             _ => return SwizzleParse::NotSwizzle,
-//RS         };
-//RS         if idx >= max {
-//RS             return SwizzleParse::InvalidLane { lane: c };
-//RS         }
-//RS         lanes.push(idx);
-//RS     }
-//RS     SwizzleParse::Ok(lanes)
-//RS }
-//RS 
-//RS /// D-SWIZZLE1: the type of a read swizzle — one lane → scalar, N lanes → `VecN`
-//RS /// (or the same SIMD lane type when all lanes are selected).
-//RS pub fn swizzle_read_type(type_name: &str, lane_count: usize) -> Type {
-//RS     if lane_count == 1 {
-//RS         return math_scalar_ty(type_name);
-//RS     }
-//RS     if is_simd_lane_type(type_name) && lane_count == math_arity(type_name) {
-//RS         return Type::Named(type_name.to_string());
-//RS     }
-//RS     Type::Named(match lane_count {
-//RS         2 => "Vec2".to_string(),
-//RS         3 => "Vec3".to_string(),
-//RS         4 => "Vec4".to_string(),
-//RS         _ => unreachable!("swizzle lane count 2..=4"),
-//RS     })
-//RS }
-//RS 
-//RS /// D-SWIZZLE1: true when a write swizzle names the same source lane twice (`v.xx`).
-//RS pub fn swizzle_write_overlaps(lanes: &[usize]) -> bool {
-//RS     let mut seen = [false; 4];
-//RS     for &lane in lanes {
-//RS         if seen[lane] {
-//RS             return true;
-//RS         }
-//RS         seen[lane] = true;
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: type-check a positional constructor `T(a, b, …)` for a
-//RS /// built-in math type. The arg types are bound by `expected` so a literal `1.0`
-//RS /// elaborates to the component type (`F32` for `F32x4`). Returns the field types
-//RS /// the caller must check each argument against; arity is `math_arity(name)`.
-//RS pub(crate) fn math_constructor_arg_types(name: &str) -> Option<Vec<Type>> {
-//RS     if !is_math_type(name) {
-//RS         return None;
-//RS     }
-//RS     let scalar = math_scalar_ty(name);
-//RS     // `from_array`-style construction of a matrix takes its N*N components in
-//RS     // column-major order; vectors/lanes take one scalar per slot.
-//RS     Some(vec![scalar; math_arity(name)])
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: the `[T#N]` fixed-list bridge type for a math value type,
-//RS /// used by `T.from_array([..])` / `v.to_array()`. `None` for non-math types.
-//RS pub(crate) fn math_array_bridge_ty(name: &str) -> Option<Type> {
-//RS     if !is_math_type(name) {
-//RS         return None;
-//RS     }
-//RS     Some(Type::FixedList {
-//RS         elem: Box::new(math_scalar_ty(name)),
-//RS         len: crate::AST::Measure::literal("length", math_arity(name) as u64),
-//RS     })
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: type-check an INSTANCE method `recv.method(args)` on a
-//RS /// built-in math type. `Some(Some(t))` → returns `t`; `Some(None)` → not a method
-//RS /// (caller falls through to its normal "no such method" diagnostic).
-//RS pub fn math_method_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
-//RS     let float = Type::Float;
-//RS     let scalar = math_scalar_ty(name);
-//RS     let self_ty = Type::Named(name.to_string());
-//RS     if is_simd_lane_type(name) {
-//RS         return match (method, n_args) {
-//RS             // Reductions collapse the lanes to a single scalar of the lane width.
-//RS             ("sum" | "product" | "min" | "max", 0) => Some(scalar),
-//RS             ("reduce", 1) => Some(scalar),
-//RS             // `[F32#4]` round-trip out.
-//RS             ("to_array", 0) => math_array_bridge_ty(name),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     // linalg
-//RS     match name {
-//RS         "Vec2" | "Vec3" | "Vec4" => match (method, n_args) {
-//RS             ("dot", 1) => Some(float),
-//RS             // cross product is only defined for 3-vectors.
-//RS             ("cross", 1) if name == "Vec3" => Some(self_ty),
-//RS             ("length", 0) => Some(float),
-//RS             ("normalize", 0) => Some(self_ty),
-//RS             ("to_array", 0) => math_array_bridge_ty(name),
-//RS             _ => None,
-//RS         },
-//RS         "Mat3" | "Mat4" => match (method, n_args) {
-//RS             ("matmul", 1) => Some(self_ty.clone()),
-//RS             ("transpose", 0) => Some(self_ty),
-//RS             // `m * v` is the operator path; `transform` is the named method form.
-//RS             ("transform", 1) => Some(Type::Named(
-//RS                 if name == "Mat3" { "Vec3" } else { "Vec4" }.to_string(),
-//RS             )),
-//RS             ("to_array", 0) => math_array_bridge_ty(name),
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: type-check a STATIC method `T.method(args)` on a math
-//RS /// type. Only `splat` (lanes/vectors) and `from_array` are provided.
-//RS pub fn math_static_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
-//RS     if !is_math_type(name) {
-//RS         return None;
-//RS     }
-//RS     let self_ty = Type::Named(name.to_string());
-//RS     match (method, n_args) {
-//RS         ("splat", 1) => Some(self_ty),
-//RS         ("from_array", 1) => Some(self_ty),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: the argument type a static method expects.
-//RS pub fn math_static_arg_ty(name: &str, method: &str) -> Option<Type> {
-//RS     match method {
-//RS         "splat" => Some(math_scalar_ty(name)),
-//RS         "from_array" => math_array_bridge_ty(name),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: the argument type an instance method expects (for the
-//RS /// single-arg methods). `None` means "no fixed arg type" (e.g. nullary methods).
-//RS pub(crate) fn math_method_arg_ty(name: &str, method: &str) -> Option<Type> {
-//RS     let self_ty = Type::Named(name.to_string());
-//RS     match (name, method) {
-//RS         (_, "dot") | (_, "cross") => Some(self_ty),
-//RS         (_, "matmul") => Some(self_ty),
-//RS         ("Mat3", "transform") => Some(Type::Named("Vec3".to_string())),
-//RS         ("Mat4", "transform") => Some(Type::Named("Vec4".to_string())),
-//RS         // `reduce(.Op)` takes a ReduceOp value, checked specially by the caller.
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-REDUCE-VALUE1=A: Core ReduceOp values accepted by `v.reduce(.Op)`.
-//RS pub(crate) fn simd_reduce_markers() -> &'static [&'static str] {
-//RS     crate::Syntax::REDUCE_OP_VALUES
-//RS }
-//RS 
-//RS /// D-SIMD2 / D-LINALG1: type-check a binary operator between two math values.
-//RS /// Returns the result type, or `None` if the op isn't defined for these operands.
-//RS /// Operator overloading is blessed on this closed built-in family ONLY.
-//RS pub fn math_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
-//RS     use crate::AST::BinOp;
-//RS     let same = lt == rt;
-//RS     match op {
-//RS         // Element-wise add/sub require identical types.
-//RS         BinOp::Add | BinOp::Sub if same && is_math_type(lt) => Some(Type::Named(lt.to_string())),
-//RS         // Multiplication: lane×lane / vec×vec element-wise; matrix×vector transform.
-//RS         BinOp::Mul => match (lt, rt) {
-//RS             (a, b) if a == b && is_math_type(a) => Some(Type::Named(a.to_string())),
-//RS             ("Mat3", "Vec3") => Some(Type::Named("Vec3".to_string())),
-//RS             ("Mat4", "Vec4") => Some(Type::Named("Vec4".to_string())),
-//RS             _ => None,
-//RS         },
-//RS         // Division: lane÷lane element-wise (linalg has no `/`).
-//RS         BinOp::Div if same && is_simd_lane_type(lt) => Some(Type::Named(lt.to_string())),
-//RS         BinOp::Eq | BinOp::Ne if same && is_math_type(lt) => Some(Type::Bool),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn math_scalar_operand(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Type::Int | Type::Float | Type::Float32 | Type::InlineRange { .. }
-//RS     ) || matches!(ty, Type::Named(name) if name == "Decimal" || name == "F64")
-//RS }
-//RS 
-//RS /// D-LINALG1 / D-SIMD2: a lane or vector times a scalar splat.
-//RS pub fn math_scalar_binop_result(op: crate::AST::BinOp, math_name: &str, scalar: &Type) -> Option<Type> {
-//RS     use crate::AST::BinOp;
-//RS     if !is_math_type(math_name) {
-//RS         return None;
-//RS     }
-//RS     if !matches!(op, BinOp::Mul | BinOp::Div) {
-//RS         return None;
-//RS     }
-//RS     if !math_scalar_operand(scalar) {
-//RS         return None;
-//RS     }
-//RS     Some(Type::Named(math_name.to_string()))
-//RS }
-//RS 
-//RS /// D-LAYOUT1 / D-LAYOUT-GATES1: is `name` an axis-typed layout variable
-//RS /// (`HVar`/`VVar`/`LengthVar`)? `LengthVar` is axis-neutral: it combines with
-//RS /// either `HVar` or `VVar` without a mismatch, and is what a bare numeric
-//RS /// literal elaborates to in a layout-value position.
-//RS pub fn is_layout_axis_type(name: &str) -> bool {
-//RS     matches!(name, "HVar" | "VVar" | "LengthVar")
-//RS }
-//RS 
-//RS /// D-LAYOUT1: the full closed layout-value family (axis types + the
-//RS /// `Constraint`/`Layout` handles).
-//RS pub fn is_layout_type(name: &str) -> bool {
-//RS     is_layout_axis_type(name) || matches!(name, "Constraint" | "Layout")
-//RS }
-//RS 
-//RS /// D-LAYOUT1: the axis a value belongs to, for cross-axis checking. Plain
-//RS /// `Int`/`Float` are axis-neutral too (a bare numeric literal is allowed
-//RS /// anywhere a `LengthVar` is — same neutrality as `LengthVar` itself, so
-//RS /// `label.width >= 80.0` never needs an explicit `LengthVar(80.0)` wrapper).
-//RS #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-//RS pub enum LayoutAxis {
-//RS     H,
-//RS     V,
-//RS     Neutral,
-//RS }
-//RS 
-//RS pub fn layout_axis_of(ty: &Type) -> Option<LayoutAxis> {
-//RS     match ty {
-//RS         Type::Named(n) if n == "HVar" => Some(LayoutAxis::H),
-//RS         Type::Named(n) if n == "VVar" => Some(LayoutAxis::V),
-//RS         Type::Named(n) if n == "LengthVar" => Some(LayoutAxis::Neutral),
-//RS         Type::Int | Type::InlineRange { .. } | Type::Float => Some(LayoutAxis::Neutral),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1: combine two axes for `+`/`-` (same-axis closure) or a
-//RS /// comparison (`>=`/`<=`/`==`, GATE 1). `None` = cross-axis mismatch
-//RS /// (E2932, `E-LAYOUT-AXIS-MISMATCH`).
-//RS fn layout_axis_combine(a: LayoutAxis, b: LayoutAxis) -> Option<LayoutAxis> {
-//RS     use LayoutAxis::*;
-//RS     match (a, b) {
-//RS         (H, V) | (V, H) => None,
-//RS         (H, _) | (_, H) => Some(H),
-//RS         (V, _) | (_, V) => Some(V),
-//RS         (Neutral, Neutral) => Some(Neutral),
-//RS     }
-//RS }
-//RS 
-//RS fn layout_axis_type_name(axis: LayoutAxis) -> &'static str {
-//RS     match axis {
-//RS         LayoutAxis::H => "HVar",
-//RS         LayoutAxis::V => "VVar",
-//RS         LayoutAxis::Neutral => "LengthVar",
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1 / D-LAYOUT-GATES1: type-check a binary operator between two
-//RS /// layout values — mirrors `math_binop_result`'s closed-operator pattern
-//RS /// exactly (GATE 1 is what lets the comparison arms return `Constraint`
-//RS /// instead of `Bool`; this is the ONLY place that blessing is wired, no
-//RS /// parallel mechanism). `Some(Ok(ty))` = success; `Some(Err(()))` = axis
-//RS /// mismatch (caller emits E2932 naming both axes); `None` = not a layout
-//RS /// combination at all (caller falls through to normal operator checking).
-//RS pub fn layout_binop_result(
-//RS     op: crate::AST::BinOp,
-//RS     lt: &Type,
-//RS     rt: &Type,
-//RS ) -> Option<Result<Type, ()>> {
-//RS     use crate::AST::BinOp;
-//RS     // At least one side must be an actual layout axis type — `Int + Float`
-//RS     // (both merely "neutral") is not our concern.
-//RS     let l_is_layout = matches!(lt, Type::Named(n) if is_layout_axis_type(n));
-//RS     let r_is_layout = matches!(rt, Type::Named(n) if is_layout_axis_type(n));
-//RS     if !l_is_layout && !r_is_layout {
-//RS         return None;
-//RS     }
-//RS     let (Some(la), Some(ra)) = (layout_axis_of(lt), layout_axis_of(rt)) else {
-//RS         return None;
-//RS     };
-//RS     match op {
-//RS         BinOp::Add | BinOp::Sub => match layout_axis_combine(la, ra) {
-//RS             Some(axis) => Some(Ok(Type::Named(layout_axis_type_name(axis).to_string()))),
-//RS             None => Some(Err(())),
-//RS         },
-//RS         BinOp::Ge | BinOp::Le | BinOp::Eq => match layout_axis_combine(la, ra) {
-//RS             Some(_) => Some(Ok(Type::Named("Constraint".to_string()))),
-//RS             None => Some(Err(())),
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1: type-check an instance method on `Layout`/`Constraint`.
-//RS /// Mirrors `math_method_return`'s pattern (a plain match table, not a
-//RS /// HashMap — this family is tiny).
-//RS pub fn layout_method_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
-//RS     match name {
-//RS         "Layout" => match (method, n_args) {
-//RS             ("h", 2) => Some(Type::Named("HVar".to_string())),
-//RS             ("v", 2) => Some(Type::Named("VVar".to_string())),
-//RS             ("value", 1) => Some(Type::Float),
-//RS             ("suggest", 2) => Some(Type::Named("Unit".to_string())),
-//RS             ("is_feasible", 0) => Some(Type::Bool),
-//RS             ("conflict", 0) => Some(Type::List(Box::new(Type::String))),
-//RS             _ => None,
-//RS         },
-//RS         "Constraint" => match (method, n_args) {
-//RS             ("required" | "strong" | "medium" | "weak", 0) => {
-//RS                 Some(Type::Named("Constraint".to_string()))
-//RS             }
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1: the fixed argument type a `Layout` method expects, by
-//RS /// position. `None` means "no plain fixed type" — `.value(v)`/`.suggest(v, _)`'s
-//RS /// first argument accepts ANY of `HVar`/`VVar`/`LengthVar` (checked by the
-//RS /// caller via `is_layout_axis_type`, not a single `Type`).
-//RS pub fn layout_method_arg_ty(method: &str, arg_index: usize) -> Option<Type> {
-//RS     match (method, arg_index) {
-//RS         ("h", 0) | ("h", 1) | ("v", 0) | ("v", 1) => Some(Type::String),
-//RS         ("suggest", 1) => Some(Type::Float),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-TYPE2-DEFAULT1 / D-NUMTYPE1: binary ops on exact numeric values.
-//RS pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
-//RS     use crate::Numeric::is_decimal_type_name;
-//RS     use crate::AST::BinOp;
-//RS     let same = lt == rt;
-//RS     match op {
-//RS         BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_decimal_type_name(lt) => {
-//RS             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
-//RS         }
-//RS         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
-//RS             if same && lt == crate::Syntax::TYPE_FRACTION =>
-//RS         {
-//RS             Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
-//RS         }
-//RS         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
-//RS             if same && lt == crate::Syntax::TYPE_COMPLEX =>
-//RS         {
-//RS             Some(Type::Named(crate::Syntax::TYPE_COMPLEX.to_string()))
-//RS         }
-//RS         BinOp::Eq | BinOp::Ne if same && is_decimal_type_name(lt) => Some(Type::Bool),
-//RS         BinOp::Eq | BinOp::Ne if same && lt == crate::Syntax::TYPE_FRACTION => Some(Type::Bool),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-DECIMAL1: decimal values do not mix implicitly with other numeric kinds.
-//RS pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, String)> {
-//RS     use crate::Numeric::type_is_decimal;
-//RS     if (type_is_decimal(lt) && rt.is_float()) || (type_is_decimal(rt) && lt.is_float()) {
-//RS         return Some((
-//RS             "E0131",
-//RS             format!(
-//RS                 "`Float` and `Decimal` can't be mixed — got `{}` and `{}`",
-//RS                 lt.show(),
-//RS                 rt.show()
-//RS             ),
-//RS             "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"
-//RS                 .to_string(),
-//RS         ));
-//RS     }
-//RS     None
-//RS }
-//RS /// D-SPACE-GEOMETRY1=A: coordinate-space geometry stays in the ordinary type
-//RS /// algebra.  The scalar payload is still the existing `Float`; only the point
-//RS /// or displacement carrier and its nominal space are checked here.
-//RS pub fn is_geometry_type(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         "Point2"
-//RS             | "Delta2"
-//RS             | "Transform"
-//RS             | "Transform2"
-//RS             | "Ray2"
-//RS             | "ScreenPoint"
-//RS             | "WorldPoint"
-//RS             | "ViewPoint"
-//RS             | "CameraPoint"
-//RS             | "DevicePoint"
-//RS             | "ScreenDelta"
-//RS             | "WorldDelta"
-//RS             | "ViewDelta"
-//RS             | "CameraDelta"
-//RS             | "DeviceDelta"
-//RS     )
-//RS }
-//RS 
-//RS pub fn geometry_point_space(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "ScreenPoint" | "ScreenDelta" => Some("Screen"),
-//RS         "WorldPoint" | "WorldDelta" => Some("World"),
-//RS         "ViewPoint" | "ViewDelta" => Some("View"),
-//RS         "CameraPoint" | "CameraDelta" => Some("Camera"),
-//RS         "DevicePoint" | "DeviceDelta" => Some("Device"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub fn geometry_is_point(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => matches!(
-//RS             name.as_str(),
-//RS             "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
-//RS         ),
-//RS         Type::Apply { name, args } => name == "Point2" && args.len() == 2,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub fn geometry_is_delta(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => matches!(
-//RS             name.as_str(),
-//RS             "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta"
-//RS         ),
-//RS         Type::Apply { name, args } => name == "Delta2" && args.len() == 2,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub fn geometry_space(ty: &Type) -> Option<Type> {
-//RS     match ty {
-//RS         Type::Named(name) => geometry_point_space(name).map(|space| {
-//RS             Type::Named(
-//RS                 space
-//RS                     .strip_suffix("Point")
-//RS                     .or_else(|| space.strip_suffix("Delta"))
-//RS                     .unwrap_or(space)
-//RS                     .to_string(),
-//RS             )
-//RS         }),
-//RS         Type::Apply { name, args } if matches!(name.as_str(), "Point2" | "Delta2") => {
-//RS             args.get(1).cloned()
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn geometry_scalar(ty: &Type) -> Type {
-//RS     match ty {
-//RS         Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Float),
-//RS         _ => Type::Float,
-//RS     }
-//RS }
-//RS 
-//RS fn geometry_same_space(left: &Type, right: &Type) -> bool {
-//RS     geometry_space(left).is_some_and(|space| geometry_space(right) == Some(space))
-//RS }
-//RS 
-//RS fn geometry_generic(name: &str, scalar: Type, space: Type) -> Type {
-//RS     Type::Apply {
-//RS         name: name.to_string(),
-//RS         args: vec![scalar, space],
-//RS     }
-//RS }
-//RS fn geometry_point_type(ty: &Type, dynamic: bool) -> Type {
-//RS     if dynamic {
-//RS         return geometry_generic("Point2", geometry_scalar(ty), geometry_space(ty).expect("point has a space"));
-//RS     }
-//RS     ty.clone()
-//RS }
-//RS 
-//RS fn geometry_delta_type(ty: &Type, dynamic: bool) -> Type {
-//RS     if dynamic {
-//RS         return geometry_generic("Delta2", geometry_scalar(ty), geometry_space(ty).expect("delta has a space"));
-//RS     }
-//RS     match ty {
-//RS         Type::Named(name) => {
-//RS             let stock = match name.as_str() {
-//RS                 "ScreenPoint" => Some("ScreenDelta"),
-//RS                 "WorldPoint" => Some("WorldDelta"),
-//RS                 "ViewPoint" => Some("ViewDelta"),
-//RS                 "CameraPoint" => Some("CameraDelta"),
-//RS                 "DevicePoint" => Some("DeviceDelta"),
-//RS                 _ => None,
-//RS             };
-//RS             stock.map_or_else(|| ty.clone(), |name| Type::Named(name.to_string()))
-//RS         }
-//RS         _ => geometry_generic(
-//RS             "Delta2",
-//RS             geometry_scalar(ty),
-//RS             geometry_space(ty).expect("delta has a space"),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn geometry_dynamic(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Type::Apply { name, .. } if matches!(name.as_str(), "Point2" | "Delta2")
-//RS     )
-//RS }
-//RS 
-//RS fn geometry_result(ok: Type) -> Type {
-//RS     Type::Result {
-//RS         ok: Box::new(ok),
-//RS         err: Box::new(Type::Named("TransformError".to_string())),
-//RS     }
-//RS }
-//RS 
-//RS pub fn geometry_binop_result(
-//RS     op: crate::AST::BinOp,
-//RS     left: &Type,
-//RS     right: &Type,
-//RS ) -> Option<Result<Type, ()>> {
-//RS     let has_geometry = geometry_is_point(left)
-//RS         || geometry_is_point(right)
-//RS         || geometry_is_delta(left)
-//RS         || geometry_is_delta(right);
-//RS     if !has_geometry {
-//RS         return None;
-//RS     }
-//RS     use crate::AST::BinOp;
-//RS     let same = geometry_same_space(left, right);
-//RS     let dynamic = geometry_dynamic(left) || geometry_dynamic(right);
-//RS     let result = match op {
-//RS         BinOp::Add if same && geometry_is_point(left) && geometry_is_delta(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_point_type(left, true))
-//RS             } else {
-//RS                 left.clone()
-//RS             }))
-//RS         }
-//RS         BinOp::Add if same && geometry_is_delta(left) && geometry_is_point(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_point_type(right, true))
-//RS             } else {
-//RS                 right.clone()
-//RS             }))
-//RS         }
-//RS         BinOp::Add if same && geometry_is_delta(left) && geometry_is_delta(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_delta_type(left, true))
-//RS             } else {
-//RS                 left.clone()
-//RS             }))
-//RS         }
-//RS         BinOp::Sub if same && geometry_is_point(left) && geometry_is_delta(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_point_type(left, true))
-//RS             } else {
-//RS                 left.clone()
-//RS             }))
-//RS         }
-//RS         BinOp::Sub if same && geometry_is_point(left) && geometry_is_point(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_delta_type(left, true))
-//RS             } else {
-//RS                 geometry_delta_type(left, false)
-//RS             }))
-//RS         }
-//RS         BinOp::Sub if same && geometry_is_delta(left) && geometry_is_delta(right) => {
-//RS             Some(Ok(if dynamic {
-//RS                 geometry_result(geometry_delta_type(left, true))
-//RS             } else {
-//RS                 left.clone()
-//RS             }))
-//RS         }
-//RS         BinOp::Eq | BinOp::Ne
-//RS             if same
-//RS                 && ((geometry_is_point(left) && geometry_is_point(right))
-//RS                     || (geometry_is_delta(left) && geometry_is_delta(right))) =>
-//RS         {
-//RS             Some(Ok(Type::Bool))
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     result.or_else(|| Some(Err(())))
-//RS }
-//RS 
-//RS fn geometry_transform_parts(ty: &Type) -> Option<(Type, Type, Type)> {
-//RS     let Type::Apply { name, args } = ty else {
-//RS         return None;
-//RS     };
-//RS     match (name.as_str(), args.as_slice()) {
-//RS         ("Transform", [from, to]) => Some((Type::Float, from.clone(), to.clone())),
-//RS         ("Transform2", [scalar, from, to]) => Some((scalar.clone(), from.clone(), to.clone())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub fn geometry_method_return(
-//RS     recv: &Type,
-//RS     method: &str,
-//RS     args: &[Type],
-//RS ) -> Option<Result<Type, ()>> {
-//RS     if let Some((scalar, from, to)) = geometry_transform_parts(recv) {
-//RS         return Some(match method {
-//RS             "then" if args.len() == 1 => {
-//RS                 match args.first().and_then(geometry_transform_parts) {
-//RS                     Some((next_scalar, next_from, next_to))
-//RS                         if next_scalar == scalar && next_from == to =>
-//RS                     {
-//RS                         let composed = Type::Apply {
-//RS                             name: if scalar == Type::Float {
-//RS                                 "Transform".to_string()
-//RS                             } else {
-//RS                                 "Transform2".to_string()
-//RS                             },
-//RS                             args: if scalar == Type::Float {
-//RS                                 vec![from, next_to]
-//RS                             } else {
-//RS                                 vec![scalar, from, next_to]
-//RS                             },
-//RS                         };
-//RS                         Ok(Type::Result {
-//RS                             ok: Box::new(composed),
-//RS                             err: Box::new(Type::Named("TransformError".to_string())),
-//RS                         })
-//RS                     }
-//RS                     _ => Err(()),
-//RS                 }
-//RS             }
-//RS             "inverse" if args.is_empty() => Ok(Type::Result {
-//RS                 ok: Box::new(Type::Apply {
-//RS                     name: if scalar == Type::Float {
-//RS                         "Transform".to_string()
-//RS                     } else {
-//RS                         "Transform2".to_string()
-//RS                     },
-//RS                     args: if scalar == Type::Float {
-//RS                         vec![to, from]
-//RS                     } else {
-//RS                         vec![scalar, to, from]
-//RS                     },
-//RS                 }),
-//RS                 err: Box::new(Type::Named("TransformError".to_string())),
-//RS             }),
-//RS             "point" if args.len() == 1
-//RS                 && args.first().is_some_and(geometry_is_point)
-//RS                 && args.first().and_then(geometry_space) == Some(from.clone()) =>
-//RS             {
-//RS                 Ok(Type::Result {
-//RS                     ok: Box::new(geometry_generic("Point2", scalar, to)),
-//RS                     err: Box::new(Type::Named("TransformError".to_string())),
-//RS                 })
-//RS             }
-//RS             "point_at_depth" if args.len() == 2
-//RS                 && args.first().is_some_and(geometry_is_point)
-//RS                 && args.first().and_then(geometry_space) == Some(from.clone()) =>
-//RS             {
-//RS                 Ok(Type::Result {
-//RS                     ok: Box::new(geometry_generic("Point2", scalar, to)),
-//RS                     err: Box::new(Type::Named("TransformError".to_string())),
-//RS                 })
-//RS             }
-//RS             "ray" if args.len() == 1
-//RS                 && args.first().is_some_and(geometry_is_point)
-//RS                 && args.first().and_then(geometry_space) == Some(from.clone()) =>
-//RS             {
-//RS                 Ok(Type::Result {
-//RS                     ok: Box::new(Type::Apply {
-//RS                         name: "Ray2".to_string(),
-//RS                         args: vec![scalar, from, to],
-//RS                     }),
-//RS                     err: Box::new(Type::Named("TransformError".to_string())),
-//RS                 })
-//RS             }
-//RS             _ => Err(()),
-//RS         });
-//RS     }
-//RS     if geometry_is_point(recv) {
-//RS         if args.len() != 1 {
-//RS             return Some(Err(()));
-//RS         }
-//RS         let arg = &args[0];
-//RS         let dynamic = geometry_dynamic(recv) || geometry_dynamic(arg);
-//RS         let output = match method {
-//RS             "add" if geometry_is_delta(arg) => Some(geometry_point_type(recv, dynamic)),
-//RS             "sub" if geometry_is_point(arg) => Some(geometry_delta_type(recv, dynamic)),
-//RS             _ => None,
-//RS         };
-//RS         let valid = output.is_some() && geometry_space(recv) == geometry_space(arg);
-//RS         return Some(if valid {
-//RS             let output = output.expect("validated geometry method result");
-//RS             Ok(if dynamic {
-//RS                 geometry_result(output)
-//RS             } else {
-//RS                 output
-//RS             })
-//RS         } else {
-//RS             Err(())
-//RS         });
-//RS     }
-//RS     if geometry_is_delta(recv) {
-//RS         if args.len() != 1 {
-//RS             return Some(Err(()));
-//RS         }
-//RS         let arg = &args[0];
-//RS         let dynamic = geometry_dynamic(recv) || geometry_dynamic(arg);
-//RS         let valid = matches!(method, "add" | "sub")
-//RS             && geometry_is_delta(arg)
-//RS             && geometry_space(recv) == geometry_space(arg);
-//RS         return Some(if valid {
-//RS             let output = geometry_delta_type(recv, dynamic);
-//RS             Ok(if dynamic {
-//RS                 geometry_result(output)
-//RS             } else {
-//RS                 output
-//RS             })
-//RS         } else {
-//RS             Err(())
-//RS         });
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// Return the source-facing values used by the registered E2520 row.
-//RS ///
-//RS /// The operation table above intentionally keeps only the result type.  The
-//RS /// checker still needs stable hole values when the table rejects an operation.
-//RS /// Keep this helper beside the table so diagnostics cannot drift from the
-//RS /// same-space rule.
-//RS pub fn geometry_binop_diagnostic(
-//RS     op: crate::AST::BinOp,
-//RS     left: &Type,
-//RS     right: &Type,
-//RS ) -> Option<(String, String, String)> {
-//RS     if !(geometry_is_point(left)
-//RS         || geometry_is_delta(left)
-//RS         || geometry_is_point(right)
-//RS         || geometry_is_delta(right))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let operation = op.spell().to_string();
-//RS     let mut expected = geometry_space(left)
-//RS         .map(|space| space.show())
-//RS         .unwrap_or_else(|| left.show());
-//RS     let mut actual = geometry_space(right)
-//RS         .map(|space| space.show())
-//RS         .unwrap_or_else(|| right.show());
-//RS     if geometry_is_point(left) && geometry_is_point(right) {
-//RS         expected = format!("a displacement in {expected}");
-//RS         actual = format!("a point in {actual}");
-//RS     }
-//RS     Some((operation, expected, actual))
-//RS }
-//RS 
-//RS /// Return the source-facing values used by the registered E2521 row when a
-//RS /// transform chain has incompatible middle spaces.
-//RS pub fn geometry_transform_diagnostic(
-//RS     recv: &Type,
-//RS     method: &str,
-//RS     args: &[Type],
-//RS ) -> Option<(String, String, String, String)> {
-//RS     if method != "then" || args.len() != 1 {
-//RS         return None;
-//RS     }
-//RS     let (
-//RS         Type::Apply {
-//RS             name,
-//RS             args: recv_args,
-//RS         },
-//RS         Type::Apply {
-//RS             name: next_name,
-//RS             args: next_args,
-//RS         },
-//RS     ) = (recv, &args[0])
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     let (_, middle_a) = match (name.as_str(), recv_args.as_slice()) {
-//RS         ("Transform", [_, to]) => ((), to),
-//RS         ("Transform2", [_, _, to]) => ((), to),
-//RS         _ => return None,
-//RS     };
-//RS     let middle_b = match (next_name.as_str(), next_args.as_slice()) {
-//RS         ("Transform", [next_from, _]) => next_from,
-//RS         ("Transform2", [_, next_from, _]) => next_from,
-//RS         _ => return None,
-//RS     };
-//RS     if middle_a == middle_b {
-//RS         return None;
-//RS     }
-//RS     Some((
-//RS         recv.show(),
-//RS         args[0].show(),
-//RS         middle_a.show(),
-//RS         middle_b.show(),
-//RS     ))
-//RS }
-//RS 
-//RS /// Expected value arguments for a valid geometry constructor.  Dynamic frame
-//RS /// identities use the existing integer carrier; the generic type parameter
-//RS /// remains the static space proof and is never inferred from a value.
-//RS pub fn geometry_static_arg_types(
-//RS     name: &str,
-//RS     method: &str,
-//RS     owner_args: &[Type],
-//RS ) -> Option<Vec<Type>> {
-//RS     match (name, method) {
-//RS         (
-//RS             "ScreenPoint"
-//RS             | "WorldPoint"
-//RS             | "ViewPoint"
-//RS             | "CameraPoint"
-//RS             | "DevicePoint"
-//RS             | "ScreenDelta"
-//RS             | "WorldDelta"
-//RS             | "ViewDelta"
-//RS             | "CameraDelta"
-//RS             | "DeviceDelta",
-//RS             "new",
-//RS         ) => Some(vec![Type::Float, Type::Float]),
-//RS         ("Point2" | "Delta2", "new") if owner_args.len() == 2 => {
-//RS             Some(vec![Type::Float, Type::Float, Type::Int])
-//RS         }
-//RS         ("Transform", "affine") if owner_args.len() == 2 => {
-//RS             Some(vec![
-//RS                 Type::Float,
-//RS                 Type::Float,
-//RS                 Type::Float,
-//RS                 Type::Float,
-//RS                 Type::Float,
-//RS                 Type::Float,
-//RS                 Type::Int,
-//RS                 Type::Int,
-//RS             ])
-//RS         }
-//RS         ("Transform2", "affine") if owner_args.len() == 3 => {
-//RS             let scalar = owner_args[0].clone();
-//RS             Some(vec![
-//RS                 scalar.clone(),
-//RS                 scalar.clone(),
-//RS                 scalar.clone(),
-//RS                 scalar.clone(),
-//RS                 scalar.clone(),
-//RS                 scalar,
-//RS                 Type::Int,
-//RS                 Type::Int,
-//RS             ])
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS pub fn geometry_static_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
-//RS     if !is_geometry_type(name) {
-//RS         return None;
-//RS     }
-//RS     match (name, method, n_args) {
-//RS         (name, "new", 2) if geometry_point_space(name).is_some() => {
-//RS             Some(Type::Named(name.to_string()))
-//RS         }
-//RS         ("Point2" | "Delta2", "new", 3) => None,
-//RS         _ => None,
-//RS     }
-//RS }
-//RS /// Named affine construction keeps the matrix slots explicit at the call site.
-//RS /// The owner type supplies the static `From`/`To` spaces (and optional scalar
-//RS /// for `Transform2`); frame identities remain dynamic carrier data.
-//RS pub fn geometry_static_return_with_owner(
-//RS     name: &str,
-//RS     method: &str,
-//RS     n_args: usize,
-//RS     owner_args: &[Type],
-//RS ) -> Option<Type> {
-//RS     if matches!(name, "Point2" | "Delta2")
-//RS         && method == "new"
-//RS         && n_args == 3
-//RS         && owner_args.len() == 2
-//RS     {
-//RS         return Some(Type::Apply {
-//RS             name: name.to_string(),
-//RS             args: owner_args.to_vec(),
-//RS         });
-//RS     }
-//RS     if matches!(name, "Transform" | "Transform2")
-//RS         && method == "affine"
-//RS         && n_args == 8
-//RS         && ((name == "Transform" && owner_args.len() == 2)
-//RS             || (name == "Transform2" && owner_args.len() == 3))
-//RS     {
-//RS         return Some(Type::Apply {
-//RS             name: name.to_string(),
-//RS             args: owner_args.to_vec(),
-//RS         });
-//RS     }
-//RS     geometry_static_return(name, method, n_args)
-//RS }
-// END-PORT-PENDING 0390 crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:1-1008
+// Private continuation of canonical Sema.Expressions / CheckerCoreLib.math_layout.
+use jet_foundation.[Type, BinOp, Syntax, Registry, KnowledgeFact, Measure]
+use jet_numeric.[is_decimal_type_name, type_is_decimal]
 
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:4
+pub fn is_math_type(name: String) -> Bool { return is_simd_lane_type(name) || is_linalg_type(name) }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:9
+pub fn is_simd_lane_type(name: String) -> Bool { return Syntax.is_simd_lane_type(name) }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:14
+pub fn is_linalg_type(name: String) -> Bool { return ["Vec2", "Vec3", "Vec4", "Mat3", "Mat4"].contains(name) }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:21
+pub fn math_scalar_ty(name: String) -> Type {
+    return if Syntax.simd_lane_layout(name).map(pair -> pair.0) == {
+        .Val(.F32) -> Type.Float32
+        .Val(.I8) -> Type.IntN{signed: true, bits: 8}
+        .Val(.I16) -> Type.IntN{signed: true, bits: 16}
+        .Val(.I32) -> Type.IntN{signed: true, bits: 32}
+        .Val(.I64) -> Type.IntN{signed: true, bits: 64}
+        .Val(.U8) -> Type.IntN{signed: false, bits: 8}
+        .Val(.U16) -> Type.IntN{signed: false, bits: 16}
+        .Val(.U32) -> Type.IntN{signed: false, bits: 32}
+        .Val(.U64) -> Type.IntN{signed: false, bits: 64}
+        .Val(.F64) | .None -> Type.Float
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:63
+pub fn registered_lane_arity(name: String) -> USize? {
+    return Type.Named(~name).knowledge_vector().facts(Registry.type_plane("Measure")).find_map(fact -> if fact == {
+        .Measure(measure) if measure.kind() == "lane" -> measure.literal_value().and_then(value -> USize.try_from(value).ok())
+        _ -> None
+    })
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:77
+pub fn math_arity(name: String) -> USize {
+    if Syntax.simd_lane_arity(name) == .Val(arity) -> return arity
+    if registered_lane_arity(name) == .Val(arity) -> return arity
+    return if name == { "Vec2" -> 2; "Vec3" -> 3; "Vec4" -> 4; "Mat3" -> 9; "Mat4" -> 16; _ -> 0 }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:96
+pub fn is_swizzleable_math_type(name: String) -> Bool { return ["F32x4", "F64x2", "Vec2", "Vec3", "Vec4"].contains(name) }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:102
+pub enum SwizzleParse {
+    Ok([USize])
+    InvalidLane{lane: Char}
+    NotSwizzle
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:113
+pub fn parse_swizzle_member(member: String, type_name: String) -> SwizzleParse {
+    if !is_swizzleable_math_type(type_name) || member.is_empty() || member.len() > 4 -> return SwizzleParse.NotSwizzle
+    max :: math_arity(type_name)
+    lanes: [USize] := []
+    &lanes.reserve(member.len())
+    for c in member.chars() {
+        idx: USize :: if c == { 'x' -> 0; 'y' -> 1; 'z' -> 2; 'w' -> 3; _ -> return SwizzleParse.NotSwizzle }
+        if idx >= max -> return SwizzleParse.InvalidLane{lane: c}
+        &lanes.push(idx)
+    }
+    return SwizzleParse.Ok(^lanes)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:137
+pub fn swizzle_read_type(type_name: String, lane_count: USize) -> Type {
+    if lane_count == 1 -> return math_scalar_ty(type_name)
+    if is_simd_lane_type(type_name) && lane_count == math_arity(type_name) -> return Type.Named(~type_name)
+    name :: if lane_count == { 2 -> "Vec2"; 3 -> "Vec3"; 4 -> "Vec4"; _ -> panic("swizzle lane count 2..=4") }
+    return Type.Named(name)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:153
+pub fn swizzle_write_overlaps(lanes: [USize]) -> Bool {
+    seen := [false; 4]
+    for lane in lanes {
+        if seen[lane] -> return true
+        seen[lane] = true
+    }
+    return false
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:168
+pub fn math_constructor_arg_types(name: String) -> [Type]? {
+    if !is_math_type(name) -> return None
+    return Val([math_scalar_ty(name); math_arity(name)])
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:180
+pub fn math_array_bridge_ty(name: String) -> Type? {
+    if !is_math_type(name) -> return None
+    return Val(Type.FixedList{elem: math_scalar_ty(name), len: Measure.literal("length", math_arity(name) as U64)})
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:193
+pub fn math_method_return(name: String, method: String, n_args: USize) -> Type? {
+    scalar :: math_scalar_ty(name)
+    self_ty :: Type.Named(~name)
+    if is_simd_lane_type(name) {
+        return if (method, n_args) == {
+            ("sum" | "product" | "min" | "max", 0) | ("reduce", 1) -> Val(^scalar)
+            ("to_array", 0) -> math_array_bridge_ty(name)
+            _ -> None
+        }
+    }
+    return if name == {
+        "Vec2" | "Vec3" | "Vec4" -> if (method, n_args) == {
+            ("dot", 1) | ("length", 0) -> Val(Type.Float)
+            ("cross", 1) if name == "Vec3" -> Val(^self_ty)
+            ("normalize", 0) -> Val(^self_ty)
+            ("to_array", 0) -> math_array_bridge_ty(name)
+            _ -> None
+        }
+        "Mat3" | "Mat4" -> if (method, n_args) == {
+            ("matmul", 1) | ("transpose", 0) -> Val(^self_ty)
+            ("transform", 1) -> Val(Type.Named(if name == "Mat3" -> "Vec3" else -> "Vec4"))
+            ("to_array", 0) -> math_array_bridge_ty(name)
+            _ -> None
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:234
+pub fn math_static_return(name: String, method: String, n_args: USize) -> Type? {
+    if !is_math_type(name) -> return None
+    return if (method, n_args) == { ("splat" | "from_array", 1) -> Val(Type.Named(~name)); _ -> None }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:247
+pub fn math_static_arg_ty(name: String, method: String) -> Type? {
+    return if method == { "splat" -> Val(math_scalar_ty(name)); "from_array" -> math_array_bridge_ty(name); _ -> None }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:257
+pub fn math_method_arg_ty(name: String, method: String) -> Type? {
+    return if (name, method) == {
+        (_, "dot" | "cross" | "matmul") -> Val(Type.Named(~name))
+        ("Mat3", "transform") -> Val(Type.Named("Vec3"))
+        ("Mat4", "transform") -> Val(Type.Named("Vec4"))
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:270
+pub fn simd_reduce_markers() -> [String] { return Syntax.REDUCE_OP_VALUES }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:277
+pub fn math_binop_result(op: BinOp, lt: String, rt: String) -> Type? {
+    same :: lt == rt
+    return if op == {
+        .Add | .Sub if same && is_math_type(lt) -> Val(Type.Named(~lt))
+        .Mul -> if (lt, rt) == {
+            (a, b) if a == b && is_math_type(a) -> Val(Type.Named(~a))
+            ("Mat3", "Vec3") -> Val(Type.Named("Vec3"))
+            ("Mat4", "Vec4") -> Val(Type.Named("Vec4"))
+            _ -> None
+        }
+        .Div if same && is_simd_lane_type(lt) -> Val(Type.Named(~lt))
+        .Eq | .Ne if same && is_math_type(lt) -> Val(Type.Bool)
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:297
+pub fn math_scalar_operand(ty: Type) -> Bool {
+    return if ty == { .Int | .Float | .Float32 | .InlineRange{..} -> true; .Named(name) -> name == "Decimal" || name == "F64"; _ -> false }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:305
+pub fn math_scalar_binop_result(op: BinOp, math_name: String, scalar: Type) -> Type? {
+    if !is_math_type(math_name) || (op != BinOp.Mul && op != BinOp.Div) || !math_scalar_operand(scalar) -> return None
+    return Val(Type.Named(~math_name))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:323
+pub fn is_layout_axis_type(name: String) -> Bool { return name == "HVar" || name == "VVar" || name == "LengthVar" }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:329
+pub fn is_layout_type(name: String) -> Bool { return is_layout_axis_type(name) || name == "Constraint" || name == "Layout" }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:338
+pub enum LayoutAxis { H; V; Neutral }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:344
+pub fn layout_axis_of(ty: Type) -> LayoutAxis? {
+    return if ty == {
+        .Named(n) if n == "HVar" -> Val(LayoutAxis.H)
+        .Named(n) if n == "VVar" -> Val(LayoutAxis.V)
+        .Named(n) if n == "LengthVar" -> Val(LayoutAxis.Neutral)
+        .Int | .InlineRange{..} | .Float -> Val(LayoutAxis.Neutral)
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:357
+pub fn layout_axis_combine(a: LayoutAxis, b: LayoutAxis) -> LayoutAxis? {
+    return if (a, b) == {
+        (.H, .V) | (.V, .H) -> None
+        (.H, _) | (_, .H) -> Val(LayoutAxis.H)
+        (.V, _) | (_, .V) -> Val(LayoutAxis.V)
+        (.Neutral, .Neutral) -> Val(LayoutAxis.Neutral)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:367
+pub fn layout_axis_type_name(axis: LayoutAxis) -> String { return if axis == { .H -> "HVar"; .V -> "VVar"; .Neutral -> "LengthVar" } }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:382
+pub fn layout_binop_result(op: BinOp, lt: Type, rt: Type) -> Result<Type, Unit>? {
+    l_is_layout :: if lt == { .Named(n) -> is_layout_axis_type(n); _ -> false }
+    r_is_layout :: if rt == { .Named(n) -> is_layout_axis_type(n); _ -> false }
+    if !l_is_layout && !r_is_layout -> return None
+    la :: layout_axis_of(lt)?
+    ra :: layout_axis_of(rt)?
+    return if op == {
+        .Add | .Sub -> Val(if layout_axis_combine(la, ra) == { .Val(axis) -> Ok(Type.Named(layout_axis_type_name(axis))); .None -> Err(()) })
+        .Ge | .Le | .Eq -> Val(if layout_axis_combine(la, ra) == { .Val(_) -> Ok(Type.Named("Constraint")); .None -> Err(()) })
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:414
+pub fn layout_method_return(name: String, method: String, n_args: USize) -> Type? {
+    return if (name, method, n_args) == {
+        ("Layout", "h", 2) -> Val(Type.Named("HVar"))
+        ("Layout", "v", 2) -> Val(Type.Named("VVar"))
+        ("Layout", "value", 1) -> Val(Type.Float)
+        ("Layout", "suggest", 2) -> Val(Type.Named("Unit"))
+        ("Layout", "is_feasible", 0) -> Val(Type.Bool)
+        ("Layout", "conflict", 0) -> Val(Type.List(Type.String))
+        ("Constraint", "required" | "strong" | "medium" | "weak", 0) -> Val(Type.Named("Constraint"))
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:439
+pub fn layout_method_arg_ty(method: String, arg_index: USize) -> Type? {
+    return if (method, arg_index) == { ("h" | "v", 0 | 1) -> Val(Type.String); ("suggest", 1) -> Val(Type.Float); _ -> None }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:448
+pub fn precise_binop_result(op: BinOp, lt: String, rt: String) -> Type? {
+    same :: lt == rt
+    return if op == {
+        .Add | .Sub | .Mul if same && is_decimal_type_name(lt) -> Val(Type.Named(Syntax.TYPE_DECIMAL))
+        .Add | .Sub | .Mul | .Div if same && lt == Syntax.TYPE_FRACTION -> Val(Type.Named(Syntax.TYPE_FRACTION))
+        .Add | .Sub | .Mul | .Div if same && lt == Syntax.TYPE_COMPLEX -> Val(Type.Named(Syntax.TYPE_COMPLEX))
+        .Eq | .Ne if same && is_decimal_type_name(lt) -> Val(Type.Bool)
+        .Eq | .Ne if same && lt == Syntax.TYPE_FRACTION -> Val(Type.Bool)
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:473
+pub fn precise_mix_error(lt: Type, rt: Type) -> (String, String, String)? {
+    if (type_is_decimal(lt) && rt.is_float()) || (type_is_decimal(rt) && lt.is_float()) {
+        return Val(("E0131", "`Float` and `Decimal` can't be mixed — got `{lt.show()}` and `{rt.show()}`", "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"))
+    }
+    return None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:492
+pub fn is_geometry_type(name: String) -> Bool {
+    return ["Point2", "Delta2", "Transform", "Transform2", "Ray2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta"].contains(name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:513
+pub fn geometry_point_space(name: String) -> String? {
+    return if name == {
+        "ScreenPoint" | "ScreenDelta" -> Val("Screen")
+        "WorldPoint" | "WorldDelta" -> Val("World")
+        "ViewPoint" | "ViewDelta" -> Val("View")
+        "CameraPoint" | "CameraDelta" -> Val("Camera")
+        "DevicePoint" | "DeviceDelta" -> Val("Device")
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:524
+pub fn geometry_is_point(ty: Type) -> Bool {
+    return if ty == {
+        .Named(name) -> ["ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint"].contains(name)
+        .Apply{name, args} -> name == "Point2" && args.len() == 2
+        _ -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:535
+pub fn geometry_is_delta(ty: Type) -> Bool {
+    return if ty == {
+        .Named(name) -> ["ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta"].contains(name)
+        .Apply{name, args} -> name == "Delta2" && args.len() == 2
+        _ -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:546
+pub fn geometry_space(ty: Type) -> Type? {
+    return if ty == {
+        .Named(name) -> geometry_point_space(name).map(space -> Type.Named(space.strip_suffix("Point").or_else(() -> space.strip_suffix("Delta")).unwrap_or(space).to_string()))
+        .Apply{name, args} if name == "Point2" || name == "Delta2" -> args.get(1).map(value -> ~value)
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:564
+pub fn geometry_scalar(ty: Type) -> Type { return if ty == { .Apply{args, ..} -> args.first().map(t -> ~t).unwrap_or(Type.Float); _ -> Type.Float } }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:571
+pub fn geometry_same_space(left: Type, right: Type) -> Bool { return geometry_space(left).is_some_and(space -> geometry_space(right) == Val(space)) }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:575
+pub fn geometry_generic(name: String, scalar: Type, space: Type) -> Type { return Type.Apply{name: ~name, args: [^scalar, ^space]} }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:581
+pub fn geometry_point_type(ty: Type, dynamic: Bool) -> Type {
+    if dynamic -> return geometry_generic("Point2", geometry_scalar(ty), geometry_space(ty).expect("point has a space"))
+    return ~ty
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:588
+pub fn geometry_delta_type(ty: Type, dynamic: Bool) -> Type {
+    if dynamic -> return geometry_generic("Delta2", geometry_scalar(ty), geometry_space(ty).expect("delta has a space"))
+    return if ty == {
+        .Named(name) -> {
+            stock :: if name == {
+                "ScreenPoint" -> Val("ScreenDelta")
+                "WorldPoint" -> Val("WorldDelta")
+                "ViewPoint" -> Val("ViewDelta")
+                "CameraPoint" -> Val("CameraDelta")
+                "DevicePoint" -> Val("DeviceDelta")
+                _ -> None
+            }
+            stock.map_or_else(() -> ~ty, name -> Type.Named(name))
+        }
+        _ -> geometry_generic("Delta2", geometry_scalar(ty), geometry_space(ty).expect("delta has a space"))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:613
+pub fn geometry_dynamic(ty: Type) -> Bool { return if ty == { .Apply{name, ..} -> name == "Point2" || name == "Delta2"; _ -> false } }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:620
+pub fn geometry_result(ok: Type) -> Type { return Type.Result{ok: ^ok, err: Type.Named("TransformError")} }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:627
+pub fn geometry_binop_result(op: BinOp, left: Type, right: Type) -> Result<Type, Unit>? {
+    if !(geometry_is_point(left) || geometry_is_point(right) || geometry_is_delta(left) || geometry_is_delta(right)) -> return None
+    same :: geometry_same_space(left, right)
+    dynamic :: geometry_dynamic(left) || geometry_dynamic(right)
+    result :: if op == {
+        .Add if same && geometry_is_point(left) && geometry_is_delta(right) -> Val(Ok(if dynamic -> geometry_result(geometry_point_type(left, true)) else -> ~left))
+        .Add if same && geometry_is_delta(left) && geometry_is_point(right) -> Val(Ok(if dynamic -> geometry_result(geometry_point_type(right, true)) else -> ~right))
+        .Add if same && geometry_is_delta(left) && geometry_is_delta(right) -> Val(Ok(if dynamic -> geometry_result(geometry_delta_type(left, true)) else -> ~left))
+        .Sub if same && geometry_is_point(left) && geometry_is_delta(right) -> Val(Ok(if dynamic -> geometry_result(geometry_point_type(left, true)) else -> ~left))
+        .Sub if same && geometry_is_point(left) && geometry_is_point(right) -> Val(Ok(if dynamic -> geometry_result(geometry_delta_type(left, true)) else -> geometry_delta_type(left, false)))
+        .Sub if same && geometry_is_delta(left) && geometry_is_delta(right) -> Val(Ok(if dynamic -> geometry_result(geometry_delta_type(left, true)) else -> ~left))
+        .Eq | .Ne if same && ((geometry_is_point(left) && geometry_is_point(right)) || (geometry_is_delta(left) && geometry_is_delta(right))) -> Val(Ok(Type.Bool))
+        _ -> None
+    }
+    return result.or_else(() -> Val(Err(())))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:697
+pub fn geometry_transform_parts(ty: Type) -> (Type, Type, Type)? {
+    if ty != .Apply{name, args} -> return None
+    return if (name, args) == {
+        ("Transform", [from, to]) -> Val((Type.Float, ~from, ~to))
+        ("Transform2", [scalar, from, to]) -> Val((~scalar, ~from, ~to))
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:708
+pub fn geometry_method_return(recv: Type, method: String, args: [Type]) -> Result<Type, Unit>? {
+    if geometry_transform_parts(recv) == .Val((scalar, from, to)) {
+        return Val(if method == {
+            "then" if args.len() == 1 -> if args.first().and_then(geometry_transform_parts) == {
+                .Val((next_scalar, next_from, next_to)) if next_scalar == scalar && next_from == to -> {
+                    composed :: Type.Apply{name: if scalar == Type.Float -> "Transform" else -> "Transform2", args: if scalar == Type.Float -> [^from, ^next_to] else -> [^scalar, ^from, ^next_to]}
+                    Ok(geometry_result(^composed))
+                }
+                _ -> Err(())
+            }
+            "inverse" if args.is_empty() -> Ok(geometry_result(Type.Apply{name: if scalar == Type.Float -> "Transform" else -> "Transform2", args: if scalar == Type.Float -> [^to, ^from] else -> [^scalar, ^to, ^from]}))
+            "point" if args.len() == 1 && args.first().is_some_and(geometry_is_point) && args.first().and_then(geometry_space) == Val(from) -> Ok(geometry_result(geometry_generic("Point2", ^scalar, ^to)))
+            "point_at_depth" if args.len() == 2 && args.first().is_some_and(geometry_is_point) && args.first().and_then(geometry_space) == Val(from) -> Ok(geometry_result(geometry_generic("Point2", ^scalar, ^to)))
+            "ray" if args.len() == 1 && args.first().is_some_and(geometry_is_point) && args.first().and_then(geometry_space) == Val(from) -> Ok(geometry_result(Type.Apply{name: "Ray2", args: [^scalar, ^from, ^to]}))
+            _ -> Err(())
+        })
+    }
+    if geometry_is_point(recv) {
+        if args.len() != 1 -> return Val(Err(()))
+        arg :: args[0]
+        dynamic :: geometry_dynamic(recv) || geometry_dynamic(arg)
+        output :: if method == {
+            "add" if geometry_is_delta(arg) -> Val(geometry_point_type(recv, dynamic))
+            "sub" if geometry_is_point(arg) -> Val(geometry_delta_type(recv, dynamic))
+            _ -> None
+        }
+        valid :: output.is_some() && geometry_space(recv) == geometry_space(arg)
+        if !valid -> return Val(Err(()))
+        value :: output.expect("validated geometry method result")
+        return Val(Ok(if dynamic -> geometry_result(^value) else -> ^value))
+    }
+    if geometry_is_delta(recv) {
+        if args.len() != 1 -> return Val(Err(()))
+        arg :: args[0]
+        dynamic :: geometry_dynamic(recv) || geometry_dynamic(arg)
+        valid :: (method == "add" || method == "sub") && geometry_is_delta(arg) && geometry_space(recv) == geometry_space(arg)
+        if !valid -> return Val(Err(()))
+        output :: geometry_delta_type(recv, dynamic)
+        return Val(Ok(if dynamic -> geometry_result(^output) else -> ^output))
+    }
+    return None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:840
+pub fn geometry_binop_diagnostic(op: BinOp, left: Type, right: Type) -> (String, String, String)? {
+    if !(geometry_is_point(left) || geometry_is_delta(left) || geometry_is_point(right) || geometry_is_delta(right)) -> return None
+    operation :: op.spell().to_string()
+    expected := geometry_space(left).map(space -> space.show()).unwrap_or_else(() -> left.show())
+    actual := geometry_space(right).map(space -> space.show()).unwrap_or_else(() -> right.show())
+    if geometry_is_point(left) && geometry_is_point(right) {
+        expected = "a displacement in {expected}"
+        actual = "a point in {actual}"
+    }
+    return Val((^operation, ^expected, ^actual))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:868
+pub fn geometry_transform_diagnostic(recv: Type, method: String, args: [Type]) -> (String, String, String, String)? {
+    if method != "then" || args.len() != 1 -> return None
+    if (recv, args[0]) != (.Apply{name, args: recv_args}, .Apply{name: next_name, args: next_args}) -> return None
+    middle_a :: if (name, recv_args) == { ("Transform", [_, to]) -> to; ("Transform2", [_, _, to]) -> to; _ -> return None }
+    middle_b :: if (next_name, next_args) == { ("Transform", [next_from, _]) -> next_from; ("Transform2", [_, next_from, _]) -> next_from; _ -> return None }
+    if middle_a == middle_b -> return None
+    return Val((recv.show(), args[0].show(), middle_a.show(), middle_b.show()))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:913
+pub fn geometry_static_arg_types(name: String, method: String, owner_args: [Type]) -> [Type]? {
+    return if (name, method) == {
+        ("ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta", "new") -> Val([Type.Float, Type.Float])
+        ("Point2" | "Delta2", "new") if owner_args.len() == 2 -> Val([Type.Float, Type.Float, Type.Int])
+        ("Transform", "affine") if owner_args.len() == 2 -> Val([Type.Float, Type.Float, Type.Float, Type.Float, Type.Float, Type.Float, Type.Int, Type.Int])
+        ("Transform2", "affine") if owner_args.len() == 3 -> {
+            scalar :: owner_args[0]
+            Val([~scalar, ~scalar, ~scalar, ~scalar, ~scalar, ~scalar, Type.Int, Type.Int])
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:965
+pub fn geometry_static_return(name: String, method: String, n_args: USize) -> Type? {
+    if !is_geometry_type(name) -> return None
+    return if (name, method, n_args) == { (name, "new", 2) if geometry_point_space(name).is_some() -> Val(Type.Named(~name)); _ -> None }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:980
+pub fn geometry_static_return_with_owner(name: String, method: String, n_args: USize, owner_args: [Type]) -> Type? {
+    if (name == "Point2" || name == "Delta2") && method == "new" && n_args == 3 && owner_args.len() == 2 -> return Val(Type.Apply{name: ~name, args: ~owner_args})
+    if (name == "Transform" || name == "Transform2") && method == "affine" && n_args == 8 && ((name == "Transform" && owner_args.len() == 2) || (name == "Transform2" && owner_args.len() == 3)) -> return Val(Type.Apply{name: ~name, args: ~owner_args})
+    return geometry_static_return(name, method, n_args)
+}

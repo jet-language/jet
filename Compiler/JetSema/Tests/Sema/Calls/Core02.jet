@@ -1,0 +1,28 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4787-4805 (behavioral control; no inline Rust tests)
+#Test("parity_rejects_a_float") {
+    diagnostics :: statements05_diagnostics("use core.math\nfn run() {{ _ :: math.is_even(1.0) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0112" && d.what.contains("needs a whole number") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4987-5000 (behavioral control)
+#Test("checked_integer_math_preserves_optional_result") {
+    diagnostics :: statements05_diagnostics("use core.math\nfn run() {{ value: Int? :: math.checked_add(1, 2)\n _ :: value }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5398-5416 (behavioral control)
+#Test("random_pick_rejects_a_scalar") {
+    diagnostics :: statements05_diagnostics("use core.math.random\nfn run() {{ _ :: random.pick(7) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0112" && d.what == "`pick` needs a list, not Int" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5492-5519 (behavioral control)
+#Test("shuffle_requires_write_access") {
+    diagnostics :: statements05_diagnostics("use core.math.random\nfn run() {{ values := [Int]{{1, 2}}\n random.shuffle(values) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0202" && d.what == "`shuffle` edits its list in place" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5634-5642 (behavioral control)
+#Test("http_dispatch_rejects_missing_request_before_type_inference") {
+    diagnostics :: statements05_diagnostics("use core.http\nfn run() {{ _ :: http.dispatch(http.router()) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" }))
+}

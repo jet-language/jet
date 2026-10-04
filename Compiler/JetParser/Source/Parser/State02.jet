@@ -1,1778 +1,419 @@
-// PORT-PENDING 0341 crates-jet-parser-src-parser-mod-slice-1: crates/jet-parser/src/Parser/mod.rs:1-1774
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Parser: tokens -> AST. Hand-written recursive descent with statement-
-//RS //! level error recovery (M1): one run reports every parse problem it can.
-//RS //!
-//RS //! D-S14-PAUSE / D-TEACHING-LAYER1: broad retired-spelling teaching is paused
-//RS //! until post-Epoch 6. Retired S14 spellings fall through to ordinary parse
-//RS //! errors. Narrow, separately ratified teaching diagnostics still live at their
-//RS //! specific parser sites.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span, MAX_SOURCE_NESTING};
-//RS use crate::Generics;
-//RS use std::borrow::Cow;
-//RS 
-//RS use crate::Lexer::{describe, StrTokPart, TokKind, Token};
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     AccessConvention, BinOp, BindName, BindPattern, Binding, CLICommandBinding, Call, CallArg,
-//RS     CodeModule, ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field,
-//RS     ForKind, Func, GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda,
-//RS     LambdaBody, LambdaMeta, LambdaParam, Marker, MetaAttr, MetaField, ModuleAliasDef, ModuleArg,
-//RS     ModuleDecl, Namespace, OrFallback, Param, Pattern, Program, Stmt, StrMatchPart, StrPart,
-//RS     StructDef, SwitchArm, TagDef, TagMarker, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert,
-//RS     Type, TypeParam, TypedLitBody, UnOp, Variant, VariantField, VariantPayload,
-//RS };
-//RS 
-//RS mod Expressions;
-//RS mod Items;
-//RS mod Modules;
-//RS mod Statements;
-//RS mod Types;
-//RS 
-//RS /// D-TAIL-RETURN1=A: value-block parsers accept a final control statement
-//RS /// only when it cannot fall through to the closing brace. Keep this structural
-//RS /// check beside the parser so value branches and fallback blocks use one rule.
-//RS pub(crate) fn statement_definitely_exits_value_block(stmt: &Stmt) -> bool {
-//RS     match stmt {
-//RS         Stmt::Return(..)
-//RS         | Stmt::Break(..)
-//RS         | Stmt::BreakValue(..)
-//RS         | Stmt::Continue(..)
-//RS         | Stmt::BreakLabel(..)
-//RS         | Stmt::BreakLabelValue(..)
-//RS         | Stmt::ContinueLabel(..) => true,
-//RS         Stmt::Expr(expr) => {
-//RS             matches!(expr.without_parens(), Expr::Todo { .. })
-//RS                 || matches!(
-//RS                     expr.without_parens(),
-//RS                     Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
-//RS                 )
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         } => {
-//RS             let fallback_exits = match else_body.as_deref() {
-//RS                 Some(body) => block_definitely_exits_value_block(body),
-//RS                 None => !crate::AST::is_subjectless_guard(subject, *span),
-//RS             };
-//RS             !arms.is_empty()
-//RS                 && arms
-//RS                     .iter()
-//RS                     .all(|arm| block_definitely_exits_value_block(&arm.body))
-//RS                 && fallback_exits
-//RS         }
-//RS         Stmt::Loop { body, .. } => {
-//RS             !loop_body_can_break(body)
-//RS         }
-//RS         Stmt::While { cond, body, .. }
-//RS             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
-//RS         {
-//RS             !loop_body_can_break(body)
-//RS         }
-//RS         Stmt::CountedLoop { cond, body, .. }
-//RS             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
-//RS         {
-//RS             !loop_body_can_break(body)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn block_definitely_exits_value_block(stmts: &[Stmt]) -> bool {
-//RS     stmts
-//RS         .iter()
-//RS         .any(statement_definitely_exits_value_block)
-//RS }
-//RS 
-//RS fn loop_body_can_break(stmts: &[Stmt]) -> bool {
-//RS     loop_body_can_break_inner(stmts, &[], true)
-//RS }
-//RS 
-//RS fn loop_body_can_break_inner(
-//RS     stmts: &[Stmt],
-//RS     nested_labels: &[&str],
-//RS     allow_unlabelled: bool,
-//RS ) -> bool {
-//RS     for stmt in stmts {
-//RS         let can_break = match stmt {
-//RS             Stmt::Break(..) | Stmt::BreakValue(..) => allow_unlabelled,
-//RS             Stmt::BreakLabel(name, ..) | Stmt::BreakLabelValue(name, ..) => {
-//RS                 !nested_labels
-//RS                     .iter()
-//RS                     .any(|label| *label == name.as_str())
-//RS             }
-//RS             Stmt::Switch {
-//RS                 arms, else_body, ..
-//RS             } => arms.iter().any(|arm| {
-//RS                 loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
-//RS             }) || else_body.as_deref().is_some_and(|body| {
-//RS                 loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
-//RS             }),
-//RS             Stmt::Loop { body, label, .. }
-//RS             | Stmt::While { body, label, .. }
-//RS             | Stmt::For { body, label, .. }
-//RS             | Stmt::CountedLoop { body, label, .. } => {
-//RS                 let mut nested = nested_labels.to_vec();
-//RS                 if let Some((label, _)) = label {
-//RS                     nested.push(label.as_str());
-//RS                 }
-//RS                 loop_body_can_break_inner(body, &nested, false)
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS         if can_break {
-//RS             return true;
-//RS         }
-//RS         if statement_definitely_exits_value_block(stmt) {
-//RS             return false;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-//RS     parse_inner(toks, false, false, None)
-//RS }
-//RS /// Parse ordinary Jet source while retaining the original text for
-//RS /// source-derived machine fixes such as the explicit-semicolon edit.
-//RS ///
-//RS /// Token spans are byte offsets into `source`; callers must pass the exact
-//RS /// source used to produce `toks`.
-//RS pub fn parse_with_source(
-//RS     toks: &[Token],
-//RS     source: &str,
-//RS ) -> Result<Program, Vec<Diagnostic>> {
-//RS     parse_inner(toks, false, false, Some(source))
-//RS }
-//RS /// Parse a Jetpack config surface. The config grammar reserves `$NAME` for a
-//RS /// typed environment read; ordinary Jet source keeps the same token retired.
-//RS pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-//RS     parse_inner(toks, false, true, None)
-//RS }
-//RS 
-//RS /// Parse a Jetpack config surface while retaining source text for config
-//RS /// values whose spelling is intentionally not a general Jet expression.
-//RS pub fn parse_config_with_source(toks: &[Token], source: &str) -> Result<Program, Vec<Diagnostic>> {
-//RS     parse_inner(toks, false, true, Some(source))
-//RS }
-//RS 
-//RS /// Parse for `jet fmt`: succeeds when the AST is recoverable, even if live
-//RS /// teaching diagnostics rewrote retired marker or punctuation forms.
-//RS pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-//RS     parse_inner(toks, true, false, None)
-//RS }
-//RS 
-//RS /// Parse for editor/LSP check: recover through live teaching errors, return
-//RS /// them alongside the AST so sema can still run (M6 phase 4).
-//RS pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     parse_for_check_inner(toks, None)
-//RS }
-//RS 
-//RS /// Parse for editor/LSP check while retaining the source text for
-//RS /// source-derived machine fixes (S14). Token spans remain byte offsets into
-//RS /// this same source string.
-//RS pub fn parse_for_check_with_source(
-//RS     toks: &[Token],
-//RS     source: &str,
-//RS ) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     parse_for_check_inner(toks, Some(source))
-//RS }
-//RS 
-//RS fn prepare_tokens<'a>(
-//RS     toks: &'a [Token],
-//RS ) -> Result<(Cow<'a, [Token]>, Vec<crate::AST::FencedStatement>), Vec<Diagnostic>> {
-//RS     // Ordinary source has neither comments nor fences. Keep its lexer-owned
-//RS     // token slice: the parser only reads tokens, and every span is already a
-//RS     // byte offset into the original source. This avoids two full token-vector
-//RS     // copies plus the fence scan on the common path.
-//RS     let mut has_comments = false;
-//RS     let mut has_fences = false;
-//RS     for token in toks {
-//RS         match &token.kind {
-//RS             TokKind::LineComment(_) | TokKind::BlockComment(_) => has_comments = true,
-//RS             TokKind::FenceOpen | TokKind::FenceClose => has_fences = true,
-//RS             _ => {}
-//RS         }
-//RS         if has_comments && has_fences {
-//RS             break;
-//RS         }
-//RS     }
-//RS 
-//RS     let code = if has_comments {
-//RS         Cow::Owned(crate::Lexer::without_comments(toks))
-//RS     } else {
-//RS         Cow::Borrowed(toks)
-//RS     };
-//RS     if has_fences {
-//RS         let (expanded, fenced_statements) = crate::FencedNames::expand(code.as_ref())?;
-//RS         check_token_nesting(&expanded)?;
-//RS         Ok((Cow::Owned(expanded), fenced_statements))
-//RS     } else {
-//RS         check_token_nesting(code.as_ref())?;
-//RS         Ok((code, Vec::new()))
-//RS     }
-//RS }
-//RS 
-//RS fn parse_for_check_inner(
-//RS     toks: &[Token],
-//RS     source: Option<&str>,
-//RS ) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     let (toks, fenced_statements) = prepare_tokens(toks)?;
-//RS 
-//RS     let mut p = Parser {
-//RS         toks: &toks,
-//RS         source: source.map(str::to_owned),
-//RS         pos: 0,
-//RS         diags: Vec::new(),
-//RS         explicit_semicolon_reported: false,
-//RS         retired_step: None,
-//RS         pending_type_gt: false,
-//RS         depth: 0,
-//RS         result_handler_depth: 0,
-//RS         type_generic_depth: 0,
-//RS         type_generic_chain: Vec::new(),
-//RS         type_generic_truncated: false,
-//RS         pub_file_default: false,
-//RS         in_layout_body: 0,
-//RS         adjacent_if_body_depth: 0,
-//RS         block_depth: 0,
-//RS         callable_tail_block_depth: None,
-//RS         callable_tail_expects_value: false,
-//RS         lambda_tail_block_depth: None,
-//RS         module_arg_expr_depth: None,
-//RS         allow_lowercase_leading_dot: false,
-//RS         allow_environment_reads: false,
-//RS         migration_mode: true,
-//RS         derive_template_depth: 0,
-//RS         policy_declarations: Vec::new(),
-//RS         user_policy_declarations: Vec::new(),
-//RS         applied_rules: Vec::new(),
-//RS         rule_facts: Vec::new(),
-//RS         block_spans: Vec::new(),
-//RS         prep_value_block: None,
-//RS         prep_value_escape: None,
-//RS     };
-//RS     let mut prog = p.program();
-//RS     prog.fenced_statements = fenced_statements;
-//RS     if p.diags.is_empty() {
-//RS         Ok((prog, Vec::new()))
-//RS     } else if p.diags.iter().all(|d| {
-//RS         d.severity == crate::Diagnostics::Severity::Lint
-//RS             || is_teaching_parse_diag(&d.code)
-//RS             || d.code == "E0081"
-//RS     }) {
-//RS         Ok((prog, p.diags))
-//RS     } else {
-//RS         Err(p.diags)
-//RS     }
-//RS }
-//RS 
-//RS fn parse_inner(
-//RS     toks: &[Token],
-//RS     for_fmt: bool,
-//RS     allow_environment_reads: bool,
-//RS     source: Option<&str>,
-//RS ) -> Result<Program, Vec<Diagnostic>> {
-//RS     let (toks, fenced_statements) = prepare_tokens(toks)?;
-//RS     let mut p = Parser {
-//RS         toks: &toks,
-//RS         source: source.map(str::to_owned),
-//RS         pos: 0,
-//RS         explicit_semicolon_reported: false,
-//RS         retired_step: None,
-//RS         diags: Vec::new(),
-//RS         pending_type_gt: false,
-//RS         depth: 0,
-//RS         result_handler_depth: 0,
-//RS         type_generic_depth: 0,
-//RS         type_generic_chain: Vec::new(),
-//RS         type_generic_truncated: false,
-//RS         pub_file_default: false,
-//RS         in_layout_body: 0,
-//RS         adjacent_if_body_depth: 0,
-//RS         block_depth: 0,
-//RS         callable_tail_block_depth: None,
-//RS         callable_tail_expects_value: false,
-//RS         lambda_tail_block_depth: None,
-//RS         module_arg_expr_depth: None,
-//RS         allow_lowercase_leading_dot: false,
-//RS         allow_environment_reads,
-//RS         migration_mode: for_fmt,
-//RS         derive_template_depth: 0,
-//RS         policy_declarations: Vec::new(),
-//RS         user_policy_declarations: Vec::new(),
-//RS         applied_rules: Vec::new(),
-//RS         rule_facts: Vec::new(),
-//RS         block_spans: Vec::new(),
-//RS         prep_value_block: None,
-//RS         prep_value_escape: None,
-//RS     };
-//RS     let mut prog = p.program();
-//RS     prog.fenced_statements = fenced_statements;
-//RS     if p.diags.is_empty() {
-//RS         return Ok(prog);
-//RS     }
-//RS     let mut errors = p
-//RS         .diags
-//RS         .iter()
-//RS         .filter(|d| d.severity == crate::Diagnostics::Severity::Error);
-//RS     if errors.clone().next().is_none()
-//RS         || (for_fmt
-//RS             && errors.all(|d| {
-//RS                 is_teaching_parse_diag(&d.code) || (d.code == "E0927" && d.what.contains("retired"))
-//RS             }))
-//RS     {
-//RS         Ok(prog)
-//RS     } else {
-//RS         Err(p.diags)
-//RS     }
-//RS }
-//RS 
-//RS fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
-//RS     if parts.len() != 1 {
-//RS         return Err(Diagnostic::error(
-//RS             "E0003",
-//RS             "an import path must be one piece of quoted text".to_string(),
-//RS             "file paths can't contain `{ }` interpolation".to_string(),
-//RS             format!("write: {} \"path/to/file\";", Syntax::KW_USE),
-//RS             None,
-//RS         ));
-//RS     }
-//RS     match &parts[0] {
-//RS         StrTokPart::Lit(s) => Ok(s.clone()),
-//RS         StrTokPart::Byte(byte) => Ok(char::from(*byte).to_string()),
-//RS         StrTokPart::Interp(_) => Err(Diagnostic::error(
-//RS             "E0003",
-//RS             "an import path can't contain `{ }` interpolation".to_string(),
-//RS             "file paths are fixed strings".to_string(),
-//RS             format!("write: {} \"path/to/file\";", Syntax::KW_USE),
-//RS             None,
-//RS         )),
-//RS     }
-//RS }
-//RS fn string_literal_token_value(kind: &TokKind) -> Result<String, Diagnostic> {
-//RS     match kind {
-//RS         TokKind::Str(parts) => string_literal_value(parts),
-//RS         TokKind::RawStr(text) => Ok(text.clone()),
-//RS         other => Err(Diagnostic::error(
-//RS             "E0003",
-//RS             format!("expected quoted text, found {}", crate::Lexer::describe(other)),
-//RS             "this position accepts one non-interpolated string literal".to_string(),
-//RS             "write a quoted string or a backtick-fenced raw string".to_string(),
-//RS             None,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
-//RS fn is_teaching_parse_diag(code: &str) -> bool {
-//RS     matches!(
-//RS         code,
-//RS         "E0031"
-//RS             | "E0034"
-//RS             | "E0048"
-//RS             | "E0049"
-//RS             | "E0055"
-//RS             | "E0057"
-//RS             | "E0065"
-//RS             | "E0066"
-//RS             | "E0068"
-//RS             | "E0070"
-//RS             | "E0080"
-//RS             // E0082 (D-ARMHEAD-PAREN1 amendment): the AST keeps the grouping
-//RS             // precedence implies, and fmt prints it with parentheses.
-//RS             | "E0082"
-//RS             | "E0077"
-//RS             | "E0146"
-//RS             | "E0154"
-//RS             | "E0210"
-//RS             | "E0986"
-//RS             | "E0320"
-//RS             | "E0992"
-//RS             | "E0994"
-//RS             | "E0366"
-//RS             | "E0367"
-//RS             | "E0372"
-//RS             | "E0373"
-//RS             | "E0374"
-//RS             | "E0378"
-//RS             | "E0379"
-//RS             | "E0383"
-//RS             | "E0384"
-//RS             | "E0385"
-//RS             | "E0386"
-//RS             | "E0999"
-//RS             | "E0412"
-//RS             | "E0413"
-//RS             | "E0414"
-//RS             | "E0415"
-//RS             | "E0417"
-//RS             | "E0418"
-//RS             | "E0998"
-//RS             | "E0927"
-//RS             // D-CONC-SHARE1=A (card #1561): the retired `Shared.new(x)` call
-//RS             // recovers as the node `shared x` builds (see
-//RS             // `Parser/Expressions/postfix.rs`), so `jet check` still reports
-//RS             // the rest of the file and `jet fmt` rewrites the call to the
-//RS             // prefix form. `jet build`/`jet run` still reject it: the teaching
-//RS             // clause in `parse_inner` is gated on the formatter path.
-//RS             | "E1115"
-//RS     )
-//RS }
-//RS 
-//RS /// Hard cap on recursive parser nesting (parentheses, unary chains,
-//RS /// literals-with-expressions, generic types). Recursive descent here — and
-//RS /// the recursive passes downstream (sema, codegen, fmt) — use the call
-//RS /// stack, so unbounded nesting in adversarial input would abort the compiler
-//RS /// with a stack overflow instead of the shared source-nesting diagnostic.
-//RS 
-//RS struct Parser<'a> {
-//RS     toks: &'a [Token],
-//RS     source: Option<String>,
-//RS     pos: usize,
-//RS     diags: Vec<Diagnostic>,
-//RS     /// D-SEMI1=A: report one explicit semicolon boundary per source file.
-//RS     explicit_semicolon_reported: bool,
-//RS     /// Span of the last retired `++`/`--` step (E0160 already reported), so
-//RS     /// the statement parser accepts its recovered operand without a second error.
-//RS     retired_step: Option<Span>,
-//RS     /// S33: when `>>` is split while closing nested `Type<…>`.
-//RS     pending_type_gt: bool,
-//RS     /// Current recursive parser nesting depth.
-//RS     depth: usize,
-//RS     /// Nested compact Result handlers leave the next `!` for their caller.
-//RS     /// Only the outermost handler diagnoses an extra failure role.
-//RS     result_handler_depth: usize,
-//RS     /// Nesting depth inside generic type arguments (M9 E0909).
-//RS     type_generic_depth: usize,
-//RS     type_generic_chain: Vec<String>,
-//RS     /// Set when generic depth exceeds the limit mid-parse.
-//RS     type_generic_truncated: bool,
-//RS     /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
-//RS     pub_file_default: bool,
-//RS     /// D-LAYOUT1 / D-LAYOUT-CTOR1: >0 while parsing a `Layout.{ … }` body.
-//RS     /// Retained for forks/probes; constraint elements are parsed as typed-
-//RS     /// literal exprs (not bare expression statements), so the E0003
-//RS     /// comparison-as-statement carve-out is unused on the happy path.
-//RS     in_layout_body: usize,
-//RS     /// >0 while a one-line effect-only `if` body is being parsed. The body's
-//RS     /// statement may end at an adjacent `else` instead of a line terminator.
-//RS     adjacent_if_body_depth: usize,
-//RS     /// Current statement-block nesting. An explicit callable result contract
-//RS     /// may admit one final value expression only at its own body depth.
-//RS     block_depth: usize,
-//RS     callable_tail_block_depth: Option<usize>,
-//RS     /// D-TAIL-RETURN1=A: the callable owning `callable_tail_block_depth`
-//RS     /// declares (or may infer) a result value. A unit callable's trailing
-//RS     /// `if` stays a statement, so its arm-tail loops keep statement meaning.
-//RS     callable_tail_expects_value: bool,
-//RS     /// A depth whose final loop keeps statement meaning: the body depth of the
-//RS     /// innermost block lambda (its result may be unit, a callback; sema alone
-//RS     /// knows whether that tail is a value), or the enclosing depth while a
-//RS     /// braceless arm's single statement is parsed.
-//RS     lambda_tail_block_depth: Option<usize>,
-//RS     /// While parsing a value in `Template<...>`, a top-level `>` closes the
-//RS     /// application instead of becoming a comparison. Nested expressions can
-//RS     /// still use `>` normally.
-//RS     module_arg_expr_depth: Option<usize>,
-//RS     /// D-JPK-BUILDRECIPE1: lower-case leading-dot build steps are values only
-//RS     /// inside the ratified `Recipe.build(steps: [...])` surface. Ordinary
-//RS     /// expressions keep the existing upper-case enum-variant grammar.
-//RS     allow_lowercase_leading_dot: bool,
-//RS     /// Internal one-shot corpus migration arm. Retired spellings remain
-//RS     /// recoverable for `fmt`/check so formatter can rewrite old sources; no
-//RS     /// user-facing switch exposes this mode.
-//RS     migration_mode: bool,
-//RS     /// D-ONCE-DOLLAR1=B: config surfaces admit `$NAME` as a typed environment
-//RS     /// read. Ordinary source leaves the same token on the teaching path.
-//RS     allow_environment_reads: bool,
-//RS     /// >0 while parsing a typed item-template body (`derive`, marker, or
-//RS     /// `b.generate`). A compile-time name in a type slot is an internal hole
-//RS     /// here; expansion fills it before ordinary sema checks the item.
-//RS     derive_template_depth: usize,
-//RS     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
-//RS     user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
-//RS     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
-//RS     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
-//RS     block_spans: Vec<Span>,
-//RS     /// The innermost `name :: prep { … }` value block being parsed: its `{`
-//RS     /// span and the block depth of its statements.
-//RS     prep_value_block: Option<(Span, usize)>,
-//RS     /// Set when a binding statement opened directly in that block shows it was
-//RS     /// never closed: the token where the enclosing binding's parse resumes.
-//RS     prep_value_escape: Option<usize>,
-//RS }
-//RS 
-//RS fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
-//RS     // Interpolations own nested token slices. Walk those slices iteratively so
-//RS     // a deep string-interpolation tree cannot bypass the source-depth guard or
-//RS     // make this guard recurse on attacker-controlled input.
-//RS     enum Frame<'a> {
-//RS         Tokens {
-//RS             tokens: &'a [Token],
-//RS             position: usize,
-//RS             depth: usize,
-//RS         },
-//RS         StringParts {
-//RS             parts: &'a [StrTokPart],
-//RS             position: usize,
-//RS             depth: usize,
-//RS         },
-//RS     }
-//RS 
-//RS     let mut pending = vec![Frame::Tokens {
-//RS         tokens: toks,
-//RS         position: 0,
-//RS         depth: 0,
-//RS     }];
-//RS     while let Some(frame) = pending.pop() {
-//RS         match frame {
-//RS             Frame::Tokens {
-//RS                 tokens,
-//RS                 mut position,
-//RS                 mut depth,
-//RS             } => {
-//RS                 let Some(token) = tokens.get(position) else {
-//RS                     continue;
-//RS                 };
-//RS                 position += 1;
-//RS                 let mut string_parts = None;
-//RS                 match &token.kind {
-//RS                     TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
-//RS                         depth = depth.saturating_add(1);
-//RS                         if depth > MAX_SOURCE_NESTING {
-//RS                             return Err(vec![Diagnostic::source_nesting_exceeded(
-//RS                                 depth,
-//RS                                 token.span,
-//RS                             )]);
-//RS                         }
-//RS                     }
-//RS                     TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-//RS                         depth = depth.saturating_sub(1);
-//RS                     }
-//RS                     TokKind::Str(parts)
-//RS                         if parts
-//RS                             .iter()
-//RS                             .any(|part| matches!(part, StrTokPart::Interp(_))) =>
-//RS                     {
-//RS                         let interpolation_depth = depth.saturating_add(1);
-//RS                         if interpolation_depth > MAX_SOURCE_NESTING {
-//RS                             return Err(vec![Diagnostic::source_nesting_exceeded(
-//RS                                 interpolation_depth,
-//RS                                 token.span,
-//RS                             )]);
-//RS                         }
-//RS                         string_parts = Some((parts.as_slice(), interpolation_depth));
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 pending.push(Frame::Tokens {
-//RS                     tokens,
-//RS                     position,
-//RS                     depth,
-//RS                 });
-//RS                 if let Some((parts, depth)) = string_parts {
-//RS                     pending.push(Frame::StringParts {
-//RS                         parts,
-//RS                         position: 0,
-//RS                         depth,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             Frame::StringParts {
-//RS                 parts,
-//RS                 mut position,
-//RS                 depth,
-//RS             } => {
-//RS                 let Some(part) = parts.get(position) else {
-//RS                     continue;
-//RS                 };
-//RS                 position += 1;
-//RS                 pending.push(Frame::StringParts {
-//RS                     parts,
-//RS                     position,
-//RS                     depth,
-//RS                 });
-//RS                 if let StrTokPart::Interp(nested) = part {
-//RS                     pending.push(Frame::Tokens {
-//RS                         tokens: nested,
-//RS                         position: 0,
-//RS                         depth,
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// One authored piece of a classic `if` chain, in source order. The L0507
-//RS /// fix rebuilds the chain as an arm table from exactly these byte ranges.
-//RS #[derive(Clone, Copy, Debug)]
-//RS pub(crate) enum BranchPart {
-//RS     Arm { cond: Span, body: Span },
-//RS     Else { body: Span },
-//RS }
-//RS 
-//RS /// True when the text between two recorded pieces holds only the chain's own
-//RS /// connectors. Anything else — a comment, a retired arrow — means the rebuilt
-//RS /// table would drop authored text, so no automatic fix is offered.
-//RS fn branch_gap_is_connector(gap: &str) -> bool {
-//RS     gap.split_whitespace().all(|word| {
-//RS         matches!(word, "if" | "else") || word == Syntax::OP_UNIFIED_ARROW
-//RS     })
-//RS }
-//RS 
-//RS /// Re-indent every line after the first by one level, so a body moved from
-//RS /// statement level into a table arm keeps its relative layout.
-//RS fn indent_following_lines(text: &str, unit: &str) -> String {
-//RS     let mut lines = text.split('\n');
-//RS     let mut out = lines.next().unwrap_or_default().to_string();
-//RS     for line in lines {
-//RS         out.push('\n');
-//RS         if !line.trim().is_empty() {
-//RS             out.push_str(unit);
-//RS             out.push_str(line);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Take the next authored piece of a chain: the text before it must be only
-//RS /// connectors, and pieces must advance in source order within `end`.
-//RS fn take_branch_piece<'s>(
-//RS     source: &'s str,
-//RS     piece: Span,
-//RS     cursor: &mut usize,
-//RS     end: usize,
-//RS ) -> Option<&'s str> {
-//RS     if piece.start < *cursor || piece.end < piece.start || piece.end > end {
-//RS         return None;
-//RS     }
-//RS     if !branch_gap_is_connector(source.get(*cursor..piece.start)?) {
-//RS         return None;
-//RS     }
-//RS     *cursor = piece.end;
-//RS     source.get(piece.start..piece.end).map(str::trim)
-//RS }
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     pub(super) fn environment_read_outside_config(&self, span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0003",
-//RS             "`$NAME` is an environment read for config surfaces only".to_string(),
-//RS             "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`".to_string(),
-//RS             "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn invalid_environment_read(&self, span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0003",
-//RS             "an environment read needs a plain name after `$`".to_string(),
-//RS             "config-surface environment access has the typed form `$NAME`".to_string(),
-//RS             "write a name such as `$HOME` in `env.jet` or a deploy/config file".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     /// D-COMPILER-NS1=A / D-META-ROOT3=A: `$` marks compiler facts. A `$`
-//RS     /// word in expression position must be one of the subjectless roots; a
-//RS     /// program never declares one, and other facts are `$` members of their
-//RS     /// subject. An ALL_CAPS `$NAME` is the config-only environment read.
-//RS     pub(super) fn unknown_fact_root(&self, name: &str, span: Span) -> Diagnostic {
-//RS         let body = name.strip_prefix(Syntax::COMPTIME_MARK).unwrap_or(name);
-//RS         if !body.is_empty() && Syntax::is_constant_name(body) {
-//RS             return self.environment_read_outside_config(span);
-//RS         }
-//RS         Diagnostic::error(
-//RS             "E0003",
-//RS             format!("`{name}` is not a compiler fact"),
-//RS             format!(
-//RS                 "`$` marks facts the compiler supplies: the roots `{}`, `{}`, `{}` and `{}`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)",
-//RS                 Syntax::FACT_ROOT_BUILD,
-//RS                 Syntax::FACT_ROOT_PACKAGE,
-//RS                 Syntax::FACT_ROOT_PHASE,
-//RS                 Syntax::FACT_ROOT_PROGRAM,
-//RS             ),
-//RS             "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     fn span_has_authored_line_break(&self, start: usize, end: usize) -> bool {
-//RS         self.toks[start..end]
-//RS             .iter()
-//RS             .any(|token| matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end)
-//RS     }
-//RS 
-//RS     /// L0507: a multi-line or chained classic branch. When the recorded parts
-//RS     /// cover the whole construct, attach the arm-table rewrite as a safe fix.
-//RS     fn prefer_arm_table_lint(&mut self, span: Span, parts: &[BranchPart], diag_mark: usize) {
-//RS         let diagnostic = Diagnostic::lint(
-//RS             "L0507",
-//RS             "prefer an ordered arm table for this branch".to_string(),
-//RS             "one ordered arm table is Jet's normal form for multi-line and chained choices"
-//RS                 .to_string(),
-//RS             "write `if { condition -> body else -> body }`".to_string(),
-//RS             Some(span),
-//RS         );
-//RS         let diagnostic = match self.arm_table_edit(span, parts, diag_mark) {
-//RS             Some(edit) => diagnostic.with_edit(edit),
-//RS             None => diagnostic,
-//RS         };
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     /// Rebuild a classic chain as `if { cond -> body … else -> body }` from its
-//RS     /// authored text. Returns `None` whenever the rewrite could lose or change
-//RS     /// anything: parse errors inside the chain, text between parts other than
-//RS     /// `if`/`else`/`->`, or a condition the guard table would read differently.
-//RS     fn arm_table_edit(
-//RS         &self,
-//RS         if_span: Span,
-//RS         parts: &[BranchPart],
-//RS         diag_mark: usize,
-//RS     ) -> Option<crate::Diagnostics::TextEdit> {
-//RS         let source = self.source.as_deref()?;
-//RS         let start = if_span.start;
-//RS         let end = self.prev_end();
-//RS         if start >= end || end > source.len() || !source[start..].starts_with("if") {
-//RS             return None;
-//RS         }
-//RS         if self.diags[diag_mark.min(self.diags.len())..]
-//RS             .iter()
-//RS             .any(|d| d.severity == crate::Diagnostics::Severity::Error)
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let mut arms: Vec<(&str, &str)> = Vec::new();
-//RS         let mut else_body: Option<&str> = None;
-//RS         let mut cursor = start + "if".len();
-//RS         let take = |piece: Span, cursor: &mut usize| take_branch_piece(source, piece, cursor, end);
-//RS         for part in parts {
-//RS             if else_body.is_some() {
-//RS                 return None;
-//RS             }
-//RS             match *part {
-//RS                 BranchPart::Arm { cond, body } => {
-//RS                     let cond = take(cond, &mut cursor)?;
-//RS                     let body = take(body, &mut cursor)?;
-//RS                     // A guard head that starts with `after` is a readiness
-//RS                     // timeout, not a Boolean test.
-//RS                     if cond.is_empty()
-//RS                         || body.is_empty()
-//RS                         || cond.split(|c: char| !c.is_alphanumeric() && c != '_').next()
-//RS                             == Some(Syntax::READINESS_AFTER)
-//RS                     {
-//RS                         return None;
-//RS                     }
-//RS                     arms.push((cond, body));
-//RS                 }
-//RS                 BranchPart::Else { body } => {
-//RS                     let body = take(body, &mut cursor)?;
-//RS                     if body.is_empty() {
-//RS                         return None;
-//RS                     }
-//RS                     else_body = Some(body);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if arms.is_empty() || !source.get(cursor..end)?.trim().is_empty() {
-//RS             return None;
-//RS         }
-//RS         let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
-//RS         let indent: String = source[line_start..start]
-//RS             .chars()
-//RS             .take_while(|c| *c == ' ' || *c == '\t')
-//RS             .collect();
-//RS         let unit = "    ";
-//RS         let mut table = String::from("if {\n");
-//RS         for (cond, body) in arms {
-//RS             table.push_str(&format!(
-//RS                 "{indent}{unit}{} -> {}\n",
-//RS                 indent_following_lines(cond, unit),
-//RS                 indent_following_lines(body, unit)
-//RS             ));
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             table.push_str(&format!(
-//RS                 "{indent}{unit}else -> {}\n",
-//RS                 indent_following_lines(body, unit)
-//RS             ));
-//RS         }
-//RS         table.push_str(&format!("{indent}}}"));
-//RS         Some(crate::Diagnostics::TextEdit {
-//RS             span: Span::new(start, end),
-//RS             new_text: table,
-//RS         })
-//RS     }
-//RS 
-//RS     fn peek(&self) -> &Token {
-//RS         &self.toks[self.pos.min(self.toks.len() - 1)]
-//RS     }
-//RS 
-//RS     fn peek2(&self) -> &Token {
-//RS         &self.toks[(self.pos + 1).min(self.toks.len() - 1)]
-//RS     }
-//RS 
-//RS     fn peek3(&self) -> &Token {
-//RS         &self.toks[(self.pos + 2).min(self.toks.len() - 1)]
-//RS     }
-//RS 
-//RS     #[allow(dead_code)]
-//RS     fn peek4(&self) -> &Token {
-//RS         &self.toks[(self.pos + 3).min(self.toks.len() - 1)]
-//RS     }
-//RS     #[allow(dead_code)]
-//RS     fn peek5(&self) -> &Token {
-//RS         &self.toks[(self.pos + 4).min(self.toks.len() - 1)]
-//RS     }
-//RS 
-//RS     /// End byte of the most recently consumed token (the one before the cursor).
-//RS     fn prev_end(&self) -> usize {
-//RS         self.toks[self.pos.saturating_sub(1)].span.end
-//RS     }
-//RS 
-//RS     /// D-SEMI1=A: explicit terminators remain parser boundaries but report one
-//RS     /// source-derived, behavior-preserving edit per file.
-//RS     fn report_explicit_semicolon(&mut self, span: Span) {
-//RS         if self.explicit_semicolon_reported {
-//RS             return;
-//RS         }
-//RS         self.explicit_semicolon_reported = true;
-//RS         let new_text = self
-//RS             .source
-//RS             .as_deref()
-//RS             .and_then(|source| {
-//RS                 let next_code = self.toks.get(self.pos + 1..)?.iter().find(|token| {
-//RS                     !matches!(
-//RS                         &token.kind,
-//RS                         TokKind::LineComment(_)
-//RS                             | TokKind::BlockComment(_)
-//RS                             | TokKind::Semi
-//RS                             | TokKind::Eof
-//RS                     )
-//RS                 });
-//RS                 let same_line_code = next_code
-//RS                     .and_then(|next| source.get(span.end..next.span.start))
-//RS                     .is_some_and(|gap| !gap.contains('\n') && !gap.contains('\r'));
-//RS                 Some(if same_line_code {
-//RS                     "\n".to_string()
-//RS                 } else {
-//RS                     String::new()
-//RS                 })
-//RS             })
-//RS             .unwrap_or_default();
-//RS         let diagnostic = Diagnostic::from_row("E0373", &[], Some(span)).with_edit(
-//RS             crate::Diagnostics::TextEdit { span, new_text },
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn bump(&mut self) -> Token {
-//RS         let t = self.peek().clone();
-//RS         if matches!(t.kind, TokKind::Semi) && t.span.start < t.span.end {
-//RS             self.report_explicit_semicolon(t.span);
-//RS         }
-//RS         if self.pos < self.toks.len() - 1 {
-//RS             self.pos += 1;
-//RS         }
-//RS         t
-//RS     }
-//RS 
-//RS     fn with_nesting<T>(
-//RS         &mut self,
-//RS         span: Span,
-//RS         f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
-//RS     ) -> Result<T, Diagnostic> {
-//RS         if self.depth >= MAX_SOURCE_NESTING {
-//RS             return Err(Diagnostic::source_nesting_exceeded(self.depth + 1, span));
-//RS         }
-//RS         self.depth += 1;
-//RS         let result = f(self);
-//RS         self.depth -= 1;
-//RS         result
-//RS     }
-//RS 
-//RS     fn peek_is_ident(&self, name: &str) -> bool {
-//RS         matches!(&self.peek().kind, TokKind::Ident(n) if n == name)
-//RS     }
-//RS 
-//RS     // --- recovery ------------------------------------------------------
-//RS 
-//RS     /// After a failed top-level item: skip to the next plausible item start.
-//RS     fn sync_top(&mut self) {
-//RS         loop {
-//RS             match self.peek().kind {
-//RS                 TokKind::Eof
-//RS                 | TokKind::KwFn
-//RS                 | TokKind::KwPub
-//RS                 | TokKind::KwStruct
-//RS                 | TokKind::KwEnum
-//RS                 | TokKind::KwImpl
-//RS                 | TokKind::KwConst
-//RS                 | TokKind::KwComptime => return,
-//RS                 _ => {
-//RS                     self.bump();
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// After a failed statement: skip to just past the next `;` at this
-//RS     /// brace depth, or stop before the block's closing `}`.
-//RS     fn sync_stmt(&mut self) {
-//RS         let mut depth = 0usize;
-//RS         loop {
-//RS             match self.peek().kind {
-//RS                 TokKind::Eof => return,
-//RS                 TokKind::LBrace => {
-//RS                     depth += 1;
-//RS                     self.bump();
-//RS                 }
-//RS                 TokKind::RBrace => {
-//RS                     if depth == 0 {
-//RS                         return;
-//RS                     }
-//RS                     depth -= 1;
-//RS                     self.bump();
-//RS                 }
-//RS                 TokKind::Semi => {
-//RS                     self.bump();
-//RS                     if depth == 0 {
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS                 _ => {
-//RS                     self.bump();
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // --- items ----------------------------------------------------------
-//RS 
-//RS     /// S6-R (ratified 2026-06-18): statements are terminated by a synthetic
-//RS     /// terminator the lexer inserts at line ends — users never type `;`. This
-//RS     /// consumes that terminator; an error here means two statements share a line.
-//RS     fn finish_stmt(&mut self) -> Result<(), Diagnostic> {
-//RS         match &self.peek().kind {
-//RS             TokKind::Semi => {
-//RS                 self.bump();
-//RS                 Ok(())
-//RS             }
-//RS             // S6-R (Go's rule part 2): a terminator may be omitted before a
-//RS             // closing `}` or EOF — a single-line block `{ stmt }` needs no
-//RS             // synthetic terminator. Don't consume the `}`; the block loop closes
-//RS             // it. A struct/map literal's `}` is consumed by the expression
-//RS             // parser, so it never reaches here — no risk to literals.
-//RS             TokKind::RBrace | TokKind::Eof => Ok(()),
-//RS             TokKind::KwElse if self.adjacent_if_body_depth > 0 => Ok(()),
-//RS             other => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "something unexpected appeared after this line, found {}",
-//RS                     describe(other)
-//RS                 ),
-//RS                 "each line ends where the line break is (no `;` needed)".to_string(),
-//RS                 "put the next line of code on a new line".to_string(),
-//RS                 Some(self.peek().span),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     fn expect_kw(&mut self, want: TokKind, where_: &str) -> Result<(), Diagnostic> {
-//RS         if std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(&want) {
-//RS             self.bump();
-//RS             Ok(())
-//RS         } else {
-//RS             Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected {} {}, found {}",
-//RS                     describe(&want),
-//RS                     where_,
-//RS                     describe(&self.peek().kind)
-//RS                 ),
-//RS                 "the structure here isn't what the compiler expected".to_string(),
-//RS                 format!("use {} {}", describe(&want), where_),
-//RS                 Some(self.peek().span),
-//RS             ))
-//RS         }
-//RS     }
-//RS 
-//RS     fn expect(&mut self, want: TokKind, where_: &str) -> Result<(), Diagnostic> {
-//RS         self.expect_kw(want, where_)
-//RS     }
-//RS 
-//RS     /// Expect the `,` between items of a delimited list. A list cut off by
-//RS     /// the end of a line, a closer of another kind, or the end of the file is
-//RS     /// E0083 at its opener, never a missing separator (#3719).
-//RS     pub(super) fn expect_list_separator(
-//RS         &mut self,
-//RS         where_: &str,
-//RS         construct: &str,
-//RS     ) -> Result<(), Diagnostic> {
-//RS         if let Some(diagnostic) = self.unclosed_delimiter(construct) {
-//RS             return Err(diagnostic);
-//RS         }
-//RS         self.expect(TokKind::Comma, where_)
-//RS     }
-//RS 
-//RS     /// Expect the closer of a delimited list; a cut-off list is E0083.
-//RS     pub(super) fn expect_closer(
-//RS         &mut self,
-//RS         want: TokKind,
-//RS         where_: &str,
-//RS         construct: &str,
-//RS     ) -> Result<(), Diagnostic> {
-//RS         if std::mem::discriminant(&self.peek().kind) != std::mem::discriminant(&want) {
-//RS             if let Some(diagnostic) = self.unclosed_delimiter(construct) {
-//RS                 return Err(diagnostic);
-//RS             }
-//RS         }
-//RS         self.expect(want, where_)
-//RS     }
-//RS 
-//RS     /// E0083 when the current token cuts off the innermost open delimiter.
-//RS     pub(super) fn unclosed_delimiter(&self, construct: &str) -> Option<Diagnostic> {
-//RS         let token = self.peek();
-//RS         let cutoff = match &token.kind {
-//RS             TokKind::Semi if token.span.start == token.span.end => "the end of the line".to_string(),
-//RS             TokKind::Eof => "the end of the file".to_string(),
-//RS             TokKind::RParen | TokKind::RBracket | TokKind::RBrace => describe(&token.kind),
-//RS             _ => return None,
-//RS         };
-//RS         let (open_span, open, close) = self.innermost_open_delimiter()?;
-//RS         if describe(&token.kind) == format!("`{close}`") {
-//RS             return None;
-//RS         }
-//RS         self.unclosed_report(open_span, open, close, &cutoff, construct)
-//RS     }
-//RS 
-//RS     /// E0083 at `open_span`: the opener is primary, the cut-off point is a
-//RS     /// labelled secondary caret, and inserting the closer there is Suggested.
-//RS     pub(super) fn unclosed_report(
-//RS         &self,
-//RS         open_span: Span,
-//RS         open: &str,
-//RS         close: &str,
-//RS         cutoff: &str,
-//RS         construct: &str,
-//RS     ) -> Option<Diagnostic> {
-//RS         let source = self.source.as_deref()?;
-//RS         let line = source
-//RS             .get(..open_span.start)?
-//RS             .bytes()
-//RS             .filter(|byte| *byte == b'\n')
-//RS             .count()
-//RS             + 1;
-//RS         let at = self.prev_end();
-//RS         let line_text = line.to_string();
-//RS         let diagnostic = Diagnostic::from_row(
-//RS             "E0083",
-//RS             &[
-//RS                 ("open", open),
-//RS                 ("close", close),
-//RS                 ("line", &line_text),
-//RS                 ("cutoff", cutoff),
-//RS                 ("construct", construct),
-//RS             ],
-//RS             Some(open_span),
-//RS         )
-//RS         .with_label(
-//RS             Span::new(at, at),
-//RS             format!("{cutoff} comes before the closing `{close}`"),
-//RS         )
-//RS         .with_suggested_edit(Span::new(at, at), close);
-//RS         Some(diagnostic)
-//RS     }
-//RS 
-//RS     /// The innermost bracket opened before the current token and not yet
-//RS     /// closed, with its spelling and matching closer.
-//RS     fn innermost_open_delimiter(&self) -> Option<(Span, &'static str, &'static str)> {
-//RS         let mut depth = 0usize;
-//RS         for token in self.toks[..self.pos.min(self.toks.len())].iter().rev() {
-//RS             match token.kind {
-//RS                 TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth += 1,
-//RS                 TokKind::LParen | TokKind::LBracket | TokKind::LBrace if depth > 0 => depth -= 1,
-//RS                 TokKind::LParen => return Some((token.span, "(", ")")),
-//RS                 TokKind::LBracket => return Some((token.span, "[", "]")),
-//RS                 TokKind::LBrace => return Some((token.span, "{", "}")),
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     pub(super) fn at_unified_arrow(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS     }
-//RS 
-//RS     pub(super) fn at_unified_arrow_token(kind: &TokKind) -> bool {
-//RS         matches!(kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS     }
-//RS 
-//RS     pub(super) fn expect_unified_arrow(&mut self, where_: &str) -> Result<Token, Diagnostic> {
-//RS         let token = self.peek().clone();
-//RS         if !Self::at_unified_arrow_token(&token.kind) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected `{}` {}, found {}",
-//RS                     Syntax::OP_UNIFIED_ARROW,
-//RS                     where_,
-//RS                     describe(&token.kind)
-//RS                 ),
-//RS                 "callables, arms, and lambdas use one arrow".to_string(),
-//RS                 format!("write `{}` {}", Syntax::OP_UNIFIED_ARROW, where_),
-//RS                 Some(token.span),
-//RS             ));
-//RS         }
-//RS         let token = self.bump();
-//RS         if !matches!(token.kind, TokKind::UnifiedArrow) {
-//RS             self.diags.push(Self::retired_unified_arrow(token.span));
-//RS         }
-//RS         Ok(token)
-//RS     }
-//RS 
-//RS     fn expect_ident(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
-//RS         match self.bump() {
-//RS             Token {
-//RS                 kind: TokKind::Ident(name),
-//RS                 span,
-//RS             } if name != Syntax::KW_CONC_TASK => Ok((name, span)),
-//RS             Token {
-//RS                 kind: TokKind::Ident(name),
-//RS                 span,
-//RS             } => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("`{name}` is reserved for structured task syntax"),
-//RS                 "the `task` word starts a child or task combinator".to_string(),
-//RS                 "choose a different identifier name".to_string(),
-//RS                 Some(span),
-//RS             )),
-//RS             Token {
-//RS                 kind: TokKind::KwIn,
-//RS                 span,
-//RS             } => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
-//RS                 format!(
-//RS                     "the `{}` keyword marks the boundary between a loop binding and its source",
-//RS                     Syntax::KW_IN
-//RS                 ),
-//RS                 format!(
-//RS                     "choose a different identifier name, or use `{}` in a source loop; after `.` it is allowed as a member name",
-//RS                     Syntax::KW_IN
-//RS                 ),
-//RS                 Some(span),
-//RS             )),
-//RS             Token {
-//RS                 kind: TokKind::KwTag,
-//RS                 span,
-//RS             } => Ok((Syntax::KW_TAG.to_string(), span)),
-//RS             t => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("expected a name {}, found {}", where_, describe(&t.kind)),
-//RS                 "names start with a letter or `_`".to_string(),
-//RS                 "e.g. `main`, `count`, `_tmp`".to_string(),
-//RS                 Some(t.span),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     /// S84 (ratified 2026-06-16): a *dashed name* — `ident (-ident)*` — for the
-//RS     /// kebab-case naming positions (package / module / system / image / env
-//RS     /// names), matching nixpkgs/npm package-name convention. A `-` only joins
-//RS     /// when it is **span-adjacent** to both neighbours (`prev.end == minus.start`
-//RS     /// and `minus.end == next.start`); a spaced `a - b` therefore stays
-//RS     /// subtraction (no lexer change, no expression-grammar change). No leading,
-//RS     /// trailing, or doubled hyphen — `image.-iso` / `image.a--b` fall through to
-//RS     /// the ordinary teaching diagnostic via `expect_ident`.
-//RS     fn expect_dashed_name(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
-//RS         let (mut name, first_span) = self.expect_ident(where_)?;
-//RS         let start = first_span.start;
-//RS         let mut end = first_span.end;
-//RS         // Join `-<segment>` while the hyphen and the following ident are both
-//RS         // glued (no intervening whitespace) to the preceding segment.
-//RS         while matches!(self.peek().kind, TokKind::Minus)
-//RS             && self.peek().span.start == end
-//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
-//RS             && self.peek2().span.start == self.peek().span.end
-//RS         {
-//RS             self.bump(); // `-`
-//RS             let seg = self.bump(); // the adjacent ident
-//RS             if let TokKind::Ident(s) = seg.kind {
-//RS                 name.push_str(Syntax::NAME_SEGMENT_SEP);
-//RS                 name.push_str(&s);
-//RS                 end = seg.span.end;
-//RS             }
-//RS         }
-//RS         Ok((name, Span::new(start, end)))
-//RS     }
-//RS 
-//RS     /// D-EFFTREE1/D-AUTHORITY-MEM2: an effect path — `ident (.ident)*` — for effect-list
-//RS     /// entries (`FS`, `FS.Read`, `Net.HTTP.Get`). The root is validated in
-//RS     /// sema against the closed ten-name D-EFF4/5 vocabulary; further segments
-//RS     /// are an open, user-chosen leaf path (mirrors D-TAG1's tag-tree dotted
-//RS     /// paths) — not validated here, and with no depth limit.
-//RS     fn expect_effect_path_name(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
-//RS         let (mut name, first_span) = self.expect_ident(where_)?;
-//RS         let mut end = first_span.end;
-//RS         while matches!(self.peek().kind, TokKind::Dot) {
-//RS             self.bump(); // `.`
-//RS             let (seg, seg_span) = self.expect_ident("for an effect path segment after `.`")?;
-//RS             name.push('.');
-//RS             name.push_str(&seg);
-//RS             end = seg_span.end;
-//RS         }
-//RS         // Memory's bounded denial is the only parameterized rights-tree
-//RS         // entry. Keep its closed argument in the canonical AST string so the
-//RS         // formatter, sema, and every execution tier consume one spelling.
-//RS         if name == "Mem.Alloc" && matches!(self.peek().kind, TokKind::LParen) {
-//RS             self.bump();
-//RS             let (label, label_span) = self.expect_ident("for the memory denial argument name")?;
-//RS             if label != "above" {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0119",
-//RS                     format!("`Mem.Alloc` does not accept the argument `{label}`"),
-//RS                     "the bounded memory denial has one closed argument: `above: Bytes`".to_string(),
-//RS                     "write `Mem.Alloc(above: 65536)`".to_string(),
-//RS                     Some(label_span),
-//RS                 ));
-//RS             }
-//RS             self.expect(TokKind::Colon, "after `above`")?;
-//RS             let token = self.bump();
-//RS             let TokKind::Int(value, _) = token.kind else {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0119",
-//RS                     "`Mem.Alloc(above: …)` needs an integer byte ceiling".to_string(),
-//RS                     "the bounded denial is checked at compile time and accepts a positive byte count".to_string(),
-//RS                     "write `Mem.Alloc(above: 65536)`".to_string(),
-//RS                     Some(token.span),
-//RS                 ));
-//RS             };
-//RS             if value <= 0 {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0119",
-//RS                     "`Mem.Alloc(above: …)` needs a positive byte ceiling".to_string(),
-//RS                     "zero cannot bound a usable memory region".to_string(),
-//RS                     "write a positive byte count, such as `Mem.Alloc(above: 65536)`".to_string(),
-//RS                     Some(token.span),
-//RS                 ));
-//RS             }
-//RS             let close_span = self.peek().span;
-//RS             self.expect(TokKind::RParen, "after the memory denial argument")?;
-//RS             name.push_str(&format!("(above: {value})"));
-//RS             end = close_span.end;
-//RS         }
-//RS         Ok((name, Span::new(first_span.start, end)))
-//RS     }
-//RS }
-//RS 
-//RS /// End byte of a parsed `System` field value, for the field's span.
-//RS fn value_end_system(v: &crate::AST::SystemFieldValue) -> usize {
-//RS     use crate::AST::SystemFieldValue::*;
-//RS     match v {
-//RS         Platform { span, .. } => span.end,
-//RS         Packages(e) | Other(e) => e.span().end,
-//RS         Services(entries) => entries.last().map(|s| s.span.end).unwrap_or(0),
-//RS         Options(entries) => entries.last().map(|o| o.span.end).unwrap_or(0),
-//RS     }
-//RS }
-//RS 
-//RS /// End byte of a parsed `Image` field value, for the field's span.
-//RS fn value_end_image(v: &crate::AST::ImageFieldValue) -> usize {
-//RS     use crate::AST::ImageFieldValue::*;
-//RS     match v {
-//RS         From { span, .. } | Format { span, .. } | Platform { span, .. } => span.end,
-//RS         Other(e) => e.span().end,
-//RS     }
-//RS }
-//RS 
-//RS /// U14/D-JPK-IMAGE1/D-ENV-IMAGE1: `from:` must be written `system.<name>`
-//RS /// (the `.Iso` disk-image tier), `packages.<name>` (a package OCI image), or
-//RS /// `env.<name>` (a runnable environment OCI image).
-//RS fn image_from_not_system(span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0003",
-//RS         "an image's `from:` must name a system, package, or environment".to_string(),
-//RS         "an `Image` is built from a `System` (`from: system.<name>`, disk images), a `Package` (`from: packages.<name>`, OCI containers), or an `Environment` (`from: env.<name>`, runnable shell images)".to_string(),
-//RS         "write `from: system.<name>`, `from: packages.<name>`, or `from: env.<name>`".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// U15: a fleet host value must be written `system.<name>[.{ overrides }]`.
-//RS fn fleet_host_not_system(span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0003",
-//RS         "a fleet host must name a system".to_string(),
-//RS         "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`"
-//RS             .to_string(),
-//RS         "write `<host>: system.<name>`, e.g. `web1: system.web`".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// U15: an unterminated `.{ … }` override record on a fleet host.
-//RS fn fleet_unterminated_override(span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0003",
-//RS         "unterminated host override record".to_string(),
-//RS         "U15: a `.{ … }` copy-with-update override on a host must be closed with `}`".to_string(),
-//RS         "close the override record with `}`".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn pat_span(pat: &Pattern) -> Span {
-//RS     pat.span()
-//RS }
-//RS 
-//RS /// D-DOTSCOPE1/leading-dot patterns share one head classifier: an uppercase
-//RS /// ident, a derive-template `$` name splice (D-NAME-SPLICE1=B), or `null` may
-//RS /// follow a leading `.`.
-//RS fn leading_dot_variant(kind: &TokKind) -> Option<String> {
-//RS     match kind {
-//RS         TokKind::Ident(name)
-//RS             if Syntax::is_comptime_name(name)
-//RS                 || name.chars().next().is_some_and(char::is_uppercase) =>
-//RS         {
-//RS             Some(name.clone())
-//RS         }
-//RS         TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod s61_tests {
-//RS     use super::*;
-//RS     use crate::Lexer::lex;
-//RS     use crate::AST::{BinOp, Expr, Stmt};
-//RS 
-//RS     fn program(src: &str) -> Program {
-//RS         let (toks, errs) = lex(src);
-//RS         assert!(errs.is_empty(), "lex errors: {errs:?}");
-//RS         parse(&toks).unwrap_or_else(|d| panic!("parse errors: {d:?}"))
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn clean_preparation_reuses_byte_identical_tokens() {
-//RS         let (tokens, errors) = lex("fn run() { value :: 1 }\n");
-//RS         assert!(errors.is_empty(), "lex errors: {errors:?}");
-//RS         let expected = crate::Lexer::without_comments(&tokens);
-//RS         let (prepared, fences) = prepare_tokens(&tokens).expect("clean source");
-//RS         assert!(fences.is_empty());
-//RS         assert_eq!(prepared.as_ref(), expected.as_slice());
-//RS         assert!(
-//RS             std::ptr::eq(prepared.as_ref().as_ptr(), tokens.as_ptr()),
-//RS             "clean source should borrow the lexer token slice"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn prefix_failure_contracts_cover_nested_type_positions() {
-//RS         let parsed = program(
-//RS             "struct Holder {\n\
-//RS                  optional: Int?\n\
-//RS                  unit: !IOError\n\
-//RS                  union: Int (DbError | TimeoutError)!\n\
-//RS                  callback: fn(Int? IOError!) IOError!\n\
-//RS                  impossible: !Never\n\
-//RS              }\n\
-//RS              alias Box<T> :: T? IOError!\n\
-//RS              fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! -> value\n\
-//RS              fn save() IOError! {}\n\
-//RS              fn run() {}\n",
-//RS         );
-//RS         let holder = parsed
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
-//RS                 _ => None,
-//RS             })
-//RS             .expect("Holder");
-//RS         assert!(matches!(
-//RS             &holder.fields[0].ty,
-//RS             crate::AST::Type::Option(inner)
-//RS                 if matches!(inner.as_ref(), crate::AST::Type::Int)
-//RS         ));
-//RS         assert!(matches!(
-//RS             &holder.fields[1].ty,
-//RS             crate::AST::Type::Result { ok, err }
-//RS                 if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-//RS                     && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
-//RS         ));
-//RS         assert!(matches!(
-//RS             &holder.fields[2].ty,
-//RS             crate::AST::Type::Result { ok, err }
-//RS                 if matches!(ok.as_ref(), crate::AST::Type::Int)
-//RS                     && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2)
-//RS         ));
-//RS         assert!(matches!(
-//RS             &holder.fields[3].ty,
-//RS             crate::AST::Type::Fn { params, ret: Some(ret), .. }
-//RS                 if matches!(params.first(), Some(crate::AST::Type::Result { .. }))
-//RS                     && matches!(ret.as_ref(), crate::AST::Type::Result { .. })
-//RS         ));
-//RS         assert!(matches!(
-//RS             &holder.fields[4].ty,
-//RS             crate::AST::Type::Result { err, .. }
-//RS                 if matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_NEVER)
-//RS         ));
-//RS         let formatted = crate::Formatter::format_source(
-//RS             "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! -> 1\n",
-//RS         )
-//RS         .expect("prefix formatter");
-//RS         assert!(formatted.contains("fn save() IOError!"), "{formatted}");
-//RS         assert!(
-//RS             formatted.contains("fn load() -> Int (DbError | TimeoutError)!"),
-//RS             "{formatted}"
-//RS         );
-//RS         let contextual =
-//RS             crate::Formatter::format_source("fn load() IOError! -> read()?(\"loading config\")\n")
-//RS                 .expect("contextual propagation formatter");
-//RS         assert!(contextual.contains("?(\"loading config\")"), "{contextual}");
-//RS     }
-//RS     #[test]
-//RS     fn built_in_marker_accepts_positional_string_argument() {
-//RS         let parsed = program(
-//RS             "#CLI\n\
-//RS              struct ServeArgs {\n\
-//RS                  #Doc(\"port\") port: Int{3000}\n\
-//RS              }\n\
-//RS              fn run(args: ServeArgs) {}\n",
-//RS         );
-//RS         let field = parsed
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 crate::AST::Item::Struct(def) => def.fields.first(),
-//RS                 _ => None,
-//RS             })
-//RS             .expect("ServeArgs.port");
-//RS         assert_eq!(field.serde_markers.len(), 1);
-//RS         assert_eq!(field.serde_markers[0].name, "Doc");
-//RS         assert!(field.serde_markers[0].arg_labels[0].is_none());
-//RS     }
-//RS 
-//RS 
-//RS     #[test]
-//RS     fn retired_failure_surface_never_builds_legacy_ast() {
-//RS         for code in [
-//RS             "E-ERR-SIGIL",
-//RS             "E-ERR-DEFAULT",
-//RS             "E-TYPE-PREFIX",
-//RS             "E-ERR-UNION",
-//RS             "E-ERR-PROPAGATE",
-//RS         ] {
-//RS             assert!(
-//RS                 !is_teaching_parse_diag(code),
-//RS                 "retired failure diagnostic must not recover an AST: {code}"
-//RS             );
-//RS         }
-//RS         for source in [
-//RS             "struct Boxed { value: Result<Int, IOError> }\nfn run() {}\n",
-//RS             "alias Old :: Int? ! IOError\n",
-//RS             "fn save() ! {}\n",
-//RS             "fn save() ! IOError {}\n",
-//RS             "fn load() -> Int !IOError {}\n", // retired-spelling
-//RS             "fn load() -> ?Int {}\n",         // retired-spelling
-//RS             "fn save() !IOError {}\n",        // retired-spelling
-//RS             "fn save() IOError | NetError! {}\n",
-//RS             "fn run() { value :: read()? }\n",
-//RS         ] {
-//RS             let (tokens, lexer_diagnostics) = lex(source);
-//RS             assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-//RS             parse(&tokens).expect_err("retired failure syntax must not produce an AST");
-//RS 
-//RS             assert!(
-//RS                 parse_for_check(&tokens).is_err(),
-//RS                 "retired failure syntax must not enter the check recovery AST: {source}"
-//RS             );
-//RS             assert!(
-//RS                 parse_for_fmt(&tokens).is_err(),
-//RS                 "retired failure syntax must not enter the formatter recovery AST: {source}"
-//RS             );
-//RS             assert!(
-//RS                 crate::Formatter::format_source(source).is_err(),
-//RS                 "retired failure syntax must not enter the formatter: {source}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn dispatch_atom_boolean_group_has_safe_source_edit() {
-//RS         let source = "fn run() {\n    n :: 48\n    ready :: true\n    if n < {\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }\n}\n";
-//RS         let (tokens, lex_diags) = lex(source);
-//RS         assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
-//RS         let (_, diagnostics) = parse_for_check_with_source(&tokens, source)
-//RS             .expect("E0386 should recover the dispatch arm");
-//RS         let diagnostic = diagnostics
-//RS             .iter()
-//RS             .find(|diagnostic| diagnostic.code == "E0386")
-//RS             .expect("E0386");
-//RS         let edit = diagnostic.edit.as_ref().expect("source edit");
-//RS         assert_eq!(&source[edit.span.start..edit.span.end], "48 | 45");
-//RS         assert_eq!(edit.new_text, "(48 | 45)");
-//RS         assert_eq!(
-//RS             diagnostic.applicability,
-//RS             Some(crate::Diagnostics::FixApplicability::Safe)
-//RS         );
-//RS         assert_eq!(
-//RS             diagnostic.safety,
-//RS             Some(crate::Diagnostics::FixSafety::Formatting)
-//RS         );
-//RS         let fixed = source.replace("48 | 45", "(48 | 45)");
-//RS         let (tokens, lex_diags) = lex(&fixed);
-//RS         assert!(lex_diags.is_empty(), "fixed lex diagnostics: {lex_diags:?}");
-//RS         assert!(parse(&tokens).is_ok(), "fixed dispatch arm should parse");
-//RS 
-//RS         for variant in [
-//RS             source.replace("&&", "||"),
-//RS             source.replace("48 | 45 && ready", "ready && 48 | 45"),
-//RS         ] {
-//RS             let (tokens, lex_diags) = lex(&variant);
-//RS             assert!(
-//RS                 lex_diags.is_empty(),
-//RS                 "variant lex diagnostics: {lex_diags:?}"
-//RS             );
-//RS             let (_, diagnostics) = parse_for_check_with_source(&tokens, &variant)
-//RS                 .expect("Boolean operands should recover with E0386");
-//RS             assert!(
-//RS                 diagnostics
-//RS                     .iter()
-//RS                     .any(|diagnostic| diagnostic.code == "E0386"),
-//RS                 "expected E0386 in variant: {diagnostics:?}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn missing_function_body_is_e0081_and_recovers_for_check() {
-//RS         let source = "fn host_open(path: String) -[FS]> Int\nfn run() {}\n";
-//RS         let (tokens, lex_diags) = lex(source);
-//RS         assert!(lex_diags.is_empty(), "{lex_diags:?}");
-//RS         assert!(
-//RS             parse(&tokens).is_err(),
-//RS             "a function without a body must fail ordinary parse"
-//RS         );
-//RS         let (prog, diagnostics) =
-//RS             parse_for_check(&tokens).expect("E0081 should recover an AST for check/LSP");
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == "E0081"),
-//RS             "expected E0081, got {diagnostics:?}"
-//RS         );
-//RS         let names: Vec<&str> = prog
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 crate::AST::Item::Func(func) => Some(func.name.as_str()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         assert!(
-//RS             names.contains(&"host_open") && names.contains(&"run"),
-//RS             "later items must still parse: {names:?}"
-//RS         );
-//RS 
-//RS         let source = "fn foo() -> Int\nfn bar() {}\n";
-//RS         let (tokens, lex_diags) = lex(source);
-//RS         assert!(lex_diags.is_empty(), "{lex_diags:?}");
-//RS         let (prog, diagnostics) =
-//RS             parse_for_check(&tokens).expect("missing brace body should recover");
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == "E0081"),
-//RS             "expected E0081 for a typed signature without a body, got {diagnostics:?}"
-//RS         );
-//RS         let names: Vec<&str> = prog
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 crate::AST::Item::Func(func) => Some(func.name.as_str()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         assert!(names.contains(&"bar"), "fn bar must still parse: {names:?}");
-//RS     }
-//RS 
-//RS     /// S84 (regression): spaced `a - b` is still subtraction. The dashed-name
-//RS     /// reader only fires in name positions and only on span-adjacent hyphens, so
-//RS     /// the expression grammar is untouched.
-//RS     #[test]
-//RS     fn spaced_minus_is_subtraction() {
-//RS         // Also a single-line-block regression guard (S6-R Go-rule part 2: a
-//RS         // terminator may be omitted before the closing `}`).
-//RS         let p = program("fn run() { d :: 5 - 3 }");
-//RS         let func = p.items.iter().find_map(|i| match i {
-//RS             crate::AST::Item::Func(f) => Some(f),
-//RS             _ => None,
-//RS         });
-//RS         let func = func.expect("a run function");
-//RS         let val = func.body.iter().find_map(|s| match s {
-//RS             Stmt::Val(b) => Some(b),
-//RS             _ => None,
-//RS         });
-//RS         let val = val.expect("a val binding");
-//RS         assert!(
-//RS             matches!(val.init, Expr::Binary(BinOp::Sub, _, _, _)),
-//RS             "expected `5 - 3` to parse as subtraction, got {:?}",
-//RS             val.init
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-META-CODE1: a compile-time name in a derive return type is a typed
-//RS     /// hole until expansion, not a fact-in-type diagnostic at definition time.
-//RS     #[test]
-//RS     fn derive_generic_type_holes_stay_in_the_template_ast() {
-//RS         let p = program(
-//RS             r#"
-//RS derive T.TypeName {
-//RS     info :: T.reflect()
-//RS     param :: info.type_params[0].name
-//RS     fn get_value(self) -> @param -> ~self.value
-//RS     fn type_name(self) -> String -> T.$name
-//RS }
-//RS "#,
-//RS         );
-//RS         let derive = p
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 crate::AST::Item::UserDerive(derive) => Some(derive),
-//RS                 _ => None,
-//RS             })
-//RS             .expect("user derive");
-//RS         let function = derive
-//RS             .body
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 crate::AST::DeriveBodyItem::Item(item) => match item.as_ref() {
-//RS                     crate::AST::Item::Func(function) if function.name == "get_value" => {
-//RS                         Some(function)
-//RS                     }
-//RS                     _ => None,
-//RS                 },
-//RS                 _ => None,
-//RS             })
-//RS             .expect("generic derive function");
-//RS         assert!(matches!(
-//RS             &function.return_type,
-//RS             Some(crate::AST::Type::Named(name)) if name == "@param"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn derive_body_rejects_nested_impl_but_generate_keeps_item_blocks() {
-//RS         let source = r#"
-//RS derive T.Debug {
-//RS     impl Thing.Debug {
-//RS         fn debug(self) -> String -> "nested"
-//RS     }
-//RS }
-//RS "#;
-//RS         let (toks, lex_errors) = lex(source);
-//RS         assert!(lex_errors.is_empty(), "lex errors: {lex_errors:?}");
-//RS         let diagnostics = parse(&toks).expect_err("a derive body must not repeat its impl header");
-//RS         assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
-//RS         assert_eq!(diagnostics[0].code, "E0003");
-//RS 
-//RS         program(
-//RS             r#"
-//RS fn build(b: BuildContext) {
-//RS     b.generate("made") {
-//RS         impl Thing.Debug {
-//RS             fn debug(self) -> String -> "generated"
-//RS         }
-//RS     }
-//RS }
-//RS "#,
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-STRUCT-ONCE1=A: a closed type-list source must stop before the root
-//RS     /// template body, so `[Type] { impl … }` is not parsed as a typed list
-//RS     /// literal.
-//RS     #[test]
-//RS     fn root_template_loop_parses_closed_type_list_and_declarations() {
-//RS         let p = program(
-//RS             r#"
-//RS prep loop T in [Point] {
-//RS     impl T {
-//RS         fn generated(self) -> String -> "generated"
-//RS     }
-//RS     #Test("generated") {
-//RS         .measure {
-//RS             assert(true)
-//RS         }
-//RS     }
-//RS }
-//RS "#,
-//RS         );
-//RS         let loop_item = p
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 crate::AST::Item::TemplateLoop(item) => Some(item),
-//RS                 _ => None,
-//RS             })
-//RS             .expect("root template loop");
-//RS         assert_eq!(loop_item.body.len(), 2);
-//RS         assert!(matches!(
-//RS             loop_item.body[0],
-//RS             crate::AST::DeriveBodyItem::Item(ref item)
-//RS                 if matches!(item.as_ref(), crate::AST::Item::Impl(_))
-//RS         ));
-//RS         assert!(matches!(
-//RS             loop_item.body[1],
-//RS             crate::AST::DeriveBodyItem::Item(ref item)
-//RS                 if matches!(item.as_ref(), crate::AST::Item::Test(_))
-//RS         ));
-//RS     }
-//RS 
-//RS     /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
-//RS     #[test]
-//RS     fn task_keyword_callable_body_parses_as_spawn() {
-//RS         let p = program("fn run() {\n    task.group g {\n        h :: task work()\n    }\n}\n");
-//RS         let run = p.items.iter().find_map(|i| match i {
-//RS             crate::AST::Item::Func(f) if f.name == "run" => Some(f),
-//RS             _ => None,
-//RS         });
-//RS         let body = &run.expect("run").body;
-//RS         let task_group = body.iter().find_map(|s| match s {
-//RS             Stmt::TaskGroup { body, .. } => Some(body),
-//RS             _ => None,
-//RS         });
-//RS         let bind = task_group
-//RS             .expect("task group")
-//RS             .iter()
-//RS             .find_map(|s| match s {
-//RS                 Stmt::Val(b) => Some(b),
-//RS                 _ => None,
-//RS             });
-//RS         match &bind.expect("binding").init {
-//RS             Expr::MethodCall { method, args, .. } => {
-//RS                 assert_eq!(method, Syntax::INTERNAL_TASK_SPAWN_METHOD);
-//RS                 assert_eq!(args.len(), 1);
-//RS                 assert!(matches!(args[0].expr, Expr::Lambda(_)));
-//RS             }
-//RS             other => panic!("expected task work() MethodCall, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-CONC-SPAWN1=D: selectors nest, and a combinator branch may use a
-//RS     /// block body without introducing another spawn spelling.
-//RS     #[test]
-// END-PORT-PENDING 0341 crates/jet-parser/src/Parser/mod.rs:1-1774
+// Private continuation of Parser/State.jet. Parser is canonical JetParserState;
+// tokens/pos/diags map to tokens/position/diagnostics and policy_declarations
+// maps to block_policy_declarations. No second parser state or AST owner.
+use jet_foundation.[Diagnostic, DiagnosticTemplateHole, Span, Program, Pattern, Expr,
+    PolicyDeclaration, UserPolicyDecl, AppliedRuleApplication, NamedSpan, SystemFieldValue, ImageFieldValue, Syntax, ast_program,
+    diagnostic_from_registry, diagnostic_from_row, diagnostic_source_nesting_exceeded, MAX_SOURCE_NESTING,
+    pattern_span, expr_span]
+use jet_lexer.[Token, StringPart, STRING_PART_TEXT, STRING_PART_BYTE, STRING_PART_INTERPOLATION,
+    TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT,
+    TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_LBRACE,
+    TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_MINUS, TOKEN_NULL,
+    TOKEN_UNIFIED_ARROW, TOKEN_LAMBDA_ARROW, TOKEN_EOF, TOKEN_SEMI, TOKEN_KW_IN, TOKEN_KW_TAG]
 
+// Rust: crates/jet-parser/src/Parser/mod.rs:34
+// statement_definitely_exits_value_block -> Statements.jet:192, with helpers
+// parser_expression_definitely_diverges/true and parser_switch_definitely_exits_value_block.
+// Rust: crates/jet-parser/src/Parser/mod.rs:83
+// block_definitely_exits_value_block -> Statements.jet:173 (any exiting statement).
+// Rust: crates/jet-parser/src/Parser/mod.rs:89
+// loop_body_can_break -> Statements.jet:217.
+// Rust: crates/jet-parser/src/Parser/mod.rs:93
+// loop_body_can_break_inner -> Statements.jet:221 (nested labelled loops and
+// switches, ignore unreachable breaks after definitely exiting statements).
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:135
+pub fn parse(toks: [Token]) -> Program ParserFailure! {
+    parse_inner(toks, false, false, None)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:143
+pub fn parse_with_source(toks: [Token], source: String) -> Program ParserFailure! {
+    parse_inner(toks, false, false, Val(source))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:151
+pub fn parse_config(toks: [Token]) -> Program ParserFailure! {
+    parse_inner(toks, false, true, None)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:157
+pub fn parse_config_with_source(toks: [Token], source: String) -> Program ParserFailure! {
+    parse_inner(toks, false, true, Val(source))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:163
+pub fn parse_for_fmt(toks: [Token]) -> Program ParserFailure! {
+    parse_inner(toks, true, false, None)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:169
+pub fn parse_for_check(toks: [Token]) -> (program: Program, diagnostics: [Diagnostic]) ParserFailure! {
+    parse_for_check_inner(toks, None)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:176
+pub fn parse_for_check_with_source(toks: [Token], source: String) -> (program: Program, diagnostics: [Diagnostic]) ParserFailure! {
+    parse_for_check_inner(toks, Val(source))
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:183
+fn prepare_tokens(toks: [Token]) -> ParserFenceExpansion ParserFailure! {
+    has_comments := false
+    has_fences := false
+    loop token in toks {
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> has_comments = true
+        if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> has_fences = true
+        if has_comments && has_fences -> break
+    }
+    // A clean input retains the lexer-owned descriptor; no token-vector clone.
+    code := toks
+    if has_comments {
+        filtered := [Token]{}
+        loop token in toks {
+            if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &filtered.push(token)
+        }
+        code = ^filtered
+    }
+    prepared := if has_fences -> parser_fence_expand(code) else -> ParserFenceExpansion{
+        tokens: code, fenced_statements: [], diagnostics: [], budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    if !prepared.diagnostics.is_empty() -> return Err(ParserFailure.Diagnostics{diagnostics: ^prepared.diagnostics})
+    check_token_nesting(prepared.tokens)?
+    prepared
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:218
+fn parse_for_check_inner(toks: [Token], source: String?) -> (program: Program, diagnostics: [Diagnostic]) ParserFailure! {
+    prepared := prepare_tokens(toks)?
+    state := parser_new_state(prepared.tokens, source, true, false)
+    program := parser_parse_program(&state)
+    program.fenced_statements = ^prepared.fenced_statements
+    program.block_spans = ^state.block_spans
+    loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
+    program.user_policy_declarations = ^state.user_policy_declarations
+    program.applied_rules = ^state.applied_rules
+    program.rule_facts = ^state.rule_facts
+    loop diagnostic in state.diagnostics {
+        if diagnostic.severity != 2 && !is_teaching_parse_diag(diagnostic.code) && diagnostic.code != "E0081" -> return Err(ParserFailure.Diagnostics{diagnostics: ^state.diagnostics})
+    }
+    (program: program, diagnostics: state.diagnostics)
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:272
+fn parse_inner(toks: [Token], for_fmt: Bool, allow_environment_reads: Bool, source: String?) -> Program ParserFailure! {
+    prepared := prepare_tokens(toks)?
+    state := parser_new_state(prepared.tokens, source, for_fmt, allow_environment_reads)
+    program := parser_parse_program(&state)
+    program.fenced_statements = ^prepared.fenced_statements
+    program.block_spans = ^state.block_spans
+    loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
+    program.user_policy_declarations = ^state.user_policy_declarations
+    program.applied_rules = ^state.applied_rules
+    program.rule_facts = ^state.rule_facts
+    loop diagnostic in state.diagnostics {
+        if diagnostic.severity != 1 -> next
+        if for_fmt && (is_teaching_parse_diag(diagnostic.code) || (diagnostic.code == "E0927" && diagnostic.what.contains("retired"))) -> next
+        return Err(ParserFailure.Diagnostics{diagnostics: ^state.diagnostics})
+    }
+    program
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:333
+fn string_literal_value(parts: [StringPart]) -> String ParserFailure! {
+    if parts.len() != 1 -> return Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_from_registry("E0003", None,
+        "an import path must be one piece of quoted text", "file paths can't contain `{{ }}` interpolation",
+        "write: {Syntax.KW_USE} \"path/to/file\";")}})
+    part :: parts[0]
+    if part.kind == STRING_PART_TEXT -> return part.text
+    if part.kind == STRING_PART_BYTE -> return Char.from_u32(U32{part.byte}).to_string()
+    Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_from_registry("E0003", None,
+        "an import path can't contain `{{ }}` interpolation", "file paths are fixed strings",
+        "write: {Syntax.KW_USE} \"path/to/file\";")}})
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:355
+fn string_literal_token_value(token: Token) -> String ParserFailure! {
+    if token.kind == TOKEN_STRING -> return string_literal_value(token.payload.string_parts)
+    if token.kind == TOKEN_RAW_STRING -> return token.payload.decoded
+    Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_from_registry("E0003", None,
+        "expected quoted text, found {parser_describe_token(token)}",
+        "this position accepts one non-interpolated string literal",
+        "write a quoted string or a backtick-fenced raw string")}})
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:371
+fn is_teaching_parse_diag(code: String) -> Bool Never! {
+    code == "E0031" || code == "E0034" || code == "E0048" || code == "E0049" || code == "E0055" || code == "E0057" || code == "E0065" || code == "E0066" || code == "E0068" || code == "E0070" || code == "E0080" || code == "E0082" || code == "E0077" || code == "E0146" || code == "E0154" || code == "E0210" || code == "E0986" || code == "E0320" || code == "E0992" || code == "E0994" || code == "E0366" || code == "E0367" || code == "E0372" || code == "E0373" || code == "E0374" || code == "E0378" || code == "E0379" || code == "E0383" || code == "E0384" || code == "E0385" || code == "E0386" || code == "E0999" || code == "E0412" || code == "E0413" || code == "E0414" || code == "E0415" || code == "E0417" || code == "E0418" || code == "E0998" || code == "E0927" || code == "E1115"
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:432
+// Parser maps to JetParserState (State.jet:47). This factory carries every Rust
+// field/default, using canonical -1 for callable_tail_block_depth=None.
+fn parser_new_state(tokens: [Token], source: String?, migration_mode: Bool, allow_environment_reads: Bool) -> JetParserState Never! {
+    source_end :: if tokens.is_empty() -> 0 else -> tokens[tokens.len() - 1].span.end
+    source_bytes :: if source == { .Val(text) -> text.bytes(); None -> [U8]{} }
+    JetParserState{tokens: tokens, position: 0, diagnostics: [], source_end: source_end,
+        source: source_bytes, source_present: source != None, line_starts: parser_line_starts(source_bytes),
+        explicit_semicolon_reported: false, retired_step: None, pending_type_gt: false,
+        pending_type_gt_span: Span{start: source_end, end: source_end}, depth: 0,
+        result_handler_depth: 0, type_generic_depth: 0, type_generic_chain: [],
+        type_generic_truncated: false, pub_file_default: false, in_layout_body: 0,
+        adjacent_if_body_depth: 0, block_depth: 0, callable_tail_depth: -1,
+        callable_tail_expects_value: false, lambda_tail_block_depth: None,
+        module_arg_expr_depth: None, allow_lowercase_leading_dot: false,
+        migration_mode: migration_mode, allow_environment_reads: allow_environment_reads,
+        derive_template_depth: 0, block_policy_declarations: [], user_policy_declarations: [],
+        applied_rules: [], rule_facts: [], block_spans: [], prep_value_block: None,
+        prep_value_escape: None, statement_start: -1}
+}
+
+// Rust's Result<_, Vec<Diagnostic>> rail; diagnostics are not themselves errors.
+#Error
+pub enum ParserFailure {
+    Diagnostics(diagnostics: [Diagnostic])
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:509,513
+// Frames retain read-only array descriptors, not copies of nested token trees.
+enum ParserNestingFrame {
+    Tokens(tokens: [Token], position: Int, depth: Int)
+    StringParts(parts: [StringPart], position: Int, depth: Int)
+}
+fn check_token_nesting(tokens: [Token]) -> () ParserFailure! {
+    pending := [ParserNestingFrame]{ParserNestingFrame.Tokens{tokens: tokens, position: 0, depth: 0}}
+    loop !pending.is_empty() {
+        frame :: &pending.pop() ?? break
+        if frame == {
+            .Tokens(batch, position, initial_depth) -> {
+                if position >= batch.len() -> next
+                token :: batch[position]
+                depth := initial_depth
+                parts_depth := Int?{None}
+                if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE {
+                    depth += 1
+                    if depth > MAX_SOURCE_NESTING -> return Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_source_nesting_exceeded(depth, token.span)}})
+                } else if token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RBRACE {
+                    if depth > 0 -> depth -= 1
+                } else if token.kind == TOKEN_STRING {
+                    has_interpolation :: loop part in token.payload.string_parts {
+                        if part.kind == STRING_PART_INTERPOLATION -> break true
+                    } ?? false
+                    if has_interpolation {
+                        interpolation_depth :: depth + 1
+                        if interpolation_depth > MAX_SOURCE_NESTING -> return Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_source_nesting_exceeded(interpolation_depth, token.span)}})
+                        parts_depth = Val(interpolation_depth)
+                    }
+                }
+                &pending.push(ParserNestingFrame.Tokens{tokens: batch, position: position + 1, depth: depth})
+                if parts_depth == .Val(nested_depth) -> &pending.push(ParserNestingFrame.StringParts{parts: token.payload.string_parts, position: 0, depth: nested_depth})
+            }
+            .StringParts(parts, position, depth) -> {
+                if position >= parts.len() -> next
+                part :: parts[position]
+                &pending.push(ParserNestingFrame.StringParts{parts: parts, position: position + 1, depth: depth})
+                if part.kind == STRING_PART_INTERPOLATION -> &pending.push(ParserNestingFrame.Tokens{tokens: part.tokens, position: 0, depth: depth})
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:615
+// BranchPart::Arm/Else -> ParserBranchPart in State.jet:98, is_else discriminant.
+// Rust: crates/jet-parser/src/Parser/mod.rs:623
+// branch_gap_is_connector -> State.jet:500, scans connector words in byte ranges.
+// Rust: crates/jet-parser/src/Parser/mod.rs:631
+// indent_following_lines -> State.jet:531, preserves blank trailing/newline lines.
+// Rust: crates/jet-parser/src/Parser/mod.rs:646
+// take_branch_piece -> State.jet:519, returns trimmed Span; caller advances cursor.
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:663
+fn parser_environment_read_outside_config(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0003", Val(span), "`$NAME` is an environment read for config surfaces only",
+        "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`",
+        "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:673
+fn parser_invalid_environment_read(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0003", Val(span), "an environment read needs a plain name after `$`",
+        "config-surface environment access has the typed form `$NAME`",
+        "write a name such as `$HOME` in `env.jet` or a deploy/config file")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:687
+fn parser_unknown_fact_root(name: String, span: Span) -> Diagnostic Never! {
+    body :: name.strip_prefix(Syntax.COMPTIME_MARK) ?? name
+    if !body.is_empty() && Syntax.is_constant_name(body) -> return parser_environment_read_outside_config(span)
+    diagnostic_from_registry("E0003", Val(span), "`{name}` is not a compiler fact",
+        "`$` marks facts the compiler supplies: the roots `{Syntax.FACT_ROOT_BUILD}`, `{Syntax.FACT_ROOT_PACKAGE}`, `{Syntax.FACT_ROOT_PHASE}` and `{Syntax.FACT_ROOT_PROGRAM}`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)",
+        "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:707
+// span_has_authored_line_break -> State.jet:466.
+// Rust: crates/jet-parser/src/Parser/mod.rs:715
+// prefer_arm_table_lint -> State.jet:479, source-derived safe edit if available.
+// Rust: crates/jet-parser/src/Parser/mod.rs:735
+// arm_table_edit -> State.jet:559, connectors/source-order/error/readiness checks.
+// Rust: crates/jet-parser/src/Parser/mod.rs:815
+// peek -> State.jet:134 parser_current (pending generic > and trivia aware).
+// Rust: crates/jet-parser/src/Parser/mod.rs:819
+// peek2 -> State.jet:157 parser_lookahead offset 1.
+// Rust: crates/jet-parser/src/Parser/mod.rs:823
+// peek3 -> State.jet:157 parser_lookahead offset 2.
+// Rust: crates/jet-parser/src/Parser/mod.rs:828
+// peek4 -> State.jet:157 parser_lookahead offset 3.
+// Rust: crates/jet-parser/src/Parser/mod.rs:832
+// peek5 -> State.jet:157 parser_lookahead offset 4.
+// Rust: crates/jet-parser/src/Parser/mod.rs:837
+// prev_end -> State.jet:624 parser_prev_token_end, includes zero-width terminators.
+// Rust: crates/jet-parser/src/Parser/mod.rs:843
+// report_explicit_semicolon -> State.jet:204 parser_report_explicit_semicolon.
+// Rust: crates/jet-parser/src/Parser/mod.rs:877
+// bump -> State.jet:189 parser_bump, with split > and explicit-semicolon teaching.
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:888
+fn parser_with_nesting<T>(state: &JetParserState, span: Span, f: fn(&JetParserState) -> T ParserFailure!) -> T ParserFailure! {
+    if state.depth >= MAX_SOURCE_NESTING -> return Err(ParserFailure.Diagnostics{diagnostics: [Diagnostic]{diagnostic_source_nesting_exceeded(state.depth + 1, span)}})
+    state.depth += 1
+    // Capture both rails before restoring depth, including a callback failure.
+    result :: f(&state)
+    state.depth -= 1
+    result
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:902
+fn parser_peek_is_ident(state: &JetParserState, name: String) -> Bool Never! {
+    token :: parser_current(&state)
+    token.kind == TOKEN_IDENT && token.payload.decoded == name
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:909
+// sync_top -> State.jet:690 parser_sync_top.
+// Rust: crates/jet-parser/src/Parser/mod.rs:929
+// sync_stmt -> State.jet:700 parser_sync_stmt.
+// Rust: crates/jet-parser/src/Parser/mod.rs:963
+// finish_stmt -> Statements.jet:1619 parser_finish_statement (adjacent else allowed).
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:989
+// expect_kw has exact Rust messages; canonical parser_expect supplies recovery.
+fn parser_expect_kw(state: &JetParserState, want: Int, context: String) -> Token {
+    if parser_current_kind(&state) == want -> return parser_bump(&state)
+    token :: parser_current(&state)
+    expected :: parser_describe_token(parser_synthetic_token(want, token.span))
+    parser_add_fatal_code(&state, "E0003", token.span,
+        "expected {expected} {context}, found {parser_describe_token(token)}",
+        "the structure here isn't what the compiler expected", "use {expected} {context}")
+    parser_synthetic_token(want, token.span)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1009
+// expect -> parser_expect_kw above, same discriminant matching and messages.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1016
+fn parser_expect_list_separator(state: &JetParserState, context: String, construct: String) {
+    if state.source_present && parser_unclosed_delimiter(&state, construct) {
+        state.abort_mark = state.diagnostics.len()
+        state.abort_position = state.position
+        return
+    }
+    parser_expect_kw(&state, TOKEN_COMMA, context)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1028
+fn parser_expect_closer(state: &JetParserState, want: Int, context: String, construct: String) {
+    if parser_current_kind(&state) != want && state.source_present && parser_unclosed_delimiter(&state, construct) {
+        state.abort_mark = state.diagnostics.len()
+        state.abort_position = state.position
+        return
+    }
+    parser_expect_kw(&state, want, context)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1043
+// unclosed_delimiter -> State.jet:413, cutoff/mismatched closer and opener check.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1060
+// unclosed_report -> State.jet:429, E0083 + secondary caret + Suggested insertion.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1098
+// innermost_open_delimiter -> State.jet:382 reverse delimiter scan.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1113
+// at_unified_arrow -> State.jet:348.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1117
+fn parser_at_unified_arrow_token(kind: Int) -> Bool Never! {
+    kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1121
+// expect_unified_arrow -> State.jet:353, retired LambdaArrow teaches E0070.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1144
+fn parser_expect_ident(state: &JetParserState, context: String) -> Token {
+    token := parser_bump(&state)
+    if token.kind == TOKEN_IDENT && token.payload.decoded != Syntax.KW_CONC_TASK -> return token
+    if token.kind == TOKEN_IDENT {
+        name :: token.payload.decoded
+        parser_add_fatal_code(&state, "E0003", token.span,
+            "`{name}` is reserved for structured task syntax",
+            "the `task` word starts a child or task combinator", "choose a different identifier name")
+        return token
+    }
+    if token.kind == TOKEN_KW_IN {
+        parser_add_fatal_code(&state, "E0003", token.span,
+            "`{Syntax.KW_IN}` is reserved as the source-loop keyword",
+            "the `{Syntax.KW_IN}` keyword marks the boundary between a loop binding and its source",
+            "choose a different identifier name, or use `{Syntax.KW_IN}` in a source loop; after `.` it is allowed as a member name")
+        return token
+    }
+    if token.kind == TOKEN_KW_TAG {
+        token.payload.decoded = Syntax.KW_TAG
+        return token
+    }
+    parser_add_fatal_code(&state, "E0003", token.span,
+        "expected a name {context}, found {parser_describe_token(token)}",
+        "names start with a letter or `_`", "e.g. `main`, `count`, `_tmp`")
+    token
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1198
+fn parser_expect_dashed_name(state: &JetParserState, context: String) -> NamedSpan {
+    first :: parser_expect_ident(&state, context)
+    name := first.payload.decoded
+    end := first.span.end
+    loop !parser_aborting(&state) && parser_current_kind(&state) == TOKEN_MINUS && parser_current(&state).span.start == end && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).span.start == parser_current(&state).span.end {
+        parser_bump(&state)
+        segment :: parser_bump(&state)
+        name = "{name}{Syntax.NAME_SEGMENT_SEP}{segment.payload.decoded}"
+        end = segment.span.end
+    }
+    NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1225
+// expect_effect_path_name -> Items.jet:1241, Mem.Alloc closed above integer/
+// positivity/parentheses validation, E0119 and exact canonical suffix string.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1280
+fn value_end_system(value: SystemFieldValue) -> Int Never! {
+    parser_module_system_value_end(value, Span{start: 0, end: 0}).end
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1291
+fn value_end_image(value: ImageFieldValue) -> Int Never! {
+    if value == {
+        .From(_, span) | .Format(_, span) | .Platform(_, _, span) -> span.end
+        .Other(expression) -> expr_span(expression).end
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1302
+fn image_from_not_system(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0003", Val(span), "an image's `from:` must name a system, package, or environment",
+        "an `Image` is built from a `System` (`from: system.<name>`, disk images), a `Package` (`from: packages.<name>`, OCI containers), or an `Environment` (`from: env.<name>`, runnable shell images)",
+        "write `from: system.<name>`, `from: packages.<name>`, or `from: env.<name>`")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1313
+fn fleet_host_not_system(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0003", Val(span), "a fleet host must name a system",
+        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`",
+        "write `<host>: system.<name>`, e.g. `web1: system.web`")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1325
+fn fleet_unterminated_override(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0003", Val(span), "unterminated host override record",
+        "U15: a `.{{ … }}` copy-with-update override on a host must be closed with `}}`",
+        "close the override record with `}}`")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1335
+// pat_span -> canonical Foundation pattern_span.
+// Rust: crates/jet-parser/src/Parser/mod.rs:1342
+fn leading_dot_variant(token: Token) -> String? Never! {
+    if token.kind == TOKEN_NULL -> return Val(Syntax.LIT_NULL)
+    if token.kind != TOKEN_IDENT -> return None
+    name :: token.payload.decoded
+    if Syntax.is_comptime_name(name) -> return Val(name)
+    if name.chars().next() == .Val(first) && first.is_uppercase() -> return Val(name)
+    None
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1355
+// s61_tests moved to paired Tests/Parser/State02.jet. The trailing #[test] at
+// Rust line 1774 belongs to the next packet's function, not this range.

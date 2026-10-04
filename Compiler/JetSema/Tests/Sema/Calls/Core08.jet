@@ -1,0 +1,114 @@
+// No inline Rust tests in fixed_sigs.rs:4202-6463. These controls exercise the
+// canonical typed signature provider, including access modes and error domains.
+use jet_foundation.[AccessConvention, CoreTypedCallSignature, Type, TypeTupleField]
+fn core08_signature(module_name: String, member: String) -> CoreTypedCallSignature {
+    core_fixed_sig_4202(module_name, member) ?? panic("missing assigned fixed signature {module_name}.{member}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4201-4281
+#Test("fixed signatures html calendar and expiration retain compound types") {
+    loop member in [String]{"escape", "unescape", "strip_tags", "unescape_and_strip", "attr_escape", "text_escape"} {
+        sig :: core08_signature("core.text.html", member)
+        assert(sig.parameters.len() == 1 && sig.parameters[0].ty == Type.String && sig.return_type == Val(Type.String))
+    }
+    range :: core08_signature("core.time.calendar", "monthrange")
+    assert(range.return_type == Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "days", ty: Type.Int}, TypeTupleField{name: "weekday", ty: Type.Int}}}))
+    year :: core08_signature("core.time.calendar", "yearcalendar")
+    assert(year.return_type == Val(Type.List{element: Type.List{element: Type.List{element: Type.Int}}}))
+    assert(core08_signature("core.time.calendar", "timegm").parameters.len() == 6)
+    assert(core08_signature("core.time.expiring", "expired").return_type == Val(Type.Bool))
+    assert(core08_signature("core.time.expiring", "remaining_ms").return_type == Val(Type.Int))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4340-4721
+#Test("fixed signatures crypto nominal results and vault move boundaries") {
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    sha :: core08_signature("core.crypto", "sha256")
+    assert(sha.parameters[0].ty == bytes && sha.return_type == Val(Type.Named{name: "Digest256"}))
+    assert(core08_signature("core.crypto", "sha512").return_type == Val(Type.Named{name: "Digest512"}))
+    prepare :: core08_signature("core.crypto.vault", "prepare_import_signing")
+    assert(prepare.parameters[0].access == AccessConvention.Read && prepare.parameters[1].access == AccessConvention.Move)
+    assert(prepare.parameters[1].ty == bytes)
+    assert(prepare.return_type == Val(Type.Result{ok: Type.Apply{name: "MutationPlan", args: [Type]{Type.Named{name: "SigningKey"}}}, err: Type.Named{name: "VaultError"}}))
+    commit :: core08_signature("core.crypto.vault", "commit_import_x25519")
+    assert(commit.parameters[0].access == AccessConvention.Move && commit.parameters[1].access == AccessConvention.Move)
+    assert(commit.parameters[0].ty == Type.Apply{name: "VaultWrite", args: [Type]{Type.Named{name: "X25519SecretKey"}}})
+    assert(core08_signature("core.crypto.expert", "argon2id").parameters.len() == 6)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4723-5396
+#Test("fixed signatures TCP UDP TLS retain their exact access and failures") {
+    read :: core08_signature("core.net", "tcp_read")
+    assert(read.parameters[0].access == AccessConvention.Write)
+    assert(read.return_type == Val(Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}))
+    reply :: core08_signature("core.net", "tcp_reply")
+    assert(reply.parameters[0].access == AccessConvention.Move)
+    udp :: core08_signature("core.net", "udp_receive")
+    assert(udp.parameters[0].access == AccessConvention.Read)
+    tls_read :: core08_signature("core.net", "tls_read")
+    assert(tls_read.parameters[0].access == AccessConvention.Write)
+    assert(tls_read.return_type == Val(Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}))
+    tls_close :: core08_signature("core.net.tls", "close")
+    assert(tls_close.parameters[0].access == AccessConvention.Move)
+    unwrap :: core08_signature("core.net.tls", "unwrap")
+    assert(unwrap.parameters[0].access == AccessConvention.Read)
+    assert(unwrap.return_type == Val(Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "IOError"}}))
+    assert(core08_signature("core.net", "error_address").return_type == Val(Type.Option{inner: Type.String}))
+    assert(core08_signature("core.net", "error_os_code").return_type == Val(Type.Option{inner: Type.Int}))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:5463-5945
+#Test("fixed signatures regex archive database and encoding keep failure shapes") {
+    assert(core08_signature("core.regex", "compile").return_type == Val(Type.Result{ok: Type.Named{name: "Regex"}, err: Type.String}))
+    assert(core08_signature("core.regex", "search").return_type == Val(Type.Option{inner: Type.Named{name: "Match"}}))
+    assert(core08_signature("core.archive", "create").parameters.len() == 2)
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    assert(core08_signature("core.archive.gzip", "decompress").return_type == Val(Type.Result{ok: bytes, err: Type.Named{name: "GzipFileError"}}))
+    assert(core08_signature("core.archive.zstd", "decompress").return_type == Val(Type.Result{ok: bytes, err: Type.Named{name: "ZstdFileError"}}))
+    row :: core08_signature("core.db", "row_int")
+    assert(row.parameters[0].ty == Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}})
+    assert(row.return_type == Val(Type.Result{ok: Type.Int, err: Type.Named{name: "DBError"}}))
+    loop member in [String]{"encode", "b64encode", "b32hexencode", "a85encode", "z85encode", "encode_url_padded"} -> assert(core08_signature("core.encoding.base64", member).return_type == Val(Type.String))
+    loop member in [String]{"decode", "b64decode", "b32hexdecode", "a85decode", "z85decode", "decode_padded", "decode_url"} -> assert(core08_signature("core.encoding.base64", member).return_type == Val(Type.Result{ok: bytes, err: Type.String}))
+    assert(core08_signature("core.encoding.binary", "iter_unpack").return_type == Val(Type.Result{ok: Type.List{element: Type.List{element: Type.Int}}, err: Type.String}))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:5999-6010
+#Test("fixed signatures preview optional viewport and value callback stay ordinary") {
+    loop member in [String]{"preview", "playground"} {
+        sig :: core08_signature("core.ui", member)
+        assert(sig.min_arity == 3 && sig.max_arity == 3)
+        assert(sig.parameters[1].ty == Type.Option{inner: Type.Named{name: "UIPreviewViewport"}})
+        assert(sig.parameters[2].ty == Type.Fn{params: [], ret: Val(Type.Named{name: "UINode"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+        assert(sig.return_type == Val(Type.Named{name: "UIPreview"}))
+        loop param in sig.parameters -> assert(param.access == AccessConvention.Read)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:6135-6361
+#Test("fixed signatures TUI moves and host cancellation-ready results remain typed") {
+    event :: core08_signature("core.tui", "io_event")
+    assert(event.parameters[1].access == AccessConvention.Move)
+    table :: core08_signature("core.tui", "table")
+    assert(table.parameters[0].access == AccessConvention.Move && table.parameters[1].access == AccessConvention.Move)
+    layout :: core08_signature("core.tui", "layout")
+    assert(layout.parameters[2].access == AccessConvention.Move)
+    assert(layout.return_type == Val(Type.List{element: Type.Named{name: "Rect"}}))
+    assert(core08_signature("core.ui.host.ime", "poll").return_type == Val(Type.Result{ok: Type.Option{inner: Type.Named{name: "UIIMEEvent"}}, err: Type.Named{name: "UIHostError"}}))
+    assert(core08_signature("core.ui.host.accessibility", "project").return_type == Val(Type.Result{ok: Type.Option{inner: Type.Named{name: "UIAccessibilityProjection"}}, err: Type.Named{name: "UIHostError"}}))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4283-4338,5965-5996,6363-6457
+#Test("fixed signatures effect-only results and web callbacks are not flattened") {
+    assert(core08_signature("core.log", "info").return_type == None)
+    assert(core08_signature("core.perf", "reset_fidelity").return_type == Val(Type.Named{name: "Unit"}))
+    on :: core08_signature("core.web", "on")
+    assert(on.parameters[2].ty == Type.Fn{params: [Type]{Type.Named{name: "WebEvent"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    assert(on.return_type == None)
+    loop module_name in [String]{"app", "core.web"} -> assert(core08_signature(module_name, "live").return_type == Val(Type.Named{name: "LiveQuery"}))
+    loop module_name in [String]{"core.web.storage.local", "core.web.storage.session"} {
+        assert(core08_signature(module_name, "get").return_type == Val(Type.Option{inner: Type.String}))
+        assert(core08_signature(module_name, "clear").return_type == None)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:6455
+#Test("fixed signatures unknown members and receiver-only surfaces stay absent") {
+    loop member in [String]{"execute", "query"} -> assert(core_fixed_sig_4202("core.db", member) == None)
+    assert(core_fixed_sig_4202("core.web.devserver", "serve") == None)
+    assert(core_fixed_sig_4202("core.ui", "button") == None)
+    assert(core_fixed_sig_4202("core.crypto", "unknown") == None)
+    assert(core_fixed_sig_4202("not.core", "get") == None)
+}

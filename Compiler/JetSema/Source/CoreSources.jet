@@ -1,28 +1,22 @@
-// PORT-PENDING 0345 crates-jet-sema-src-coresourcetexts-module-group: crates/jet-sema/src/CoreSources.rs:1-24
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Body text of the source-owned Core modules: the public rows of
-//RS //! `jet_foundation::CoreModuleExports::CORE_SOURCE_MODULES` plus the private
-//RS //! parts in `jet_foundation::CoreSourceParts`.
-//RS //!
-//RS //! The metadata rows stay in jet-foundation; the bodies live here, in the
-//RS //! first crate that reads them, so editing a Core body rebuilds jet-sema and
-//RS //! its dependents but never jet-foundation, the lexer, the parser or comptime.
-//RS 
-//RS use jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE;
-//RS 
-//RS include!("CoreSourceTexts.rs");
-//RS 
-//RS const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] =
-//RS     &[(CORE_TEXT_STRING_MODULE, include_str!("../../../Core/text/string.jet"))];
-//RS 
-//RS /// Source text of the Core source module (public or private part) whose
-//RS /// `CoreSourceModule::module` is `module`.
-//RS pub fn core_source_text(module: &str) -> Option<&'static str> {
-//RS     CORE_SOURCE_TEXTS
-//RS         .iter()
-//RS         .chain(CORE_PRIVATE_SOURCE_TEXTS)
-//RS         .find(|(name, _)| *name == module)
-//RS         .map(|(_, text)| *text)
-//RS }
-// END-PORT-PENDING 0345 crates/jet-sema/src/CoreSources.rs:1-24
+// Core body text lives at the first consuming compiler layer; metadata stays
+// in Foundation so changing a body does not rebuild lexer/parser/comptime.
+// Rust: crates/jet-sema/src/CoreSources.rs:9
+use jet_foundation.CoreSourceParts.[CORE_TEXT_STRING_MODULE]
+// Rust: crates/jet-sema/src/CoreSources.rs:11
+use CoreSourceTexts.[CORE_SOURCE_TEXTS]
 
+// Rust: crates/jet-sema/src/CoreSources.rs:13
+CORE_PRIVATE_SOURCE_TEXTS :: prep { [(String, String)]{
+    (CORE_TEXT_STRING_MODULE, #Embed("../../../Core/text/string.jet"))
+} }
+
+// Rust: crates/jet-sema/src/CoreSources.rs:18
+pub fn core_source_text(module: String) -> String? Never! {
+    loop (name, text) in CORE_SOURCE_TEXTS {
+        if name == module -> return Val(text)
+    }
+    loop (name, text) in CORE_PRIVATE_SOURCE_TEXTS {
+        if name == module -> return Val(text)
+    }
+    None
+}

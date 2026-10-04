@@ -1,0 +1,58 @@
+// Rust: crates/jet-foundation/src/StreamCursor.rs:575
+#Test("reads_advance_and_report_bounds") {
+    r := jet_reader_over([U8]{42,0,0,0,3,0,16,32,48})
+    assert(jet_reader_read_u32_le(&r) == Ok(U32{42}))
+    assert(jet_reader_read_u16_le(&r) == Ok(U16{3}))
+    assert(jet_reader_take(&r, I64{3}) == Ok([U8]{16,32,48}))
+    assert(jet_reader_at_end(r))
+    assert(jet_reader_remaining(r) == I64{0})
+    assert(jet_reader_read_u8(&r) == Err("Reader.read_u8: needed 1 byte at position 9, only 0 remain"))
+    assert(jet_reader_take(&r, I64{-1}) == Err("Reader.take: length must not be negative, got -1"))
+}
+// Rust: crates/jet-foundation/src/StreamCursor.rs:593
+#Test("fast_fixed_reads_advance_and_leave_misses_cold") {
+    r := jet_reader_over([U8]{42,0,3})
+    assert(jet_reader_read_u8_fast(&r) == Val(U8{42}))
+    assert(r.pos == 1)
+    assert(jet_reader_read_u16_le_fast(&r) == Val(U16{0x0300}))
+    assert(r.pos == 3)
+    assert(jet_reader_read_u8_fast(&r) == None)
+    assert(r.pos == 3)
+}
+// Rust: crates/jet-foundation/src/StreamCursor.rs:604
+#Test("region_bounds_checks_without_advancing") {
+    r :: jet_reader_over([U8]{1,2,3})
+    assert(jet_reader_region_bounds(r, I64{2}) == Val((0,2)))
+    assert(r.pos == 0)
+    assert(jet_reader_region_bounds(r, I64{4}) == None)
+    assert(r.pos == 0)
+    assert(jet_reader_region_bounds(r, I64{-1}) == None)
+    assert(r.pos == 0)
+}
+// Rust: crates/jet-foundation/src/StreamCursor.rs:615
+#Test("reads_little_endian_floats") {
+    r := jet_reader_over([U8]{0,0,192,63,0,0,0,0,0,0,4,64})
+    assert(jet_reader_read_f32_le(&r) == Ok(F32{1.5}))
+    assert(jet_reader_read_f64_le(&r) == Ok(F64{2.5}))
+    assert(jet_reader_at_end(r))
+}
+// Rust: crates/jet-foundation/src/StreamCursor.rs:625
+#Test("take_pattern_advances_on_a_hit_and_names_the_position_on_a_miss") {
+    c := jet_cursor_over("abcdef")
+    assert(jet_cursor_tail(c) == "abcdef")
+    jet_cursor_take_pattern(&c, 3)
+    assert(jet_cursor_tail(c) == "def")
+    assert(jet_cursor_pattern_miss(c) == "pattern did not match at cursor position 3")
+    r := jet_reader_over([U8]{1,2,3,4})
+    jet_reader_take_pattern(&r, 2)
+    assert(jet_reader_tail(r).to_list() == [U8]{3,4})
+    assert(jet_reader_pattern_miss(r) == "pattern did not match at reader position 2")
+}
+// Rust: crates/jet-foundation/src/StreamCursor.rs:645
+#Test("cursor_skips_space_and_takes_until") {
+    c := jet_cursor_over("   ab|cd")
+    jet_cursor_skip_ws(&c)
+    assert(c.pos == 3)
+    assert(jet_cursor_take_until(&c, "|") == Ok("ab"))
+    assert(jet_cursor_take_until(&c, "!").is_err())
+}

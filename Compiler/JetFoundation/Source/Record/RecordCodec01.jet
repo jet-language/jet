@@ -67,14 +67,9 @@ impl RecordValue {
     // Rust: crates/jet-foundation/src/RecordCodec.rs:152
     pub fn field(self, name: String) -> (@RecordValue) RecordError! from self {
         fields :: self.as_map()
-        // Canonical map rows are sorted by UTF-8 key bytes.
-        low := 0
-        high := fields.len()
-        loop low < high {
-            middle :: low + (high - low) / 2
-            if fields[middle].name == name -> return Ok(@fields[middle].value)
-            if record_bytes_before(fields[middle].name.bytes(), name.bytes()) -> low = middle + 1
-            else -> high = middle
+        // Canonical Jet permits unsorted map input before encoding.
+        loop index in 0..<fields.len() {
+            if fields[index].name == name -> return Ok(@fields[index].value)
         }
         Err(RecordError.Malformed("field `{name}` is missing"))
     }

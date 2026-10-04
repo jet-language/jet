@@ -1,0 +1,58 @@
+// Rust providers.rs/ptr_tuple.rs contain no inline tests; these controls use
+// real lexer tokens and the canonical parser state, never a parser mock.
+use jet_foundation.[AccessConvention, Expr, Span]
+use jet_lexer.[TOKEN_AT, TOKEN_IDENT, TOKEN_RPAREN]
+
+fn provider_tuple_packet_state(source: String) -> JetParserState {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty())
+    JetParserState{tokens: lexed.tokens, position: 0, diagnostics: [], source_end: source.len(),
+        block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: source.len(), end: source.len()},
+        result_handler_depth: 0, statement_start: -1, source: source.bytes()}
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/providers.rs:4,8
+#Test("provider reference recovery consumes its complete token suffix") {
+    state := provider_tuple_packet_state("provider@1/name-*?=)")
+    assert(parser_looks_like_provider_ref_value(&state))
+    value :: parser_provider_ref_placeholder(&state)
+    assert(parser_current_kind(&state) == TOKEN_RPAREN)
+    assert(if value == { .Str(parts, span) -> parts.len() == 1 && span.start == 0 && span.end == 19; _ -> false })
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/providers.rs:42,52
+#Test("capability convention sigils consume only write and move") {
+    write := provider_tuple_packet_state("&value")
+    assert(parser_parse_capability_sigil(&write) == Val(AccessConvention.Write))
+    assert(parser_current_kind(&write) == TOKEN_IDENT)
+    move := provider_tuple_packet_state("^value")
+    assert(parser_parse_capability_sigil(&move) == Val(AccessConvention.Move))
+    read := provider_tuple_packet_state("value")
+    assert(parser_parse_capability_sigil(&read) == None && read.position == 0)
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs:67,345
+#Test("tuple lookahead ignores nested commas and distinguishes named members") {
+    named := provider_tuple_packet_state("(x: 1, y: 2)")
+    assert(parser_looks_like_named_tuple(&named, false))
+    parser_bump(&named)
+    assert(parser_looks_like_named_tuple(&named, true))
+    assert(!parser_after_lparen_is_positional_tuple(&named))
+    group := provider_tuple_packet_state("(call(1, 2))")
+    parser_bump(&group)
+    assert(!parser_after_lparen_is_positional_tuple(&group))
+    positional := provider_tuple_packet_state("(call(1, 2), 3)")
+    parser_bump(&positional)
+    assert(parser_after_lparen_is_positional_tuple(&positional))
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs:107
+#Test("numeric tuple field recovery retains span and compiler facts stay closed") {
+    number := provider_tuple_packet_state("123")
+    field :: parser_expect_field_name(&number)
+    assert(field.payload.decoded == "0" && field.span.start == 0 && field.span.end == 3)
+    assert(number.diagnostics.len() == 1)
+    retired := provider_tuple_packet_state("$track_origin")
+    _ :: parser_expect_field_name(&retired)
+    assert(parser_aborting(&retired) && retired.diagnostics.len() == 1)
+}

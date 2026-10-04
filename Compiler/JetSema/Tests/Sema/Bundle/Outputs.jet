@@ -1,0 +1,23 @@
+use jet_foundation.[Expr, StrPart, Span, Type, INTERNAL_UNIT_TYPE]
+use jet_sema.Sema.Bundle.Outputs.[output_string, output_module_path, is_fallible_void_entry_return, no_run_error]
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:3 (behavioral control)
+#Test("output_fallible_unit_return_is_exact") {
+    assert(is_fallible_void_entry_return(Type.Result{ok: Type.Named{name: INTERNAL_UNIT_TYPE}, err: Type.Named{name: "Err"}}))
+    assert(!is_fallible_void_entry_return(Type.Named{name: INTERNAL_UNIT_TYPE}))
+    assert(!is_fallible_void_entry_return(Type.Result{ok: Type.Named{name: "Int"}, err: Type.Named{name: "Err"}}))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:98 (behavioral control)
+#Test("output_name_requires_one_plain_literal") {
+    span :: Span{start: 0, end: 3}
+    assert(output_string(Expr.Str{parts: [StrPart.Lit{value: "app"}], span: span}) == Val("app"))
+    assert(output_string(Expr.Str{parts: [], span: span}).is_none())
+    assert(output_string(Expr.Ident{name: "app", span: span}).is_none())
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:137 (behavioral control)
+#Test("output_module_path_preserves_member_order") {
+    span :: Span{start: 0, end: 3}
+    entry :: Expr.Field{base: Expr.Field{base: Expr.Ident{name: "a", span: span}, member: "b", span: span}, member: "run", span: span}
+    path :: output_module_path(entry) ?? panic("qualified reference")
+    assert(path.0 == "a")
+    assert(path.2 == [("b", span), ("run", span)])
+}

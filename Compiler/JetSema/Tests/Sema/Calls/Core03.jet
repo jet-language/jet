@@ -1,0 +1,19 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:6281-6302 (behavioral control; no inline Rust tests)
+#Test("event_zero_argument_constructors_reject_an_extra_value") {
+    diagnostics :: statements05_diagnostics("use core.event\nfn run() {{ _ :: event.scope(1) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:7334-7397 (behavioral control)
+#Test("portable_display_width_returns_a_bare_integer") {
+    diagnostics :: statements05_diagnostics("use core.text\nfn run() {{ width: Int :: text.display_width(\"wide\")\n _ :: width + 1 }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:7408-7454 (behavioral control)
+#Test("plugin_load_does_not_invent_an_ambient_authority") {
+    diagnostics :: statements05_diagnostics("use core.plugin\nfn run() {{ _ :: plugin.load(\"unregistered.wasm\") }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" }))
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E1257" }))
+}

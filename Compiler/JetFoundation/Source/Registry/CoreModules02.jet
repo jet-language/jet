@@ -1,149 +1,123 @@
-// PORT-PENDING 0391 crates-jet-sema-src-sema-checkercorelib-module-items: crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs:1-145
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// Canonical Core module member names (completion, help, diagnostics).
-//RS pub fn core_module_items(module: &str) -> Vec<String> {
-//RS     jet_foundation::CoreModuleExports::core_modules()
-//RS         .iter()
-//RS         .find(|declaration| declaration.module == module)
-//RS         .map_or(&[][..], |declaration| declaration.members)
-//RS         .iter()
-//RS         .map(|item| (*item).to_string())
-//RS         .collect()
-//RS }
-//RS pub fn core_module_type_item(module: &str, item: &str) -> bool {
-//RS     if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
-//RS         return true;
-//RS     }
-//RS     // Remaining arms are sema-only nominal surfaces (for example vault
-//RS     // handles) that are not declared Core exports; exported types use the
-//RS     // descriptor lookup above.
-//RS     matches!(
-//RS         (module, item),
-//RS         ("core.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
-//RS             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
-//RS             | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError" | "PasswordHash"
-//RS             | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError")
-//RS         | ("core.build",
-//RS             "BuildGraph" | "BuildGraphTarget" | "BuildGraphAction" | "BuildGraphFile"
-//RS             | "BuildGraphNode" | "BuildGraphInputDigest" | "BuildGraphActionKey"
-//RS             | "BuildGraphFileDelta" | "BuildGraphKeyDelta" | "BuildGraphCacheDelta"
-//RS             | "BuildGraphDiff")
-//RS         | ("core.data",
-//RS             "DataAuthority" | "DataColumn" | "DataError" | "DataErrorKind"
-//RS             | "DataFormat" | "DataFreshness" | "DataInvalidationCause" | "DataLimits"
-//RS             | "DataLineOptions" | "DataLoader" | "DataLoaderKind" | "DataLoaderStatus"
-//RS             | "DataPivotCell" | "DataProvenance" | "Query" | "DataSchema" | "DataSnapshot"
-//RS             | "DataSnapshotIdentity" | "DataSourceIdentity" | "DataStatus" | "DataStream"
-//RS             | "Group"
-//RS             | "JetDataPlotAccessibility" | "JetDataPlotAggregate" | "JetDataPlotAxis"
-//RS             | "JetDataPlotBackend" | "JetDataPlotCapability" | "JetDataPlotChannel"
-//RS             | "JetDataPlotColumn" | "JetDataPlotDomain" | "JetDataPlotEncoding"
-//RS             | "JetDataPlotError" | "JetDataPlotErrorKind" | "JetDataPlotFacet"
-//RS             | "JetDataPlotFacetKind" | "JetDataPlotField" | "JetDataPlotFilterOp"
-//RS             | "JetDataPlotInspection" | "JetDataPlotInteraction" | "JetDataPlotLayer"
-//RS             | "JetDataPlotLayout" | "JetDataPlotLegend" | "JetDataPlotLegendPosition"
-//RS             | "JetDataPlotMark" | "JetDataPlotPlan" | "JetDataPlotProjection"
-//RS             | "JetDataPlotRender" | "JetDataPlotRenderFormat" | "JetDataPlotScale"
-//RS             | "JetDataPlotScaleKind" | "JetDataPlotSchema" | "JetDataPlotSelectedRow"
-//RS             | "JetDataPlotSourceFacts" | "JetDataPlotSupport" | "JetDataPlotTransform"
-//RS             | "JetDataPlotValue")
-//RS         | ("core.data.plot",
-//RS             "JetDataPlotAccessibility" | "JetDataPlotAggregate" | "JetDataPlotAxis"
-//RS             | "JetDataPlotBackend" | "JetDataPlotCapability" | "JetDataPlotChannel"
-//RS             | "JetDataPlotColumn" | "JetDataPlotDomain" | "JetDataPlotEncoding"
-//RS             | "JetDataPlotError" | "JetDataPlotErrorKind" | "JetDataPlotFacet"
-//RS             | "JetDataPlotFacetKind" | "JetDataPlotField" | "JetDataPlotFilterOp"
-//RS             | "JetDataPlotInspection" | "JetDataPlotInteraction" | "JetDataPlotLayer"
-//RS             | "JetDataPlotLayout" | "JetDataPlotLegend" | "JetDataPlotLegendPosition"
-//RS             | "JetDataPlotMark" | "JetDataPlotPlan" | "JetDataPlotProjection"
-//RS             | "JetDataPlotRender" | "JetDataPlotRenderFormat" | "JetDataPlotScale"
-//RS             | "JetDataPlotScaleKind" | "JetDataPlotSchema" | "JetDataPlotSelectedRow"
-//RS             | "JetDataPlotSourceFacts" | "JetDataPlotSupport" | "JetDataPlotTransform"
-//RS             | "JetDataPlotValue")
-//RS         | ("core.email",
-//RS             "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
-//RS             | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
-//RS             | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig"
-//RS             | "Mailer")
-//RS         | ("core.encoding",
-//RS             "DataTree" | "EncodingFormat" | "EncodingLimits" | "EncodingError" | "EncodingCause"
-//RS             | "EncodingErrorKind" | "DataEvent")
-//RS         | ("core.encoding.cbor",
-//RS             "CBORReader" | "CBORWriter" | "CBOROptions" | "CBORError" | "CBORErrorKind")
-//RS         | ("core.encoding.csv", "CSVReader" | "CSVWriter" | "CSVRow")
-//RS         | ("core.encoding.json", "JSONReader" | "JSONWriter")
-//RS         | ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter")
-//RS         | ("core.encoding.xml", "XMLReader" | "XMLWriter")
-//RS         | ("core.files", "FileScope")
-//RS         | ("core.mem", "AllocError" | "Atomic")
-//RS         | ("core.sys", "EnvError")
-//RS         // D-FOUND-LIFECYCLE1=A: typed process-signal lifecycle control.
-//RS         // D-FOUND-REALTIME1=A: callback streams expose one typed lifecycle pair.
-//RS         | ("core.rt", "RealtimeStream" | "RealtimeReceipt")
-//RS         | ("core.process", "ProcessSignal")
-//RS         // D-FOUND-PLATFORM1=A: one typed host/font value vocabulary.
-//RS         | ("core.font", "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper")
-//RS         | ("core.ui",
-//RS             "UIIMEMode" | "UIPreview" | "UIPreviewAccessibility"
-//RS             | "UIPreviewAuthority" | "UIPreviewContext" | "UIPreviewDevice"
-//RS             | "UIPreviewEffect" | "UIPreviewInputOverride" | "UIPreviewInputValue"
-//RS             | "UIPreviewKind" | "UIPreviewLifecycle" | "UIPreviewRegistry"
-//RS             | "UIPreviewSource" | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport")
-//RS         | ("core.tui",
-//RS             "TUIEvent" | "TUIColorProfile" | "TUIColor" | "TUICapabilities"
-//RS             | "TUIStyle" | "TUIConstraint" | "TUIDirection" | "TUIListState")
-//RS         | ("core.ui.host",
-//RS             "UICapability" | "UICapabilityFact" | "UICapabilityFacts" | "UICancellation"
-//RS             | "UIHostError" | "UIServiceResult" | "UIFileDialogKind" | "UIFSAccess"
-//RS             | "UIFSRights" | "UIFSGrant" | "UIGrantedPath" | "UIFileFilter"
-//RS             | "UIFileDialogRequest" | "UIFileDialogSelection" | "UIClipboardText"
-//RS             | "UIClipboardWrite" | "UITextRange" | "UIIMEMode" | "UIIMEPhase"
-//RS             | "UIIMEComposition" | "UIIMEEvent" | "UIDragOperation" | "UIDropItem"
-//RS             | "UIDragPhase" | "UIDragEvent" | "UIShortcutModifier" | "UIShortcutModifiers"
-//RS             | "UIShortcut" | "UIShortcutBinding" | "UIShortcutDispatch"
-//RS             | "UIAccessibilityState" | "UIAccessibility" | "UINodeID"
-//RS             | "UIAccessibilityProjection" | "UIFileFilterResult" | "UIFSGrantResult"
-//RS             | "UIShortcutResult" | "UiShortcutBindingResult" | "UIAccessibilityResult"
-//RS             | "UIFileDialogResult" | "UIClipboardTextResult" | "UIClipboardWriteResult"
-//RS             | "UIIMEResult" | "UIDragResult" | "UIShortcutDispatchResult"
-//RS             | "UIAccessibilityNodeResult" | "UIAccessibilityAttachResult"
-//RS             | "UIAccessibilityProjectionResult")
-//RS         | ("core.web.forms",
-//RS             "WebFormValueType" | "WebFormStatus" | "WebFormFieldState"
-//RS             | "WebFormState" | "WebForm" | "WebFormValidation"
-//RS             | "WebFormControl" | "WebFormValidationTiming" | "WebFormFieldSpec"
-//RS             | "WebFormInput" | "WebFormDecodedInput" | "WebFormActionError"
-//RS             | "WebFormTyped" | "WebFormValidationChain"
-//RS             | "WebFormTypedValidation" | "WebFormTypedSubmission")
-//RS         // D-BROWSER-AUTO1=A: native BiDi and browser-test values.
-//RS         | ("core.web.browser",
-//RS             "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
-//RS             | "BrowserIntercept"
-//RS             | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
-//RS             | "BrowserAbilities"
-//RS             | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
-//RS             | "BrowserTestConfig" | "BrowserTestSource" | "BrowserTestAction"
-//RS             | "BrowserTestSnapshot" | "BrowserTestEventFact" | "BrowserTestArtifact"
-//RS             | "BrowserTestAttempt" | "BrowserTestCase" | "BrowserTestReport"
-//RS             | "BrowserTestFixture" | "BrowserTestServer")
-//RS         // D-FLAGSHIP-WEBAPI1=A: headless web suite modules own their
-//RS         // nominal values; none are re-exported from root `core.web`.
-//RS         | ("core.web.router",
-//RS             "WebRouterValueType" | "WebRouterField" | "WebRouterSearchCodec"
-//RS             | "WebRouterCacheStatus" | "WebRouterCacheState" | "WebNavigationStatus"
-//RS             | "WebNavigation" | "WebNavigationState")
-//RS         | ("core.web.query", "WebMutationState" | "WebMutationStatus" | "WebQueryStatus" | "WebQueryNetworkMode" | "WebQueryState" | "WebQuery")
-//RS         | ("core.web.table",
-//RS             "WebTableSortDirection" | "WebTablePageMode" | "WebTableSort" | "WebTableFilter"
-//RS             | "WebTableState" | "WebTableColumn" | "WebTablePage" | "WebTableRow" | "WebTable")
-//RS         | ("core.web.virtual",
-//RS             "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport")
-//RS         | ("core.web.store",
-//RS             "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
-//RS             | "WebStorePatch" | "WebStore" | "WebStoreSubscription")
-//RS         // D-WEBAPP1=D: namespaced `web.App` / `web.Page` / `web.Context` / `web.Mount`.
-//RS         | ("core.web", "App" | "Page" | "Context" | "Mount")
-//RS     )
-//RS }
-// END-PORT-PENDING 0391 crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs:1-145
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs:2
+// Canonical Core module member names (completion, help, diagnostics).
+pub fn core_module_items(module: String) -> [String] {
+    declaration :: core_module_export(module) ?? return [String]{}
+    declaration.members
+}
 
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs:11
+pub fn core_module_type_item(module: String, item: String) -> Bool {
+    if core_module_has_type(module, item) -> return true
+    // Remaining arms are sema-only nominal surfaces, not declared Core exports.
+    if (module, item) == {
+        ("core.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
+            | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
+            | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError" | "PasswordHash"
+            | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError") -> true
+        ("core.build", "BuildGraph" | "BuildGraphTarget" | "BuildGraphAction" | "BuildGraphFile"
+            | "BuildGraphNode" | "BuildGraphInputDigest" | "BuildGraphActionKey"
+            | "BuildGraphFileDelta" | "BuildGraphKeyDelta" | "BuildGraphCacheDelta"
+            | "BuildGraphDiff") -> true
+        ("core.data", "DataAuthority" | "DataColumn" | "DataError" | "DataErrorKind"
+            | "DataFormat" | "DataFreshness" | "DataInvalidationCause" | "DataLimits"
+            | "DataLineOptions" | "DataLoader" | "DataLoaderKind" | "DataLoaderStatus"
+            | "DataPivotCell" | "DataProvenance" | "Query" | "DataSchema" | "DataSnapshot"
+            | "DataSnapshotIdentity" | "DataSourceIdentity" | "DataStatus" | "DataStream"
+            | "Group"
+            | "JetDataPlotAccessibility" | "JetDataPlotAggregate" | "JetDataPlotAxis"
+            | "JetDataPlotBackend" | "JetDataPlotCapability" | "JetDataPlotChannel"
+            | "JetDataPlotColumn" | "JetDataPlotDomain" | "JetDataPlotEncoding"
+            | "JetDataPlotError" | "JetDataPlotErrorKind" | "JetDataPlotFacet"
+            | "JetDataPlotFacetKind" | "JetDataPlotField" | "JetDataPlotFilterOp"
+            | "JetDataPlotInspection" | "JetDataPlotInteraction" | "JetDataPlotLayer"
+            | "JetDataPlotLayout" | "JetDataPlotLegend" | "JetDataPlotLegendPosition"
+            | "JetDataPlotMark" | "JetDataPlotPlan" | "JetDataPlotProjection"
+            | "JetDataPlotRender" | "JetDataPlotRenderFormat" | "JetDataPlotScale"
+            | "JetDataPlotScaleKind" | "JetDataPlotSchema" | "JetDataPlotSelectedRow"
+            | "JetDataPlotSourceFacts" | "JetDataPlotSupport" | "JetDataPlotTransform"
+            | "JetDataPlotValue") -> true
+        ("core.data.plot", "JetDataPlotAccessibility" | "JetDataPlotAggregate" | "JetDataPlotAxis"
+            | "JetDataPlotBackend" | "JetDataPlotCapability" | "JetDataPlotChannel"
+            | "JetDataPlotColumn" | "JetDataPlotDomain" | "JetDataPlotEncoding"
+            | "JetDataPlotError" | "JetDataPlotErrorKind" | "JetDataPlotFacet"
+            | "JetDataPlotFacetKind" | "JetDataPlotField" | "JetDataPlotFilterOp"
+            | "JetDataPlotInspection" | "JetDataPlotInteraction" | "JetDataPlotLayer"
+            | "JetDataPlotLayout" | "JetDataPlotLegend" | "JetDataPlotLegendPosition"
+            | "JetDataPlotMark" | "JetDataPlotPlan" | "JetDataPlotProjection"
+            | "JetDataPlotRender" | "JetDataPlotRenderFormat" | "JetDataPlotScale"
+            | "JetDataPlotScaleKind" | "JetDataPlotSchema" | "JetDataPlotSelectedRow"
+            | "JetDataPlotSourceFacts" | "JetDataPlotSupport" | "JetDataPlotTransform"
+            | "JetDataPlotValue") -> true
+        ("core.email", "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
+            | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
+            | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig"
+            | "Mailer") -> true
+        ("core.encoding", "DataTree" | "EncodingFormat" | "EncodingLimits" | "EncodingError" | "EncodingCause"
+            | "EncodingErrorKind" | "DataEvent") -> true
+        ("core.encoding.cbor", "CBORReader" | "CBORWriter" | "CBOROptions" | "CBORError" | "CBORErrorKind") -> true
+        ("core.encoding.csv", "CSVReader" | "CSVWriter" | "CSVRow") -> true
+        ("core.encoding.json", "JSONReader" | "JSONWriter") -> true
+        ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") -> true
+        ("core.encoding.xml", "XMLReader" | "XMLWriter") -> true
+        ("core.files", "FileScope") -> true
+        ("core.mem", "AllocError" | "Atomic") -> true
+        ("core.sys", "EnvError") -> true
+        // D-FOUND-LIFECYCLE1=A: typed process-signal lifecycle control.
+        // D-FOUND-REALTIME1=A: callback streams expose one typed lifecycle pair.
+        ("core.rt", "RealtimeStream" | "RealtimeReceipt") -> true
+        ("core.process", "ProcessSignal") -> true
+        // D-FOUND-PLATFORM1=A: one typed host/font value vocabulary.
+        ("core.font", "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper") -> true
+        ("core.ui", "UIIMEMode" | "UIPreview" | "UIPreviewAccessibility"
+            | "UIPreviewAuthority" | "UIPreviewContext" | "UIPreviewDevice"
+            | "UIPreviewEffect" | "UIPreviewInputOverride" | "UIPreviewInputValue"
+            | "UIPreviewKind" | "UIPreviewLifecycle" | "UIPreviewRegistry"
+            | "UIPreviewSource" | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport") -> true
+        ("core.tui", "TUIEvent" | "TUIColorProfile" | "TUIColor" | "TUICapabilities"
+            | "TUIStyle" | "TUIConstraint" | "TUIDirection" | "TUIListState") -> true
+        ("core.ui.host", "UICapability" | "UICapabilityFact" | "UICapabilityFacts" | "UICancellation"
+            | "UIHostError" | "UIServiceResult" | "UIFileDialogKind" | "UIFSAccess"
+            | "UIFSRights" | "UIFSGrant" | "UIGrantedPath" | "UIFileFilter"
+            | "UIFileDialogRequest" | "UIFileDialogSelection" | "UIClipboardText"
+            | "UIClipboardWrite" | "UITextRange" | "UIIMEMode" | "UIIMEPhase"
+            | "UIIMEComposition" | "UIIMEEvent" | "UIDragOperation" | "UIDropItem"
+            | "UIDragPhase" | "UIDragEvent" | "UIShortcutModifier" | "UIShortcutModifiers"
+            | "UIShortcut" | "UIShortcutBinding" | "UIShortcutDispatch"
+            | "UIAccessibilityState" | "UIAccessibility" | "UINodeID"
+            | "UIAccessibilityProjection" | "UIFileFilterResult" | "UIFSGrantResult"
+            | "UIShortcutResult" | "UiShortcutBindingResult" | "UIAccessibilityResult"
+            | "UIFileDialogResult" | "UIClipboardTextResult" | "UIClipboardWriteResult"
+            | "UIIMEResult" | "UIDragResult" | "UIShortcutDispatchResult"
+            | "UIAccessibilityNodeResult" | "UIAccessibilityAttachResult"
+            | "UIAccessibilityProjectionResult") -> true
+        ("core.web.forms", "WebFormValueType" | "WebFormStatus" | "WebFormFieldState"
+            | "WebFormState" | "WebForm" | "WebFormValidation"
+            | "WebFormControl" | "WebFormValidationTiming" | "WebFormFieldSpec"
+            | "WebFormInput" | "WebFormDecodedInput" | "WebFormActionError"
+            | "WebFormTyped" | "WebFormValidationChain"
+            | "WebFormTypedValidation" | "WebFormTypedSubmission") -> true
+        // D-BROWSER-AUTO1=A: native BiDi and browser-test values.
+        ("core.web.browser", "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
+            | "BrowserIntercept"
+            | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
+            | "BrowserAbilities"
+            | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
+            | "BrowserTestConfig" | "BrowserTestSource" | "BrowserTestAction"
+            | "BrowserTestSnapshot" | "BrowserTestEventFact" | "BrowserTestArtifact"
+            | "BrowserTestAttempt" | "BrowserTestCase" | "BrowserTestReport"
+            | "BrowserTestFixture" | "BrowserTestServer") -> true
+        // D-FLAGSHIP-WEBAPI1=A: nominal values are not re-exported from core.web.
+        ("core.web.router", "WebRouterValueType" | "WebRouterField" | "WebRouterSearchCodec"
+            | "WebRouterCacheStatus" | "WebRouterCacheState" | "WebNavigationStatus"
+            | "WebNavigation" | "WebNavigationState") -> true
+        ("core.web.query", "WebMutationState" | "WebMutationStatus" | "WebQueryStatus" | "WebQueryNetworkMode" | "WebQueryState" | "WebQuery") -> true
+        ("core.web.table", "WebTableSortDirection" | "WebTablePageMode" | "WebTableSort" | "WebTableFilter"
+            | "WebTableState" | "WebTableColumn" | "WebTablePage" | "WebTableRow" | "WebTable") -> true
+        ("core.web.virtual", "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport") -> true
+        ("core.web.store", "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
+            | "WebStorePatch" | "WebStore" | "WebStoreSubscription") -> true
+        // D-WEBAPP1=D: namespaced web.App / web.Page / web.Context / web.Mount.
+        ("core.web", "App" | "Page" | "Context" | "Mount") -> true
+        else -> false
+    }
+}

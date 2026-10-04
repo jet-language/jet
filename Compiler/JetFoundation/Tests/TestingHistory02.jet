@@ -1,0 +1,83 @@
+use JetFoundation.TestingHistory
+use JetFoundation.TestingComparison.[ComparisonStatus, ObservationRelation]
+
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3384
+#Test("injected_booking_defect_reduces_to_valid_replay") {
+    run :: run_booking_history_campaign(41, 4, true).expect("campaign")
+    artifact :: run.failure.expect("injected defect must mismatch")
+    assert(artifact.case.operations.len() <= 3)
+    assert(booking_case_is_valid(artifact.case))
+    assert(artifact.comparison.status == ComparisonStatus.Mismatch)
+    assert(artifact.identity.input_id == artifact.case.input_id())
+    assert(artifact.json().contains("\"schedule\""))
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3395
+#Test("matched_booking_campaign_is_not_a_universal_proof") {
+    run :: run_booking_history_campaign(41, 4, false).expect("campaign")
+    assert(!run.has_failure())
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3401
+#Test("shrinker_preserves_handles_and_domain_dependencies") {
+    run :: run_booking_history_campaign(41, 4, true).expect("campaign")
+    artifact :: run.failure.expect("mismatch")
+    artifact.case.validate().expect("generic dependencies")
+    names :: artifact.case.operations.map(fn(operation) { operation.name })
+    assert(names == ["reserve", "timeout", "retry"])
+    assert(artifact.case.operations[2].consumes == [HandleId{value: 1}])
+    assert(artifact.case.operations[2].creates == [HandleId{value: 2}])
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3423
+#Test("generated_histories_cover_operations_and_dependencies") {
+    seen := [String:Bool]{}
+    loop seed in 0..<256 {
+        rng := HistoryRng.new(U64(seed))
+        case :: generate_booking_history_case(&rng, seed, 8).expect("booking generator produces a bounded case")
+        loop position in 0..<case.operations.len() {
+            operation :: case.operations[position]
+            seen[~operation.name] = true
+            assert(operation.task == Val(TaskId{value: U32(position) % 2}))
+            assert(operation.event == Val(EventId{value: U32(position) + 1}))
+            if position > 0 {
+                assert(operation.depends_on == [U32(position) - 1])
+                assert(operation.preconditions.any(fn(precondition) { if precondition == { .TaskCompleted(task) -> task == TaskId{value: (U32(position) - 1) % 2} else -> false } }))
+                assert(operation.preconditions.any(fn(precondition) { if precondition == { .EventAvailable(event) -> event == EventId{value: U32(position)} else -> false } }))
+            }
+        }
+        if ["reserve", "cancel", "timeout", "retry"].all(fn(name) { seen.has_key(name) }) -> break
+    }
+    assert(["reserve", "cancel", "timeout", "retry"].all(fn(name) { seen.has_key(name) }))
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3482
+#Test("history_artifact_repeats_and_replays_same_failure") {
+    first :: run_booking_history_campaign(41, 4, true).expect("campaign").failure.expect("injected defect")
+    second :: run_booking_history_campaign(41, 4, true).expect("campaign").failure.expect("injected defect")
+    assert(first.json() == second.json())
+    replay :: compare_booking_case(first.case, true).expect("replay")
+    assert(replay.status == ComparisonStatus.Mismatch)
+    original :: first.comparison.first_mismatch().expect("artifact mismatch")
+    replayed :: replay.first_mismatch().expect("replay mismatch")
+    assert(replayed.reference.typed_failure == original.reference.typed_failure)
+    assert(replayed.candidate.typed_failure == original.candidate.typed_failure)
+    assert(replayed.reference.mutation == original.reference.mutation)
+    assert(replayed.candidate.mutation == original.candidate.mutation)
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3503
+#Test("discarded_cases_stop_at_the_declared_bound") {
+    config :: HistoryConfig.new(41, 1, HistoryBounds{max_steps: 1, max_resources: 1, max_shrink_attempts: 1, max_discarded_cases: 0}, "test", "typed-history-v1", "unit", ObservationRelation.TypedEquality, OracleDeclaration.independent("model"))
+    runner :: HistoryRunner.new(^config).expect("valid config")
+    error :: runner.run(fn(_, _) { None }, fn(_) { panic("discarded cases are not observed") }).expect_err("discard bound must be enforced")
+    assert(error == HistoryError.InvalidConfig("discarded cases exceeded the configured bound"))
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3530
+#Test("oracle_validation_rejects_direct_transitive_and_opaque_edges") {
+    direct :: OracleDeclaration.independent("model").with_dependency(OracleDependency.new("model", "production", OracleDependencyKind.ProductionBehavior))
+    assert(if direct.validate_independence() == { .Err(HistoryError.InvalidOracle(_)) -> true else -> false })
+    transitive :: OracleDeclaration.independent("model").with_dependency(OracleDependency.new("model", "helper", OracleDependencyKind.Independent)).with_dependency(OracleDependency.new("helper", "production", OracleDependencyKind.ProductionBehavior))
+    assert(transitive.validate_independence().is_err())
+    opaque :: OracleDeclaration.independent("model").with_dependency(OracleDependency.new("model", "opaque", OracleDependencyKind.Opaque))
+    assert(opaque.validate_independence().is_err())
+}
+// Rust: crates/jet-foundation/src/TestingHistory.rs:3560
+#Test("secret_constructor_never_retains_secret_value") {
+    assert(HistoryValue.secret("password=not-persisted", "credential") == HistoryValue.Redacted("credential"))
+}

@@ -1,414 +1,192 @@
-// PORT-PENDING 0114 crates-jet-foundation-src-xmlpull-module-group-slice-5429: crates/jet-foundation/src/sema.rs:1-410
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Backend-neutral rights rows and the one semantic walker.
-//RS //!
-//RS //! D-RIGHTS1=C keeps the surface spellings but gives them one typed row. The
-//RS //! row is compile-time metadata: every checker supplies the effects it found,
-//RS //! and this module answers the same allow/deny question without knowing a
-//RS //! backend, MIR, or execution tier.
-//RS 
-//RS use crate::Authority::{self, Holds, Scope, Verdict};
-//RS 
-//RS /// The source spelling or semantic preset that produced one rights row.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-//RS pub enum RightsRowKind {
-//RS     Callable,
-//RS     Pure,
-//RS     Replayable,
-//RS     Comptime,
-//RS     Invocation,
-//RS     Transaction,
-//RS }
-//RS 
-//RS impl RightsRowKind {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Callable => "callable",
-//RS             Self::Pure => "pure",
-//RS             Self::Replayable => "replayable",
-//RS             Self::Comptime => "comptime",
-//RS             Self::Invocation => "invocation",
-//RS             Self::Transaction => "transaction",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Why a row exists. The chain is kept with the row instead of reconstructed
-//RS /// by a diagnostic or an execution tier.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsProvenance {
-//RS     pub source: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS impl RightsProvenance {
-//RS     pub fn new(source: impl Into<String>, reason: impl Into<String>) -> Self {
-//RS         Self {
-//RS             source: source.into(),
-//RS             reason: reason.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One callable rights row. `allow == None` is an unbounded row; `Some(empty)`
-//RS /// is the explicit pure-empty row. Denials always win over grants.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsRow {
-//RS     pub kind: RightsRowKind,
-//RS     pub allow: Option<Holds>,
-//RS     pub deny: Holds,
-//RS     pub provenance: RightsProvenance,
-//RS }
-//RS 
-//RS impl RightsRow {
-//RS     pub fn new(
-//RS         kind: RightsRowKind,
-//RS         allow: Option<Holds>,
-//RS         deny: Holds,
-//RS         provenance: RightsProvenance,
-//RS     ) -> Self {
-//RS         Self {
-//RS             kind,
-//RS             allow: allow.map(|rights| normalize_holds(&rights)),
-//RS             deny: normalize_holds(&deny),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS 
-//RS     /// The ordinary inferred callable row: no bound, no prohibition.
-//RS     pub fn callable(provenance: RightsProvenance) -> Self {
-//RS         Self::new(RightsRowKind::Callable, None, Holds::new(), provenance)
-//RS     }
-//RS 
-//RS     /// `-[]>`: the explicit empty row. Every reached effect is missing.
-//RS     pub fn pure(provenance: RightsProvenance) -> Self {
-//RS         Self::new(
-//RS             RightsRowKind::Pure,
-//RS             Some(Holds::new()),
-//RS             Holds::new(),
-//RS             provenance,
-//RS         )
-//RS     }
-//RS 
-//RS     /// `#Replayable`: an unbounded row with the four ambient nondeterministic
-//RS     /// roots denied. A denied root covers every qualified descendant.
-//RS     pub fn replayable(provenance: RightsProvenance) -> Self {
-//RS         Self::new(
-//RS             RightsRowKind::Replayable,
-//RS             None,
-//RS             Holds::from([
-//RS                 "Time".to_string(),
-//RS                 "Rand".to_string(),
-//RS                 "Net".to_string(),
-//RS                 "IO".to_string(),
-//RS             ]),
-//RS             provenance,
-//RS         )
-//RS     }
-//RS 
-//RS     /// A compile-time block may use only the memory row.
-//RS     pub fn comptime(provenance: RightsProvenance) -> Self {
-//RS         Self::new(
-//RS             RightsRowKind::Comptime,
-//RS             Some(Holds::from(["Mem".to_string()])),
-//RS             Holds::new(),
-//RS             provenance,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Invocation grants and denials use the manifest's roots or leaves. Keep
-//RS     /// the original root as well as its known leaves so open effect trees do
-//RS     /// not become narrower merely because a leaf is not in the Prelude list.
-//RS     pub fn invocation<I, A, J, D>(
-//RS         allow: I,
-//RS         deny: J,
-//RS         provenance: RightsProvenance,
-//RS     ) -> Self
-//RS     where
-//RS         I: IntoIterator<Item = A>,
-//RS         A: AsRef<str>,
-//RS         J: IntoIterator<Item = D>,
-//RS         D: AsRef<str>,
-//RS     {
-//RS         let allow = expand_leaves(allow);
-//RS         let deny = expand_leaves(deny);
-//RS         Self::new(RightsRowKind::Invocation, Some(allow), deny, provenance)
-//RS     }
-//RS 
-//RS     /// The transaction checker retains its undo-duty logic, but its
-//RS     /// irreversibility vocabulary comes from the declared Prelude facts.
-//RS     pub fn transaction(provenance: RightsProvenance) -> Self {
-//RS         Self::new(
-//RS             RightsRowKind::Transaction,
-//RS             None,
-//RS             irreversible_effects(),
-//RS             provenance,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Lower a named preset to the same row consumed by [`walk`].
-//RS     pub fn preset(kind: RightsRowKind, provenance: RightsProvenance) -> Self {
-//RS         match kind {
-//RS             RightsRowKind::Callable => Self::callable(provenance),
-//RS             RightsRowKind::Pure => Self::pure(provenance),
-//RS             RightsRowKind::Replayable => Self::replayable(provenance),
-//RS             RightsRowKind::Comptime => Self::comptime(provenance),
-//RS             RightsRowKind::Invocation => Self::invocation(
-//RS                 std::iter::empty::<&str>(),
-//RS                 std::iter::empty::<&str>(),
-//RS                 provenance,
-//RS             ),
-//RS             RightsRowKind::Transaction => Self::transaction(provenance),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn decide(&self, right: &str) -> Verdict {
-//RS         if Authority::covers_any(&self.deny, right) {
-//RS             Verdict::Denied
-//RS         } else if self
-//RS             .allow
-//RS             .as_ref()
-//RS             .is_none_or(|allow| Authority::covers_any(allow, right))
-//RS         {
-//RS             Verdict::Allowed
-//RS         } else {
-//RS             Verdict::Missing
-//RS         }
-//RS     }
-//RS 
-//RS     /// Walk every reached right. The result retains every denial rather than
-//RS     /// collapsing different failures into one score.
-//RS     pub fn walk(
-//RS         &self,
-//RS         effects: &Holds,
-//RS         call_chain: &[String],
-//RS         scope_chain: &[ScopeFrame],
-//RS     ) -> RightsWalk {
-//RS         let denials = effects
-//RS             .iter()
-//RS             .filter_map(|right| {
-//RS                 let verdict = self.decide(right);
-//RS                 (verdict != Verdict::Allowed).then(|| RightsDenial {
-//RS                     right: right.clone(),
-//RS                     verdict,
-//RS                     row: self.provenance.clone(),
-//RS                     chain: DenialChain::new(right, call_chain, scope_chain),
-//RS                 })
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let verdict = if denials
-//RS             .iter()
-//RS             .any(|denial| denial.verdict == Verdict::Denied)
-//RS         {
-//RS             Verdict::Denied
-//RS         } else if denials
-//RS             .iter()
-//RS             .any(|denial| denial.verdict == Verdict::Missing)
-//RS         {
-//RS             Verdict::Missing
-//RS         } else {
-//RS             Verdict::Allowed
-//RS         };
-//RS         RightsWalk {
-//RS             kind: self.kind,
-//RS             verdict,
-//RS             denials,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Compare a legacy answer one right at a time. This is the Phase A seam:
-//RS     /// callers may instrument old walkers while retaining their verdict until
-//RS     /// the deferred differential matrix proves equality.
-//RS     pub fn observe<F>(
-//RS         &self,
-//RS         callable: impl Into<String>,
-//RS         effects: &Holds,
-//RS         call_chain: &[String],
-//RS         scope_chain: &[ScopeFrame],
-//RS         legacy: F,
-//RS     ) -> Result<RightsWalk, RightsMismatch>
-//RS     where
-//RS         F: Fn(&str) -> Verdict,
-//RS     {
-//RS         let walk = self.walk(effects, call_chain, scope_chain);
-//RS         let differences = effects
-//RS             .iter()
-//RS             .filter_map(|right| {
-//RS                 let canonical = self.decide(right);
-//RS                 let observed = legacy(right);
-//RS                 (canonical != observed).then(|| RightsDifference {
-//RS                     right: right.clone(),
-//RS                     canonical,
-//RS                     legacy: observed,
-//RS                 })
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         if differences.is_empty() {
-//RS             Ok(walk)
-//RS         } else {
-//RS             Err(RightsMismatch {
-//RS                 callable: callable.into(),
-//RS                 kind: self.kind,
-//RS                 row: self.provenance.clone(),
-//RS                 differences,
-//RS             })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One scope in the outer-to-inner authority chain.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ScopeFrame {
-//RS     pub scope: Scope,
-//RS     pub name: String,
-//RS     pub grants: Holds,
-//RS     pub provenance: RightsProvenance,
-//RS }
-//RS 
-//RS impl ScopeFrame {
-//RS     pub fn new(
-//RS         scope: Scope,
-//RS         name: impl Into<String>,
-//RS         grants: Holds,
-//RS         provenance: RightsProvenance,
-//RS     ) -> Self {
-//RS         Self {
-//RS             scope,
-//RS             name: name.into(),
-//RS             grants: normalize_holds(&grants),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One typed denial chain for every refused right.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct DenialChain {
-//RS     pub right: String,
-//RS     pub call_chain: Vec<String>,
-//RS     pub scope_chain: Vec<ScopeFrame>,
-//RS     pub nearest_granting_scope: Option<ScopeFrame>,
-//RS }
-//RS 
-//RS impl DenialChain {
-//RS     pub fn new(right: &str, call_chain: &[String], scope_chain: &[ScopeFrame]) -> Self {
-//RS         let nearest_granting_scope = scope_chain
-//RS             .iter()
-//RS             .rev()
-//RS             .find(|frame| Authority::covers_any(&frame.grants, right))
-//RS             .cloned();
-//RS         Self {
-//RS             right: right.to_string(),
-//RS             call_chain: call_chain.to_vec(),
-//RS             scope_chain: scope_chain.to_vec(),
-//RS             nearest_granting_scope,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One refusal produced by the canonical walker.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsDenial {
-//RS     pub right: String,
-//RS     pub verdict: Verdict,
-//RS     pub row: RightsProvenance,
-//RS     pub chain: DenialChain,
-//RS }
-//RS 
-//RS /// Result of one row walk. `denials` contains all failing rights in stable
-//RS /// order, so callers never average an allowed and a refused fact.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsWalk {
-//RS     pub kind: RightsRowKind,
-//RS     pub verdict: Verdict,
-//RS     pub denials: Vec<RightsDenial>,
-//RS }
-//RS 
-//RS impl RightsWalk {
-//RS     pub const fn allowed(&self) -> bool {
-//RS         matches!(self.verdict, Verdict::Allowed)
-//RS     }
-//RS }
-//RS 
-//RS /// One per-right difference between an old checker and the canonical row.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsDifference {
-//RS     pub right: String,
-//RS     pub canonical: Verdict,
-//RS     pub legacy: Verdict,
-//RS }
-//RS 
-//RS /// Explicit differential failure. No aggregate pass/fail score hides which
-//RS /// fact differed or which row provenance produced it.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RightsMismatch {
-//RS     pub callable: String,
-//RS     pub kind: RightsRowKind,
-//RS     pub row: RightsProvenance,
-//RS     pub differences: Vec<RightsDifference>,
-//RS }
-//RS 
-//RS /// The one canonical walker entry point.
-//RS pub fn walk(
-//RS     row: &RightsRow,
-//RS     effects: &Holds,
-//RS     call_chain: &[String],
-//RS     scope_chain: &[ScopeFrame],
-//RS ) -> RightsWalk {
-//RS     row.walk(effects, call_chain, scope_chain)
-//RS }
-//RS 
-//RS /// Expand roots into the known Prelude leaves while retaining the root itself
-//RS /// for open, user-defined descendants.
-//RS pub fn expand_leaves<I, S>(rights: I) -> Holds
-//RS where
-//RS     I: IntoIterator<Item = S>,
-//RS     S: AsRef<str>,
-//RS {
-//RS     let known_leaves = crate::Syntax::BUILTIN_EFFECT_LEAVES
-//RS         .iter()
-//RS         .copied()
-//RS         .chain(
-//RS             Authority::effect_declarations()
-//RS                 .iter()
-//RS                 .filter(|declaration| declaration.name.contains('.'))
-//RS                 .map(|declaration| declaration.name),
-//RS         )
-//RS         .collect::<Vec<_>>();
-//RS     let mut expanded = Holds::new();
-//RS     for right in rights {
-//RS         let canonical = Authority::parse_right(right.as_ref())
-//RS             .unwrap_or_else(|| right.as_ref().trim().to_string());
-//RS         expanded.insert(canonical.clone());
-//RS         for leaf in &known_leaves {
-//RS             if Authority::covers(&canonical, leaf) {
-//RS                 expanded.insert((*leaf).to_string());
-//RS             }
-//RS         }
-//RS     }
-//RS     expanded
-//RS }
-//RS 
-//RS /// Source-declared irreversible roots/leaves, including the `FFI` root.
-//RS pub fn irreversible_effects() -> Holds {
-//RS     Authority::effect_declarations()
-//RS         .iter()
-//RS         .filter(|declaration| declaration.irreversible)
-//RS         .map(|declaration| declaration.name.to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn is_irreversible(right: &str) -> bool {
-//RS     Authority::is_declared_irreversible(right)
-//RS }
-//RS 
-//RS fn normalize_holds(rights: &Holds) -> Holds {
-//RS     rights
-//RS         .iter()
-//RS         .map(|right| {
-//RS             Authority::parse_right(right).unwrap_or_else(|| right.trim().to_string())
-//RS         })
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0114 crates/jet-foundation/src/sema.rs:1-410
+// Backend-neutral rights rows and the one semantic walker.
+use JetFoundation.Authority
+use JetFoundation.Authority.[Holds, Scope, Verdict]
+use JetFoundation.Syntax
 
+// Rust: crates/jet-foundation/src/sema.rs:12
+pub enum RightsRowKind { Callable, Pure, Replayable, Comptime, Invocation, Transaction }
+extend RightsRowKind {
+    // Rust: crates/jet-foundation/src/sema.rs:22
+    pub fn name(self) -> String Never! {
+        match self {
+            Callable => "callable", Pure => "pure", Replayable => "replayable",
+            Comptime => "comptime", Invocation => "invocation", Transaction => "transaction"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/sema.rs:37
+pub struct RightsProvenance { pub source: String, pub reason: String }
+extend RightsProvenance {
+    // Rust: crates/jet-foundation/src/sema.rs:43
+    pub fn new(source: String, reason: String) -> RightsProvenance Never! {
+        RightsProvenance{source: ^source, reason: ^reason}
+    }
+}
+// Rust: crates/jet-foundation/src/sema.rs:54
+pub struct RightsRow {
+    pub kind: RightsRowKind
+    pub allow: Holds?
+    pub deny: Holds
+    pub provenance: RightsProvenance
+}
+extend RightsRow {
+    // Rust: crates/jet-foundation/src/sema.rs:62
+    pub fn new(kind: RightsRowKind, allow: Holds?, deny: Holds, provenance: RightsProvenance) -> RightsRow Never! {
+        normalized: Holds? := None
+        if allow is Some(rights) { normalized = Some(normalize_holds(&rights)) }
+        RightsRow{kind: kind, allow: ^normalized, deny: normalize_holds(&deny), provenance: ^provenance}
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:77
+    pub fn callable(provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Callable, None, Holds.new(), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:82
+    pub fn pure(provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Pure, Some(Holds.new()), Holds.new(), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:93
+    pub fn replayable(provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Replayable, None, Holds.from(["Time", "Rand", "Net", "IO"]), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:108
+    pub fn comptime(provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Comptime, Some(Holds.from(["Mem"])), Holds.new(), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:120
+    pub fn invocation(allow: View<String>, deny: View<String>, provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Invocation, Some(expand_leaves(allow)), expand_leaves(deny), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:138
+    pub fn transaction(provenance: RightsProvenance) -> RightsRow Never! {
+        RightsRow.new(RightsRowKind.Transaction, None, irreversible_effects(), ^provenance)
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:148
+    pub fn preset(kind: RightsRowKind, provenance: RightsProvenance) -> RightsRow Never! {
+        match kind {
+            Callable => RightsRow.callable(^provenance), Pure => RightsRow.pure(^provenance),
+            Replayable => RightsRow.replayable(^provenance), Comptime => RightsRow.comptime(^provenance),
+            Invocation => RightsRow.invocation([], [], ^provenance), Transaction => RightsRow.transaction(^provenance)
+        }
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:163
+    pub fn decide(self: &RightsRow, right: String) -> Verdict Never! {
+        if Authority.covers_any(&self.deny, right) { return Verdict.Denied }
+        if self.allow is Some(allow) {
+            if !Authority.covers_any(&allow, right) { return Verdict.Missing }
+        }
+        Verdict.Allowed
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:179
+    pub fn walk(self: &RightsRow, effects: &Holds, call_chain: View<String>, scope_chain: View<ScopeFrame>) -> RightsWalk Never! {
+        denials: [RightsDenial] := []
+        verdict := Verdict.Allowed
+        // Holds is a sorted set; preserve stable BTreeSet iteration.
+        for right in effects {
+            answer :: self.decide(right)
+            if answer != Verdict.Allowed {
+                denials.push(RightsDenial{right: right.clone(), verdict: answer, row: self.provenance.clone(),
+                    chain: DenialChain.new(right, call_chain, scope_chain)})
+                if answer == Verdict.Denied { verdict = Verdict.Denied }
+                else if verdict != Verdict.Denied { verdict = Verdict.Missing }
+            }
+        }
+        RightsWalk{kind: self.kind, verdict: verdict, denials: ^denials}
+    }
+    // Rust: crates/jet-foundation/src/sema.rs:220
+    pub fn observe(self: &RightsRow, callable: String, effects: &Holds, call_chain: View<String>, scope_chain: View<ScopeFrame>, legacy: fn(String) -> Verdict Never!) -> RightsWalk RightsMismatch! {
+        result :: self.walk(effects, call_chain, scope_chain)
+        differences: [RightsDifference] := []
+        for right in effects {
+            canonical :: self.decide(right)
+            observed :: legacy(right)
+            if canonical != observed {
+                differences.push(RightsDifference{right: right.clone(), canonical: canonical, legacy: observed})
+            }
+        }
+        if differences.is_empty() { return ^result }
+        Err(RightsMismatch{callable: ^callable, kind: self.kind, row: self.provenance.clone(), differences: ^differences})
+    }
+}
+// Rust: crates/jet-foundation/src/sema.rs:259
+pub struct ScopeFrame {
+    pub scope: Scope
+    pub name: String
+    pub grants: Holds
+    pub provenance: RightsProvenance
+}
+extend ScopeFrame {
+    // Rust: crates/jet-foundation/src/sema.rs:267
+    pub fn new(scope: Scope, name: String, grants: Holds, provenance: RightsProvenance) -> ScopeFrame Never! {
+        ScopeFrame{scope: scope, name: ^name, grants: normalize_holds(&grants), provenance: ^provenance}
+    }
+}
+// Rust: crates/jet-foundation/src/sema.rs:284
+pub struct DenialChain {
+    pub right: String
+    pub call_chain: [String]
+    pub scope_chain: [ScopeFrame]
+    pub nearest_granting_scope: ScopeFrame?
+}
+extend DenialChain {
+    // Rust: crates/jet-foundation/src/sema.rs:292
+    pub fn new(right: String, call_chain: View<String>, scope_chain: View<ScopeFrame>) -> DenialChain Never! {
+        nearest: ScopeFrame? := None
+        for frame in scope_chain.iter().rev() {
+            if Authority.covers_any(&frame.grants, right) { nearest = Some(frame.clone()); break }
+        }
+        DenialChain{right: right.clone(), call_chain: call_chain.to_vec(), scope_chain: scope_chain.to_vec(), nearest_granting_scope: ^nearest}
+    }
+}
+// Rust: crates/jet-foundation/src/sema.rs:309
+pub struct RightsDenial { pub right: String, pub verdict: Verdict, pub row: RightsProvenance, pub chain: DenialChain }
+// Rust: crates/jet-foundation/src/sema.rs:318
+pub struct RightsWalk { pub kind: RightsRowKind, pub verdict: Verdict, pub denials: [RightsDenial] }
+extend RightsWalk {
+    // Rust: crates/jet-foundation/src/sema.rs:326
+    pub fn allowed(self: &RightsWalk) -> Bool Never! { self.verdict == Verdict.Allowed }
+}
+// Rust: crates/jet-foundation/src/sema.rs:333
+pub struct RightsDifference { pub right: String, pub canonical: Verdict, pub legacy: Verdict }
+// Rust: crates/jet-foundation/src/sema.rs:341
+#Error
+pub struct RightsMismatch { pub callable: String, pub kind: RightsRowKind, pub row: RightsProvenance, pub differences: [RightsDifference] }
+// Rust: crates/jet-foundation/src/sema.rs:350
+pub fn walk(row: &RightsRow, effects: &Holds, call_chain: View<String>, scope_chain: View<ScopeFrame>) -> RightsWalk Never! {
+    row.walk(effects, call_chain, scope_chain)
+}
+// Rust: crates/jet-foundation/src/sema.rs:361
+pub fn expand_leaves(rights: View<String>) -> Holds Never! {
+    known_leaves := Syntax.BUILTIN_EFFECT_LEAVES.to_vec()
+    for declaration in Authority.effect_declarations() {
+        if declaration.name.contains(".") { known_leaves.push(declaration.name) }
+    }
+    expanded := Holds.new()
+    for right in rights {
+        trimmed := right.trim() // #4303
+        canonical :: Authority.parse_right(right).unwrap_or_else(fn() { trimmed.to_string() })
+        expanded.insert(canonical.clone())
+        for leaf in &known_leaves {
+            if Authority.covers(canonical, leaf) { expanded.insert(leaf.to_string()) }
+        }
+    }
+    ^expanded
+}
+// Rust: crates/jet-foundation/src/sema.rs:391
+pub fn irreversible_effects() -> Holds Never! {
+    effects := Holds.new()
+    for declaration in Authority.effect_declarations() {
+        if declaration.irreversible { effects.insert(declaration.name.to_string()) }
+    }
+    ^effects
+}
+// Rust: crates/jet-foundation/src/sema.rs:399
+pub fn is_irreversible(right: String) -> Bool Never! { Authority.is_declared_irreversible(right) }
+// Rust: crates/jet-foundation/src/sema.rs:403
+fn normalize_holds(rights: &Holds) -> Holds Never! {
+    normalized := Holds.new()
+    for right in rights {
+        trimmed := right.trim() // #4303
+        normalized.insert(Authority.parse_right(right).unwrap_or_else(fn() { trimmed.to_string() }))
+    }
+    ^normalized
+}

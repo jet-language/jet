@@ -1,312 +1,175 @@
-// PORT-PENDING 0352 crates-jet-sema-src-sema-bundle-comptime-module-group: crates/jet-sema/src/Sema/Bundle/Comptime.rs:1-308
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Comptime-evaluation detection: does any part of a bundle reach for a
-//RS //! compile-time evaluated construct? Split out of `Bundle.rs` to keep the
-//RS //! module under the card #510 boundary; this slice has no dependency on the
-//RS //! rest of Bundle beyond the AST types every checker function reads.
-//RS 
-//RS use crate::AST::{
-//RS     DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Pattern,
-//RS     ProgramBundle, Stmt, StrPart, StructPatField,
-//RS };
-//RS 
-//RS pub fn bundle_has_comptime_evaluation(bundle: &ProgramBundle) -> bool {
-//RS     bundle
-//RS         .modules
-//RS         .iter()
-//RS         .flat_map(|module| &module.items)
-//RS         .any(item_has_comptime_evaluation)
-//RS }
-//RS 
-//RS pub(super) fn item_has_comptime_evaluation(item: &Item) -> bool {
-//RS     let function = |function: &Func| stmts_have_comptime_evaluation(&function.body);
-//RS     match item {
-//RS         Item::Func(value) => function(value),
-//RS         Item::Struct(value) => {
-//RS             value.methods.iter().any(function)
-//RS                 || value
-//RS                     .trait_impls
-//RS                     .iter()
-//RS                     .flat_map(|implementation| &implementation.methods)
-//RS                     .any(function)
-//RS         }
-//RS         Item::Enum(value) => {
-//RS             value.methods.iter().any(function)
-//RS                 || value
-//RS                     .trait_impls
-//RS                     .iter()
-//RS                     .flat_map(|implementation| &implementation.methods)
-//RS                     .any(function)
-//RS         }
-//RS         Item::Trait(value) => value
-//RS             .methods
-//RS             .iter()
-//RS             .filter_map(|method| method.default_body.as_deref())
-//RS             .any(stmts_have_comptime_evaluation),
-//RS         Item::Impl(value) => value.methods.iter().any(function),
-//RS         Item::Const(value) => value.is_comptime,
-//RS         Item::Test(value) => stmts_have_comptime_evaluation(&value.body),
-//RS         Item::CodeModule(value) => value
-//RS             .body
-//RS             .as_deref()
-//RS             .is_some_and(|body| body.iter().any(item_has_comptime_evaluation)),
-//RS         Item::ErrorConv(value) => stmts_have_comptime_evaluation(&value.body),
-//RS         Item::UserDerive(value) => derive_body_has_comptime_evaluation(&value.body),
-//RS         // D-STRUCT-ONCE1=A: root declaration loops are compile-time templates;
-//RS         // keep query-mode detection aligned with marker/derive loops.
-//RS         Item::TemplateLoop(value) => {
-//RS             expr_has_comptime_evaluation(&value.source)
-//RS                 || derive_body_has_comptime_evaluation(&value.body)
-//RS         }
-//RS         Item::GenericModule(value) => value.body.iter().any(item_has_comptime_evaluation),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn derive_body_has_comptime_evaluation(body: &[DeriveBodyItem]) -> bool {
-//RS     body.iter().any(|item| match item {
-//RS         DeriveBodyItem::Item(item) => item_has_comptime_evaluation(item),
-//RS         DeriveBodyItem::Stmt(stmt) => stmts_have_comptime_evaluation(std::slice::from_ref(stmt)),
-//RS         DeriveBodyItem::Loop { source, body, .. } => {
-//RS             expr_has_comptime_evaluation(source) || derive_body_has_comptime_evaluation(body)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
-//RS     stmts.iter().any(|stmt| match stmt {
-//RS         Stmt::Expr(value) | Stmt::Yield(value, _) | Stmt::DeferClose { close: value, .. } => {
-//RS             expr_has_comptime_evaluation(value)
-//RS         }
-//RS         Stmt::Val(binding) => binding.is_comptime || expr_has_comptime_evaluation(&binding.init),
-//RS         Stmt::Assign { value, .. } => expr_has_comptime_evaluation(value),
-//RS         Stmt::Return(Some(value), _) => expr_has_comptime_evaluation(value),
-//RS         Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-//RS             expr_has_comptime_evaluation(value)
-//RS         }
-//RS         Stmt::Return(None, _) => false,
-//RS         Stmt::While { cond, body, .. } => {
-//RS             expr_has_comptime_evaluation(cond) || stmts_have_comptime_evaluation(body)
-//RS         }
-//RS         Stmt::For { kind, body, .. } => {
-//RS             let iterable = match kind {
-//RS                 ForKind::Range {
-//RS                     start,
-//RS                     end,
-//RS                     step,
-//RS                     exclusive: _,
-//RS                 } => {
-//RS                     expr_has_comptime_evaluation(start)
-//RS                         || expr_has_comptime_evaluation(end)
-//RS                         || step.as_ref().is_some_and(expr_has_comptime_evaluation)
-//RS                 }
-//RS                 ForKind::In { collection, step } => {
-//RS                     expr_has_comptime_evaluation(collection)
-//RS                         || step.as_ref().is_some_and(expr_has_comptime_evaluation)
-//RS                 }
-//RS             };
-//RS             iterable || stmts_have_comptime_evaluation(body)
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             expr_has_comptime_evaluation(subject)
-//RS                 || arms.iter().any(|arm| {
-//RS                     expr_has_comptime_evaluation(&arm.cond)
-//RS                         || stmts_have_comptime_evaluation(&arm.body)
-//RS                 })
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_some_and(stmts_have_comptime_evaluation)
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             init.is_comptime
-//RS                 || expr_has_comptime_evaluation(&init.init)
-//RS                 || expr_has_comptime_evaluation(cond)
-//RS                 || step
-//RS                     .as_deref()
-//RS                     .is_some_and(|step| stmts_have_comptime_evaluation(std::slice::from_ref(step)))
-//RS                 || stmts_have_comptime_evaluation(body)
-//RS         }
-//RS         Stmt::Loop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => stmts_have_comptime_evaluation(body),
-//RS         Stmt::ContextBlock { fields, body, .. } => {
-//RS             fields
-//RS                 .iter()
-//RS                 .any(|(_, value, _)| expr_has_comptime_evaluation(value))
-//RS                 || stmts_have_comptime_evaluation(body)
-//RS         }
-//RS         Stmt::ComptimeIf { .. } | Stmt::ComptimeSwitch { .. } | Stmt::ComptimeBlock { .. } => true,
-//RS         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
-//RS             false
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
-//RS     let argument = |arg: &crate::AST::CallArg| expr_has_comptime_evaluation(&arg.expr);
-//RS     match expr {
-//RS         Expr::Str(parts, _) => parts.iter().any(|part| match part {
-//RS             StrPart::Interp(value, _) => expr_has_comptime_evaluation(value),
-//RS             StrPart::Lit(_) => false,
-//RS         }),
-//RS         Expr::ListLit(values, _) => values.iter().any(expr_has_comptime_evaluation),
-//RS         Expr::MemberSpread { base, .. } => expr_has_comptime_evaluation(base),
-//RS         Expr::Spread(value, _)
-//RS         | Expr::Unary(_, value, _)
-//RS         | Expr::Deref(value, _)
-//RS         | Expr::RawOf(value, _)
-//RS         | Expr::Copy(value, _)
-//RS         | Expr::Place(value, _, _)
-//RS         | Expr::Field(value, _, _)
-//RS         | Expr::Tainted(value, _, _)
-//RS         | Expr::Present(value, _)
-//RS         | Expr::Ok(value, _)
-//RS         | Expr::Err(value, _)
-//RS         | Expr::Paren(value, _)
-//RS         | Expr::PtrFromAddr { addr: value, .. } => expr_has_comptime_evaluation(value),
-//RS         Expr::Try(value, _, _, note) => {
-//RS             expr_has_comptime_evaluation(value)
-//RS                 || note.as_deref().is_some_and(expr_has_comptime_evaluation)
-//RS         }
-//RS         Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
-//RS             expr_has_comptime_evaluation(key) || expr_has_comptime_evaluation(value)
-//RS         }),
-//RS         Expr::Index { base, index, .. } => {
-//RS             expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
-//RS         }
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             expr_has_comptime_evaluation(base)
-//RS                 || range.as_deref().map_or_else(
-//RS                     || expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end),
-//RS                     expr_has_comptime_evaluation,
-//RS                 )
-//RS         }
-//RS         Expr::Range { start, end, .. } => {
-//RS             expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
-//RS         }
-//RS         Expr::Call(call) => call.args.iter().any(argument),
-//RS         Expr::Binary(_, left, right, _) => {
-//RS             expr_has_comptime_evaluation(left) || expr_has_comptime_evaluation(right)
-//RS         }
-//RS         Expr::CompareChain { operands, .. } => operands.iter().any(expr_has_comptime_evaluation),
-//RS         Expr::OptField { base, .. } => expr_has_comptime_evaluation(base),
-//RS         Expr::MethodCall { receiver, args, .. } => {
-//RS             expr_has_comptime_evaluation(receiver) || args.iter().any(argument)
-//RS         }
-//RS         Expr::StructLit { fields, .. } => fields
-//RS             .iter()
-//RS             .any(|(_, _, value)| expr_has_comptime_evaluation(value)),
-//RS         Expr::TypedLit { body, .. } => {
-//RS             let mut hit = false;
-//RS             body.for_each_expr(|value| {
-//RS                 if expr_has_comptime_evaluation(value) {
-//RS                     hit = true;
-//RS                 }
-//RS             });
-//RS             hit
-//RS         }
-//RS         Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-//RS             EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
-//RS                 expr_has_comptime_evaluation(value)
-//RS             }
-//RS         }),
-//RS         Expr::PatternTest {
-//RS             subject, pattern, ..
-//RS         } => {
-//RS             expr_has_comptime_evaluation(subject)
-//RS                 || match pattern {
-//RS                     Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-//RS                         StructPatField::Value { value, .. } => expr_has_comptime_evaluation(value),
-//RS                         StructPatField::Bind { .. } => false,
-//RS                     }),
-//RS                     _ => false,
-//RS                 }
-//RS         }
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => {
-//RS             expr_has_comptime_evaluation(value)
-//RS                 || match fallback {
-//RS                     OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
-//RS                         expr_has_comptime_evaluation(value)
-//RS                     }
-//RS                     OrFallback::Block { body, value, .. } => {
-//RS                         stmts_have_comptime_evaluation(body)
-//RS                             || value
-//RS                                 .as_ref()
-//RS                                 .is_some_and(|value| expr_has_comptime_evaluation(value))
-//RS                     }
-//RS                     _ => false,
-//RS                 }
-//RS         }
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             expr_has_comptime_evaluation(cond)
-//RS                 || stmts_have_comptime_evaluation(then_body)
-//RS                 || expr_has_comptime_evaluation(then_value)
-//RS                 || stmts_have_comptime_evaluation(else_body)
-//RS                 || expr_has_comptime_evaluation(else_value)
-//RS         }
-//RS         Expr::TupleLit(fields, _, _) => fields
-//RS             .iter()
-//RS             .any(|(_, value)| expr_has_comptime_evaluation(value)),
-//RS         Expr::Lambda(lambda) => match &lambda.body {
-//RS             LambdaBody::Expr(value) => expr_has_comptime_evaluation(value),
-//RS             LambdaBody::Block(body) => stmts_have_comptime_evaluation(body),
-//RS         },
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             expr_has_comptime_evaluation(callee) || args.iter().any(argument)
-//RS         }
-//RS         Expr::ComptimeName { .. } => true,
-//RS         Expr::Int(..)
-//RS         | Expr::Float(..)
-//RS         | Expr::Bool(..)
-//RS         | Expr::Unit(..)
-//RS         | Expr::Char(..)
-//RS         | Expr::StrMatchLit(..)
-//RS         | Expr::BinMatchLit(..)
-//RS         | Expr::Ident(..)
-//RS         | Expr::UnitLit { .. }
-//RS         | Expr::Absent(_)
-//RS         | Expr::Todo { .. }
-//RS         | Expr::NoElse(_)
-//RS         | Expr::ReduceMarker(..) => false,
-//RS     }
-//RS }
-// END-PORT-PENDING 0352 crates/jet-sema/src/Sema/Bundle/Comptime.rs:1-308
+// Compile-time evaluation detection over the bundle AST.
+use jet_foundation.[DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Pattern, ProgramBundle, Stmt, StrPart, StructPatField]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:11
+pub fn bundle_has_comptime_evaluation(bundle: ProgramBundle) -> Bool Never! {
+    loop module in bundle.modules {
+        loop item in module.items { if item_has_comptime_evaluation(item) -> return true }
+    }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:19
+pub fn item_has_comptime_evaluation(item: Item) -> Bool Never! {
+    function :: (value: Func) -> stmts_have_comptime_evaluation(value.body)
+    if item == {
+        .Func(value) -> function(value)
+        .Struct(value) -> {
+            if value.methods.any(function) -> return true
+            loop implementation in value.trait_impls { if implementation.methods.any(function) -> return true }
+            false
+        }
+        .Enum(value) -> {
+            if value.methods.any(function) -> return true
+            loop implementation in value.trait_impls { if implementation.methods.any(function) -> return true }
+            false
+        }
+        .Trait(value) -> {
+            loop method in value.methods {
+                if method.default_body == .Val(body) { if stmts_have_comptime_evaluation(body) -> return true }
+            }
+            false
+        }
+        .Impl(value) -> value.methods.any(function)
+        .Const(value) -> value.is_comptime
+        .Test(value) -> stmts_have_comptime_evaluation(value.body)
+        .CodeModule(value) -> {
+            if value.body == .Val(body) -> return body.any(item_has_comptime_evaluation)
+            false
+        }
+        .ErrorConv(value) -> stmts_have_comptime_evaluation(value.body)
+        .UserDerive(value) -> derive_body_has_comptime_evaluation(value.body)
+        // D-STRUCT-ONCE1=A: root loops are compile-time templates.
+        .TemplateLoop(value) -> expr_has_comptime_evaluation(value.source) || derive_body_has_comptime_evaluation(value.body)
+        .GenericModule(value) -> value.body.any(item_has_comptime_evaluation)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:64
+fn derive_body_has_comptime_evaluation(body: [DeriveBodyItem]) -> Bool Never! {
+    loop item in body {
+        hit :: if item == {
+            .Item(value) -> item_has_comptime_evaluation(value)
+            .Stmt(stmt) -> stmt_has_comptime_evaluation(stmt)
+            .Loop(source, inner, _) -> expr_has_comptime_evaluation(source) || derive_body_has_comptime_evaluation(inner)
+        }
+        if hit -> return true
+    }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:74
+pub fn stmts_have_comptime_evaluation(stmts: [Stmt]) -> Bool Never! {
+    stmts.any(stmt_has_comptime_evaluation)
+}
+// Single borrowed statement avoids constructing a one-element AST array.
+fn stmt_has_comptime_evaluation(stmt: Stmt) -> Bool Never! {
+    if stmt == {
+        .Expr(value) | .Yield(value, _) | .DeferClose(value, _) -> expr_has_comptime_evaluation(value)
+        .Val(binding) -> binding.is_comptime || expr_has_comptime_evaluation(binding.init)
+        .Assign(_, value, _) -> expr_has_comptime_evaluation(value)
+        .Return(.Val(value), _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> expr_has_comptime_evaluation(value)
+        .Return(.None, _) -> false
+        .While(cond, body, _) -> expr_has_comptime_evaluation(cond) || stmts_have_comptime_evaluation(body)
+        .For(_, kind, body, _) -> {
+            iterable :: if kind == {
+                .Range(start, end, step, _) -> expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end) || step.is_some_and(expr_has_comptime_evaluation)
+                .In(collection, step) -> expr_has_comptime_evaluation(collection) || step.is_some_and(expr_has_comptime_evaluation)
+            }
+            iterable || stmts_have_comptime_evaluation(body)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            expr_has_comptime_evaluation(subject)
+                || arms.any(arm -> expr_has_comptime_evaluation(arm.cond) || stmts_have_comptime_evaluation(arm.body))
+                || else_body.is_some_and(stmts_have_comptime_evaluation)
+        }
+        .CountedLoop(init, cond, step, body, _) -> {
+            init.is_comptime || expr_has_comptime_evaluation(init.init)
+                || expr_has_comptime_evaluation(cond)
+                || step.is_some_and(stmt_has_comptime_evaluation)
+                || stmts_have_comptime_evaluation(body)
+        }
+        .Loop(body, _) | .Unsafe(body, _) | .Impure(body, _) | .Reactive(body, _)
+        | .Shield(body, _) | .Switched(body, _) | .Region(body, _) | .Policy(_, body, _)
+        | .TaskGroup(_, body, _) | .Layout(_, body, _) | .AuthorityScope(_, body, _)
+        | .Transact(body, _) | .AssumeDet(body, _) | .Live(_, body, _)
+        | .ScopeMember(_, body, _) -> stmts_have_comptime_evaluation(body)
+        .ContextBlock(fields, body, _) -> fields.any(field -> expr_has_comptime_evaluation(field.1)) || stmts_have_comptime_evaluation(body)
+        .ComptimeIf(..) | .ComptimeSwitch(..) | .ComptimeBlock(..) -> true
+        .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:166
+fn expr_has_comptime_evaluation(expr: Expr) -> Bool Never! {
+    argument :: arg -> expr_has_comptime_evaluation(arg.expr)
+    if expr == {
+        .Str(parts, _) -> parts.any(part -> if part == {
+            .Interp(value, _) -> expr_has_comptime_evaluation(value)
+            .Lit(_) -> false
+        })
+        .ListLit(values, _) -> values.any(expr_has_comptime_evaluation)
+        .MemberSpread(base, _) -> expr_has_comptime_evaluation(base)
+        .Spread(value, _) | .Unary(_, value, _) | .Deref(value, _)
+        | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _)
+        | .Field(value, _, _) | .Tainted(value, _, _) | .Present(value, _)
+        | .Ok(value, _) | .Err(value, _) | .Paren(value, _)
+        | .PtrFromAddr(value, _) -> expr_has_comptime_evaluation(value)
+        .Try(value, _, _, note) -> expr_has_comptime_evaluation(value) || note.is_some_and(expr_has_comptime_evaluation)
+        .MapLit(entries, _) -> entries.any(entry -> expr_has_comptime_evaluation(entry.0) || expr_has_comptime_evaluation(entry.1))
+        .Index(base, index, _) -> expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
+        .Slice(base, start, end, range, _) -> {
+            expr_has_comptime_evaluation(base) || if range == {
+                .Val(value) -> expr_has_comptime_evaluation(value)
+                .None -> expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
+            }
+        }
+        .Range(start, end, _, _) -> expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
+        .Call(call) -> call.args.any(argument)
+        .Binary(_, left, right, _) -> expr_has_comptime_evaluation(left) || expr_has_comptime_evaluation(right)
+        .CompareChain(operands, _, _) -> operands.any(expr_has_comptime_evaluation)
+        .OptField(base, _, _) -> expr_has_comptime_evaluation(base)
+        .MethodCall(receiver, _, args, ..) -> expr_has_comptime_evaluation(receiver) || args.any(argument)
+        .StructLit(_, fields, ..) -> fields.any(field -> expr_has_comptime_evaluation(field.2))
+        .TypedLit(_, body, _) -> {
+            hit := false
+            body.for_each_expr(value -> { if expr_has_comptime_evaluation(value) -> hit = true })
+            hit
+        }
+        .EnumLit(_, _, args, ..) -> args.any(arg -> if arg == {
+            .Positional(value) | .Named(_, _, value) -> expr_has_comptime_evaluation(value)
+        })
+        .PatternTest(subject, pattern, ..) -> {
+            expr_has_comptime_evaluation(subject) || if pattern == {
+                .Struct(_, fields, ..) -> fields.any(field -> if field == {
+                    .Value(_, value, _) -> expr_has_comptime_evaluation(value)
+                    .Bind(..) -> false
+                })
+                _ -> false
+            }
+        }
+        .OrFallback(value, fallback, _) -> {
+            expr_has_comptime_evaluation(value) || if fallback == {
+                .Value(inner) | .Return(.Val(inner), _) -> expr_has_comptime_evaluation(inner)
+                .Block(body, inner, _) -> stmts_have_comptime_evaluation(body) || inner.is_some_and(expr_has_comptime_evaluation)
+                _ -> false
+            }
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            expr_has_comptime_evaluation(cond) || stmts_have_comptime_evaluation(then_body)
+                || expr_has_comptime_evaluation(then_value) || stmts_have_comptime_evaluation(else_body)
+                || expr_has_comptime_evaluation(else_value)
+        }
+        .TupleLit(fields, _, _) -> fields.any(field -> expr_has_comptime_evaluation(field.1))
+        .Lambda(lambda) -> if lambda.body == {
+            .Expr(value) -> expr_has_comptime_evaluation(value)
+            .Block(body) -> stmts_have_comptime_evaluation(body)
+        }
+        .CallValue(callee, args, _) -> expr_has_comptime_evaluation(callee) || args.any(argument)
+        .ComptimeName(..) -> true
+        .Int(..) | .Float(..) | .Bool(..) | .Unit(..) | .Char(..)
+        | .StrMatchLit(..) | .BinMatchLit(..) | .Ident(..) | .UnitLit(..)
+        | .Absent(_) | .Todo(..) | .NoElse(_) | .ReduceMarker(..) -> false
+    }
+}

@@ -1,0 +1,52 @@
+// No Rust inline tests in PerformanceBudget.rs:1-1848; controls exercise the
+// same exact arithmetic and independent-validation branches without providers.
+#Test("performance budget arbitrary precision integer arithmetic") {
+    left :: BigInt.parse("1000000000000000000000000000001") ?? panic("left")
+    right :: BigInt.parse("999999999999999999999999999999") ?? panic("right")
+    assert_eq(left.add(right).to_string(), "2000000000000000000000000000000")
+    assert_eq(left.sub(right).to_string(), "2")
+    product :: left.mul(right)
+    assert_eq((product.exact_div(left) ?? panic("exact division")).to_string(), right.to_string())
+    assert_eq((BigInt.parse_source("-0x1_0000") ?? panic("source integer")).to_string(), "-65536")
+    if BigInt.parse("-0") == { .Err(error) -> assert_eq(error.message, "non-canonical integer `-0`") .Ok(_) -> panic("noncanonical zero accepted") }
+}
+#Test("performance budget rational reduction and zero denominator") {
+    reduced :: Rational.new(6, -8) ?? panic("rational")
+    assert_eq(reduced.to_string(), "-3/4")
+    assert_eq((reduced.add(Rational.new(3, 4) ?? panic("positive")) ?? panic("addition")), Rational.zero())
+    if Rational.new(1, 0) == { .Err(error) -> assert_eq(error.message, "rational denominator is zero") .Ok(_) -> panic("zero denominator accepted") }
+    nonreduced :: CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "den", value: CanonicalJSON.Integer("4")}, CanonicalJSONField{key: "num", value: CanonicalJSON.Integer("2")}})
+    if validate_rational(nonreduced, true, "quantity") == { .Err(error) -> assert_eq(error.message, "quantity is not gcd-reduced") .Ok(_) -> panic("nonreduced wire rational accepted") }
+}
+#Test("performance budget nearest rank mean and median absolute deviation") {
+    samples :: [Rational]{Rational.integer(4), Rational.integer(1), Rational.integer(3), Rational.integer(2)}
+    stats :: statistics(samples) ?? panic("statistics")
+    assert_eq(stats.p50, Rational.integer(2))
+    assert_eq(stats.p90, Rational.integer(4))
+    assert_eq(stats.p999, Rational.integer(4))
+    assert_eq(stats.mean, Rational.new(5, 2) ?? panic("mean"))
+    assert_eq(stats.mad, Rational.integer(1))
+}
+#Test("performance budget evidence and enforcement remain distinct") {
+    pass :: evaluate("e", "c", [], [Rational.integer(5)], [], None, Comparison.Absolute(Rational.integer(5), LimitDirection.AtMost), Direction.LowerIsBetter, Enforcement.Fail, None) ?? panic("evaluate pass")
+    assert_eq(pass.evidence, Evidence.Pass)
+    assert_eq(pass.outcome, PolicyOutcome.Pass)
+    warn :: evaluate("e", "c", [], [Rational.integer(6)], [], None, Comparison.Absolute(Rational.integer(5), LimitDirection.AtMost), Direction.LowerIsBetter, Enforcement.Warn, None) ?? panic("evaluate regression")
+    assert_eq(warn.evidence, Evidence.Regression)
+    assert_eq(warn.outcome, PolicyOutcome.Warn)
+    unavailable :: evaluate("e", "c", [], [Rational.integer(6)], [Rational.zero()], None, Comparison.RelativeTo(BigInt.one(), RelativeGoal.RegressionAtMost), Direction.LowerIsBetter, Enforcement.Fail, None) ?? panic("zero baseline")
+    assert_eq(unavailable.evidence, Evidence.Unavailable)
+    assert_eq(unavailable.outcome, PolicyOutcome.Fail)
+}
+#Test("performance budget bootstrap reproducibility and trend direction") {
+    samples :: [Rational]{Rational.integer(1), Rational.integer(2), Rational.integer(3)}
+    policy :: MeasurementPolicy{bootstrap_resamples: 20, lower_rank: 1, upper_rank: 20}
+    a :: evaluate("e", "c", [], samples, [], Val(Percentile.P50), Comparison.AbsoluteFrom(Rational.integer(2), LimitDirection.AtMost), Direction.LowerIsBetter, Enforcement.Fail, Val(policy)) ?? panic("bootstrap")
+    b :: evaluate("e", "c", [], samples, [], Val(Percentile.P50), Comparison.AbsoluteFrom(Rational.integer(2), LimitDirection.AtMost), Direction.LowerIsBetter, Enforcement.Fail, Val(policy)) ?? panic("repeat bootstrap")
+    assert_eq(a.bootstrap, b.bootstrap)
+    assert_eq(a.bootstrap.len(), 20)
+    descending :: [Rational]{Rational.integer(3), Rational.integer(2), Rational.integer(1)}
+    result :: trend([String]{"a", "b", "c"}, descending, Direction.LowerIsBetter) ?? panic("trend")
+    assert_eq(result.label, TrendLabel.Improving)
+    assert_eq(result.score, Val(Rational.integer(1)))
+}

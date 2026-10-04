@@ -1,0 +1,54 @@
+use jet_foundation.[Type, Span, VariantPayload]
+use jet_sema.[core_generic_struct_field, core_generic_constructable_fields, core_file_handle_dispatch_name, file_handle_method_return, job_queue_method_return, core_auth_variants, core_http_variants, core_encoding_variants, core_key_pattern_types, core_key_variants]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:2334
+#Test("core_generic_fields_preserve_arguments_and_reject_wrong_arity") {
+    assert_eq(core_generic_struct_field("DataJoin", "left", [Type.Int, Type.String]), Val(Type.Int))
+    assert_eq(core_generic_struct_field("DataJoin", "right", [Type.Int, Type.String]), Val(Type.String))
+    assert_eq(core_generic_struct_field("DataJoin", "left", [Type.Int]), None)
+    assert_eq(core_generic_constructable_fields("DataJoin", [Type.Int, Type.String]), Val([("left", Type.Int), ("right", Type.String)]))
+    assert_eq(core_generic_constructable_fields("HistoryStrategy", []), None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:2588
+#Test("queue_recognition_distinguishes_unknown_method_from_bad_arity") {
+    queue :: Type.Named{name: "JobQueue"}
+    assert_eq(job_queue_method_return(queue, "enqueue", 1), Val(None))
+    assert(job_queue_method_return(queue, "enqueue", 2) != Val(None))
+    assert(job_queue_method_return(queue, "enqueue", 3) != Val(None))
+    assert_eq(job_queue_method_return(queue, "enqueue", 4), Val(None))
+    assert_eq(job_queue_method_return(queue, "absent", 0), None)
+    assert_eq(job_queue_method_return(Type.Int, "enqueue", 2), None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:3496
+#Test("stream_dispatch_requires_exact_core_identity_and_retains_direction_diagnostic") {
+    assert_eq(core_file_handle_dispatch_name("<corelib>/Core/files::Core/files/files.jet::FileReader"), Val("FileReader"))
+    assert_eq(core_file_handle_dispatch_name("other::FileReader"), None)
+    diags := []
+    assert_eq(file_handle_method_return("FileReader", "write_line", 1, Span.new(1, 2), &diags), Val(None))
+    assert_eq(diags.len(), 1)
+    assert_eq(diags[0].code, "E2501")
+    assert_eq(file_handle_method_return("FileReader", "read_line", 1, Span.new(1, 2), &diags), None)
+    assert_eq(diags.len(), 1)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:2805
+#Test("closed_core_variant_payloads_keep_names_and_types") {
+    zero :: Span.new(0, 0)
+    assert_eq(core_key_pattern_types("Char"), Val([Type.Char]))
+    assert_eq(core_key_pattern_types("F"), Val([Type.Int]))
+    assert_eq(core_key_pattern_types("Enter"), Val([]))
+    assert_eq(core_key_pattern_types("absent"), None)
+    assert_eq(core_key_variants().get("Ctrl"), Val((zero, VariantPayload.Single{ty: Type.Char, span: zero})))
+    auth :: core_auth_variants("AuthError").expect("known enum")
+    assert(auth.contains_key("WrongAudience"))
+    assert_eq(auth.get("TokenNotYetValid"), Val((zero, VariantPayload.Unit)))
+    assert_eq(core_auth_variants("other"), None)
+    http :: core_http_variants("HTTPError").expect("known enum")
+    assert(http.contains_key("UnsupportedTarget"))
+    assert(http.contains_key("Policy"))
+    data :: core_encoding_variants("DataEvent").expect("known enum")
+    assert(data.contains_key("ArrayStart"))
+    assert_eq(data.get("Bool"), Val((zero, VariantPayload.Single{ty: Type.Bool, span: zero})))
+}

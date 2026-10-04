@@ -1,146 +1,97 @@
-// PORT-PENDING 0344 crates-jet-parser-tests-result-handler-grammar: crates/jet-parser/tests/result_handler_grammar.rs:1-142
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use jet_parser::AST::{Expr, Item, Pattern, Stmt, Type, UnOp};
-//RS use jet_parser::{Lexer, Parser};
-//RS 
-//RS #[test]
-//RS fn result_handler_lookahead_keeps_neighboring_forms_unambiguous() {
-//RS     let source = r#"
-//RS fn optional() -> Success? -> None
-//RS fn fallible() Error! -> Err("bad")
-//RS 
-//RS fn run(value: Int Error!, optional: String) {
-//RS     propagated :: value
-//RS     noted :: value?("context")
-//RS     chained :: optional?.len
-//RS     negated :: !true
-//RS     handled :: value ? ok -> if {
-//RS         !true -> ok
-//RS         else -> ok
-//RS     }
-//RS     ! error -> error
-//RS }
-//RS "#;
-//RS     let (tokens, lexer_diagnostics) = Lexer::lex(source);
-//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-//RS     let program = Parser::parse(&tokens).expect("neighboring forms should parse");
-//RS 
-//RS     let function = |name| {
-//RS         program.items.iter().find_map(|item| match item {
-//RS             Item::Func(function) if function.name == name => Some(function),
-//RS             _ => None,
-//RS         })
-//RS     };
-//RS     assert!(matches!(
-//RS         function("optional").and_then(|function| function.return_type.as_ref()),
-//RS         Some(Type::Option(inner))
-//RS             if matches!(inner.as_ref(), Type::Named(name) if name == "Success")
-//RS     ));
-//RS     assert!(matches!(
-//RS         function("fallible").and_then(|function| function.return_type.as_ref()),
-//RS         Some(Type::Result { err, .. })
-//RS             if matches!(err.as_ref(), Type::Named(name) if name == "Error")
-//RS     ));
-//RS 
-//RS     let run = function("run").expect("run");
-//RS     let binding = |name| {
-//RS         run.body.iter().find_map(|stmt| match stmt {
-//RS             Stmt::Val(binding) if binding.name == name => Some(&binding.init),
-//RS             _ => None,
-//RS         })
-//RS     };
-//RS     assert!(matches!(binding("propagated"), Some(Expr::Ident(name, _)) if name == "value"));
-//RS     assert!(matches!(
-//RS         binding("noted"),
-//RS         Some(Expr::Try(_, _, _, Some(_)))
-//RS     ));
-//RS     assert!(matches!(binding("chained"), Some(Expr::OptField { .. })));
-//RS     assert!(matches!(
-//RS         binding("negated"),
-//RS         Some(Expr::Unary(UnOp::Not, inner, _))
-//RS             if matches!(inner.as_ref(), Expr::Bool(true, _))
-//RS     ));
-//RS 
-//RS     let Some(Expr::If {
-//RS         cond,
-//RS         then_value,
-//RS         else_value,
-//RS         ..
-//RS     }) = binding("handled")
-//RS     else {
-//RS         panic!("handler must remain an exhaustive if expression");
-//RS     };
-//RS     assert!(matches!(
-//RS         cond.as_ref(),
-//RS         Expr::PatternTest {
-//RS             pattern: Pattern::Ok { binding, .. },
-//RS             ..
-//RS         } if binding == "ok"
-//RS     ));
-//RS     assert!(matches!(
-//RS         then_value.as_ref(),
-//RS         Expr::If { cond, .. }
-//RS             if matches!(
-//RS                 cond.as_ref(),
-//RS                 Expr::Unary(UnOp::Not, inner, _)
-//RS                     if matches!(inner.as_ref(), Expr::Bool(true, _))
-//RS             )
-//RS     ));
-//RS     assert!(matches!(
-//RS         else_value.as_ref(),
-//RS         Expr::If {
-//RS             cond: err_cond,
-//RS             then_value: failure,
-//RS             ..
-//RS         } if matches!(
-//RS             err_cond.as_ref(),
-//RS             Expr::PatternTest {
-//RS                 pattern: Pattern::Err { binding, .. },
-//RS                 ..
-//RS             } if binding == "error"
-//RS         ) && matches!(failure.as_ref(), Expr::Ident(name, _) if name == "error")
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type() {
-//RS     let source = r#"
-//RS fn from_addr<T>(addr: Int) -> *T Never! { todo }
-//RS fn either(value: *Node | Label) {}
-//RS "#;
-//RS     let (tokens, lexer_diagnostics) = Lexer::lex(source);
-//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-//RS     let program = Parser::parse(&tokens).expect("pointer types should parse");
-//RS     let function = |name| {
-//RS         program.items.iter().find_map(|item| match item {
-//RS             Item::Func(function) if function.name == name => Some(function),
-//RS             _ => None,
-//RS         })
-//RS     };
-//RS     let is_pointer_to = |ty: &Type, element: &str| {
-//RS         matches!(ty, Type::Apply { name, args } if name == "Ptr"
-//RS             && matches!(args.as_slice(), [Type::Named(inner)] if inner == element))
-//RS     };
-//RS     assert!(
-//RS         matches!(
-//RS             function("from_addr").and_then(|function| function.return_type.as_ref()),
-//RS             Some(Type::Result { ok, err }) if is_pointer_to(ok, "T") && err.is_never()
-//RS         ),
-//RS         "`*T Never!` must be a `Never!` contract over `*T`"
-//RS     );
-//RS     let either = function("either").expect("either");
-//RS     assert!(
-//RS         matches!(
-//RS             &either.params[0].ty,
-//RS             Type::Union(members)
-//RS                 if members.len() == 2
-//RS                     && members.iter().any(|member| is_pointer_to(member, "Node"))
-//RS                     && members
-//RS                         .iter()
-//RS                         .any(|member| matches!(member, Type::Named(name) if name == "Label"))
-//RS         ),
-//RS         "`*Node | Label` must be a union with a `*Node` member"
-//RS     );
-//RS }
-// END-PORT-PENDING 0344 crates/jet-parser/tests/result_handler_grammar.rs:1-142
+use jet_foundation.[Expr, Item, Pattern, Stmt, Type, UnOp, Func, Program]
+use jet_parser.[parse_tokens]
+use jet_lexer.[lex_payload]
 
+fn result_handler_function(program: Program, name: String) -> (@Func)? from program {
+    loop item in program.items {
+        if item == .Func(function) && function.name == name -> return Val(@function)
+    }
+    None
+}
+fn result_handler_binding(function: @Func, name: String) -> (@Expr)? from function {
+    loop stmt in function.body {
+        if stmt == .Val(binding) && binding.name == name -> return Val(@binding.init)
+    }
+    None
+}
+// Rust: crates/jet-parser/tests/result_handler_grammar.rs:5
+#Test("result_handler_lookahead_keeps_neighboring_forms_unambiguous") {
+    source :: "\nfn optional() -> Success? -> None\nfn fallible() Error! -> Err(\"bad\")\n\nfn run(value: Int Error!, optional: String) {\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    handled :: value ? ok -> if {\n        !true -> ok\n        else -> ok\n    }\n    ! error -> error\n}\n"
+    lexed :: lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
+    parsed :: parse_tokens(lexed.tokens)
+    assert(parsed.diagnostics.is_empty(), "neighboring forms should parse")
+    optional :: result_handler_function(parsed.program, "optional") ?? panic("optional")
+    assert(if optional.return_type == {
+        .Val(.Option(inner)) -> if inner == { .Named(name) -> name == "Success" else -> false }
+        else -> false
+    })
+    fallible :: result_handler_function(parsed.program, "fallible") ?? panic("fallible")
+    assert(if fallible.return_type == {
+        .Val(.Result(_, err)) -> if err == { .Named(name) -> name == "Error" else -> false }
+        else -> false
+    })
+    run :: result_handler_function(parsed.program, "run") ?? panic("run")
+    propagated :: result_handler_binding(run, "propagated") ?? panic("propagated")
+    assert(if propagated == { .Ident(name, _) -> name == "value" else -> false })
+    noted :: result_handler_binding(run, "noted") ?? panic("noted")
+    assert(if noted == { .Try(_, _, _, .Val(_)) -> true else -> false })
+    chained :: result_handler_binding(run, "chained") ?? panic("chained")
+    assert(if chained == { .OptField(_, _, _, _, _) -> true else -> false })
+    negated :: result_handler_binding(run, "negated") ?? panic("negated")
+    assert(if negated == { .Unary(.Not, inner, _) -> if inner == { .Bool(true, _) -> true else -> false } else -> false })
+    handled :: result_handler_binding(run, "handled") ?? panic("handled")
+    if handled == .If(cond, _, then_value, _, else_value, _) {
+        assert(if cond == { .PatternTest(_, .Ok(binding, _, _, _), _) -> binding == "ok" else -> false })
+        assert(if then_value == {
+            .If(inner_cond, _, _, _, _, _) -> if inner_cond == {
+                .Unary(.Not, inner, _) -> if inner == { .Bool(true, _) -> true else -> false }
+                else -> false
+            }
+            else -> false
+        })
+        assert(if else_value == {
+            .If(err_cond, _, failure, _, _, _) -> {
+                is_error :: if err_cond == { .PatternTest(_, .Err(binding, _, _, _), _) -> binding == "error" else -> false }
+                is_failure :: if failure == { .Ident(name, _) -> name == "error" else -> false }
+                is_error && is_failure
+            }
+            else -> false
+        })
+    } else {
+        panic("handler must remain an exhaustive if expression")
+    }
+}
+
+fn result_handler_is_pointer_to(ty: Type, element: String) -> Bool Never! {
+    if ty == .Apply(name, args) && name == "Ptr" && args.len() == 1 {
+        return if args[0] == { .Named(inner) -> inner == element else -> false }
+    }
+    false
+}
+// Rust: crates/jet-parser/tests/result_handler_grammar.rs:104
+#Test("pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type") {
+    source :: "\nfn from_addr<T>(addr: Int) -> *T Never! { todo }\nfn either(value: *Node | Label) {}\n"
+    lexed :: lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
+    parsed :: parse_tokens(lexed.tokens)
+    assert(parsed.diagnostics.is_empty(), "pointer types should parse")
+    from_addr :: result_handler_function(parsed.program, "from_addr") ?? panic("from_addr")
+    assert(if from_addr.return_type == {
+        .Val(.Result(ok, err)) -> result_handler_is_pointer_to(ok, "T") && err == .Named("Never")
+        else -> false
+    }, "`*T Never!` must be a `Never!` contract over `*T`")
+    either :: result_handler_function(parsed.program, "either") ?? panic("either")
+    assert(if either.params[0].ty == {
+        .Union(members) -> {
+            has_pointer := false
+            has_label := false
+            loop member in members {
+                if result_handler_is_pointer_to(member, "Node") -> has_pointer = true
+                if member == .Named(name) && name == "Label" -> has_label = true
+            }
+            members.len() == 2 && has_pointer && has_label
+        }
+        else -> false
+    }, "`*Node | Label` must be a union with a `*Node` member")
+}

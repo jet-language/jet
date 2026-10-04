@@ -1,1278 +1,758 @@
-// PORT-PENDING 0114 crates-jet-foundation-src-xmlpull-module-group-slice-5429: crates/jet-foundation/src/XmlPull.rs:5429-6702
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn normalize_attribute_text(raw: &str) -> String {
-//RS     let mut normalized = String::with_capacity(raw.len());
-//RS     let mut characters = raw.chars().peekable();
-//RS     while let Some(character) = characters.next() {
-//RS         match character {
-//RS             '\r' => {
-//RS                 if characters.peek() == Some(&'\n') {
-//RS                     characters.next();
-//RS                 }
-//RS                 normalized.push(' ');
-//RS             }
-//RS             '\n' | '\t' => normalized.push(' '),
-//RS             character => normalized.push(character),
-//RS         }
-//RS     }
-//RS     normalized
-//RS }
-//RS fn split_name(raw: &str) -> (Option<String>, String) {
-//RS     match raw.split_once(':') {
-//RS         Some((p, l)) => (Some(p.to_string()), l.to_string()),
-//RS         None => (None, raw.to_string()),
-//RS     }
-//RS }
-//RS fn predefined(name: &str) -> Option<String> {
-//RS     match name {
-//RS         "lt" => Some("<".into()),
-//RS         "gt" => Some(">".into()),
-//RS         "amp" => Some("&".into()),
-//RS         "apos" => Some("'".into()),
-//RS         "quot" => Some("\"".into()),
-//RS         _ if name.starts_with("#x") => u32::from_str_radix(&name[2..], 16)
-//RS             .ok()
-//RS             .and_then(char::from_u32)
-//RS             .filter(|character| valid_xml_char(*character))
-//RS             .map(|c| c.to_string()),
-//RS         _ if name.starts_with('#') => name[1..]
-//RS             .parse::<u32>()
-//RS             .ok()
-//RS             .and_then(char::from_u32)
-//RS             .filter(|character| valid_xml_char(*character))
-//RS             .map(|c| c.to_string()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn take_doctype_literal(source: &str, cursor: &mut usize) -> Result<String, Error> {
-//RS     while source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(u8::is_ascii_whitespace)
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS     let quote = *source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .ok_or_else(|| Error::at(*cursor, "DOCTYPE external identifier lacks quoted value"))?;
-//RS     if quote != b'\'' && quote != b'"' {
-//RS         return Err(Error::at(
-//RS             *cursor,
-//RS             "DOCTYPE external identifier must be quoted",
-//RS         ));
-//RS     }
-//RS     *cursor += 1;
-//RS     let start = *cursor;
-//RS     while source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(|byte| *byte != quote)
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS     if *cursor == source.len() {
-//RS         return Err(Error::at(start, "unterminated DOCTYPE external identifier"));
-//RS     }
-//RS     let value = source[start..*cursor].to_string();
-//RS     *cursor += 1;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn doctype_fields(
-//RS     inside: &str,
-//RS ) -> Result<(String, Option<String>, Option<String>, Option<String>), Error> {
-//RS     let mut subset_start = None;
-//RS     let mut quote = None;
-//RS     for (offset, character) in inside.char_indices() {
-//RS         if let Some(expected) = quote {
-//RS             if character == expected {
-//RS                 quote = None;
-//RS             }
-//RS         } else if character == '\'' || character == '"' {
-//RS             quote = Some(character);
-//RS         } else if character == '[' {
-//RS             subset_start = Some(offset);
-//RS             break;
-//RS         }
-//RS     }
-//RS     let (header, internal_subset) = match subset_start {
-//RS         Some(start) => {
-//RS             let tail = inside[start + 1..].trim_end();
-//RS             let subset = tail
-//RS                 .strip_suffix(']')
-//RS                 .ok_or_else(|| Error::at(start, "DOCTYPE internal subset lacks ]"))?;
-//RS             (inside[..start].trim(), Some(subset.to_string()))
-//RS         }
-//RS         None => (inside.trim(), None),
-//RS     };
-//RS     let name_end = header.find(char::is_whitespace).unwrap_or(header.len());
-//RS     let name = header[..name_end].to_string();
-//RS     if !valid_name(&name) {
-//RS         return Err(Error::at(0, "invalid DOCTYPE name"));
-//RS     }
-//RS     let external = header[name_end..].trim();
-//RS     if external.is_empty() {
-//RS         return Ok((name, None, None, internal_subset));
-//RS     }
-//RS     let mut cursor = if external.starts_with("SYSTEM") {
-//RS         "SYSTEM".len()
-//RS     } else if external.starts_with("PUBLIC") {
-//RS         "PUBLIC".len()
-//RS     } else {
-//RS         return Err(Error::at(name_end, "invalid DOCTYPE external identifier"));
-//RS     };
-//RS     let public = if external.starts_with("PUBLIC") {
-//RS         Some(take_doctype_literal(external, &mut cursor)?)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let system = Some(take_doctype_literal(external, &mut cursor)?);
-//RS     if !external[cursor..].trim().is_empty() {
-//RS         return Err(Error::at(
-//RS             cursor,
-//RS             "unexpected data after DOCTYPE identifier",
-//RS         ));
-//RS     }
-//RS     Ok((name, public, system, internal_subset))
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum DeclaredEntityKind {
-//RS     Internal,
-//RS     External,
-//RS }
-//RS 
-//RS fn take_entity_literal(source: &str, cursor: &mut usize) -> Result<String, Error> {
-//RS     while source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(u8::is_ascii_whitespace)
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS     let quote = *source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .ok_or_else(|| Error::at(*cursor, "ENTITY declaration lacks quoted value"))?;
-//RS     if quote != b'\'' && quote != b'"' {
-//RS         return Err(Error::at(
-//RS             *cursor,
-//RS             "ENTITY declaration value must be quoted",
-//RS         ));
-//RS     }
-//RS     *cursor += 1;
-//RS     let start = *cursor;
-//RS     while source
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(|byte| *byte != quote)
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS     if *cursor == source.len() {
-//RS         return Err(Error::at(start, "unterminated ENTITY declaration value"));
-//RS     }
-//RS     let value = source[start..*cursor].to_string();
-//RS     *cursor += 1;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn reject_parameter_entity_markup(subset: &str, base: usize) -> Result<(), Error> {
-//RS     let mut index = 0usize;
-//RS     while index < subset.len() {
-//RS         if subset.as_bytes()[index] == b'%' {
-//RS             let name_begin = index + 1;
-//RS             let mut name_end = name_begin;
-//RS             while name_end < subset.len() {
-//RS                 let next = subset[name_end..].chars().next().unwrap();
-//RS                 if name_end == name_begin {
-//RS                     if !name_start(next) {
-//RS                         break;
-//RS                     }
-//RS                 } else if !name_char(next) {
-//RS                     break;
-//RS                 }
-//RS                 name_end += next.len_utf8();
-//RS             }
-//RS             if name_end > name_begin && subset.as_bytes().get(name_end) == Some(&b';') {
-//RS                 return Err(Error::at_kind(
-//RS                     base + index,
-//RS                     Reason::Unsupported,
-//RS                     "parameter entity references are unsupported",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         index += subset[index..].chars().next().unwrap().len_utf8();
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn general_entity_refs(value: &str) -> Vec<String> {
-//RS     let mut refs = Vec::new();
-//RS     let mut at = 0usize;
-//RS     while at < value.len() {
-//RS         let Some(rel) = value[at..].find('&') else {
-//RS             break;
-//RS         };
-//RS         let start = at + rel;
-//RS         let Some(end) = value[start..].find(';') else {
-//RS             break;
-//RS         };
-//RS         let name = &value[start + 1..start + end];
-//RS         if !name.is_empty()
-//RS             && !name.starts_with('#')
-//RS             && predefined(name).is_none()
-//RS             && valid_name(name)
-//RS         {
-//RS             refs.push(name.to_string());
-//RS         }
-//RS         at = start + end + 1;
-//RS     }
-//RS     refs
-//RS }
-//RS 
-//RS fn entity_reference_graph_has_cycle(edges: &BTreeMap<String, Vec<String>>) -> bool {
-//RS     #[derive(Clone, Copy, PartialEq, Eq)]
-//RS     enum Color {
-//RS         White,
-//RS         Gray,
-//RS         Black,
-//RS     }
-//RS     let mut color = BTreeMap::new();
-//RS     for name in edges.keys() {
-//RS         color.insert(name.clone(), Color::White);
-//RS     }
-//RS     fn visit(
-//RS         node: &str,
-//RS         edges: &BTreeMap<String, Vec<String>>,
-//RS         color: &mut BTreeMap<String, Color>,
-//RS     ) -> bool {
-//RS         color.insert(node.to_string(), Color::Gray);
-//RS         if let Some(targets) = edges.get(node) {
-//RS             for target in targets {
-//RS                 match color.get(target).copied().unwrap_or(Color::White) {
-//RS                     Color::Gray => return true,
-//RS                     Color::White => {
-//RS                         if visit(target, edges, color) {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                     Color::Black => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         color.insert(node.to_string(), Color::Black);
-//RS         false
-//RS     }
-//RS     for name in edges.keys() {
-//RS         if color.get(name) == Some(&Color::White) && visit(name, edges, &mut color) {
-//RS             return true;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn declared_entity_table(
-//RS     subset: Option<&str>,
-//RS ) -> Result<(BTreeMap<String, DeclaredEntityKind>, usize), Error> {
-//RS     let mut names = BTreeMap::new();
-//RS     let mut replacements = BTreeMap::new();
-//RS     let mut count = 0usize;
-//RS     let Some(subset) = subset else {
-//RS         return Ok((names, count));
-//RS     };
-//RS     reject_parameter_entity_markup(subset, 0)?;
-//RS     let mut search_from = 0usize;
-//RS     while let Some(rel) = subset[search_from..].find("<!ENTITY") {
-//RS         let start = search_from + rel;
-//RS         count = count.saturating_add(1);
-//RS         let mut cursor = start + "<!ENTITY".len();
-//RS         while subset
-//RS             .as_bytes()
-//RS             .get(cursor)
-//RS             .is_some_and(u8::is_ascii_whitespace)
-//RS         {
-//RS             cursor += 1;
-//RS         }
-//RS         if subset.as_bytes().get(cursor) == Some(&b'%') {
-//RS             return Err(Error::at_kind(
-//RS                 start,
-//RS                 Reason::Unsupported,
-//RS                 "parameter entity declarations are unsupported",
-//RS             ));
-//RS         }
-//RS         let name_begin = cursor;
-//RS         while cursor < subset.len() {
-//RS             let next = subset[cursor..].chars().next().unwrap();
-//RS             if cursor == name_begin {
-//RS                 if !name_start(next) {
-//RS                     break;
-//RS                 }
-//RS             } else if !name_char(next) {
-//RS                 break;
-//RS             }
-//RS             cursor += next.len_utf8();
-//RS         }
-//RS         if cursor == name_begin {
-//RS             return Err(Error::at(start, "ENTITY declaration lacks name"));
-//RS         }
-//RS         let name = &subset[name_begin..cursor];
-//RS         if !valid_name(name) {
-//RS             return Err(Error::at(start, "invalid ENTITY declaration name"));
-//RS         }
-//RS         while subset
-//RS             .as_bytes()
-//RS             .get(cursor)
-//RS             .is_some_and(u8::is_ascii_whitespace)
-//RS         {
-//RS             cursor += 1;
-//RS         }
-//RS         let kind =
-//RS             if subset[cursor..].starts_with("SYSTEM") || subset[cursor..].starts_with("PUBLIC") {
-//RS                 let external_start = cursor;
-//RS                 if subset[cursor..].starts_with("PUBLIC") {
-//RS                     cursor += "PUBLIC".len();
-//RS                     take_entity_literal(subset, &mut cursor)?;
-//RS                 } else {
-//RS                     cursor += "SYSTEM".len();
-//RS                 }
-//RS                 take_entity_literal(subset, &mut cursor)?;
-//RS                 while subset
-//RS                     .as_bytes()
-//RS                     .get(cursor)
-//RS                     .is_some_and(u8::is_ascii_whitespace)
-//RS                 {
-//RS                     cursor += 1;
-//RS                 }
-//RS                 if subset[cursor..].starts_with("NDATA") {
-//RS                     return Err(Error::at_kind(
-//RS                         start,
-//RS                         Reason::Unsupported,
-//RS                         "unparsed external entities are unsupported",
-//RS                     ));
-//RS                 }
-//RS                 let _ = external_start;
-//RS                 DeclaredEntityKind::External
-//RS             } else if subset.as_bytes().get(cursor) == Some(&b'\'')
-//RS                 || subset.as_bytes().get(cursor) == Some(&b'"')
-//RS             {
-//RS                 let value = take_entity_literal(subset, &mut cursor)?;
-//RS                 replacements.insert(name.to_string(), value);
-//RS                 DeclaredEntityKind::Internal
-//RS             } else {
-//RS                 return Err(Error::at(start, "ENTITY declaration lacks value"));
-//RS             };
-//RS         if names.insert(name.to_string(), kind).is_some() {
-//RS             return Err(Error::at(start, "duplicate ENTITY declaration"));
-//RS         }
-//RS         search_from = start + "<!ENTITY".len();
-//RS     }
-//RS     let mut edges = BTreeMap::new();
-//RS     for (name, value) in &replacements {
-//RS         let targets = general_entity_refs(value)
-//RS             .into_iter()
-//RS             .filter(|target| replacements.contains_key(target))
-//RS             .collect::<Vec<_>>();
-//RS         edges.insert(name.clone(), targets);
-//RS     }
-//RS     if entity_reference_graph_has_cycle(&edges) {
-//RS         return Err(Error::at_kind(
-//RS             0,
-//RS             Reason::EntityCycle,
-//RS             "XML entity declarations form a replacement cycle",
-//RS         ));
-//RS     }
-//RS     Ok((names, count))
-//RS }
-//RS 
-//RS fn declaration_fields(data: &str) -> Result<(String, Option<String>, Option<bool>), Error> {
-//RS     let mut cursor = 0;
-//RS     let mut fields = Vec::new();
-//RS     while cursor < data.len() {
-//RS         while data.as_bytes()[cursor].is_ascii_whitespace() {
-//RS             cursor += 1;
-//RS             if cursor == data.len() {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         if cursor == data.len() {
-//RS             break;
-//RS         }
-//RS         let key_start = cursor;
-//RS         while cursor < data.len()
-//RS             && !data.as_bytes()[cursor].is_ascii_whitespace()
-//RS             && data.as_bytes()[cursor] != b'='
-//RS         {
-//RS             cursor += 1;
-//RS         }
-//RS         let key = &data[key_start..cursor];
-//RS         while cursor < data.len() && data.as_bytes()[cursor].is_ascii_whitespace() {
-//RS             cursor += 1;
-//RS         }
-//RS         if data.as_bytes().get(cursor) != Some(&b'=') {
-//RS             return Err(Error::at(cursor, "XML declaration field needs ="));
-//RS         }
-//RS         cursor += 1;
-//RS         let value = take_doctype_literal(data, &mut cursor)?;
-//RS         fields.push((key, value));
-//RS     }
-//RS     if fields.first().map(|(key, _)| *key) != Some("version") {
-//RS         return Err(Error::at(0, "XML declaration must start with version"));
-//RS     }
-//RS     let version = fields[0].1.clone();
-//RS     if version != "1.0" {
-//RS         return Err(Error::at(0, "only XML version 1.0 is supported"));
-//RS     }
-//RS     let mut encoding = None;
-//RS     let mut standalone = None;
-//RS     for (key, value) in fields.into_iter().skip(1) {
-//RS         match key {
-//RS             "encoding" if encoding.is_none() && standalone.is_none() => {
-//RS                 if !matches!(
-//RS                     value.to_ascii_uppercase().as_str(),
-//RS                     "UTF-8" | "UTF-16" | "UTF-16LE" | "UTF-16BE"
-//RS                 ) {
-//RS                     return Err(Error::at_kind(
-//RS                         0,
-//RS                         Reason::InvalidEncoding,
-//RS                         "unsupported XML declaration encoding",
-//RS                     ));
-//RS                 }
-//RS                 encoding = Some(value);
-//RS             }
-//RS             "standalone" if standalone.is_none() => match value.as_str() {
-//RS                 "yes" => standalone = Some(true),
-//RS                 "no" => standalone = Some(false),
-//RS                 _ => return Err(Error::at(0, "standalone must be yes or no")),
-//RS             },
-//RS             _ => return Err(Error::at(0, "invalid or duplicate XML declaration field")),
-//RS         }
-//RS     }
-//RS     Ok((version, encoding, standalone))
-//RS }
-//RS 
-//RS fn declaration_matches_input(name: &str, encoding: Option<WireEncoding>) -> bool {
-//RS     match encoding.unwrap_or(WireEncoding::UTF8) {
-//RS         WireEncoding::UTF8 => name.eq_ignore_ascii_case("UTF-8"),
-//RS         WireEncoding::Utf16Le | WireEncoding::Utf16Be => matches!(
-//RS             name.to_ascii_uppercase().as_str(),
-//RS             "UTF-16" | "UTF-16LE" | "UTF-16BE"
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Scanner<'a> {
-//RS     pub fn new(source: &'a str) -> Self {
-//RS         Self {
-//RS             source,
-//RS             wire_encoding: None,
-//RS             offset: 0,
-//RS             started: false,
-//RS             ended: false,
-//RS             root_seen: false,
-//RS             root_closed: false,
-//RS             declaration_seen: false,
-//RS             doctype_seen: false,
-//RS             declared_entities: BTreeMap::new(),
-//RS             stack: Vec::new(),
-//RS             options: ParseOptions::safe(),
-//RS             nodes: 0,
-//RS             text_bytes: 0,
-//RS             entity_replacement_bytes: 0,
-//RS         }
-//RS     }
-//RS     pub fn with_options(source: &'a str, options: ParseOptions) -> Result<Self, Error> {
-//RS         options.limits.validate()?;
-//RS         Ok(Self {
-//RS             options,
-//RS             ..Self::new(source)
-//RS         })
-//RS     }
-//RS     fn path(&self) -> String {
-//RS         let mut path = String::from("$");
-//RS         for frame in &self.stack {
-//RS             path.push('/');
-//RS             if let Some(uri) = &frame.name.namespace_uri {
-//RS                 path.push('{');
-//RS                 path.push_str(uri);
-//RS                 path.push('}');
-//RS             }
-//RS             path.push_str(&frame.name.local);
-//RS         }
-//RS         path
-//RS     }
-//RS     fn classify(error: &mut Error) {
-//RS         if error.kind != Reason::Malformed {
-//RS             return;
-//RS         }
-//RS         let reason = error.reason.as_str();
-//RS         error.kind = if reason.contains("encoding") || reason.contains("version 1.0") {
-//RS             Reason::InvalidEncoding
-//RS         } else if reason.contains("mismatched") {
-//RS             Reason::MismatchedTag
-//RS         } else if reason.contains("name") || reason.contains("instruction target") {
-//RS             Reason::InvalidName
-//RS         } else if reason.contains("namespace") || reason.contains("prefix") {
-//RS             Reason::Namespace
-//RS         } else if reason.contains("duplicate expanded XML attribute") {
-//RS             Reason::DuplicateAttribute
-//RS         } else if reason.contains("entity") || reason.contains("character reference") {
-//RS             Reason::Entity
-//RS         } else {
-//RS             error.kind
-//RS         };
-//RS     }
-//RS     fn limit<T>(&self, reason: impl Into<String>) -> Result<T, Error> {
-//RS         Err(Error::at_kind(self.offset, Reason::Limit, reason))
-//RS     }
-//RS     fn check_name(&self, value: &str, label: &str) -> Result<(), Error> {
-//RS         if value.len() > self.options.limits.max_name_bytes {
-//RS             return self.limit(format!(
-//RS                 "XML {label} exceeds max_name_bytes ({})",
-//RS                 self.options.limits.max_name_bytes
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     fn charge_text(&mut self, bytes: usize, label: &str) -> Result<(), Error> {
-//RS         if bytes > self.options.limits.max_text_bytes
-//RS             || self.text_bytes.saturating_add(bytes) > self.options.limits.max_text_bytes
-//RS         {
-//RS             return self.limit(format!(
-//RS                 "XML {label} exceeds max_text_bytes ({})",
-//RS                 self.options.limits.max_text_bytes
-//RS             ));
-//RS         }
-//RS         self.text_bytes += bytes;
-//RS         Ok(())
-//RS     }
-//RS     fn resolve_entity(&mut self, name: &str) -> Result<Option<String>, Error> {
-//RS         if let Some(value) = predefined(name) {
-//RS             return Ok(Some(value));
-//RS         }
-//RS         if name.starts_with('#') {
-//RS             return self.fail("invalid numeric character reference");
-//RS         }
-//RS         match self.declared_entities.get(name).copied() {
-//RS             None => self.fail(format!("undeclared entity reference `&{name};`")),
-//RS             Some(DeclaredEntityKind::External) => Err(Error::at_kind(
-//RS                 self.offset,
-//RS                 Reason::Unsupported,
-//RS                 format!("external entity reference `&{name};` is unsupported"),
-//RS             )),
-//RS             Some(DeclaredEntityKind::Internal) => match &self.options.entities {
-//RS                 EntityPolicy::Preserve => Ok(None),
-//RS                 EntityPolicy::Reject => Err(Error::at_kind(
-//RS                     self.offset,
-//RS                     Reason::Entity,
-//RS                     format!("entity reference `&{name};` rejected by XML entity policy"),
-//RS                 )),
-//RS                 EntityPolicy::Resolve(values) => {
-//RS                     let Some(value) = values.get(name).cloned() else {
-//RS                         return Ok(None);
-//RS                     };
-//RS                     if self.options.limits.max_entity_depth < 1 {
-//RS                         return self.limit("XML entity replacement exceeds max_entity_depth (0)");
-//RS                     }
-//RS                     let total = self.entity_replacement_bytes.saturating_add(value.len());
-//RS                     if value.len() > self.options.limits.max_entity_replacement_bytes
-//RS                         || total > self.options.limits.max_entity_replacement_bytes
-//RS                     {
-//RS                         return self.limit(format!(
-//RS                             "XML entity replacement exceeds max_entity_replacement_bytes ({})",
-//RS                             self.options.limits.max_entity_replacement_bytes
-//RS                         ));
-//RS                     }
-//RS                     self.entity_replacement_bytes = total;
-//RS                     self.charge_text(value.len(), "entity replacement")?;
-//RS                     Ok(Some(value))
-//RS                 }
-//RS             },
-//RS         }
-//RS     }
-//RS     fn fail<T>(&self, reason: impl Into<String>) -> Result<T, Error> {
-//RS         Err(Error::at(self.offset, reason))
-//RS     }
-//RS     fn validate_characters(&self, start: usize, end: usize) -> Result<(), Error> {
-//RS         if let Some((offset, character)) = self.source[start..end]
-//RS             .char_indices()
-//RS             .find(|(_, character)| !valid_xml_char(*character))
-//RS         {
-//RS             return Err(Error::at(
-//RS                 start + offset,
-//RS                 format!(
-//RS                     "XML contains forbidden character U+{:04X}",
-//RS                     character as u32
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     fn starts(&self, s: &str) -> bool {
-//RS         self.source[self.offset..].starts_with(s)
-//RS     }
-//RS     fn take_until(&mut self, end: &str, reason: &str) -> Result<(String, String), Error> {
-//RS         let start = self.offset;
-//RS         let Some(rel) = self.source[self.offset..].find(end) else {
-//RS             return self.fail(reason);
-//RS         };
-//RS         let token_end = self.offset + rel + end.len();
-//RS         self.validate_characters(start, token_end)?;
-//RS         self.offset = token_end;
-//RS         Ok((
-//RS             self.source[start..self.offset].to_string(),
-//RS             self.source[start..self.offset - end.len()].to_string(),
-//RS         ))
-//RS     }
-//RS     fn scope_uri(
-//RS         &self,
-//RS         prefix: Option<&str>,
-//RS         local: &[(Option<String>, String)],
-//RS     ) -> Option<String> {
-//RS         for (p, u) in local.iter().rev().chain(
-//RS             self.stack
-//RS                 .iter()
-//RS                 .rev()
-//RS                 .flat_map(|f| f.namespaces.iter().rev()),
-//RS         ) {
-//RS             if p.as_deref() == prefix {
-//RS                 return Some(u.clone());
-//RS             }
-//RS         }
-//RS         if prefix == Some("xml") {
-//RS             Some("http://www.w3.org/XML/1998/namespace".into())
-//RS         } else {
-//RS             None
-//RS         }
-//RS     }
-//RS     fn resolved_name(
-//RS         &self,
-//RS         raw: &str,
-//RS         local: &[(Option<String>, String)],
-//RS         attribute: bool,
-//RS     ) -> Result<Name, Error> {
-//RS         self.check_name(raw, "name")?;
-//RS         if !valid_name(raw) {
-//RS             return self.fail(format!("invalid XML name `{raw}`"));
-//RS         }
-//RS         let (prefix, name) = split_name(raw);
-//RS         let uri = if attribute && prefix.is_none() {
-//RS             None
-//RS         } else {
-//RS             self.scope_uri(prefix.as_deref(), local)
-//RS         };
-//RS         if prefix.is_some() && uri.is_none() {
-//RS             return self.fail(format!("unbound namespace prefix in `{raw}`"));
-//RS         }
-//RS         Ok(Name {
-//RS             raw: raw.into(),
-//RS             prefix,
-//RS             local: name,
-//RS             namespace_uri: uri,
-//RS         })
-//RS     }
-//RS     fn reference(&mut self) -> Result<(String, String, Option<String>), Error> {
-//RS         let start = self.offset;
-//RS         let Some(end) = self.source[start..].find(';') else {
-//RS             return self.fail("unterminated entity reference");
-//RS         };
-//RS         let name = &self.source[start + 1..start + end];
-//RS         if name.is_empty() {
-//RS             return self.fail("empty entity reference");
-//RS         }
-//RS         self.validate_characters(start, start + end + 1)?;
-//RS         let resolved = self.resolve_entity(name)?;
-//RS         self.offset = start + end + 1;
-//RS         Ok((
-//RS             self.source[start..self.offset].into(),
-//RS             name.into(),
-//RS             resolved,
-//RS         ))
-//RS     }
-//RS     fn parse_parts(
-//RS         &mut self,
-//RS         raw: &str,
-//RS         source_base: usize,
-//RS     ) -> Result<(Vec<Part>, Option<String>), Error> {
-//RS         let mut parts = Vec::new();
-//RS         let mut normalized = String::new();
-//RS         let mut at = 0;
-//RS         while at < raw.len() {
-//RS             if let Some(rel) = raw[at..].find('&') {
-//RS                 if rel > 0 {
-//RS                     let v = &raw[at..at + rel];
-//RS                     let value = normalize_attribute_text(v);
-//RS                     normalized.push_str(&value);
-//RS                     parts.push(Part::Text {
-//RS                         value,
-//RS                         raw: v.into(),
-//RS                     });
-//RS                 }
-//RS                 let start = at + rel;
-//RS                 let Some(end) = raw[start..].find(';') else {
-//RS                     return Err(Error::at(
-//RS                         source_base + start,
-//RS                         "unterminated entity reference",
-//RS                     ));
-//RS                 };
-//RS                 let name = &raw[start + 1..start + end];
-//RS                 let mut resolved = self.resolve_entity(name).map_err(|mut error| {
-//RS                     error.offset = source_base + start;
-//RS                     error
-//RS                 })?;
-//RS                 if !name.starts_with('#') && !matches!(name, "lt" | "gt" | "amp" | "apos" | "quot")
-//RS                 {
-//RS                     if let Some(value) = &mut resolved {
-//RS                         *value = normalize_attribute_text(value);
-//RS                     }
-//RS                 }
-//RS                 if let Some(v) = &resolved {
-//RS                     normalized.push_str(v)
-//RS                 }
-//RS                 parts.push(Part::Entity {
-//RS                     name: name.into(),
-//RS                     resolved: resolved.clone(),
-//RS                     raw: raw[start..start + end + 1].into(),
-//RS                 });
-//RS                 if resolved.is_none() {
-//RS                     normalized.clear()
-//RS                 }
-//RS                 at = start + end + 1;
-//RS             } else {
-//RS                 let v = &raw[at..];
-//RS                 let value = normalize_attribute_text(v);
-//RS                 normalized.push_str(&value);
-//RS                 parts.push(Part::Text {
-//RS                     value,
-//RS                     raw: v.into(),
-//RS                 });
-//RS                 break;
-//RS             }
-//RS         }
-//RS         let all = parts
-//RS             .iter()
-//RS             .all(|p| !matches!(p, Part::Entity { resolved: None, .. }));
-//RS         Ok((parts, all.then_some(normalized)))
-//RS     }
-//RS     fn open(&mut self) -> Result<Event, Error> {
-//RS         let start = self.offset;
-//RS         let mut end = start + 1;
-//RS         let mut quote = None;
-//RS         while end < self.source.len() {
-//RS             let character = self.source.as_bytes()[end] as char;
-//RS             if let Some(expected) = quote {
-//RS                 if character == expected {
-//RS                     quote = None;
-//RS                 }
-//RS             } else if character == '\'' || character == '"' {
-//RS                 quote = Some(character);
-//RS             } else if character == '>' {
-//RS                 break;
-//RS             }
-//RS             end += 1;
-//RS         }
-//RS         if end == self.source.len() {
-//RS             return self.fail("unterminated opening tag");
-//RS         }
-//RS         self.validate_characters(start, end + 1)?;
-//RS         let mut inner = &self.source[start + 1..end];
-//RS         let empty = inner.trim_end().ends_with('/');
-//RS         if empty {
-//RS             inner = inner.trim_end();
-//RS             inner = &inner[..inner.len() - 1]
-//RS         }
-//RS         let mut cursor = 0;
-//RS         while inner[cursor..]
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(char::is_whitespace)
-//RS         {
-//RS             cursor += inner[cursor..]
-//RS                 .chars()
-//RS                 .next()
-//RS                 .map(char::len_utf8)
-//RS                 .unwrap_or(0)
-//RS         }
-//RS         let ns = inner[cursor..]
-//RS             .find(char::is_whitespace)
-//RS             .unwrap_or(inner.len() - cursor);
-//RS         let raw_name = &inner[cursor..cursor + ns];
-//RS         cursor += ns;
-//RS         let mut raw_attrs = Vec::new();
-//RS         while cursor < inner.len() {
-//RS             while inner[cursor..]
-//RS                 .chars()
-//RS                 .next()
-//RS                 .is_some_and(char::is_whitespace)
-//RS             {
-//RS                 cursor += inner[cursor..]
-//RS                     .chars()
-//RS                     .next()
-//RS                     .map(char::len_utf8)
-//RS                     .unwrap_or(0)
-//RS             }
-//RS             if cursor >= inner.len() {
-//RS                 break;
-//RS             }
-//RS             let astart = cursor;
-//RS             while cursor < inner.len()
-//RS                 && !inner.as_bytes()[cursor].is_ascii_whitespace()
-//RS                 && inner.as_bytes()[cursor] != b'='
-//RS             {
-//RS                 cursor += 1
-//RS             }
-//RS             let key = inner[astart..cursor].to_string();
-//RS             while cursor < inner.len() && inner.as_bytes()[cursor].is_ascii_whitespace() {
-//RS                 cursor += 1
-//RS             }
-//RS             if inner.as_bytes().get(cursor) != Some(&b'=') {
-//RS                 return self.fail("XML attribute needs =");
-//RS             }
-//RS             cursor += 1;
-//RS             while cursor < inner.len() && inner.as_bytes()[cursor].is_ascii_whitespace() {
-//RS                 cursor += 1
-//RS             }
-//RS             let quote = *inner
-//RS                 .as_bytes()
-//RS                 .get(cursor)
-//RS                 .ok_or_else(|| Error::at(start + cursor, "missing attribute value"))?
-//RS                 as char;
-//RS             if quote != '\'' && quote != '\"' {
-//RS                 return self.fail("XML attribute value must be quoted");
-//RS             }
-//RS             cursor += 1;
-//RS             let vstart = cursor;
-//RS             while cursor < inner.len() && inner.as_bytes()[cursor] as char != quote {
-//RS                 cursor += 1
-//RS             }
-//RS             if cursor >= inner.len() {
-//RS                 return self.fail("unterminated attribute value");
-//RS             }
-//RS             let value = inner[vstart..cursor].to_string();
-//RS             let value_source_base = start + 1 + vstart;
-//RS             if value.contains('<') {
-//RS                 return self.fail("XML attribute value contains <");
-//RS             }
-//RS             cursor += 1;
-//RS             raw_attrs.push((
-//RS                 key,
-//RS                 value,
-//RS                 value_source_base,
-//RS                 quote,
-//RS                 inner[astart..cursor].to_string(),
-//RS             ));
-//RS         }
-//RS         let mut declarations = Vec::new();
-//RS         let mut seen_ns = BTreeSet::new();
-//RS         for (k, v, value_source_base, q, r) in &raw_attrs {
-//RS             if k == "xmlns" || k.starts_with("xmlns:") {
-//RS                 let p = if k == "xmlns" {
-//RS                     None
-//RS                 } else {
-//RS                     Some(k[6..].to_string())
-//RS                 };
-//RS                 if !seen_ns.insert(p.clone()) {
-//RS                     return self.fail("duplicate namespace declaration");
-//RS                 }
-//RS                 if p.as_deref() == Some("xmlns")
-//RS                     || p.as_deref() == Some("xml") && v != "http://www.w3.org/XML/1998/namespace"
-//RS                 {
-//RS                     return self.fail("reserved namespace prefix binding");
-//RS                 }
-//RS                 let (_, normalized) = self.parse_parts(v, *value_source_base)?;
-//RS                 let Some(namespace_uri) = normalized else {
-//RS                     return self.fail("namespace URI contains unresolved entity reference");
-//RS                 };
-//RS                 declarations.push((p, namespace_uri, *q, r.clone()));
-//RS             }
-//RS         }
-//RS         let local: Vec<_> = declarations
-//RS             .iter()
-//RS             .map(|(p, u, _, _)| (p.clone(), u.clone()))
-//RS             .collect();
-//RS         let name = self.resolved_name(raw_name, &local, false)?;
-//RS         let namespaces = declarations
-//RS             .into_iter()
-//RS             .map(|(prefix, namespace_uri, quote, raw)| Namespace {
-//RS                 prefix,
-//RS                 namespace_uri,
-//RS                 quote,
-//RS                 raw,
-//RS             })
-//RS             .collect();
-//RS         let mut attributes = Vec::new();
-//RS         let mut expanded = BTreeSet::new();
-//RS         for (k, v, value_source_base, q, r) in raw_attrs {
-//RS             if k == "xmlns" || k.starts_with("xmlns:") {
-//RS                 continue;
-//RS             }
-//RS             let aname = self.resolved_name(&k, &local, true)?;
-//RS             if !expanded.insert((aname.namespace_uri.clone(), aname.local.clone())) {
-//RS                 return self.fail("duplicate expanded XML attribute");
-//RS             }
-//RS             let (parts, normalized) = self.parse_parts(&v, value_source_base)?;
-//RS             attributes.push(Attribute {
-//RS                 name: aname,
-//RS                 parts,
-//RS                 normalized,
-//RS                 quote: q,
-//RS                 raw: r,
-//RS             });
-//RS         }
-//RS         self.offset = end + 1;
-//RS         let raw = self.source[start..self.offset].into();
-//RS         self.root_seen = true;
-//RS         if !empty {
-//RS             self.stack.push(Frame {
-//RS                 name: name.clone(),
-//RS                 namespaces: local,
-//RS             })
-//RS         } else if self.stack.is_empty() {
-//RS             self.root_closed = true
-//RS         }
-//RS         Ok(Event::ElementStart {
-//RS             name,
-//RS             namespaces,
-//RS             attributes,
-//RS             empty,
-//RS             raw,
-//RS         })
-//RS     }
-//RS     fn charge_nodes(&mut self, amount: usize) -> Result<(), Error> {
-//RS         if self.nodes.saturating_add(amount) > self.options.limits.max_nodes {
-//RS             return self.limit(format!(
-//RS                 "XML document exceeds max_nodes ({})",
-//RS                 self.options.limits.max_nodes
-//RS             ));
-//RS         }
-//RS         self.nodes += amount;
-//RS         Ok(())
-//RS     }
-//RS     fn charge_event(&mut self, event: &Event) -> Result<(), Error> {
-//RS         match event {
-//RS             Event::DocumentStart => self.charge_nodes(1)?,
-//RS             Event::DocumentEnd | Event::ElementEnd { .. } => {}
-//RS             Event::ElementStart {
-//RS                 name,
-//RS                 namespaces,
-//RS                 attributes,
-//RS                 empty,
-//RS                 ..
-//RS             } => {
-//RS                 let depth = if *empty {
-//RS                     self.stack.len() + 1
-//RS                 } else {
-//RS                     self.stack.len()
-//RS                 };
-//RS                 if depth > self.options.limits.max_depth {
-//RS                     return self.limit(format!(
-//RS                         "XML element nesting exceeds max_depth ({})",
-//RS                         self.options.limits.max_depth
-//RS                     ));
-//RS                 }
-//RS                 if attributes.len() > self.options.limits.max_attributes_per_element {
-//RS                     return self.limit(format!(
-//RS                         "XML element exceeds max_attributes_per_element ({})",
-//RS                         self.options.limits.max_attributes_per_element
-//RS                     ));
-//RS                 }
-//RS                 self.check_name(&name.raw, "element name")?;
-//RS                 self.check_name(&name.local, "local name")?;
-//RS                 if let Some(prefix) = &name.prefix {
-//RS                     self.check_name(prefix, "name prefix")?;
-//RS                 }
-//RS                 if let Some(uri) = &name.namespace_uri {
-//RS                     self.check_name(uri, "namespace URI")?;
-//RS                 }
-//RS                 for namespace in namespaces {
-//RS                     if let Some(prefix) = &namespace.prefix {
-//RS                         self.check_name(prefix, "namespace prefix")?;
-//RS                     }
-//RS                     self.check_name(&namespace.namespace_uri, "namespace URI")?;
-//RS                 }
-//RS                 for attribute in attributes {
-//RS                     self.check_name(&attribute.name.raw, "attribute name")?;
-//RS                     self.check_name(&attribute.name.local, "attribute local name")?;
-//RS                     if let Some(prefix) = &attribute.name.prefix {
-//RS                         self.check_name(prefix, "attribute prefix")?;
-//RS                     }
-//RS                     if let Some(uri) = &attribute.name.namespace_uri {
-//RS                         self.check_name(uri, "attribute namespace URI")?;
-//RS                     }
-//RS                     for part in &attribute.parts {
-//RS                         if let Part::Text { value, .. } = part {
-//RS                             self.charge_text(value.len(), "attribute text")?;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 self.charge_nodes(1 + namespaces.len() + attributes.len())?;
-//RS             }
-//RS             Event::Declaration {
-//RS                 version, encoding, ..
-//RS             } => {
-//RS                 self.check_name(version, "XML version")?;
-//RS                 if let Some(encoding) = encoding {
-//RS                     self.check_name(encoding, "XML encoding")?;
-//RS                 }
-//RS                 self.charge_nodes(1)?;
-//RS             }
-//RS             Event::Doctype {
-//RS                 name,
-//RS                 public_id,
-//RS                 system_id,
-//RS                 internal_subset,
-//RS                 ..
-//RS             } => {
-//RS                 self.check_name(name, "DOCTYPE name")?;
-//RS                 for value in [public_id, system_id].into_iter().flatten() {
-//RS                     self.check_name(value, "DOCTYPE identifier")?;
-//RS                 }
-//RS                 if let Some(value) = internal_subset {
-//RS                     self.charge_text(value.len(), "DOCTYPE internal subset")?;
-//RS                 }
-//RS                 self.charge_nodes(1)?;
-//RS             }
-//RS             Event::ProcessingInstruction { target, value, .. } => {
-//RS                 self.check_name(target, "processing instruction target")?;
-//RS                 self.charge_text(value.len(), "processing instruction text")?;
-//RS                 self.charge_nodes(1)?;
-//RS             }
-//RS             Event::DocumentWhitespace { value, .. }
-//RS             | Event::Text { value, .. }
-//RS             | Event::Cdata { value, .. }
-//RS             | Event::Comment { value, .. } => {
-//RS                 self.charge_text(value.len(), "text")?;
-//RS                 self.charge_nodes(1)?;
-//RS             }
-//RS             Event::EntityRef { name, .. } => {
-//RS                 self.check_name(name, "entity name")?;
-//RS                 self.charge_nodes(1)?;
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     fn next_inner(&mut self) -> Result<Option<Event>, Error> {
-//RS         if self.ended {
-//RS             return Ok(None);
-//RS         }
-//RS         if !self.started {
-//RS             self.started = true;
-//RS             return Ok(Some(Event::DocumentStart));
-//RS         }
-//RS         if self.offset == self.source.len() {
-//RS             if !self.stack.is_empty() {
-//RS                 return self.fail("XML document ended before closing element");
-//RS             }
-//RS             if !self.root_seen {
-//RS                 return self.fail("empty XML document");
-//RS             }
-//RS             self.ended = true;
-//RS             return Ok(Some(Event::DocumentEnd));
-//RS         }
-//RS         if self.starts("<!--") {
-//RS             let (raw, body) = self.take_until("-->", "unterminated XML comment")?;
-//RS             let value = body[4..].to_string();
-//RS             if value.contains("--") {
-//RS                 return self.fail("XML comment contains --");
-//RS             }
-//RS             return Ok(Some(Event::Comment { value, raw }));
-//RS         }
-//RS         if self.starts("<![CDATA[") {
-//RS             if self.stack.is_empty() {
-//RS                 return self.fail("CDATA outside root element");
-//RS             }
-//RS             let (raw, body) = self.take_until("]]>", "unterminated CDATA")?;
-//RS             return Ok(Some(Event::Cdata {
-//RS                 value: body[9..].into(),
-//RS                 raw,
-//RS             }));
-//RS         }
-//RS         if self.starts("<?xml") {
-//RS             if self.declaration_seen || self.root_seen || self.offset != 0 {
-//RS                 return self.fail("XML declaration is out of order");
-//RS             }
-//RS             let (raw, body) = self.take_until("?>", "unterminated XML declaration")?;
-//RS             let data = body[5..].trim();
-//RS             let (version, encoding, standalone) = declaration_fields(data)?;
-//RS             if encoding
-//RS                 .as_deref()
-//RS                 .is_some_and(|name| !declaration_matches_input(name, self.wire_encoding))
-//RS             {
-//RS                 return Err(Error::at_kind(
-//RS                     0,
-//RS                     Reason::InvalidEncoding,
-//RS                     "XML declaration conflicts with detected input encoding",
-//RS                 ));
-//RS             }
-//RS             self.declaration_seen = true;
-//RS             return Ok(Some(Event::Declaration {
-//RS                 version,
-//RS                 encoding,
-//RS                 standalone,
-//RS                 raw,
-//RS             }));
-//RS         }
-//RS         if self.starts("<?") {
-//RS             let (raw, body) = self.take_until("?>", "unterminated processing instruction")?;
-//RS             let data = &body[2..];
-//RS             let split = data.find(char::is_whitespace).unwrap_or(data.len());
-//RS             let target = data[..split].to_string();
-//RS             if !valid_name(&target) || target.eq_ignore_ascii_case("xml") {
-//RS                 return self.fail("invalid processing instruction target");
-//RS             }
-//RS             return Ok(Some(Event::ProcessingInstruction {
-//RS                 target,
-//RS                 value: data[split..].trim_start().into(),
-//RS                 raw,
-//RS             }));
-//RS         }
-//RS         if self.starts("<!DOCTYPE") {
-//RS             if self.doctype_seen || self.root_seen {
-//RS                 return self.fail("DOCTYPE is out of order");
-//RS             }
-//RS             let start = self.offset;
-//RS             let mut i = start + 9;
-//RS             let mut quote = None;
-//RS             let mut bracket = 0;
-//RS             while i < self.source.len() {
-//RS                 let c = self.source.as_bytes()[i] as char;
-//RS                 if let Some(q) = quote {
-//RS                     if c == q {
-//RS                         quote = None
-//RS                     }
-//RS                 } else if c == '\'' || c == '\"' {
-//RS                     quote = Some(c)
-//RS                 } else if c == '[' {
-//RS                     bracket += 1
-//RS                 } else if c == ']' {
-//RS                     bracket -= 1
-//RS                 } else if c == '>' && bracket == 0 {
-//RS                     break;
-//RS                 }
-//RS                 i += 1
-//RS             }
-//RS             if i == self.source.len() {
-//RS                 return self.fail("unterminated DOCTYPE");
-//RS             }
-//RS             self.validate_characters(start, i + 1)?;
-//RS             self.offset = i + 1;
-//RS             let raw = self.source[start..self.offset].to_string();
-//RS             let inside = self.source[start + 9..i].trim();
-//RS             let (name, public_id, system_id, internal_subset) = doctype_fields(inside)
-//RS                 .map_err(|error| Error::at(start + 9 + error.offset, error.reason))?;
-//RS             let (declared_entities, declaration_count) =
-//RS                 declared_entity_table(internal_subset.as_deref()).map_err(|error| {
-//RS                     let mut mapped =
-//RS                         Error::at_kind(start + 9 + error.offset, error.kind, error.reason.clone());
-//RS                     mapped.path = error.path;
-//RS                     mapped
-//RS                 })?;
-//RS             if declaration_count > self.options.limits.max_entity_declarations {
-//RS                 return self.limit(format!(
-//RS                     "XML document exceeds max_entity_declarations ({})",
-//RS                     self.options.limits.max_entity_declarations
-//RS                 ));
-//RS             }
-//RS             for name in declared_entities.keys() {
-//RS                 self.check_name(name, "entity name")?;
-//RS             }
-//RS             self.declared_entities = declared_entities;
-//RS             self.doctype_seen = true;
-//RS             return Ok(Some(Event::Doctype {
-//RS                 name,
-//RS                 public_id,
-//RS                 system_id,
-//RS                 internal_subset,
-//RS                 raw,
-//RS             }));
-//RS         }
-//RS         if self.starts("</") {
-//RS             let start = self.offset;
-//RS             let Some(rel) = self.source[start..].find('>') else {
-//RS                 return self.fail("unterminated closing tag");
-//RS             };
-//RS             self.validate_characters(start, start + rel + 1)?;
-//RS             let raw_name = self.source[start + 2..start + rel].trim();
-//RS             let frame = self
-//RS                 .stack
-//RS                 .last()
-//RS                 .cloned()
-//RS                 .ok_or_else(|| Error::at(start, "closing tag without opener"))?;
-//RS             let name = self.resolved_name(raw_name, &[], false)?;
-//RS             if name.namespace_uri != frame.name.namespace_uri || name.local != frame.name.local {
-//RS                 return self.fail("mismatched XML closing tag");
-//RS             }
-//RS             self.offset = start + rel + 1;
-//RS             self.stack.pop();
-//RS             if self.stack.is_empty() {
-//RS                 self.root_closed = true
-//RS             }
-//RS             return Ok(Some(Event::ElementEnd {
-//RS                 name,
-//RS                 raw: self.source[start..self.offset].into(),
-//RS             }));
-//RS         }
-//RS         if self.starts("<") {
-//RS             if self.root_closed {
-//RS                 return self.fail("multiple XML root elements");
-//RS             }
-//RS             return self.open().map(Some);
-//RS         }
-//RS         if self.starts("&") {
-//RS             if self.stack.is_empty() {
-//RS                 return self.fail("entity reference outside root element");
-//RS             }
-//RS             let (raw, name, resolved) = self.reference()?;
-//RS             return Ok(Some(Event::EntityRef {
-//RS                 name,
-//RS                 resolved,
-//RS                 raw,
-//RS             }));
-//RS         }
-//RS         let start = self.offset;
-//RS         let rel = self.source[start..]
-//RS             .find(['<', '&'])
-//RS             .unwrap_or(self.source.len() - start);
-//RS         self.validate_characters(start, start + rel)?;
-//RS         self.offset += rel;
-//RS         let raw = self.source[start..self.offset].to_string();
-//RS         if self.stack.is_empty() {
-//RS             if !raw.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) {
-//RS                 return self.fail("character data outside root element");
-//RS             }
-//RS             Ok(Some(Event::DocumentWhitespace {
-//RS                 value: raw.clone(),
-//RS                 raw,
-//RS             }))
-//RS         } else {
-//RS             if raw.contains("]]>") {
-//RS                 return self.fail("character data contains forbidden ]]>");
-//RS             }
-//RS             Ok(Some(Event::Text {
-//RS                 value: raw.clone(),
-//RS                 raw,
-//RS             }))
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn next(&mut self) -> Result<Option<Event>, Error> {
-//RS         match self.next_inner() {
-//RS             Ok(Some(event)) => {
-//RS                 if let Err(mut error) = self.charge_event(&event) {
-//RS                     Self::classify(&mut error);
-//RS                     return Err(error.located(self.source, self.path()));
-//RS                 }
-//RS                 Ok(Some(event))
-//RS             }
-//RS             Ok(None) => Ok(None),
-//RS             Err(mut error) => {
-//RS                 Self::classify(&mut error);
-//RS                 Err(error.located(self.source, self.path()))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0114 crates/jet-foundation/src/XmlPull.rs:5429-6702
+// Private fragment of JetFoundation.XmlPull; shares its types and helpers.
+// Rust: crates/jet-foundation/src/XmlPull.rs:5429
+fn normalize_attribute_text(raw: String) -> String Never! {
+    normalized := String.with_capacity(raw.len())
+    characters := raw.chars().peekable()
+    while characters.next() is Some(character) {
+        match character {
+            '\r' => {
+                if characters.peek() == Some('\n') { _ :: characters.next() }
+                normalized.push(' ')
+            }
+            '\n' | '\t' => normalized.push(' ')
+            _ => normalized.push(character)
+        }
+    }
+    ^normalized
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5446
+fn split_name(raw: String) -> (String?, String) Never! {
+    match raw.split_once(':') {
+        Some((prefix, local)) => (Some(prefix.to_string()), local.to_string())
+        None => (None, raw.to_string())
+    }
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5452
+fn predefined(name: String) -> String? Never! {
+    match name {
+        "lt" => Some("<"), "gt" => Some(">"), "amp" => Some("&"),
+        "apos" => Some("'"), "quot" => Some("\""),
+        _ => {
+            number: U32? := None
+            if name.starts_with("#x") { number = U32.from_str_radix(name[2..], 16).ok() }
+            else if name.starts_with('#') { number = name[1..].parse<U32>().ok() }
+            if number is Some(value) {
+                if Char.from_u32(value) is Some(character) {
+                    if valid_xml_char(character) { return Some(character.to_string()) }
+                }
+            }
+            None
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5474
+fn take_doctype_literal(source: String, cursor: &USize) -> String Error! {
+    while source.as_bytes().get(*cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { *cursor += 1 }
+    quote :: source.as_bytes().get(*cursor).ok_or_else(fn() { Error.at(*cursor, "DOCTYPE external identifier lacks quoted value") })
+    if quote != b'\'' && quote != b'"' { return Err(Error.at(*cursor, "DOCTYPE external identifier must be quoted")) }
+    *cursor += 1
+    start :: *cursor
+    while source.as_bytes().get(*cursor).is_some_and(fn(byte) { byte != quote }) { *cursor += 1 }
+    if *cursor == source.len() { return Err(Error.at(start, "unterminated DOCTYPE external identifier")) }
+    value :: source[start..*cursor].to_string()
+    *cursor += 1
+    ^value
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5509
+fn doctype_fields(inside: String) -> (String, String?, String?, String?) Error! {
+    subset_start: USize? := None
+    quote: Char? := None
+    for (offset, character) in inside.char_indices() {
+        if quote is Some(expected) {
+            if character == expected { quote = None }
+        } else if character == '\'' || character == '"' { quote = Some(character) }
+        else if character == '[' { subset_start = Some(offset); break }
+    }
+    header: String := ""
+    internal_subset: String? := None
+    if subset_start is Some(start) {
+        tail := inside[start + 1..].trim_end() // #4303
+        subset :: tail.strip_suffix(']').ok_or_else(fn() { Error.at(start, "DOCTYPE internal subset lacks ]") })
+        trimmed := inside[..start].trim() // #4303
+        header = trimmed.to_string()
+        internal_subset = Some(subset.to_string())
+    } else {
+        trimmed := inside.trim() // #4303
+        header = trimmed.to_string()
+    }
+    name_end :: header.find(fn(character) { character.is_whitespace() }).unwrap_or(header.len())
+    name :: header[..name_end].to_string()
+    if !valid_name(name) { return Err(Error.at(0, "invalid DOCTYPE name")) }
+    external := header[name_end..].trim() // #4303
+    if external.is_empty() { return (^name, None, None, ^internal_subset) }
+    cursor: USize := 0
+    if external.starts_with("SYSTEM") { cursor = "SYSTEM".len() }
+    else if external.starts_with("PUBLIC") { cursor = "PUBLIC".len() }
+    else { return Err(Error.at(name_end, "invalid DOCTYPE external identifier")) }
+    public_id: String? := None
+    if external.starts_with("PUBLIC") { public_id = Some(take_doctype_literal(external, &cursor)) }
+    system_id :: Some(take_doctype_literal(external, &cursor))
+    if !external[cursor..].trim().is_empty() { return Err(Error.at(cursor, "unexpected data after DOCTYPE identifier")) }
+    (^name, ^public_id, ^system_id, ^internal_subset)
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5567
+enum DeclaredEntityKind { Internal, External }
+// Rust: crates/jet-foundation/src/XmlPull.rs:5573
+fn take_entity_literal(source: String, cursor: &USize) -> String Error! {
+    while source.as_bytes().get(*cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { *cursor += 1 }
+    quote :: source.as_bytes().get(*cursor).ok_or_else(fn() { Error.at(*cursor, "ENTITY declaration lacks quoted value") })
+    if quote != b'\'' && quote != b'"' { return Err(Error.at(*cursor, "ENTITY declaration value must be quoted")) }
+    *cursor += 1
+    start :: *cursor
+    while source.as_bytes().get(*cursor).is_some_and(fn(byte) { byte != quote }) { *cursor += 1 }
+    if *cursor == source.len() { return Err(Error.at(start, "unterminated ENTITY declaration value")) }
+    value :: source[start..*cursor].to_string()
+    *cursor += 1
+    ^value
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5608
+fn reject_parameter_entity_markup(subset: String, base: USize) -> Unit Error! {
+    index: USize := 0
+    while index < subset.len() {
+        if subset.as_bytes()[index] == b'%' {
+            name_begin :: index + 1
+            name_end := name_begin
+            while name_end < subset.len() {
+                next :: subset[name_end..].chars().next().unwrap()
+                if name_end == name_begin { if !name_start(next) { break } }
+                else if !name_char(next) { break }
+                name_end += next.len_utf8()
+            }
+            if name_end > name_begin && subset.as_bytes().get(name_end) == Some(b';') {
+                return Err(Error.at_kind(base + index, Reason.Unsupported, "parameter entity references are unsupported"))
+            }
+        }
+        index += subset[index..].chars().next().unwrap().len_utf8()
+    }
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5638
+fn general_entity_refs(value: String) -> [String] Never! {
+    refs: [String] := []
+    at: USize := 0
+    while at < value.len() {
+        rel :: match value[at..].find('&') { Some(offset) => offset, None => break }
+        start :: at + rel
+        end :: match value[start..].find(';') { Some(offset) => offset, None => break }
+        name := value[start + 1..start + end] // #4303
+        if !name.is_empty() && !name.starts_with('#') && predefined(name).is_none() && valid_name(name) {
+            refs.push(name.to_string())
+        }
+        at = start + end + 1
+    }
+    ^refs
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5664
+enum Color { White, Gray, Black }
+// Rust: crates/jet-foundation/src/XmlPull.rs:5673
+fn visit(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {
+    color.insert(node.to_string(), Color.Gray)
+    if edges.get(node) is Some(targets) {
+        for target in targets {
+            match color.get(target).unwrap_or(Color.White) {
+                Gray => return true
+                White => { if visit(target, edges, color) { return true } }
+                Black => {}
+            }
+        }
+    }
+    color.insert(node.to_string(), Color.Black)
+    false
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5662
+fn entity_reference_graph_has_cycle(edges: &[String:[String]]) -> Bool Never! {
+    color: [String:Color] := [:]
+    names := edges.keys().to_vec()
+    names.sort()
+    for name in &names { color.insert(name.clone(), Color.White) }
+    for name in &names {
+        if color.get(name) == Some(Color.White) && visit(name, edges, &color) { return true }
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5703
+fn declared_entity_table(subset: String?) -> ([String:DeclaredEntityKind], USize) Error! {
+    names: [String:DeclaredEntityKind] := [:]
+    replacements: [String:String] := [:]
+    count: USize := 0
+    source :: match subset { Some(value) => value, None => return (^names, count) }
+    reject_parameter_entity_markup(source, 0)
+    search_from: USize := 0
+    while source[search_from..].find("<!ENTITY") is Some(rel) {
+        start :: search_from + rel
+        count = count.saturating_add(1)
+        cursor := start + "<!ENTITY".len()
+        while source.as_bytes().get(cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { cursor += 1 }
+        if source.as_bytes().get(cursor) == Some(b'%') {
+            return Err(Error.at_kind(start, Reason.Unsupported, "parameter entity declarations are unsupported"))
+        }
+        name_begin :: cursor
+        while cursor < source.len() {
+            next :: source[cursor..].chars().next().unwrap()
+            if cursor == name_begin { if !name_start(next) { break } }
+            else if !name_char(next) { break }
+            cursor += next.len_utf8()
+        }
+        if cursor == name_begin { return Err(Error.at(start, "ENTITY declaration lacks name")) }
+        name := source[name_begin..cursor] // #4303
+        if !valid_name(name) { return Err(Error.at(start, "invalid ENTITY declaration name")) }
+        while source.as_bytes().get(cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { cursor += 1 }
+        kind: DeclaredEntityKind := DeclaredEntityKind.Internal
+        if source[cursor..].starts_with("SYSTEM") || source[cursor..].starts_with("PUBLIC") {
+            external_start :: cursor
+            if source[cursor..].starts_with("PUBLIC") {
+                cursor += "PUBLIC".len()
+                _ :: take_entity_literal(source, &cursor)
+            } else { cursor += "SYSTEM".len() }
+            _ :: take_entity_literal(source, &cursor)
+            while source.as_bytes().get(cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { cursor += 1 }
+            if source[cursor..].starts_with("NDATA") {
+                return Err(Error.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
+            }
+            _ :: external_start
+            kind = DeclaredEntityKind.External
+        } else if source.as_bytes().get(cursor) == Some(b'\'') || source.as_bytes().get(cursor) == Some(b'"') {
+            value :: take_entity_literal(source, &cursor)
+            replacements.insert(name.to_string(), ^value)
+        } else { return Err(Error.at(start, "ENTITY declaration lacks value")) }
+        if names.insert(name.to_string(), kind).is_some() { return Err(Error.at(start, "duplicate ENTITY declaration")) }
+        search_from = start + "<!ENTITY".len()
+    }
+    edges: [String:[String]] := [:]
+    ordered := replacements.keys().to_vec()
+    ordered.sort()
+    for name in &ordered {
+        targets: [String] := []
+        for target in general_entity_refs(replacements[name]) {
+            if replacements.contains_key(target) { targets.push(^target) }
+        }
+        edges.insert(name.clone(), ^targets)
+    }
+    if entity_reference_graph_has_cycle(&edges) {
+        return Err(Error.at_kind(0, Reason.EntityCycle, "XML entity declarations form a replacement cycle"))
+    }
+    (^names, count)
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5816
+fn declaration_fields(data: String) -> (String, String?, Bool?) Error! {
+    cursor: USize := 0
+    fields: [(String, String)] := []
+    while cursor < data.len() {
+        while data.as_bytes()[cursor].is_ascii_whitespace() {
+            cursor += 1
+            if cursor == data.len() { break }
+        }
+        if cursor == data.len() { break }
+        key_start :: cursor
+        while cursor < data.len() && !data.as_bytes()[cursor].is_ascii_whitespace() && data.as_bytes()[cursor] != b'=' { cursor += 1 }
+        key := data[key_start..cursor] // #4303
+        while cursor < data.len() && data.as_bytes()[cursor].is_ascii_whitespace() { cursor += 1 }
+        if data.as_bytes().get(cursor) != Some(b'=') { return Err(Error.at(cursor, "XML declaration field needs =")) }
+        cursor += 1
+        value :: take_doctype_literal(data, &cursor)
+        fields.push((key.to_string(), ^value))
+    }
+    if fields.first().map(fn(field) { field.0 }) != Some("version") { return Err(Error.at(0, "XML declaration must start with version")) }
+    version :: fields[0].1.clone()
+    if version != "1.0" { return Err(Error.at(0, "only XML version 1.0 is supported")) }
+    encoding: String? := None
+    standalone: Bool? := None
+    for (key, value) in fields.into_iter().skip(1) {
+        if key == "encoding" && encoding.is_none() && standalone.is_none() {
+            match value.to_ascii_uppercase() {
+                "UTF-8" | "UTF-16" | "UTF-16LE" | "UTF-16BE" => {}
+                _ => return Err(Error.at_kind(0, Reason.InvalidEncoding, "unsupported XML declaration encoding"))
+            }
+            encoding = Some(^value)
+        } else if key == "standalone" && standalone.is_none() {
+            match value {
+                "yes" => standalone = Some(true), "no" => standalone = Some(false)
+                _ => return Err(Error.at(0, "standalone must be yes or no"))
+            }
+        } else { return Err(Error.at(0, "invalid or duplicate XML declaration field")) }
+    }
+    (^version, ^encoding, standalone)
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5882
+fn declaration_matches_input(name: String, encoding: WireEncoding?) -> Bool Never! {
+    match encoding.unwrap_or(WireEncoding.UTF8) {
+        UTF8 => name.eq_ignore_ascii_case("UTF-8")
+        Utf16Le | Utf16Be => match name.to_ascii_uppercase() {
+            "UTF-16" | "UTF-16LE" | "UTF-16BE" => true, _ => false
+        }
+    }
+}
+extend Scanner {
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5893
+    pub fn new(source: String) -> Scanner Never! {
+        Scanner{source: source, wire_encoding: None, offset: 0, started: false, ended: false,
+            root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false,
+            declared_entities: [:], stack: [], options: ParseOptions.safe(), nodes: 0,
+            text_bytes: 0, entity_replacement_bytes: 0}
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5912
+    pub fn with_options(source: String, options: ParseOptions) -> Scanner Error! {
+        options.limits.validate()
+        scanner := Scanner.new(source)
+        scanner.options = ^options
+        ^scanner
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5919
+    fn path(self: &Scanner) -> String Never! {
+        path := "$".to_string()
+        for frame in &self.stack {
+            path.push('/')
+            if frame.name.namespace_uri is Some(uri) {
+                path.push('{'); path.push_str(uri); path.push('}')
+            }
+            path.push_str(frame.name.local)
+        }
+        ^path
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5932
+    fn classify(error: &Error) -> Unit Never! {
+        if error.kind != Reason.Malformed { return }
+        reason :: error.reason
+        if reason.contains("encoding") || reason.contains("version 1.0") { error.kind = Reason.InvalidEncoding }
+        else if reason.contains("mismatched") { error.kind = Reason.MismatchedTag }
+        else if reason.contains("name") || reason.contains("instruction target") { error.kind = Reason.InvalidName }
+        else if reason.contains("namespace") || reason.contains("prefix") { error.kind = Reason.Namespace }
+        else if reason.contains("duplicate expanded XML attribute") { error.kind = Reason.DuplicateAttribute }
+        else if reason.contains("entity") || reason.contains("character reference") { error.kind = Reason.Entity }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5953
+    fn limit<T>(self: &Scanner, reason: String) -> T Error! {
+        Err(Error.at_kind(self.offset, Reason.Limit, ^reason))
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5956
+    fn check_name(self: &Scanner, value: String, label: String) -> Unit Error! {
+        if value.len() > self.options.limits.max_name_bytes {
+            return self.limit("XML {label} exceeds max_name_bytes ({self.options.limits.max_name_bytes})")
+        }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5965
+    fn charge_text(self: &Scanner, bytes: USize, label: String) -> Unit Error! {
+        if bytes > self.options.limits.max_text_bytes || self.text_bytes.saturating_add(bytes) > self.options.limits.max_text_bytes {
+            return self.limit("XML {label} exceeds max_text_bytes ({self.options.limits.max_text_bytes})")
+        }
+        self.text_bytes += bytes
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:5977
+    fn resolve_entity(self: &Scanner, name: String) -> String? Error! {
+        if predefined(name) is Some(value) { return Some(^value) }
+        if name.starts_with('#') { return self.fail("invalid numeric character reference") }
+        match self.declared_entities.get(name) {
+            None => self.fail("undeclared entity reference `&{name};`")
+            Some(DeclaredEntityKind.External) => Err(Error.at_kind(self.offset, Reason.Unsupported, "external entity reference `&{name};` is unsupported"))
+            Some(DeclaredEntityKind.Internal) => match &self.options.entities {
+                Preserve => None
+                Reject => Err(Error.at_kind(self.offset, Reason.Entity, "entity reference `&{name};` rejected by XML entity policy"))
+                Resolve(values) => {
+                    value :: match values.get(name) { Some(replacement) => replacement.clone(), None => return None }
+                    if self.options.limits.max_entity_depth < 1 {
+                        return self.limit("XML entity replacement exceeds max_entity_depth (0)")
+                    }
+                    total :: self.entity_replacement_bytes.saturating_add(value.len())
+                    if value.len() > self.options.limits.max_entity_replacement_bytes || total > self.options.limits.max_entity_replacement_bytes {
+                        return self.limit("XML entity replacement exceeds max_entity_replacement_bytes ({self.options.limits.max_entity_replacement_bytes})")
+                    }
+                    self.entity_replacement_bytes = total
+                    self.charge_text(value.len(), "entity replacement")
+                    Some(^value)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6021
+    fn fail<T>(self: &Scanner, reason: String) -> T Error! { Err(Error.at(self.offset, ^reason)) }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6024
+    fn validate_characters(self: &Scanner, start: USize, end: USize) -> Unit Error! {
+        for (offset, character) in self.source[start..end].char_indices() {
+            if !valid_xml_char(character) {
+                return Err(Error.at(start + offset, "XML contains forbidden character U+{(character as U32):04X}"))
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6039
+    fn starts(self: &Scanner, value: String) -> Bool Never! { self.source[self.offset..].starts_with(value) }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6042
+    fn take_until(self: &Scanner, end: String, reason: String) -> (String, String) Error! {
+        start :: self.offset
+        rel :: match self.source[self.offset..].find(end) { Some(offset) => offset, None => return self.fail(reason) }
+        token_end :: self.offset + rel + end.len()
+        self.validate_characters(start, token_end)
+        self.offset = token_end
+        (self.source[start..self.offset].to_string(), self.source[start..self.offset - end.len()].to_string())
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6055
+    fn scope_uri(self: &Scanner, prefix: String?, local: View<(String?, String)>) -> String? Never! {
+        for (p, uri) in local.iter().rev() { if p == prefix { return Some(uri.clone()) } }
+        for frame in self.stack.iter().rev() {
+            for (p, uri) in frame.namespaces.iter().rev() { if p == prefix { return Some(uri.clone()) } }
+        }
+        if prefix == Some("xml") { Some("http://www.w3.org/XML/1998/namespace") } else { None }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6076
+    fn resolved_name(self: &Scanner, raw: String, local: View<(String?, String)>, attribute: Bool) -> Name Error! {
+        self.check_name(raw, "name")
+        if !valid_name(raw) { return self.fail("invalid XML name `{raw}`") }
+        (prefix, name) :: split_name(raw)
+        uri: String? := None
+        if !(attribute && prefix.is_none()) { uri = self.scope_uri(prefix, local) }
+        if prefix.is_some() && uri.is_none() { return self.fail("unbound namespace prefix in `{raw}`") }
+        Name{raw: raw.to_string(), prefix: ^prefix, local: ^name, namespace_uri: ^uri}
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6102
+    fn reference(self: &Scanner) -> (String, String, String?) Error! {
+        start :: self.offset
+        end :: match self.source[start..].find(';') { Some(offset) => offset, None => return self.fail("unterminated entity reference") }
+        name := self.source[start + 1..start + end] // #4303
+        if name.is_empty() { return self.fail("empty entity reference") }
+        self.validate_characters(start, start + end + 1)
+        resolved :: self.resolve_entity(name)
+        self.offset = start + end + 1
+        (self.source[start..self.offset].to_string(), name.to_string(), ^resolved)
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6120
+    fn parse_parts(self: &Scanner, raw: String, source_base: USize) -> ([Part], String?) Error! {
+        parts: [Part] := []
+        normalized := String.new()
+        at: USize := 0
+        all := true
+        while at < raw.len() {
+            if raw[at..].find('&') is Some(rel) {
+                if rel > 0 {
+                    literal := raw[at..at + rel] // #4303
+                    value :: normalize_attribute_text(literal)
+                    normalized.push_str(value)
+                    parts.push(Part.Text{value: ^value, raw: literal.to_string()})
+                }
+                start :: at + rel
+                end :: match raw[start..].find(';') {
+                    Some(offset) => offset
+                    None => return Err(Error.at(source_base + start, "unterminated entity reference"))
+                }
+                name := raw[start + 1..start + end] // #4303
+                resolved := self.resolve_entity(name) catch { error ->
+                    mapped := ^error
+                    mapped.offset = source_base + start
+                    return Err(^mapped)
+                }
+                if !name.starts_with('#') && name != "lt" && name != "gt" && name != "amp" && name != "apos" && name != "quot" {
+                    if resolved is Some(value) { resolved = Some(normalize_attribute_text(value)) }
+                }
+                if resolved is Some(value) { normalized.push_str(value) }
+                else { normalized.clear(); all = false }
+                parts.push(Part.Entity{name: name.to_string(), resolved: ^resolved, raw: raw[start..start + end + 1].to_string()})
+                at = start + end + 1
+            } else {
+                literal := raw[at..] // #4303
+                value :: normalize_attribute_text(literal)
+                normalized.push_str(value)
+                parts.push(Part.Text{value: ^value, raw: literal.to_string()})
+                break
+            }
+        }
+        if all { (^parts, Some(^normalized)) } else { (^parts, None) }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6185
+    fn open(self: &Scanner) -> Event Error! {
+        start :: self.offset
+        end := start + 1
+        quote: Char? := None
+        while end < self.source.len() {
+            character :: self.source.as_bytes()[end] as Char
+            if quote is Some(expected) { if character == expected { quote = None } }
+            else if character == '\'' || character == '"' { quote = Some(character) }
+            else if character == '>' { break }
+            end += 1
+        }
+        if end == self.source.len() { return self.fail("unterminated opening tag") }
+        self.validate_characters(start, end + 1)
+        inner := self.source[start + 1..end] // #4303
+        empty :: inner.trim_end().ends_with('/')
+        if empty {
+            inner = inner.trim_end()
+            inner = inner[..inner.len() - 1]
+        }
+        cursor: USize := 0
+        while inner[cursor..].chars().next().is_some_and(fn(character) { character.is_whitespace() }) {
+            cursor += inner[cursor..].chars().next().map(fn(character) { character.len_utf8() }).unwrap_or(0)
+        }
+        ns :: inner[cursor..].find(fn(character) { character.is_whitespace() }).unwrap_or(inner.len() - cursor)
+        raw_name := inner[cursor..cursor + ns] // #4303
+        cursor += ns
+        raw_attrs: [(String, String, USize, Char, String)] := []
+        while cursor < inner.len() {
+            while inner[cursor..].chars().next().is_some_and(fn(character) { character.is_whitespace() }) {
+                cursor += inner[cursor..].chars().next().map(fn(character) { character.len_utf8() }).unwrap_or(0)
+            }
+            if cursor >= inner.len() { break }
+            astart :: cursor
+            while cursor < inner.len() && !inner.as_bytes()[cursor].is_ascii_whitespace() && inner.as_bytes()[cursor] != b'=' { cursor += 1 }
+            key :: inner[astart..cursor].to_string()
+            while cursor < inner.len() && inner.as_bytes()[cursor].is_ascii_whitespace() { cursor += 1 }
+            if inner.as_bytes().get(cursor) != Some(b'=') { return self.fail("XML attribute needs =") }
+            cursor += 1
+            while cursor < inner.len() && inner.as_bytes()[cursor].is_ascii_whitespace() { cursor += 1 }
+            q :: inner.as_bytes().get(cursor).ok_or_else(fn() { Error.at(start + cursor, "missing attribute value") }) as Char
+            if q != '\'' && q != '"' { return self.fail("XML attribute value must be quoted") }
+            cursor += 1
+            vstart :: cursor
+            while cursor < inner.len() && inner.as_bytes()[cursor] as Char != q { cursor += 1 }
+            if cursor >= inner.len() { return self.fail("unterminated attribute value") }
+            value :: inner[vstart..cursor].to_string()
+            value_source_base :: start + 1 + vstart
+            if value.contains('<') { return self.fail("XML attribute value contains <") }
+            cursor += 1
+            raw_attrs.push((^key, ^value, value_source_base, q, inner[astart..cursor].to_string()))
+        }
+        declarations: [(String?, String, Char, String)] := []
+        // GATE #4499: exact optional-string and expanded-name tuple keys.
+        seen_ns: [String?:Bool] := [:]
+        for (key, value, value_source_base, q, raw) in &raw_attrs {
+            if key == "xmlns" || key.starts_with("xmlns:") {
+                prefix: String? := None
+                if key != "xmlns" { prefix = Some(key[6..].to_string()) }
+                if seen_ns.insert(prefix.clone(), true).is_some() { return self.fail("duplicate namespace declaration") }
+                if prefix == Some("xmlns") || prefix == Some("xml") && value != "http://www.w3.org/XML/1998/namespace" {
+                    return self.fail("reserved namespace prefix binding")
+                }
+                (_, normalized) :: self.parse_parts(value, value_source_base)
+                namespace_uri :: match normalized {
+                    Some(uri) => ^uri
+                    None => return self.fail("namespace URI contains unresolved entity reference")
+                }
+                declarations.push((^prefix, ^namespace_uri, q, raw.clone()))
+            }
+        }
+        local: [(String?, String)] := []
+        for (prefix, uri, _, _) in &declarations { local.push((prefix.clone(), uri.clone())) }
+        name :: self.resolved_name(raw_name, local, false)
+        namespaces: [Namespace] := []
+        for (prefix, uri, q, raw) in declarations {
+            namespaces.push(Namespace{prefix: ^prefix, namespace_uri: ^uri, quote: q, raw: ^raw})
+        }
+        attributes: [Attribute] := []
+        expanded: [(String?, String):Bool] := [:] // GATE #4499
+        for (key, value, value_source_base, q, raw) in raw_attrs {
+            if key == "xmlns" || key.starts_with("xmlns:") { continue }
+            aname :: self.resolved_name(key, local, true)
+            if expanded.insert((aname.namespace_uri.clone(), aname.local.clone()), true).is_some() {
+                return self.fail("duplicate expanded XML attribute")
+            }
+            (parts, normalized) :: self.parse_parts(value, value_source_base)
+            attributes.push(Attribute{name: ^aname, parts: ^parts, normalized: ^normalized, quote: q, raw: ^raw})
+        }
+        self.offset = end + 1
+        raw :: self.source[start..self.offset].to_string()
+        self.root_seen = true
+        if !empty { self.stack.push(Frame{name: name.clone(), namespaces: ^local}) }
+        else if self.stack.is_empty() { self.root_closed = true }
+        Event.ElementStart{name: ^name, namespaces: ^namespaces, attributes: ^attributes, empty: empty, raw: ^raw}
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6369
+    fn charge_nodes(self: &Scanner, amount: USize) -> Unit Error! {
+        if self.nodes.saturating_add(amount) > self.options.limits.max_nodes {
+            return self.limit("XML document exceeds max_nodes ({self.options.limits.max_nodes})")
+        }
+        self.nodes += amount
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6379
+    fn charge_event(self: &Scanner, event: &Event) -> Unit Error! {
+        match event {
+            DocumentStart => self.charge_nodes(1)
+            DocumentEnd | ElementEnd{..} => {}
+            ElementStart{name, namespaces, attributes, empty, ..} => {
+                depth := self.stack.len()
+                if empty { depth += 1 }
+                if depth > self.options.limits.max_depth {
+                    return self.limit("XML element nesting exceeds max_depth ({self.options.limits.max_depth})")
+                }
+                if attributes.len() > self.options.limits.max_attributes_per_element {
+                    return self.limit("XML element exceeds max_attributes_per_element ({self.options.limits.max_attributes_per_element})")
+                }
+                self.check_name(name.raw, "element name")
+                self.check_name(name.local, "local name")
+                if name.prefix is Some(prefix) { self.check_name(prefix, "name prefix") }
+                if name.namespace_uri is Some(uri) { self.check_name(uri, "namespace URI") }
+                for namespace in namespaces {
+                    if namespace.prefix is Some(prefix) { self.check_name(prefix, "namespace prefix") }
+                    self.check_name(namespace.namespace_uri, "namespace URI")
+                }
+                for attribute in attributes {
+                    self.check_name(attribute.name.raw, "attribute name")
+                    self.check_name(attribute.name.local, "attribute local name")
+                    if attribute.name.prefix is Some(prefix) { self.check_name(prefix, "attribute prefix") }
+                    if attribute.name.namespace_uri is Some(uri) { self.check_name(uri, "attribute namespace URI") }
+                    for part in &attribute.parts {
+                        if part is Part.Text{value, ..} { self.charge_text(value.len(), "attribute text") }
+                    }
+                }
+                self.charge_nodes(1 + namespaces.len() + attributes.len())
+            }
+            Declaration{version, encoding, ..} => {
+                self.check_name(version, "XML version")
+                if encoding is Some(name) { self.check_name(name, "XML encoding") }
+                self.charge_nodes(1)
+            }
+            Doctype{name, public_id, system_id, internal_subset, ..} => {
+                self.check_name(name, "DOCTYPE name")
+                if public_id is Some(value) { self.check_name(value, "DOCTYPE identifier") }
+                if system_id is Some(value) { self.check_name(value, "DOCTYPE identifier") }
+                if internal_subset is Some(value) { self.charge_text(value.len(), "DOCTYPE internal subset") }
+                self.charge_nodes(1)
+            }
+            ProcessingInstruction{target, value, ..} => {
+                self.check_name(target, "processing instruction target")
+                self.charge_text(value.len(), "processing instruction text")
+                self.charge_nodes(1)
+            }
+            DocumentWhitespace{value, ..} | Text{value, ..} | Cdata{value, ..} | Comment{value, ..} => {
+                self.charge_text(value.len(), "text")
+                self.charge_nodes(1)
+            }
+            EntityRef{name, ..} => {
+                self.check_name(name, "entity name")
+                self.charge_nodes(1)
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6482
+    fn next_inner(self: &Scanner) -> Event? Error! {
+        if self.ended { return None }
+        if !self.started { self.started = true; return Some(Event.DocumentStart) }
+        if self.offset == self.source.len() {
+            if !self.stack.is_empty() { return self.fail("XML document ended before closing element") }
+            if !self.root_seen { return self.fail("empty XML document") }
+            self.ended = true
+            return Some(Event.DocumentEnd)
+        }
+        if self.starts("<!--") {
+            (raw, body) :: self.take_until("-->", "unterminated XML comment")
+            value :: body[4..].to_string()
+            if value.contains("--") { return self.fail("XML comment contains --") }
+            return Some(Event.Comment{value: ^value, raw: ^raw})
+        }
+        if self.starts("<![CDATA[") {
+            if self.stack.is_empty() { return self.fail("CDATA outside root element") }
+            (raw, body) :: self.take_until("]]>", "unterminated CDATA")
+            return Some(Event.Cdata{value: body[9..].to_string(), raw: ^raw})
+        }
+        if self.starts("<?xml") {
+            if self.declaration_seen || self.root_seen || self.offset != 0 { return self.fail("XML declaration is out of order") }
+            (raw, body) :: self.take_until("?>", "unterminated XML declaration")
+            data := body[5..].trim() // #4303
+            (version, encoding, standalone) :: declaration_fields(data)
+            if encoding is Some(name) {
+                if !declaration_matches_input(name, self.wire_encoding) {
+                    return Err(Error.at_kind(0, Reason.InvalidEncoding, "XML declaration conflicts with detected input encoding"))
+                }
+            }
+            self.declaration_seen = true
+            return Some(Event.Declaration{version: ^version, encoding: ^encoding, standalone: standalone, raw: ^raw})
+        }
+        if self.starts("<?") {
+            (raw, body) :: self.take_until("?>", "unterminated processing instruction")
+            data := body[2..] // #4303
+            split :: data.find(fn(character) { character.is_whitespace() }).unwrap_or(data.len())
+            target :: data[..split].to_string()
+            if !valid_name(target) || target.eq_ignore_ascii_case("xml") { return self.fail("invalid processing instruction target") }
+            value := data[split..].trim_start() // #4303
+            return Some(Event.ProcessingInstruction{target: ^target, value: value.to_string(), raw: ^raw})
+        }
+        if self.starts("<!DOCTYPE") {
+            if self.doctype_seen || self.root_seen { return self.fail("DOCTYPE is out of order") }
+            start :: self.offset
+            i := start + 9
+            quote: Char? := None
+            bracket: I32 := 0
+            while i < self.source.len() {
+                character :: self.source.as_bytes()[i] as Char
+                if quote is Some(q) { if character == q { quote = None } }
+                else if character == '\'' || character == '"' { quote = Some(character) }
+                else if character == '[' { bracket += 1 }
+                else if character == ']' { bracket -= 1 }
+                else if character == '>' && bracket == 0 { break }
+                i += 1
+            }
+            if i == self.source.len() { return self.fail("unterminated DOCTYPE") }
+            self.validate_characters(start, i + 1)
+            self.offset = i + 1
+            raw :: self.source[start..self.offset].to_string()
+            inside := self.source[start + 9..i].trim() // #4303
+            (name, public_id, system_id, internal_subset) :: doctype_fields(inside) catch { error ->
+                return Err(Error.at(start + 9 + error.offset, error.reason))
+            }
+            (declared_entities, declaration_count) :: declared_entity_table(internal_subset) catch { error ->
+                mapped := Error.at_kind(start + 9 + error.offset, error.kind, error.reason.clone())
+                mapped.path = ^error.path
+                return Err(^mapped)
+            }
+            if declaration_count > self.options.limits.max_entity_declarations {
+                return self.limit("XML document exceeds max_entity_declarations ({self.options.limits.max_entity_declarations})")
+            }
+            ordered := declared_entities.keys().to_vec()
+            ordered.sort()
+            for entity_name in &ordered { self.check_name(entity_name, "entity name") }
+            self.declared_entities = ^declared_entities
+            self.doctype_seen = true
+            return Some(Event.Doctype{name: ^name, public_id: ^public_id, system_id: ^system_id, internal_subset: ^internal_subset, raw: ^raw})
+        }
+        if self.starts("</") {
+            start :: self.offset
+            rel :: match self.source[start..].find('>') { Some(offset) => offset, None => return self.fail("unterminated closing tag") }
+            self.validate_characters(start, start + rel + 1)
+            raw_name := self.source[start + 2..start + rel].trim() // #4303
+            frame :: self.stack.last().cloned().ok_or_else(fn() { Error.at(start, "closing tag without opener") })
+            name :: self.resolved_name(raw_name, [], false)
+            if name.namespace_uri != frame.name.namespace_uri || name.local != frame.name.local {
+                return self.fail("mismatched XML closing tag")
+            }
+            self.offset = start + rel + 1
+            _ :: self.stack.pop()
+            if self.stack.is_empty() { self.root_closed = true }
+            return Some(Event.ElementEnd{name: ^name, raw: self.source[start..self.offset].to_string()})
+        }
+        if self.starts("<") {
+            if self.root_closed { return self.fail("multiple XML root elements") }
+            return Some(self.open())
+        }
+        if self.starts("&") {
+            if self.stack.is_empty() { return self.fail("entity reference outside root element") }
+            (raw, name, resolved) :: self.reference()
+            return Some(Event.EntityRef{name: ^name, resolved: ^resolved, raw: ^raw})
+        }
+        start :: self.offset
+        rel :: self.source[start..].find(['<', '&']).unwrap_or(self.source.len() - start)
+        self.validate_characters(start, start + rel)
+        self.offset += rel
+        raw :: self.source[start..self.offset].to_string()
+        if self.stack.is_empty() {
+            if !raw.chars().all(fn(character) { character == ' ' || character == '\t' || character == '\r' || character == '\n' }) {
+                return self.fail("character data outside root element")
+            }
+            Some(Event.DocumentWhitespace{value: raw.clone(), raw: ^raw})
+        } else {
+            if raw.contains("]]>") { return self.fail("character data contains forbidden ]]>") }
+            Some(Event.Text{value: raw.clone(), raw: ^raw})
+        }
+    }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:6686
+    pub fn next(self: &Scanner) -> Event? Error! {
+        event :: self.next_inner() catch { error ->
+            located := ^error
+            Scanner.classify(&located)
+            return Err(located.located(self.source, self.path()))
+        }
+        if event is Some(value) {
+            self.charge_event(&value) catch { error ->
+                located := ^error
+                Scanner.classify(&located)
+                return Err(located.located(self.source, self.path()))
+            }
+            return Some(^value)
+        }
+        None
+    }
+}
 

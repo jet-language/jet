@@ -1,0 +1,8 @@
+use JetFoundation.WasmDebug.[embed_source_mapping_url, custom_section_payloads]
+// Rust: crates/jet-foundation/src/WasmDebug.rs:580
+#Test("embed_source_mapping_url_appends_custom_section") {
+    wasm := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    embed_source_mapping_url(&wasm, "app.wasm.map")
+    payloads :: custom_section_payloads(wasm.view(), "sourceMappingURL".bytes())
+    assert(payloads == [View<U8>]{"app.wasm.map".bytes()})
+}

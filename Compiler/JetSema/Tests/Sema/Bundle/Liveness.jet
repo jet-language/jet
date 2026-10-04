@@ -1,0 +1,18 @@
+use jet_foundation.[Span]
+use jet_sema.Sema.Bundle.Liveness.[ignored_name, export_kind, rename_edit]
+// Rust: crates/jet-sema/src/Sema/Bundle/Liveness.rs:386 (behavioral control)
+#Test("liveness_ignored_names_and_exports") {
+    assert(ignored_name(""))
+    assert(ignored_name("_unused"))
+    assert(!ignored_name("ordinary"))
+    assert(export_kind("file_module"))
+    assert(export_kind("function"))
+    assert(!export_kind("parameter"))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Liveness.rs:390 (behavioral control)
+#Test("liveness_rename_edit_retains_byte_span") {
+    span :: Span{start: 3, end: 9}
+    edit :: rename_edit(span, "helper")
+    assert(edit.span == span)
+    assert(edit.new_text == "_helper")
+}

@@ -1,0 +1,22 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:243-300 (behavioral control; no inline Rust tests)
+#Test("sized_peer_joins_a_numerals_own_minimal_width") {
+    diagnostics :: statements05_diagnostics("fn run() {{ byte: U8 :: 1\n wide: U16 :: byte + 256\n _ :: wide }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:312-428 (behavioral control)
+#Test("integer_context_rejects_values_outside_the_destination_width") {
+    diagnostics :: statements05_diagnostics("fn run() {{ byte: U8 :: 256\n _ :: byte }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:380-412 (behavioral control)
+#Test("float_literal_context_requires_exact_integer_representability") {
+    diagnostics :: statements05_diagnostics("fn run() {{ value: Float :: 9007199254740993\n _ :: value }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E1003" }))
+    exact :: statements05_diagnostics("fn run() {{ value: Float :: 9007199254740992\n _ :: value }}\n")
+    assert(!exact.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{exact:?}")
+}

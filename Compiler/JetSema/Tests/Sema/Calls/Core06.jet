@@ -1,0 +1,94 @@
+use jet_foundation.[AccessConvention, Type]
+use jet_foundation.Syntax.[DURATION_TYPE]
+use jet_sema.CheckerCoreLib.[result_ty, io_error_ty, unit_ty, u8_ty]
+use JetSema.Sema.Calls.Core06.[core_fixed_files_sig, core_fixed_auth_sig, core_fixed_random_sig, core_fixed_crypto_random_sig, core_fixed_crypto_zeroize_sig, core_fixed_collections_sig, core_fixed_collection_set_sig, core_fixed_stats_sig, core_fixed_rt_sig, core_fixed_time_initial_sig, core_fixed_tasks_sig, core_fixed_testing_sig]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1287-1325 (behavioral control; no inline Rust tests)
+#Test("file_read_and_write_keep_path_union_and_io_domain") {
+    r :: AccessConvention.Read
+    path :: Type.Union([Type.String, Type.Named("Path")])
+    assert(core_fixed_files_sig("read") == Val(([(r, ~path)], Val(result_ty(Type.String, io_error_ty())))))
+    assert(core_fixed_files_sig("write_bytes") == Val(([(r, path), (r, Type.List(u8_ty()))], Val(result_ty(unit_ty(), io_error_ty())))))
+    assert(core_fixed_files_sig("does_not_exist") == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1372-1378 (behavioral control)
+#Test("walk_forms_share_ignore_argument_and_entry_result") {
+    walk :: core_fixed_files_sig("walk").unwrap()
+    assert(core_fixed_files_sig("walk_parallel") == Val(walk))
+    assert(core_fixed_files_sig("walk_files") == Val(walk))
+    assert(walk.0.len() == 2)
+    assert(walk.0[1] == (AccessConvention.Read, Type.Option(Type.String)))
+    assert(walk.1 == Val(result_ty(Type.List(Type.Named("WalkEntry")), io_error_ty())))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1622-1644 (behavioral control)
+#Test("jwt_fixed_abi_keeps_five_parameters_and_typed_error") {
+    jwt :: core_fixed_auth_sig("verify_jwt").unwrap()
+    assert(jwt.0.len() == 5)
+    assert(jwt.0[1] == (AccessConvention.Read, Type.List(u8_ty())))
+    assert(jwt.0[4] == (AccessConvention.Read, Type.Named("Duration")))
+    assert(jwt.1 == Val(result_ty(Type.Named("Claims"), Type.Named("AuthError"))))
+    assert(core_fixed_auth_sig("verify_paseto").unwrap().0.len() == 3)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2402-2404,2448-2454 (behavioral control)
+#Test("ambient_prng_cs_rng_and_zeroize_have_distinct_contracts") {
+    seeded :: core_fixed_random_sig("bytes").unwrap()
+    secure :: core_fixed_crypto_random_sig("bytes").unwrap()
+    assert(seeded.1 == Val(Type.List(u8_ty())))
+    assert(secure.1 == Val(Type.Option(Type.List(u8_ty()))))
+    wipe :: core_fixed_crypto_zeroize_sig("__zeroize").unwrap()
+    assert(wipe.0 == [(AccessConvention.Move, Type.List(u8_ty()))])
+    assert(wipe.1 == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2083-2109 (behavioral control)
+#Test("heap_results_preserve_named_slots_and_optional_empty_value") {
+    popped :: core_fixed_collections_sig("heappop").unwrap()
+    replaced :: core_fixed_collections_sig("heapreplace").unwrap()
+    pushed :: core_fixed_collections_sig("heappushpop").unwrap()
+    empty_shape :: Val(Type.Tuple([("heap", Type.List(Type.Int)), ("value", Type.Option(Type.Int))]))
+    assert(popped.1 == empty_shape)
+    assert(replaced.1 == empty_shape)
+    assert(pushed.1 == Val(Type.Tuple([("heap", Type.List(Type.Int)), ("value", Type.Int)])))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2224-2239 (behavioral control)
+#Test("set_remove_reports_absence_and_len_is_not_boolean") {
+    assert(core_fixed_collection_set_sig("remove").unwrap().1 == Val(Type.Option(Type.Named("StringSet"))))
+    assert(core_fixed_collection_set_sig("len").unwrap().1 == Val(Type.Int))
+    assert(core_fixed_collection_set_sig("is_empty").unwrap().1 == Val(Type.Bool))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2310-2358 (behavioral control)
+#Test("statistics_empty_sensitive_values_are_optional_but_vectors_are_not") {
+    assert(core_fixed_stats_sig("mean").unwrap().1 == Val(Type.Option(Type.Float)))
+    assert(core_fixed_stats_sig("covariance").unwrap().1 == Val(Type.Option(Type.Float)))
+    assert(core_fixed_stats_sig("multimode").unwrap().1 == Val(Type.List(Type.Float)))
+    assert(core_fixed_stats_sig("histogram").unwrap().1 == Val(Type.List(Type.Int)))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2479-2499 (behavioral control)
+#Test("realtime_callback_requires_empty_effect_bound_and_read_access") {
+    signature :: core_fixed_rt_sig("callback").unwrap()
+    callback :: signature.0[2].1
+    if callback == .Fn(params: params, ret: ret, effect_bound: effects, call_metadata: metadata, ..) {
+        assert(params == [Type.List(Type.Float)])
+        assert(ret == None)
+        assert(effects == Val([]))
+        assert(metadata.unwrap().conventions == [AccessConvention.Read])
+    } else { panic("callback parameter must be callable") }
+    assert(signature.1 == Val(Type.Named("RealtimeStream")))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2471-2478,2500-2527 (behavioral control)
+#Test("time_and_task_budget_contracts_use_duration_not_raw_int") {
+    duration_param :: [(AccessConvention.Read, Type.Named(DURATION_TYPE))]
+    assert(core_fixed_time_initial_sig("sleep").unwrap() == (duration_param, None))
+    assert(core_fixed_tasks_sig("timeout").unwrap() == (duration_param, Val(unit_ty())))
+    assert(core_fixed_tasks_sig("interval").unwrap().1 == Val(Type.Apply("Receiver", [Type.Int])))
+    loop name in ["from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds"] {
+        assert(core_fixed_time_initial_sig(name).unwrap() == ([(AccessConvention.Read, Type.Int)], Val(Type.Named("DateTime"))))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1869-1885 (behavioral control)
+#Test("testing_compare_uses_typed_data_tree_callbacks") {
+    comparison :: core_fixed_testing_sig("compare").unwrap()
+    assert(comparison.0.len() == 4)
+    assert(comparison.0[0].1 == Type.List(Type.Named("DataTree")))
+    assert(comparison.0[1] == comparison.0[2])
+    assert(comparison.1 == Val(Type.Named("TestComparison")))
+}

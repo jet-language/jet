@@ -1,0 +1,102 @@
+use jet_foundation.[Item, Type, VariantPayload]
+use jet_lexer.[lex]
+use jet_parser.[parse]
+use jet_formatter.[format_synthetic_program]
+use jet_sema.[TypeRegistry, register_enum, register_type_methods, expand_builtin_derive_items, expand_builtin_serde_items]
+
+// Rust: crates/jet-sema/src/Sema/Registration/Derives.rs:527
+#Test("reserved_nominals_generate_no_builtin_items") {
+    loop src in [
+        "#[Comparable, Encode, Decode]\nstruct Unit { name: String }",
+        "#[Comparable, Encode, Decode]\nenum Unit { Named(String) }",
+        "#Comparable\nUnit :: distinct Int",
+        "#[Comparable, Encode, Decode]\nstruct Cell { name: String }",
+    ] {
+        (tokens, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "{src}: {lex_diags:?}")
+        program := parse(&tokens).expect("source parses")
+        original :: format_synthetic_program(&program)
+        diags := []
+        expand_builtin_derive_items(&program.items, &diags)
+        assert(diags.is_empty(), "derive expansion: {src}: {diags:?}")
+        assert_eq(format_synthetic_program(&program), original, "derive expansion must leave a rejected nominal unchanged: {src}")
+        expand_builtin_serde_items(&program.items, &diags)
+        assert(diags.is_empty(), "serde expansion: {src}: {diags:?}")
+        assert_eq(format_synthetic_program(&program), original, "serde expansion must leave a rejected nominal unchanged: {src}")
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Derives.rs:561
+#Test("recursive_enum_derive_compares_same_variant_payloads_only") {
+    src :: "enum Expr { Num(Int)\nWrap(Expr) }"
+    (tokens, lex_diags) :: lex(src)
+    assert(lex_diags.is_empty())
+    program := parse(&tokens).expect("source parses")
+    diags := []
+    expand_builtin_derive_items(&program.items, &diags)
+    assert(diags.is_empty(), "built-in derive diagnostics: {diags:?}")
+    rendered :: format_synthetic_program(&program)
+    assert(rendered.contains("left_Num_value != right_Num_value"), "Int payload should compare with !=, got:\n{rendered}")
+    assert(rendered.contains("left_Wrap_value.equal(right_Wrap_value)"), "recursive payload should call equal, got:\n{rendered}")
+    assert(!rendered.contains("left_Num_value != right_Wrap") && !rendered.contains("left_Wrap_value.equal(right_Num"), "an arm must compare `self` only with the same `rhs` variant, got:\n{rendered}")
+    assert(!rendered.contains("left_Num_value.equal"), "Int payload must not call equal, got:\n{rendered}")
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Derives.rs:591
+#Test("builtin_derive_source_expands_to_ast_item") {
+    (tokens, lex_diags) :: lex("#Comparable struct Point { value: Int }")
+    assert(lex_diags.is_empty())
+    program := parse(&tokens).expect("source parses")
+    diags := []
+    expand_builtin_derive_items(&program.items, &diags)
+    assert(diags.is_empty(), "built-in derive diagnostics: {diags:?}")
+    found := false
+    loop item in program.items {
+        if item == .Struct(s) {
+            loop implementation in s.trait_impls {
+                if implementation.trait_name == "Comparable" -> found = true
+            }
+        }
+    }
+    assert(found)
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Derives.rs:609
+#Test("register_enum_canonicalizes_recursive_payloads") {
+    src :: "enum Expr { Num(Int)\nWrap(Expr) }"
+    (tokens, lex_diags) :: lex(src)
+    assert(lex_diags.is_empty())
+    program :: parse(&tokens).expect("source parses")
+    enum_def :: if program.items[0] == .Enum(value) -> value else -> panic("expected enum")
+    registry := TypeRegistry{
+        types: [:], error_types: [:], unit_types: [:], unit_facts: [:], literal_facts: [:],
+        computed_fields: [:], field_defaults: [:], receipt_sections: [:], nominal_memo: Default.default(),
+    }
+    diags := []
+    register_enum(&enum_def, &registry, &diags, [:], [:])
+    assert(diags.is_empty(), "{diags:?}")
+    variants :: registry.enum_variants("Expr").expect("enum registered")
+    (_, payload) :: variants.get("Wrap").expect("Wrap variant")
+    if payload == .Single(ty, _) -> assert_eq(ty, Type.Named{name: "Expr"})
+    else -> panic("expected single payload, got {payload:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Derives.rs:648
+#Test("nested_derive_methods_register_on_the_type") {
+    src :: "enum Expr { Num(Int)\nWrap(Expr) }"
+    (tokens, lex_diags) :: lex(src)
+    assert(lex_diags.is_empty())
+    program := parse(&tokens).expect("source parses")
+    diags := []
+    expand_builtin_derive_items(&program.items, &diags)
+    assert(diags.is_empty(), "built-in derive diagnostics: {diags:?}")
+    registry := TypeRegistry{
+        types: [:], error_types: [:], unit_types: [:], unit_facts: [:], literal_facts: [:],
+        computed_fields: [:], field_defaults: [:], receipt_sections: [:], nominal_memo: Default.default(),
+    }
+    loop item in program.items {
+        if item == .Enum(enum_def) -> register_enum(&enum_def, &registry, &diags, [:], [:])
+    }
+    register_type_methods(&program.items, &registry, &diags)
+    assert(registry.method("Expr", "equal") != None, "nested Equatable.equal must be visible on the enum")
+}

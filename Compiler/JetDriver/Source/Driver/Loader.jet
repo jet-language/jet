@@ -2508,7 +2508,7 @@ fn jet_driver_load_pending_sources(request: JetDriverCompileRequest, snapshot: J
         }
         if request.trace_sink == .Val(sink) -> sink.begin("parse", unit.relative_path, pending_index - 1, pending.len())
         source :: if {
-            is_core -> ""
+            is_core -> (jet_driver_find_generated_source_file(core_generated, unit.path, &diagnostics) ?? panic("loaded Core source omitted its exact embedded text")).source
             unit.foreign_cache_index == .Val(index) -> jet_driver_source_view_text(snapshot.roots[unit.root_index].foreign_cache_files[index], overlays)
             else -> jet_driver_source_view_text(snapshot.roots[unit.root_index].files[unit.file_index], overlays)
         }
@@ -2655,7 +2655,7 @@ fn jet_driver_load_pending_sources(request: JetDriverCompileRequest, snapshot: J
                     direct :: jet_driver_file_import_path(jet_driver_unit_native_relative(unit), definition.name)
                     import_path :: if direct == .Val(path) && target_unit.relative_os_path == .Val(target) && compiler_driver_os_path.equals(path, target) -> definition.name else -> "{definition.name}/module"
                     synthetic :: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
-                    &modules[module_position].program.imports.push(synthetic)
+                    &bundle.value.modules[modules[module_position].bundle_index ?? panic("a namespace declaration has no retained loaded module")].imports.push(synthetic)
                     if aliases.get(definition.name) == None -> _ := &aliases.add(definition.name, target_unit_index)
                     &resolved_imports.push(SemaRegistrationImportEdge{
                         source_module_identity: module_identity,

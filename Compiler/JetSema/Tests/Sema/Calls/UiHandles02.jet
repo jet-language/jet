@@ -1,0 +1,28 @@
+use jet_foundation.[Type, Expr, StrPart, Span]
+use jet_sema.[is_no_os_forbidden, module_short_name, no_os_hint, numeric_const_type, is_empty_string_literal, literal_string_value]
+
+// Behavioral controls for crates/jet-sema/src/Sema/CheckerCoreLib/serde_diags.rs:1-858 (no original inline tests).
+#Test("no_os_module_surface") {
+    assert(is_no_os_forbidden("core.crypto.vault"))
+    assert(is_no_os_forbidden("core.net.tls"))
+    assert(!is_no_os_forbidden("core.crypto"))
+    assert(!is_no_os_forbidden("core.data"))
+    assert(module_short_name("core.crypto.vault") == "vault")
+    assert(module_short_name("core") == "core")
+    assert(no_os_hint("core.tasks") == "OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency.")
+}
+#Test("numeric_constants_preserve_type") {
+    assert(numeric_const_type(Type.Int, "MIN") == Val(Type.Int))
+    assert(numeric_const_type(Type.Float32, "EPSILON") == Val(Type.Float32))
+    assert(numeric_const_type(Type.Int, "INFINITY") == None)
+    assert(numeric_const_type(Type.Float, "unknown") == None)
+}
+#Test("literal_label_shape_is_exact") {
+    sp :: Span.new(0, 0)
+    assert(is_empty_string_literal(Expr.Str([], sp)))
+    assert(is_empty_string_literal(Expr.Str([StrPart.Lit(""), StrPart.Lit("")], sp)))
+    assert(!is_empty_string_literal(Expr.Str([StrPart.Lit("label")], sp)))
+    assert(literal_string_value(Expr.Str([StrPart.Lit("label")], sp)) == Val("label"))
+    assert(literal_string_value(Expr.Str([StrPart.Lit("a"), StrPart.Lit("b")], sp)) == None)
+    assert(literal_string_value(Expr.Str([], sp)) == None)
+}

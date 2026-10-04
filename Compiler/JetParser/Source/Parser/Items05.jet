@@ -1,1717 +1,418 @@
-// PORT-PENDING 0331 crates-jet-parser-src-parser-items-imports-policy: crates/jet-parser/src/Parser/Items/imports_policy.rs:1-1713
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{
-//RS     describe, string_literal_token_value, Diagnostic, Item, Parser, Program, Span, Syntax, TokKind,
-//RS };
-//RS use super::helpers::format_version_segment;
-//RS use super::TargetMarker;
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// D-STRUCT-POLICY1=A: parse the one user-authored setting form,
-//RS     /// `pub policy name(params…) { wrap(call) { … } }`. `policy` and
-//RS     /// `wrap` are contextual words, so the declaration owns the exact
-//RS     /// shape without adding lexer tokens or a second declaration parser.
-//RS     pub(in crate::Parser) fn user_policy_decl(
-//RS         &mut self,
-//RS         is_pub: bool,
-//RS     ) -> Result<crate::AST::UserPolicyDecl, Diagnostic> {
-//RS         let start = self.peek().span;
-//RS         self.expect_ident("to start a policy declaration")?;
-//RS         let (name, name_span) = self.expect_ident("the policy setting name")?;
-//RS         self.expect(TokKind::LParen, "to open the policy parameter list")?;
-//RS         let params = self.parse_param_list()?;
-//RS         self.expect(TokKind::LBrace, "to open the policy declaration")?;
-//RS 
-//RS         let (wrap, wrap_span) = self.expect_ident("`wrap` in a policy declaration")?;
-//RS         if wrap != Syntax::KW_WRAP {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected `{}` in a policy declaration, found `{wrap}`",
-//RS                     Syntax::KW_WRAP
-//RS                 ),
-//RS                 "a user policy has one checked wrapper boundary around the supplied callable"
-//RS                     .to_string(),
-//RS                 format!("write `{}`(call) {{ … }}", Syntax::KW_WRAP),
-//RS                 Some(wrap_span),
-//RS             ));
-//RS         }
-//RS         self.expect(TokKind::LParen, "after `wrap` in a policy declaration")?;
-//RS         let (call, call_span) = self.expect_ident("the callable name in `wrap(call)`")?;
-//RS         if call != "call" {
-//RS             return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!("a policy wrapper must receive `call`, found `{call}`"),
-//RS                     "D-STRUCT-POLICY1 gives the wrapper one callable value and no AST or signature-edit power"
-//RS                         .to_string(),
-//RS                     "write `wrap(call) { … }`".to_string(),
-//RS                     Some(call_span),
-//RS                 ));
-//RS         }
-//RS         self.expect(TokKind::RParen, "to close `wrap(call)`")?;
-//RS         self.expect(TokKind::LBrace, "to open the policy wrapper body")?;
-//RS         let body = self.block_stmts();
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         self.expect(TokKind::RBrace, "to close the policy declaration")?;
-//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS         if matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         if !is_pub {
-//RS             return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     "a user policy setting must be public".to_string(),
-//RS                     "policy settings are nominal package vocabulary and their users must resolve one package-owned name"
-//RS                         .to_string(),
-//RS                     "write `pub policy name(...) { wrap(call) { … } }`".to_string(),
-//RS                     Some(start),
-//RS                 ));
-//RS         }
-//RS         Ok(crate::AST::UserPolicyDecl {
-//RS             is_pub,
-//RS             name,
-//RS             name_span,
-//RS             params,
-//RS             body,
-//RS             span: Span::new(start.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-CALLPOLICY1=E: the function-level `#Policy` marker is the typed
-//RS     /// callable wrapper chain. The retired scoped-policy identifiers do
-//RS     /// not enter this parser path.
-//RS     pub(in crate::Parser) fn callable_policy_chain_from_marker(
-//RS         &self,
-//RS         marker: &crate::AST::Marker,
-//RS     ) -> Result<crate::AST::CallablePolicyChain, Diagnostic> {
-//RS         crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).map_err(|reason| {
-//RS             Diagnostic::error(
-//RS                 "E0355",
-//RS                 format!("`#Policy` needs callable policy values: {reason}"),
-//RS                 "callable policies are typed values and preserve the complete function signature"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "write `#Policy({})`",
-//RS                     crate::AST::CallablePolicyChain::NAMES
-//RS                         .iter()
-//RS                         .map(|name| format!("{name}(…)"))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ")
-//RS                 ),
-//RS                 Some(marker.span),
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn policy_is_file_decl(&self) -> bool {
-//RS         let mut i = self.pos + 2;
-//RS         let mut depth = 0usize;
-//RS         while let Some(token) = self.toks.get(i) {
-//RS             match token.kind {
-//RS                 TokKind::LParen => depth += 1,
-//RS                 TokKind::RParen => {
-//RS                     depth = depth.saturating_sub(1);
-//RS                     if depth == 0 {
-//RS                         return matches!(
-//RS                             self.toks.get(i + 1).map(|t| &t.kind),
-//RS                             Some(TokKind::Semi) | Some(TokKind::Eof)
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             i += 1;
-//RS         }
-//RS         true
-//RS     }
-//RS 
-//RS     /// D-CALLPOLICY2=C: a callable policy starts with a policy call
-//RS     /// expression (`retry(…)`, `trace(…)`, …). This shape check runs before
-//RS     /// the old file-declaration lookahead so the two grammar positions do
-//RS     /// not silently select the retired scoped-policy parser.
-//RS     pub(in crate::Parser) fn callable_policy_marker_shape(&self) -> bool {
-//RS         matches!(
-//RS             (
-//RS                 self.toks
-//RS                     .get(self.pos + 3)
-//RS                     .and_then(|token| match &token.kind {
-//RS                         TokKind::Ident(_) => Some(&token.kind),
-//RS                         _ => None,
-//RS                     }),
-//RS                 self.toks.get(self.pos + 4).map(|token| &token.kind),
-//RS             ),
-//RS             (Some(TokKind::Ident(_)), Some(TokKind::LParen))
-//RS         )
-//RS     }
-//RS 
-//RS     /// D-MARK-SCOPE1: parse one source `#Policy(...)` declaration list.
-//RS     pub(in crate::Parser) fn policy_decl(
-//RS         &mut self,
-//RS         scope: crate::Policy::PolicyScope,
-//RS     ) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
-//RS         let site = match scope {
-//RS             crate::Policy::PolicyScope::Package => crate::Policy::RuleSite::Package,
-//RS             crate::Policy::PolicyScope::Module => crate::Policy::RuleSite::Module,
-//RS             crate::Policy::PolicyScope::Function => crate::Policy::RuleSite::Function,
-//RS             crate::Policy::PolicyScope::Block => crate::Policy::RuleSite::Block,
-//RS             crate::Policy::PolicyScope::Organization => crate::Policy::RuleSite::Package,
-//RS         };
-//RS         let marker = self.parse_registered_marker_at_site(site)?;
-//RS         self.policy_declarations_from_marker(marker, scope)
-//RS     }
-//RS     pub(in crate::Parser) fn retired_memory_policy_diagnostic(
-//RS         name: &str,
-//RS         name_span: crate::Diagnostics::Span,
-//RS         limit: Option<i64>,
-//RS     ) -> Option<Diagnostic> {
-//RS         if !matches!(name, "no_alloc" | "zero_rc" | "arena_bounded") {
-//RS             return None;
-//RS         }
-//RS         let replacement = match (name, limit) {
-//RS             ("no_alloc", _) => "`-[!Mem.Alloc]>`".to_string(),
-//RS             ("zero_rc", _) => "`-[!Mem.Rc]>`".to_string(),
-//RS             ("arena_bounded", Some(bytes)) => {
-//RS                 format!("`-[!Mem.Alloc(above: {bytes})]>`")
-//RS             }
-//RS             _ => "`-[!Mem.Alloc(above: N)]>`".to_string(),
-//RS         };
-//RS         Some(Diagnostic::error(
-//RS             "E0355",
-//RS             format!("`{name}` is a retired memory policy"),
-//RS             "memory floors are rights-tree prohibitions, not policy-marker arguments".to_string(),
-//RS             format!("write {replacement} on the function signature"),
-//RS             Some(name_span),
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn retired_memory_policy_marker_diagnostic(
-//RS         &self,
-//RS         marker: &crate::AST::Marker,
-//RS     ) -> Option<Diagnostic> {
-//RS         marker.expr_args_owned().into_iter().find_map(|expr| {
-//RS             let (name, name_span, limit) = match expr {
-//RS                 crate::AST::Expr::Ident(name, span) => (name, span, None),
-//RS                 crate::AST::Expr::Call(call) => {
-//RS                     let limit = match call.args.as_slice() {
-//RS                         [] => None,
-//RS                         [argument]
-//RS                             if argument.label.is_none() && !argument.spread =>
-//RS                         {
-//RS                             match argument.expr {
-//RS                                 crate::AST::Expr::Int(value, ..) => Some(value),
-//RS                                 _ => return None,
-//RS                             }
-//RS                         }
-//RS                         _ => return None,
-//RS                     };
-//RS                     (call.name, call.name_span, limit)
-//RS                 }
-//RS                 _ => return None,
-//RS             };
-//RS             Self::retired_memory_policy_diagnostic(&name, name_span, limit)
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     pub(in crate::Parser) fn policy_declarations_from_marker(
-//RS         &mut self,
-//RS         marker: crate::AST::Marker,
-//RS         scope: crate::Policy::PolicyScope,
-//RS     ) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
-//RS         let marker_span = marker.span;
-//RS         self.bound_registered_rule_arguments(&marker)?;
-//RS         let labels = marker.arg_labels.clone();
-//RS         let mut out = Vec::new();
-//RS         for (index, expr) in marker.expr_args_owned().into_iter().enumerate() {
-//RS             let label = labels
-//RS                 .get(index)
-//RS                 .and_then(|label| label.as_ref())
-//RS                 .map(|(name, _)| name.as_str());
-//RS             let (name, name_span, limit, explicit_value, sentry_value) =
-//RS                 if matches!(label, Some("copies" | "sentries")) {
-//RS                     let value = match expr {
-//RS                         crate::AST::Expr::EnumLit {
-//RS                             type_name,
-//RS                             variant,
-//RS                             args,
-//RS                             span,
-//RS                             ..
-//RS                         } if type_name.is_empty() && args.is_empty() => match variant.as_str() {
-//RS                             "Explicit" if label == Some("copies") => {
-//RS                                 crate::Policy::PolicyValue::Explicit
-//RS                             }
-//RS                             "On" if label == Some("sentries") => crate::Policy::PolicyValue::On,
-//RS                             "Off" if label == Some("sentries") => crate::Policy::PolicyValue::Off,
-//RS                             _ => {
-//RS                                 return Err(crate::Policy::marker_argument_shape_error(
-//RS                                     Syntax::MARKER_POLICY,
-//RS                                     span,
-//RS                                 ))
-//RS                             }
-//RS                         },
-//RS                         other => {
-//RS                             return Err(crate::Policy::marker_argument_shape_error(
-//RS                                 Syntax::MARKER_POLICY,
-//RS                                 other.span(),
-//RS                             ))
-//RS                         }
-//RS                     };
-//RS                     (
-//RS                         label.unwrap().to_string(),
-//RS                         marker_span,
-//RS                         None,
-//RS                         (label == Some("copies")).then_some(value.clone()),
-//RS                         (label == Some("sentries")).then_some(value),
-//RS                     )
-//RS                 } else {
-//RS                     let (name, name_span, limit) = match expr {
-//RS                         crate::AST::Expr::Ident(name, span) => (name, span, None),
-//RS                         crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
-//RS                             let argument = call.args.pop().unwrap();
-//RS                             let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
-//RS                                 return Err(crate::Policy::marker_argument_shape_error(
-//RS                                     Syntax::MARKER_POLICY,
-//RS                                     marker_span,
-//RS                                 ));
-//RS                             };
-//RS                             if argument.label.is_some() {
-//RS                                 return Err(crate::Policy::marker_argument_shape_error(
-//RS                                     Syntax::MARKER_POLICY,
-//RS                                     marker_span,
-//RS                                 ));
-//RS                             }
-//RS                             (call.name, call.name_span, Some(value))
-//RS                         }
-//RS                         other => {
-//RS                             return Err(crate::Policy::marker_argument_shape_error(
-//RS                                 Syntax::MARKER_POLICY,
-//RS                                 other.span(),
-//RS                             ))
-//RS                         }
-//RS                     };
-//RS                     (name, name_span, limit, None, None)
-//RS                 };
-//RS             if let Some(diagnostic) =
-//RS                 Self::retired_memory_policy_diagnostic(&name, name_span, limit)
-//RS             {
-//RS                 return Err(diagnostic);
-//RS             }
-//RS             let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
-//RS                 let site_bound =
-//RS                     crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
-//RS                 let package_only =
-//RS                     name == Syntax::POLICY_FIELD_CONTAIN || name == Syntax::POLICY_FIELD_HARDEN;
-//RS                 let why = if package_only {
-//RS                     "contain and harden govern package dependencies and release profiles, not source scopes".to_string()
-//RS                 } else if site_bound {
-//RS                     "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them".to_string()
-//RS                 } else {
-//RS                     "the compiler owns the closed policy registry and its scope rules".to_string()
-//RS                 };
-//RS                 let fix = if package_only {
-//RS                     "write `policy: { contain: [\"dependency\"], harden: true }` in `package.jet`"
-//RS                         .to_string()
-//RS                 } else if site_bound {
-//RS                     format!("use `#{name}` at its sound site")
-//RS                 } else {
-//RS                     "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials".to_string()
-//RS                 };
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0355",
-//RS                     format!("`{name}` is not a scoped policy"),
-//RS                     why,
-//RS                     fix,
-//RS                     Some(name_span),
-//RS                 ));
-//RS             };
-//RS             let value = match (key, explicit_value, sentry_value) {
-//RS                     (crate::Policy::PolicyKey::Copies, Some(value), None) => value,
-//RS                     (crate::Policy::PolicyKey::Copies, _, _) => return Err(Diagnostic::error("E0355", "`copies` needs an explicit mode".to_string(), "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax".to_string(), "write `copies: .Explicit`".to_string(), Some(name_span))),
-//RS                     (crate::Policy::PolicyKey::Sentries, _, Some(value)) => value,
-//RS                     (crate::Policy::PolicyKey::Sentries, _, None) => return Err(Diagnostic::error("E0355", "`sentries` needs an explicit mode".to_string(), "sentry instrumentation is either on or off; it is not a boolean memory fact".to_string(), "write `sentries: .Off` or `sentries: .On`".to_string(), Some(name_span))),
-//RS                     (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, None, None) => crate::Policy::PolicyValue::Enabled,
-//RS                     (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, _, _) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
-//RS                     (crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic, _, _) => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
-//RS                 };
-//RS             out.push(crate::Policy::PolicyDeclaration {
-//RS                 key,
-//RS                 value,
-//RS                 scope,
-//RS                 span: marker_span,
-//RS                 target: None,
-//RS                 source: "<source>".to_string(),
-//RS             });
-//RS         }
-//RS         Ok(out)
-//RS     }
-//RS 
-//RS     /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
-//RS     pub(in crate::Parser) fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
-//RS         let start = self.bump().span; // consume `use`
-//RS         match &self.peek().kind {
-//RS             TokKind::Str(_) | TokKind::RawStr(_) => {
-//RS                 let path = string_literal_token_value(&self.peek().kind)?;
-//RS                 let path_span = self.bump().span;
-//RS                 let alias_default = path.rsplit('/').next().unwrap_or("module").to_string();
-//RS                 let (alias, alias_span) = if matches!(
-//RS                     &self.peek().kind,
-//RS                     TokKind::Ident(n) if n == Syntax::KW_AS
-//RS                 ) {
-//RS                     self.bump();
-//RS                     let (name, span) = self.expect_ident("after `as`")?;
-//RS                     (name, span)
-//RS                 } else {
-//RS                     (alias_default, start)
-//RS                 };
-//RS                 self.expect(TokKind::Semi, "after an import")?;
-//RS                 let end = self.toks[self.pos - 1].span.end;
-//RS                 Ok(crate::AST::ImportDecl {
-//RS                     kind: crate::AST::ImportKind::File(path, path_span),
-//RS                     alias,
-//RS                     alias_span,
-//RS                     span: Span::new(start.start, end),
-//RS                     item_spans: Vec::new(),
-//RS                     local_spans: Vec::new(),
-//RS                     is_pub: false,
-//RS                     is_package_pub: false,
-//RS                     inline_version: None,
-//RS                 })
-//RS             }
-//RS             TokKind::Ident(_) => {
-//RS                 // Peek ahead to decide which import form this is:
-//RS                 //   use ident.ident ;   → Unqualified single (no `as`)
-//RS                 //   use ident …         → dotted path; `import_decl_module_path`
-//RS                 //                         also owns the `.[…]` and `.*`
-//RS                 //                         suffixes, at any path depth
-//RS                 let (first, first_span) = self.expect_ident("after `use`")?;
-//RS                 if matches!(self.peek().kind, TokKind::Dot) {
-//RS                     // Look two tokens ahead (past the dot).
-//RS                     if matches!(self.peek2().kind, TokKind::Ident(_))
-//RS                             && first != Syntax::PROJECT_IMPORT_ROOT
-//RS                             // The token after the item ident: `;` means the item
-//RS                             // ended, so this is the single-item form.
-//RS                             && matches!(self.peek3().kind, TokKind::Semi | TokKind::Eof)
-//RS                     {
-//RS                         // use alias.item ; — Unqualified single (no alias for single form)
-//RS                         self.bump(); // consume `.`
-//RS                         let (item, item_span) = self.expect_ident("after `.` in a `use` import")?;
-//RS                         let items_span = item_span;
-//RS                         self.expect(TokKind::Semi, "after an import")?;
-//RS                         let end = self.toks[self.pos - 1].span.end;
-//RS                         Ok(crate::AST::ImportDecl {
-//RS                             kind: crate::AST::ImportKind::Unqualified {
-//RS                                 module_alias: first,
-//RS                                 module_alias_span: first_span,
-//RS                                 items: vec![(item.clone(), None)],
-//RS                                 items_span,
-//RS                                 span: Span::new(start.start, end),
-//RS                             },
-//RS                             alias: item.clone(),
-//RS                             alias_span: item_span,
-//RS                             span: Span::new(start.start, end),
-//RS                             item_spans: vec![item_span],
-//RS                             local_spans: vec![item_span],
-//RS                             is_pub: false,
-//RS                             is_package_pub: false,
-//RS                             inline_version: None,
-//RS                         })
-//RS                     } else {
-//RS                         self.import_decl_module_path(start, first, first_span)
-//RS                     }
-//RS                 } else {
-//RS                     // No dot: use module_name (optionally `as alias`)
-//RS                     // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — an inline
-//RS                     // script dependency. Only the bare (no-dot) module-name
-//RS                     // form takes a version; `use core.files#1.0;` is nonsensical
-//RS                     // and isn't accepted here (the stray `#` falls through to
-//RS                     // a normal "expected `;`" parse error).
-//RS                     let inline_version = if matches!(self.peek().kind, TokKind::Hash) {
-//RS                         Some(self.inline_version()?)
-//RS                     } else {
-//RS                         None
-//RS                     };
-//RS                     let (alias, alias_span) = if matches!(
-//RS                         &self.peek().kind,
-//RS                         TokKind::Ident(n) if n == Syntax::KW_AS
-//RS                     ) {
-//RS                         self.bump();
-//RS                         let (name, span) = self.expect_ident("after `as`")?;
-//RS                         (name, span)
-//RS                     } else {
-//RS                         (first.clone(), first_span)
-//RS                     };
-//RS                     self.expect(TokKind::Semi, "after an import")?;
-//RS                     let end = self.toks[self.pos - 1].span.end;
-//RS                     Ok(crate::AST::ImportDecl {
-//RS                         kind: crate::AST::ImportKind::Module(first, first_span),
-//RS                         alias,
-//RS                         alias_span,
-//RS                         span: Span::new(start.start, end),
-//RS                         item_spans: Vec::new(),
-//RS                         local_spans: Vec::new(),
-//RS                         is_pub: false,
-//RS                         is_package_pub: false,
-//RS                         inline_version,
-//RS                     })
-//RS                 }
-//RS             }
-//RS             other => {
-//RS                 let other = other.clone();
-//RS                 Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!(
-//RS                         "expected a file path in quotes or a module name after `{}`, found {}",
-//RS                         Syntax::KW_USE,
-//RS                         describe(&other)
-//RS                     ),
-//RS                     format!(
-//RS                         "write `{} \"path/to/file\";` or `{} module_name;`",
-//RS                         Syntax::KW_USE,
-//RS                         Syntax::KW_USE
-//RS                     ),
-//RS                     format!(
-//RS                         "e.g. `{} \"util/helpers\";` or `{} scoring;`",
-//RS                         Syntax::KW_USE,
-//RS                         Syntax::KW_USE
-//RS                     ),
-//RS                     Some(self.peek().span),
-//RS                 ))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Helper: finish parsing a module import whose first ident is already consumed.
-//RS     /// Handles `use first.sub.module [as alias];`.
-//RS     fn import_decl_module_path(
-//RS         &mut self,
-//RS         start: Span,
-//RS         first: String,
-//RS         first_span: Span,
-//RS     ) -> Result<crate::AST::ImportDecl, Diagnostic> {
-//RS         // Continue eating dots to build the full dotted name. A dot that
-//RS         // introduces `[` (the member list), `{` (the retired member list),
-//RS         // or `*`
-//RS         // (a wildcard) belongs to that suffix, not to the path — otherwise
-//RS         // `use core.math.[abs, min]` would demand a name after the last dot.
-//RS         let mut name = first;
-//RS         let mut end = first_span.end;
-//RS         while matches!(self.peek().kind, TokKind::Dot)
-//RS             && !matches!(
-//RS                 self.peek2().kind,
-//RS                 TokKind::LBracket | TokKind::LBrace | TokKind::Star
-//RS             )
-//RS         {
-//RS             self.bump();
-//RS             let (part, span) = self.expect_ident("after `.` in an import")?;
-//RS             name.push('.');
-//RS             name.push_str(&part);
-//RS             end = span.end;
-//RS         }
-//RS         let module_span = Span::new(first_span.start, end);
-//RS         if matches!(self.peek().kind, TokKind::Dot) {
-//RS             self.bump(); // the dot of `.[` or `.*`
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::Star) {
-//RS             let star_span = self.bump().span;
-//RS             return Err(Diagnostic::error(
-//RS                 "E0612",
-//RS                 "wildcard imports are not supported".to_string(),
-//RS                 format!("`use {name}.*` would hide where each name comes from"),
-//RS                 format!("list each item instead: `use {name}.[item, other]`"),
-//RS                 Some(star_span),
-//RS             ));
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             let brace_span = self.bump().span;
-//RS             // Recover the retired group as one import. Leave the following
-//RS             // terminator for the shared import recovery path.
-//RS             let mut brace_depth = 1usize;
-//RS             while brace_depth > 0 && !matches!(&self.peek().kind, TokKind::Eof) {
-//RS                 match &self.peek().kind {
-//RS                     TokKind::LBrace => brace_depth += 1,
-//RS                     TokKind::RBrace => brace_depth -= 1,
-//RS                     _ => {}
-//RS                 }
-//RS                 self.bump();
-//RS             }
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "brace import groups are not supported".to_string(),
-//RS                 format!("`use {name}.{{…}}` is the retired grouped-import spelling"),
-//RS                 format!("write `use {name}.[item, other as local]`"),
-//RS                 Some(brace_span),
-//RS             ));
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::LBracket) {
-//RS             return self.import_decl_unqualified_list(start, name, module_span);
-//RS         }
-//RS         let alias_default = name.rsplit('.').next().unwrap_or(name.as_str()).to_string();
-//RS         let (alias, alias_span) = if matches!(
-//RS             &self.peek().kind,
-//RS             TokKind::Ident(n) if n == Syntax::KW_AS
-//RS         ) {
-//RS             self.bump();
-//RS             let (n, s) = self.expect_ident("after `as`")?;
-//RS             (n, s)
-//RS         } else {
-//RS             (alias_default, start)
-//RS         };
-//RS         self.expect(TokKind::Semi, "after an import")?;
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(crate::AST::ImportDecl {
-//RS             kind: crate::AST::ImportKind::Module(name, module_span),
-//RS             alias,
-//RS             alias_span,
-//RS             span: Span::new(start.start, end),
-//RS             item_spans: Vec::new(),
-//RS             local_spans: Vec::new(),
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             // A dotted module path (`use core.files;`) never takes U11's `#version`
-//RS             // — that's the single-segment `pkg` form only.
-//RS             inline_version: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-CORE-USELIST1=A: parse the canonical `use prefix.[items]` form.
-//RS     /// Item paths retain dots so `use core.encoding.[json, csv]` and
-//RS     /// `use core.[encoding.json]` carry the same member walk to sema.
-//RS     fn import_decl_unqualified_list(
-//RS         &mut self,
-//RS         start: Span,
-//RS         module_alias: String,
-//RS         module_alias_span: Span,
-//RS     ) -> Result<crate::AST::ImportDecl, Diagnostic> {
-//RS         let lbracket_span = self.bump().span;
-//RS         if matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "an import member list cannot be empty".to_string(),
-//RS                 "the canonical `.[…]` form must name at least one member".to_string(),
-//RS                 "write `use prefix.[member]`".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         let mut items = Vec::new();
-//RS         let mut item_spans = Vec::new();
-//RS         let mut local_spans = Vec::new();
-//RS         while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
-//RS             let (first, first_span) = self.expect_ident("inside `use prefix.[…]`")?;
-//RS             let mut item = first;
-//RS             let mut item_end = first_span.end;
-//RS             let mut local_span = first_span;
-//RS             while matches!(self.peek().kind, TokKind::Dot) {
-//RS                 self.bump();
-//RS                 let (part, part_span) = self.expect_ident("after `.` in an import list")?;
-//RS                 item.push('.');
-//RS                 item.push_str(&part);
-//RS                 item_end = part_span.end;
-//RS                 local_span = part_span;
-//RS             }
-//RS             let alias = if matches!(
-//RS                 &self.peek().kind,
-//RS                 TokKind::Ident(n) if n == Syntax::KW_AS
-//RS             ) {
-//RS                 self.bump();
-//RS                 let (alias, alias_span) = self.expect_ident("after `as` in import list")?;
-//RS                 local_span = alias_span;
-//RS                 Some(alias)
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             items.push((item, alias));
-//RS             item_spans.push(Span::new(first_span.start, item_end));
-//RS             local_spans.push(local_span);
-//RS             if matches!(self.peek().kind, TokKind::Comma) {
-//RS                 self.bump();
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         let rbracket_span = self.peek().span;
-//RS         self.expect(TokKind::RBracket, "to close `use prefix.[…]`")?;
-//RS         let items_span = Span::new(lbracket_span.start, rbracket_span.end);
-//RS         self.expect(TokKind::Semi, "after an import")?;
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(crate::AST::ImportDecl {
-//RS             kind: crate::AST::ImportKind::Unqualified {
-//RS                 module_alias: module_alias.clone(),
-//RS                 module_alias_span,
-//RS                 items,
-//RS                 items_span,
-//RS                 span: Span::new(start.start, end),
-//RS             },
-//RS             alias: module_alias,
-//RS             alias_span: module_alias_span,
-//RS             span: Span::new(start.start, end),
-//RS             item_spans,
-//RS             local_spans,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             inline_version: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// U11 (D-JPK-SCRIPTDEP1=A): parse `#<version>` on `use pkg#version;` — a
-//RS     /// dotted numeric selector (`1`, `1.4`, `1.4.2`, …). `#` is already
-//RS     /// `TokKind::Hash` (the same token applied rules and `[T#N]` use); the selector
-//RS     /// itself isn't its own lexer token, so it's rebuilt segment-by-segment
-//RS     /// from the `Int`/`Float` tokens the number lexer already produced
-//RS     /// (`1.4.2` lexes as `Float(1.4)`, `Dot`, `Int(2)`). One known edge case:
-//RS     /// a two-segment run with a trailing zero (`1.10`) collapses through
-//RS     /// `f64` to the same bits as `1.1` — indistinguishable once lexed. Real
-//RS     /// versions rarely hinge on that, so it's an accepted limitation rather
-//RS     /// than new lexer machinery.
-//RS     fn inline_version(&mut self) -> Result<crate::AST::InlineVersion, Diagnostic> {
-//RS         let hash_span = self.bump().span; // consume `#`
-//RS         let mut text = String::new();
-//RS         let mut end;
-//RS         match self.peek().kind.clone() {
-//RS             TokKind::Int(n, _) => {
-//RS                 text.push_str(&n.to_string());
-//RS                 end = self.bump().span.end;
-//RS             }
-//RS             TokKind::Float(f, _) => {
-//RS                 text.push_str(&format_version_segment(f));
-//RS                 end = self.bump().span.end;
-//RS             }
-//RS             _ => {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     "expected a version number after `#`".to_string(),
-//RS                     "`use pkg#version;` (U11) pins an inline script dependency to a version."
-//RS                         .to_string(),
-//RS                     "write digits after `#`, e.g. `use textkit#1.4;` or `use textkit#1.4.2;`"
-//RS                         .to_string(),
-//RS                     Some(self.peek().span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         while matches!(self.peek().kind, TokKind::Dot)
-//RS             && matches!(self.peek2().kind, TokKind::Int(_, _))
-//RS         {
-//RS             self.bump(); // `.`
-//RS             let TokKind::Int(n, _) = self.peek().kind else {
-//RS                 unreachable!("guarded by the match above")
-//RS             };
-//RS             text.push('.');
-//RS             text.push_str(&n.to_string());
-//RS             end = self.bump().span.end;
-//RS         }
-//RS         Ok(crate::AST::InlineVersion {
-//RS             text,
-//RS             span: Span::new(hash_span.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn program(&mut self) -> Program {
-//RS         let mut imports = Vec::new();
-//RS         let mut items = Vec::new();
-//RS         let mut script_body = Vec::new();
-//RS         let mut web_target_ceiling = None;
-//RS         let mut default_target: Option<String> = None;
-//RS         let mut html_path: Option<String> = None;
-//RS         let mut html_seen = false;
-//RS         let mut pub_file = false;
-//RS         let mut no_prelude = false;
-//RS         loop {
-//RS             // D-STRUCT-POLICY1=A: these contextual declarations live at
-//RS             // package/file top level and are carried beside ordinary
-//RS             // items. Keep them out of `Item` so every existing item
-//RS             // consumer continues to see only code-bearing declarations.
-//RS             if matches!(self.peek().kind, TokKind::KwPub)
-//RS                 && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY)
-//RS             {
-//RS                 self.bump(); // `pub`
-//RS                 match self.user_policy_decl(true) {
-//RS                     Ok(declaration) => self.user_policy_declarations.push(declaration),
-//RS                     Err(diagnostic) => {
-//RS                         self.diags.push(diagnostic);
-//RS                         self.sync_top();
-//RS                     }
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY) {
-//RS                 match self.user_policy_decl(false) {
-//RS                     Ok(declaration) => self.user_policy_declarations.push(declaration),
-//RS                     Err(diagnostic) => {
-//RS                         self.diags.push(diagnostic);
-//RS                         self.sync_top();
-//RS                     }
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             let r = match &self.peek().kind {
-//RS                 TokKind::Eof => break,
-//RS                 // S6-R: the lexer inserts a synthetic terminator after the `}`
-//RS                 // that closes an item (a `}` ends a statement). At the top level
-//RS                 // it is trivia between items — skip it.
-//RS                 TokKind::Semi => {
-//RS                     self.bump();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::KwUse => match self.import_decl() {
-//RS                     Ok(imp) => {
-//RS                         imports.push(imp);
-//RS                         continue;
-//RS                     }
-//RS                     Err(d) => {
-//RS                         self.diags.push(d);
-//RS                         self.sync_stmt();
-//RS                         continue;
-//RS                     }
-//RS                 },
-//RS                 TokKind::KwEffect => self.effect_decl().map(Item::EffectDecl),
-//RS                 // D-MARK-SCOPE1: file-scoped non-memory policy, parsed like
-//RS                 // `use`/`#PubFile` (not inside a module body).
-//RS                 TokKind::Hash
-//RS                     if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY)
-//RS                         && self.policy_is_file_decl()
-//RS                         && !self.marker_sequence_leads_to_function() =>
-//RS                 {
-//RS                     match self.policy_decl(crate::Policy::PolicyScope::Module) {
-//RS                         Ok(declarations) => {
-//RS                             for declaration in declarations {
-//RS                                 self.policy_declarations.push(declaration);
-//RS                             }
-//RS                             continue;
-//RS                         }
-//RS                         Err(d) => {
-//RS                             self.diags.push(d);
-//RS                             self.sync_top();
-//RS                             continue;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
-//RS                     let t = self.bump();
-//RS                     let ffi_attempt = matches!(&self.peek().kind, TokKind::KwExtern);
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0031",
-//RS                             format!(
-//RS                                 "{} doesn't use `{}` to call Rust crates",
-//RS                                 Syntax::LANG_NAME,
-//RS                                 Syntax::FOREIGN_UNSAFE
-//RS                             ),
-//RS                             "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "write: {} {} \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}",
-//RS                                 Syntax::KW_EXTERN,
-//RS                                 Syntax::KW_RUST
-//RS                             ),
-//RS                             Some(t.span),
-//RS                         ));
-//RS                     if ffi_attempt {
-//RS                         self.extern_rust_block().map(Item::ExternRust)
-//RS                     } else {
-//RS                         self.sync_top();
-//RS                         continue;
-//RS                     }
-//RS                 }
-//RS                 TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
-//RS                     if pub_file {
-//RS                         let span = self.peek().span;
-//RS                         self.diags.push(crate::Policy::marker_repeated_error(
-//RS                             Syntax::MARKER_PUB_FILE,
-//RS                             "file",
-//RS                             span,
-//RS                         ));
-//RS                         self.bump();
-//RS                         self.bump();
-//RS                         self.sync_top();
-//RS                         continue;
-//RS                     }
-//RS                     self.bump(); // `#`
-//RS                     self.bump(); // `PubFile`
-//RS                     pub_file = true;
-//RS                     self.pub_file_default = true;
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
-//RS                     if no_prelude {
-//RS                         let span = self.peek().span;
-//RS                         self.diags.push(crate::Policy::marker_repeated_error(
-//RS                             Syntax::MARKER_NO_PRELUDE,
-//RS                             "file",
-//RS                             span,
-//RS                         ));
-//RS                         self.bump();
-//RS                         self.bump();
-//RS                         self.sync_top();
-//RS                         continue;
-//RS                     }
-//RS                     self.bump(); // `#`
-//RS                     self.bump(); // `NoPrelude`
-//RS                     no_prelude = true;
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
-//RS                 {
-//RS                     let span = self.peek().span;
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0418",
-//RS                         format!(
-//RS                             "write `#{}`, not `#{}`",
-//RS                             Syntax::MARKER_PUB_FILE,
-//RS                             Syntax::MARKER_PUBLIC_FILE
-//RS                         ),
-//RS                         format!(
-//RS                             "`#{}` flips this file to public-by-default (D-VISDEFAULT2)",
-//RS                             Syntax::MARKER_PUB_FILE
-//RS                         ),
-//RS                         format!(
-//RS                             "write `#{}` at the top of the file",
-//RS                             Syntax::MARKER_PUB_FILE
-//RS                         ),
-//RS                         Some(span),
-//RS                     ));
-//RS                     if pub_file {
-//RS                         self.diags.push(crate::Policy::marker_repeated_error(
-//RS                             Syntax::MARKER_PUB_FILE,
-//RS                             "file",
-//RS                             span,
-//RS                         ));
-//RS                     } else {
-//RS                         pub_file = true;
-//RS                         self.pub_file_default = true;
-//RS                     }
-//RS                     self.bump();
-//RS                     self.bump();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::Hash if self.file_marker_stack_starts_here() => {
-//RS                     match self.parse_file_marker_sequence() {
-//RS                         Ok(markers) => {
-//RS                             let mut failed = false;
-//RS                             let ordered_markers = markers.clone();
-//RS                             // A repeat *inside* this group was already
-//RS                             // reported by the shared D-MARK-REPEAT1 check.
-//RS                             // Only a repeat of a marker seen in an earlier
-//RS                             // top-level group is news here.
-//RS                             let had_pub_file = pub_file;
-//RS                             let had_no_prelude = no_prelude;
-//RS                             for marker in markers {
-//RS                                 match marker.name.as_str() {
-//RS                                     Syntax::MARKER_PUB_FILE => {
-//RS                                         if pub_file {
-//RS                                             if had_pub_file {
-//RS                                                 self.diags.push(
-//RS                                                     crate::Policy::marker_repeated_error(
-//RS                                                         Syntax::MARKER_PUB_FILE,
-//RS                                                         "file",
-//RS                                                         marker.span,
-//RS                                                     ),
-//RS                                                 );
-//RS                                             }
-//RS                                             failed = true;
-//RS                                         } else {
-//RS                                             pub_file = true;
-//RS                                             self.pub_file_default = true;
-//RS                                         }
-//RS                                     }
-//RS                                     Syntax::MARKER_NO_PRELUDE => {
-//RS                                         if no_prelude {
-//RS                                             if had_no_prelude {
-//RS                                                 self.diags.push(
-//RS                                                     crate::Policy::marker_repeated_error(
-//RS                                                         Syntax::MARKER_NO_PRELUDE,
-//RS                                                         "file",
-//RS                                                         marker.span,
-//RS                                                     ),
-//RS                                                 );
-//RS                                             }
-//RS                                             failed = true;
-//RS                                         } else {
-//RS                                             no_prelude = true;
-//RS                                         }
-//RS                                     }
-//RS                                     Syntax::MARKER_TARGET => match self
-//RS                                         .web_target_from_marker(&marker)
-//RS                                     {
-//RS                                         Ok(TargetMarker::DefaultWeb)
-//RS                                             if default_target.is_none() =>
-//RS                                         {
-//RS                                             default_target =
-//RS                                                 Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
-//RS                                         }
-//RS                                         Ok(TargetMarker::Bucket(target))
-//RS                                             if web_target_ceiling.is_none() =>
-//RS                                         {
-//RS                                             web_target_ceiling = Some(target);
-//RS                                         }
-//RS                                         Ok(_) => {
-//RS                                             self.diags.push(Diagnostic::error(
-//RS                                                     "E0003",
-//RS                                                     "this grouped `#Target` duplicates or cannot attach at file scope".to_string(),
-//RS                                                     "a file marker list may contain one file target and one companion `#HTML` marker".to_string(),
-//RS                                                     "remove the duplicate, or move an OS target directly onto its `impl`".to_string(),
-//RS                                                     Some(marker.span),
-//RS                                                 ));
-//RS                                             failed = true;
-//RS                                         }
-//RS                                         Err(d) => {
-//RS                                             self.diags.push(d);
-//RS                                             failed = true;
-//RS                                         }
-//RS                                     },
-//RS                                     Syntax::MARKER_HTML => match self.html_from_marker(&marker) {
-//RS                                         Ok(path) if !html_seen => {
-//RS                                             html_seen = true;
-//RS                                             html_path = path;
-//RS                                         }
-//RS                                         Ok(_) => {
-//RS                                             self.diags.push(Diagnostic::error(
-//RS                                                     "E0003",
-//RS                                                     "only one `#HTML(…)` marker is allowed per file".to_string(),
-//RS                                                     "a file may declare at most one companion host page".to_string(),
-//RS                                                     "remove the duplicate `#HTML(…)` marker".to_string(),
-//RS                                                     Some(marker.span),
-//RS                                                 ));
-//RS                                             failed = true;
-//RS                                         }
-//RS                                         Err(d) => {
-//RS                                             self.diags.push(d);
-//RS                                             failed = true;
-//RS                                         }
-//RS                                     },
-//RS                                     _ => {
-//RS                                         let diagnostic =
-//RS                                             match crate::Policy::applied_rule(&marker.name) {
-//RS                                                 Some(row)
-//RS                                                     if matches!(
-//RS                                                         row.status,
-//RS                                                         crate::Policy::RuleStatus::Active
-//RS                                                     ) =>
-//RS                                                 {
-//RS                                                     crate::Policy::marker_wrong_site_error(
-//RS                                                         &marker.name,
-//RS                                                         crate::Policy::RuleSite::File,
-//RS                                                         marker.span,
-//RS                                                     )
-//RS                                                 }
-//RS                                                 _ => crate::Policy::marker_unknown_error(
-//RS                                                     &marker.name,
-//RS                                                     &crate::Policy::active_rule_names(),
-//RS                                                     marker.name_span,
-//RS                                                 ),
-//RS                                             };
-//RS                                         self.diags.push(diagnostic);
-//RS                                         failed = true;
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                             if failed {
-//RS                                 self.sync_top();
-//RS                             } else {
-//RS                                 self.applied_rules.extend(ordered_markers.into_iter().map(
-//RS                                     |marker| crate::AST::AppliedRuleApplication {
-//RS                                         marker,
-//RS                                         target: None,
-//RS                                         site: Some(crate::Policy::RuleSite::File),
-//RS                                     },
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                         Err(d) => {
-//RS                             self.diags.push(d);
-//RS                             self.sync_top();
-//RS                         }
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(JS)` immediately
-//RS                 // attached to a following `fn`/`pub fn` is the per-function
-//RS                 // bucket override (routed to `at_web_partition_fn` below,
-//RS                 // parsed inside `func()`), not the file/module ceiling.
-//RS                 TokKind::Hash
-//RS                     if self.at_web_target() && !self.marker_sequence_leads_to_function() =>
-//RS                 {
-//RS                     match self.parse_web_target_marker() {
-//RS                         Ok(TargetMarker::DefaultWeb) => {
-//RS                             if matches!(self.peek().kind, TokKind::KwModule) {
-//RS                                 let span = self.peek().span;
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                         "E0003",
-//RS                                         "`#Target(Web)` isn't valid on a module".to_string(),
-//RS                                         "`Web` is a file-level default-backend marker, not a partition ceiling".to_string(),
-//RS                                         "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(JS)` on a module".to_string(),
-//RS                                         Some(span),
-//RS                                     ));
-//RS                                 self.sync_top();
-//RS                                 continue;
-//RS                             }
-//RS                             if default_target.is_some() {
-//RS                                 let span = self.peek().span;
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                     "E0003",
-//RS                                     "only one `#Target(Web)` marker is allowed per file"
-//RS                                         .to_string(),
-//RS                                     "a file may declare at most one default backend".to_string(),
-//RS                                     "remove the duplicate `#Target(Web)` marker".to_string(),
-//RS                                     Some(span),
-//RS                                 ));
-//RS                                 self.sync_top();
-//RS                                 continue;
-//RS                             }
-//RS                             default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
-//RS                             continue;
-//RS                         }
-//RS                         Ok(TargetMarker::Bucket(target)) => {
-//RS                             if matches!(self.peek().kind, TokKind::KwModule) {
-//RS                                 match self.code_module_with_pkg_and_target(
-//RS                                     false,
-//RS                                     false,
-//RS                                     Some(target),
-//RS                                 ) {
-//RS                                     Ok(item) => items.push(item),
-//RS                                     Err(d) => {
-//RS                                         self.diags.push(d);
-//RS                                         self.sync_top();
-//RS                                     }
-//RS                                 }
-//RS                                 continue;
-//RS                             }
-//RS                             if web_target_ceiling.is_some() {
-//RS                                 let span = self.peek().span;
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                     "E0003",
-//RS                                     "only one `#Target(…)` ceiling is allowed per file".to_string(),
-//RS                                     "a file may declare at most one web partition ceiling"
-//RS                                         .to_string(),
-//RS                                     "remove the duplicate `#Target(Wasm)` or `#Target(JS)` marker"
-//RS                                         .to_string(),
-//RS                                     Some(span),
-//RS                                 ));
-//RS                                 self.sync_top();
-//RS                                 continue;
-//RS                             }
-//RS                             web_target_ceiling = Some(target);
-//RS                             continue;
-//RS                         }
-//RS                         // D-OSTARGET1=A: `#Target(OS.X)` attaches to the `impl` block
-//RS                         // that immediately follows — item scope, not file scope.
-//RS                         Ok(TargetMarker::OS(os)) => {
-//RS                             match self.os_gated_impl(os) {
-//RS                                 Ok(item) => items.push(item),
-//RS                                 Err(d) => {
-//RS                                     self.diags.push(d);
-//RS                                     self.sync_top();
-//RS                                 }
-//RS                             }
-//RS                             continue;
-//RS                         }
-//RS                         Err(d) => {
-//RS                             self.diags.push(d);
-//RS                             self.sync_top();
-//RS                             continue;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — explicit
-//RS                 // companion host page for `--target=web` builds.
-//RS                 TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
-//RS                     Ok((marker, path)) => {
-//RS                         if html_seen {
-//RS                             let span = self.peek().span;
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0003",
-//RS                                 "only one `#HTML(…)` marker is allowed per file".to_string(),
-//RS                                 "a file may declare at most one companion host page".to_string(),
-//RS                                 "remove the duplicate `#HTML(…)` marker".to_string(),
-//RS                                 Some(span),
-//RS                             ));
-//RS                             self.sync_top();
-//RS                             continue;
-//RS                         }
-//RS                         html_seen = true;
-//RS                         html_path = path;
-//RS                         self.applied_rules.push(crate::AST::AppliedRuleApplication {
-//RS                             marker,
-//RS                             target: None,
-//RS                             site: Some(crate::Policy::RuleSite::File),
-//RS                         });
-//RS                         continue;
-//RS                     }
-//RS                     Err(d) => {
-//RS                         self.diags.push(d);
-//RS                         self.sync_top();
-//RS                         continue;
-//RS                     }
-//RS                 },
-//RS                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
-//RS                 TokKind::KwFn => self.func().map(Item::Func),
-//RS                 TokKind::Ident(_) if self.at_foreign_declaration() => {
-//RS                     let word = match self.peek().kind.clone() {
-//RS                         TokKind::Ident(word) => word,
-//RS                         _ => unreachable!(),
-//RS                     };
-//RS                     let span = self.bump().span;
-//RS                     self.diags
-//RS                         .push(self.foreign_keyword_diagnostic(&word, span));
-//RS                     self.foreign_function().map(Item::Func)
-//RS                 }
-//RS                 TokKind::Ident(_) if self.at_foreign_binding() => {
-//RS                     let word = match self.peek().kind.clone() {
-//RS                         TokKind::Ident(word) => word,
-//RS                         _ => unreachable!(),
-//RS                     };
-//RS                     let span = self.bump().span;
-//RS                     Err(self.foreign_keyword_diagnostic(&word, span))
-//RS                 }
-//RS                 // Test declarations own the semantic Test site even when
-//RS                 // their surface begins with `fn`.
-//RS                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-//RS                 TokKind::Hash if self.at_bench_def() => self.retired_bench_marker(),
-//RS                 TokKind::Hash if self.marker_sequence_leads_to_function() => {
-//RS                     self.func_with_marker_list().map(Item::Func)
-//RS                 }
-//RS                 TokKind::Ident(_)
-//RS                     if matches!(self.peek2().kind, TokKind::ColonColon)
-//RS                         && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TYPE_OUTPUT)
-//RS                         && matches!(self.peek4().kind, TokKind::Dot) =>
-//RS                 {
-//RS                     self.output_def().map(Item::Const)
-//RS                 }
-//RS                 TokKind::Ident(name)
-//RS                     if name == Syntax::OUTPUT_DEFAULTS
-//RS                         && matches!(self.peek2().kind, TokKind::Colon) =>
-//RS                 {
-//RS                     self.output_defaults_def().map(Item::Const)
-//RS                 }
-//RS                 TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) => {
-//RS                     self.func().map(Item::Func)
-//RS                 }
-//RS                 TokKind::Hash if self.at_meta_attr() => {
-//RS                     if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
-//RS                         self.retired_const_def().map(Item::Const)
-//RS                     } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime))
-//RS                         || self.at_comptime_marker_after_meta()
-//RS                     {
-//RS                         self.comptime_def().map(Item::Const)
-//RS                     } else if self.at_persist_after_meta() {
-//RS                         self.persist_def().map(Item::Const)
-//RS                     } else {
-//RS                         self.func().map(Item::Func)
-//RS                     }
-//RS                 }
-//RS                 // D-TAINT-SAN: bare lowercase `sanitizer fn` is the retired
-//RS                 // spelling of the taint-strip modifier (E0059). Point at
-//RS                 // `#Sanitizer`, then parse as if `#Sanitizer fn`.
-//RS                 TokKind::Ident(n)
-//RS                     if n == Syntax::FOREIGN_SANITIZER && self.foreign_sanitizer_follows() =>
-//RS                 {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(self.foreign_sanitizer_diag(t.span));
-//RS                     self.func_with_modifiers(false, true).map(Item::Func)
-//RS                 }
-//RS                 TokKind::KwPriv | TokKind::KwPub if matches!(self.peek2().kind, TokKind::Colon) => {
-//RS                     let span = Span::new(self.peek().span.start, self.peek2().span.end);
-//RS                     self.bump();
-//RS                     self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0415",
-//RS                             "section visibility labels like `pub:` / `priv:` are not supported"
-//RS                                 .to_string(),
-//RS                             "moving an item above or below a label would silently change whether it exports"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-//RS                                 Syntax::MARKER_PUB_FILE,
-//RS                                 Syntax::KW_PRIV
-//RS                             ),
-//RS                             Some(span),
-//RS                         ));
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::KwPriv => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.item_after_visibility(is_pub, is_package_pub)
-//RS                 }
-//RS                 TokKind::Ident(n) if n == Syntax::FOREIGN_PRIVATE => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.item_after_visibility(is_pub, is_package_pub)
-//RS                 }
-//RS                 TokKind::KwPub => {
-//RS                     // D-PUBPKG1=A: `pub(package)` qualifier — peek2 is `(`.
-//RS                     if matches!(self.peek2().kind, TokKind::LParen) {
-//RS                         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-//RS                         // Imports are collected separately because `Item` has no
-//RS                         // import variant; all declarations share the canonical
-//RS                         // visibility dispatcher.
-//RS                         if matches!(self.peek().kind, TokKind::KwUse) {
-//RS                             match self.import_decl() {
-//RS                                 Ok(mut imp) => {
-//RS                                     imp.is_pub = is_pub;
-//RS                                     imp.is_package_pub = is_package_pub;
-//RS                                     imports.push(imp);
-//RS                                     continue;
-//RS                                 }
-//RS                                 Err(d) => {
-//RS                                     self.diags.push(d);
-//RS                                     self.sync_stmt();
-//RS                                     continue;
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         self.item_after_visibility(is_pub, is_package_pub)
-//RS                     } else {
-//RS                         // Marker-bearing public types have a distinct parser
-//RS                         // because the marker precedes the type keyword.
-//RS                         match self.peek2().kind {
-//RS                             // D-REPRC1: `pub #layout(c) struct Name { … }`
-//RS                             TokKind::Hash
-//RS                                 if matches!(
-//RS                                     &self.peek3().kind,
-//RS                                     TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT
-//RS                                 ) =>
-//RS                             {
-//RS                                 self.bump(); // consume `pub`
-//RS                                 self.layout_type_def(true)
-//RS                             }
-//RS                             // D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
-//RS                             // `pub #PublishedSchema struct Name { … }` (retired
-//RS                             // `pub #PublishedSchema` teaches E0062).
-//RS                             TokKind::Hash
-//RS                                 if matches!(
-//RS                                     &self.peek3().kind,
-//RS                                     TokKind::Ident(n)
-//RS                                         if n == Syntax::MARKER_PUBLISHED_SCHEMA
-//RS                                 ) =>
-//RS                             {
-//RS                                 self.bump(); // consume `pub`
-//RS                                 self.published_schema_struct_def(true).map(Item::Struct)
-//RS                             }
-//RS                             // D-LIN1: `pub #SingleUse struct|enum Name { … }`
-//RS                             TokKind::Hash
-//RS                                 if matches!(
-//RS                                     &self.peek3().kind,
-//RS                                     TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE
-//RS                                 ) =>
-//RS                             {
-//RS                                 self.bump(); // consume `pub`
-//RS                                 self.single_use_type_def(true)
-//RS                             }
-//RS                             // D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
-//RS                             // `pub #MustUse struct|enum Name { … }` (retired
-//RS                             // `pub #MustUse` teaches E0062).
-//RS                             TokKind::Hash
-//RS                                 if matches!(
-//RS                                     &self.peek3().kind,
-//RS                                     TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE
-//RS                                 ) =>
-//RS                             {
-//RS                                 self.bump(); // consume `pub`
-//RS                                 self.must_use_type_def(true)
-//RS                             }
-//RS                             _ => {
-//RS                                 let (is_pub, is_package_pub) =
-//RS                                     self.parse_item_visibility();
-//RS                                 if matches!(self.peek().kind, TokKind::KwUse) {
-//RS                                     match self.import_decl() {
-//RS                                         Ok(mut imp) => {
-//RS                                             imp.is_pub = is_pub;
-//RS                                             imp.is_package_pub = is_package_pub;
-//RS                                             imports.push(imp);
-//RS                                             continue;
-//RS                                         }
-//RS                                         Err(d) => {
-//RS                                             self.diags.push(d);
-//RS                                             self.sync_stmt();
-//RS                                             continue;
-//RS                                         }
-//RS                                     }
-//RS                                 }
-//RS                                 self.item_after_visibility(is_pub, is_package_pub)
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
-//RS                 TokKind::Ident(n)
-//RS                     if false && n == Syntax::FOREIGN_TEST && self.foreign_test_follows() =>
-//RS                 {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(self.foreign_test_diag(t.span));
-//RS                     self.test_def_after_kw(None).map(Item::Test)
-//RS                 }
-//RS                 TokKind::KwModule if self.is_code_module_at(1) => self.code_module(false),
-//RS                 TokKind::KwModule => self.module_decl().map(Item::Module),
-//RS                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-//RS                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-//RS                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-//RS                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-//RS                 TokKind::KwImpl => self.impl_or_error_conv(),
-//RS                 TokKind::Hash if self.at_bundle_distinct_def() => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.distinct_def(is_pub, is_package_pub)
-//RS                         .map(Item::Distinct)
-//RS                 }
-//RS                 // D-SHAPE2: `#[RenameAll(camel)]`, `#[Codable, Debug]`, or
-//RS                 // `#Codable` type rules use the one applied-rule parser.
-//RS                 TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() => {
-//RS                     self.type_def_with_any_markers()
-//RS                 }
-//RS                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
-//RS                 TokKind::Hash if self.at_retired_at_c_module() => {
-//RS                     self.retired_at_c_module().map(Item::CModule)
-//RS                 }
-//RS                 TokKind::Hash if self.at_unit_family_def() => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.unit_family_def(is_pub, is_package_pub)
-//RS                         .map(Item::UnitFamily)
-//RS                 }
-//RS                 // D-REPRC1: `#layout(c) struct Name { … }`
-//RS                 TokKind::Hash if self.at_layout_struct() => self.layout_type_def(false),
-//RS                 // D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): `#PublishedSchema struct Name { … }`
-//RS                 TokKind::Hash if self.at_published_schema_struct() => {
-//RS                     self.published_schema_struct_def(false).map(Item::Struct)
-//RS                 }
-//RS                 // D-LIN1: `#SingleUse struct|enum Name { … }`
-//RS                 TokKind::Hash if self.at_single_use_type() => self.single_use_type_def(false),
-//RS                 // D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): `#MustUse struct|enum Name { … }`
-//RS                 TokKind::Hash if self.at_must_use_type() => self.must_use_type_def(false),
-//RS                 // D-MIGRATE1 + D-ARROW-CONTROL1:
-//RS                 // `migration TypeName { rename a -> b }`
-//RS                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
-//RS                     self.migration_decl().map(Item::Migration)
-//RS                 }
-//RS                 // D-STATE-HOME1=A: retired `state TypeName { A, B, C }`
-//RS                 TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.reject_top_level_state_decl(is_pub, is_package_pub)
-//RS                 }
-//RS                 // D-PROTO1/D-PROTO2 + D-ARROW-CONTROL1:
-//RS                 // `protocol Name { client: Msg(…) }`
-//RS                 TokKind::Ident(n) if n == Syntax::KW_PROTOCOL && self.at_protocol_block() => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.protocol_decl_with_pkg(is_pub, is_package_pub)
-//RS                         .map(Item::ProtocolDecl)
-//RS                 }
-//RS                 // D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`
-//RS                 // — a rule declaration (card #1456, declaration-side parse
-//RS                 // only).
-//RS                 TokKind::Ident(n) if n == Syntax::KW_MARKER && self.at_marker_decl() => {
-//RS                     self.marker_decl().map(Item::MarkerDecl)
-//RS                 }
-//RS                 // D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` — a
-//RS                 // non-code registry declaration with the shared parameter shape.
-//RS                 TokKind::Ident(n) if n == Syntax::KW_FACT && self.at_fact_decl() => {
-//RS                     self.fact_decl().map(Item::FactDecl)
-//RS                 }
-//RS                 // D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T> :: …`
-//RS                 TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.type_alias_def(is_pub, is_package_pub)
-//RS                         .map(Item::TypeAlias)
-//RS                 }
-//RS                 // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
-//RS                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
-//RS                 TokKind::Hash
-//RS                     if matches!(
-//RS                         &self.peek2().kind,
-//RS                         TokKind::Ident(n)
-//RS                             if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
-//RS                     ) =>
-//RS                 {
-//RS                     if let Err(diagnostic) =
-//RS                         self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)
-//RS                     {
-//RS                         self.diags.push(diagnostic);
-//RS                         self.sync_top();
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 // D-MARK-META1=B: maturity words are closed `#Meta` values,
-//RS                 // never standalone markers on either plane. Reject them as
-//RS                 // ordinary unknown markers with no retired-spelling teaching.
-//RS                 TokKind::Hash
-//RS                     if matches!(&self.peek2().kind, TokKind::Ident(n)
-//RS                             if n == Syntax::MARKER_EXPERIMENTAL
-//RS                                 || n == Syntax::MARKER_TESTED
-//RS                                 || n == Syntax::MARKER_HARDENED) =>
-//RS                 {
-//RS                     if let Err(diagnostic) =
-//RS                         self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)
-//RS                     {
-//RS                         self.diags.push(diagnostic);
-//RS                         self.sync_top();
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 // `const` never routes through the foreign-binding family.
-//RS                 // D-VERDICT-1231-1 retired it with a named replacement, and
-//RS                 // `retired_const_def` both teaches E0146 and recovers by
-//RS                 // parsing the rest as a comptime binding, so the name still
-//RS                 // exists and nothing downstream cascades. A generic
-//RS                 // "write a complete Jet statement" would replace a known
-//RS                 // fact with a guess (tests/ui/const_retired.stderr).
-//RS                 TokKind::KwConst => self.retired_const_def().map(Item::Const),
-//RS                 // D-PERSIST1: `#Persist name (:: | :=) expr` — module-level
-//RS                 // bare binding that survives a `jet dev` hot reload.
-//RS                 TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
-//RS                 // D-CONSTMARK1: `#Static` / `#Inline` before a constant.
-//RS                 TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
-//RS                 TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
-//RS                 // D-PREP-SURFACE2=A: a retired top-level `@NAME :: expr`
-//RS                 // teaches E0388 and recovers as `NAME :: prep { expr }`.
-//RS                 TokKind::Ident(ref n) if n.starts_with(Syntax::RETIRED_COMPTIME_MARK) => {
-//RS                     self.comptime_def().map(Item::Const)
-//RS                 }
-//RS                 TokKind::Dollar => {
-//RS                     let span = self.bump().span;
-//RS                     Err(if self.allow_environment_reads {
-//RS                         self.invalid_environment_read(span)
-//RS                     } else {
-//RS                         self.environment_read_outside_config(span)
-//RS                     })
-//RS                 }
-//RS                 // D-STRUCT-ONCE1=A / D-PREP-BRANCH1=A: the root declaration
-//RS                 // loop is `prep loop`; the retired `@loop` head recovers in
-//RS                 // `derive_body_loop` and teaches E0388.
-//RS                 TokKind::Ident(_) if self.at_prep_verb(&TokKind::KwLoop) => {
-//RS                     self.item_template_loop().map(Item::TemplateLoop)
-//RS                 }
-//RS                 TokKind::At if matches!(self.peek2().kind, TokKind::KwLoop) => {
-//RS                     self.item_template_loop().map(Item::TemplateLoop)
-//RS                 }
-//RS                 TokKind::At => {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0063",
-//RS                             "applied rules use `#`, not `@`".to_string(),
-//RS                             "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)".to_string(),
-//RS                             "replace the leading `@` with `#`".to_string(),
-//RS                             Some(t.span),
-//RS                         ));
-//RS                     self.sync_top();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::Hash => {
-//RS                     if let Err(diagnostic) =
-//RS                         self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)
-//RS                     {
-//RS                         self.diags.push(diagnostic);
-//RS                         self.sync_top();
-//RS                     }
-//RS                     self.sync_top();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
-//RS                 TokKind::Ident(_) if self.at_distinct_def() => {
-//RS                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS                     self.distinct_def(is_pub, is_package_pub)
-//RS                         .map(Item::Distinct)
-//RS                 }
-//RS                 // D-MODULE-BIND1: ordinary module globals are declarations.
-//RS                 // Executable top-level statements remain in `script_body` and
-//RS                 // are rejected unless they are inside an explicit `fn run`.
-//RS                 TokKind::Ident(_) if self.looks_like_sigil_binding() => {
-//RS                     self.module_binding_def().map(Item::Const)
-//RS                 }
-//RS                 TokKind::Ident(name) if false && name == Syntax::FOREIGN_CLASS => {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0021",
-//RS                             format!(
-//RS                                 "types are written with `{}`, not `{}`",
-//RS                                 Syntax::KW_STRUCT,
-//RS                                 Syntax::FOREIGN_CLASS
-//RS                             ),
-//RS                             format!(
-//RS                                 "{} uses exactly one spelling for each thing, so all code reads the same",
-//RS                                 Syntax::LANG_NAME
-//RS                             ),
-//RS                             format!(
-//RS                                 "replace `{}` with `{}`",
-//RS                                 Syntax::FOREIGN_CLASS,
-//RS                                 Syntax::KW_STRUCT
-//RS                             ),
-//RS                             Some(t.span),
-//RS                         ));
-//RS                     self.struct_def(false).map(Item::Struct)
-//RS                 }
-//RS                 TokKind::Ident(name) if false && name == Syntax::FOREIGN_INTERFACE => {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0022",
-//RS                         format!(
-//RS                             "`{}` is spelled `{}` in {}",
-//RS                             Syntax::FOREIGN_INTERFACE,
-//RS                             Syntax::KW_TRAIT,
-//RS                             Syntax::LANG_NAME
-//RS                         ),
-//RS                         format!(
-//RS                             "traits are written with `{}` — see docs for `trait Name {{ … }}`",
-//RS                             Syntax::KW_TRAIT
-//RS                         ),
-//RS                         format!(
-//RS                             "replace `{}` with `{}`",
-//RS                             Syntax::FOREIGN_INTERFACE,
-//RS                             Syntax::KW_TRAIT
-//RS                         ),
-//RS                         Some(t.span),
-//RS                     ));
-//RS                     self.sync_top();
-//RS                     continue;
-//RS                 }
-//RS                 // D-NAMESPACE1=A: `namespace` is not a Jet keyword — E0323 teaching error.
-//RS                 TokKind::Ident(name) if name == Syntax::FOREIGN_NAMESPACE => {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0323",
-//RS                         "in-file grouping uses `module name { }`, not `namespace`".to_string(),
-//RS                         "Jet has one spelling for in-file grouping: a named `module` block"
-//RS                             .to_string(),
-//RS                         "write `module mygroup { fn foo() { … } }` instead".to_string(),
-//RS                         Some(t.span),
-//RS                     ));
-//RS                     self.sync_top();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::Ident(name) if false && name == Syntax::FOREIGN_IMPORT => {
-//RS                     let t = self.bump();
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0015",
-//RS                         format!(
-//RS                             "{} uses `{}`, not `{}`",
-//RS                             Syntax::LANG_NAME,
-//RS                             Syntax::KW_USE,
-//RS                             Syntax::FOREIGN_IMPORT
-//RS                         ),
-//RS                         format!(
-//RS                             "other files are brought in with `{} \"path\"` or `{} name` (S16; M6)",
-//RS                             Syntax::KW_USE,
-//RS                             Syntax::KW_USE
-//RS                         ),
-//RS                         format!(
-//RS                             "replace with `{} \"path\";`, `{} name;`, or `{} \"path\" {} alias;`",
-//RS                             Syntax::KW_USE,
-//RS                             Syntax::KW_USE,
-//RS                             Syntax::KW_USE,
-//RS                             Syntax::KW_AS
-//RS                         ),
-//RS                         Some(t.span),
-//RS                     ));
-//RS                     self.sync_stmt();
-//RS                     continue;
-//RS                 }
-//RS                 _other => {
-//RS                     // Script body at the top level. `sync_stmt` stops
-//RS                     // *before* a `}` at brace depth 0 because inside a
-//RS                     // block the block parser consumes it — at the top
-//RS                     // level nothing does, so a stray `}` would leave the
-//RS                     // cursor where it was and this loop would re-report
-//RS                     // the same token forever. Every pass through this arm
-//RS                     // must move the cursor.
-//RS                     let before = self.pos;
-//RS                     match self.stmt() {
-//RS                         Ok(stmt) => script_body.push(stmt),
-//RS                         Err(d) => {
-//RS                             self.diags.push(d);
-//RS                             self.sync_stmt();
-//RS                         }
-//RS                     }
-//RS                     if self.pos == before {
-//RS                         self.bump();
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS             };
-//RS             match r {
-//RS                 Ok(item) => items.push(Self::normalize_external_method_item(item)),
-//RS                 Err(d) => {
-//RS                     self.diags.push(d);
-//RS                     self.sync_top();
-//RS                 }
-//RS             }
-//RS         }
-//RS         for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
-//RS             let module_chain = self
-//RS                 .policy_declarations
-//RS                 .iter()
-//RS                 .filter(|d| d.scope == crate::Policy::PolicyScope::Module)
-//RS                 .cloned()
-//RS                 .collect::<Vec<_>>();
-//RS             if let Err(error) = crate::Policy::resolve(key, module_chain) {
-//RS                 let span = match error {
-//RS                     crate::Policy::PolicyError::ProhibitedScope { span, .. }
-//RS                     | crate::Policy::PolicyError::Widening { span, .. } => span,
-//RS                     crate::Policy::PolicyError::Conflict { second, .. } => second,
-//RS                 };
-//RS                 self.diags.push(Diagnostic::error("E0355", format!("invalid module `{}` policy", key.name()), "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry".to_string(), "remove the conflict or tighten the inherited value".to_string(), Some(span)));
-//RS             }
-//RS             let targets = self
-//RS                 .policy_declarations
-//RS                 .iter()
-//RS                 .filter(|d| d.scope == crate::Policy::PolicyScope::Function && d.key == key)
-//RS                 .filter_map(|d| d.target)
-//RS                 .collect::<Vec<_>>();
-//RS             for target in targets {
-//RS                 let chain = self
-//RS                     .policy_declarations
-//RS                     .iter()
-//RS                     .filter(|d| {
-//RS                         d.scope == crate::Policy::PolicyScope::Module
-//RS                             || (d.scope == crate::Policy::PolicyScope::Function
-//RS                                 && d.target == Some(target))
-//RS                     })
-//RS                     .cloned()
-//RS                     .collect::<Vec<_>>();
-//RS                 if let Err(error) = crate::Policy::resolve(key, chain) {
-//RS                     let span = match error {
-//RS                         crate::Policy::PolicyError::ProhibitedScope { span, .. }
-//RS                         | crate::Policy::PolicyError::Widening { span, .. } => span,
-//RS                         crate::Policy::PolicyError::Conflict { second, .. } => second,
-//RS                     };
-//RS                     self.diags.push(Diagnostic::error("E0355", format!("invalid function `{}` policy", key.name()), "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry".to_string(), "remove the conflict or tighten the inherited value".to_string(), Some(span)));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Program {
-//RS             imports,
-//RS             items,
-//RS             script_body,
-//RS             block_spans: std::mem::take(&mut self.block_spans),
-//RS             fenced_statements: Vec::new(),
-//RS             web_target_ceiling,
-//RS             pub_file,
-//RS             no_prelude,
-//RS             default_target,
-//RS             html_path,
-//RS             policy_declarations: std::mem::take(&mut self.policy_declarations),
-//RS             user_policy_declarations: std::mem::take(&mut self.user_policy_declarations),
-//RS             applied_rules: std::mem::take(&mut self.applied_rules),
-//RS             rule_facts: std::mem::take(&mut self.rule_facts),
-//RS         }
-//RS     }
-//RS 
-//RS     fn effect_decl(&mut self) -> Result<crate::AST::EffectDecl, Diagnostic> {
-//RS         let start = self.bump().span;
-//RS         let (name, name_span) =
-//RS             self.expect_effect_path_name("after the `effect` declaration keyword")?;
-//RS         let (irreversible, declaration_end) = if matches!(
-//RS             &self.peek().kind,
-//RS             TokKind::Ident(fact) if fact == "$irreversible"
-//RS         ) {
-//RS             let fact_span = self.bump().span;
-//RS             (true, fact_span.end)
-//RS         } else {
-//RS             (false, name_span.end)
-//RS         };
-//RS         if matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         Ok(crate::AST::EffectDecl {
-//RS             name,
-//RS             name_span,
-//RS             irreversible,
-//RS             span: Span::new(start.start, declaration_end),
-//RS         })
-//RS     }
-//RS }
-// END-PORT-PENDING 0331 crates/jet-parser/src/Parser/Items/imports_policy.rs:1-1713
+// Private continuation of JetParser.Parser.Items. Exact checked policy/import
+// rails extend the existing JetParserState and Foundation AST carriers.
+use JetFoundation.AST.[UserPolicyDecl, CallablePolicyChain, Marker, Expr, ImportDecl, ImportKind, ImportedItem, InlineVersion, EffectDecl, Program, AppliedRuleApplication]
+use JetFoundation.Diagnostics.[Diagnostic, Span, diagnostic_from_registry]
+use JetFoundation.Policy.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, RuleSite, RuleStatus, PolicyError, POLICY_RULES, policy_resolve, applied_rule, marker_argument_shape_error, marker_repeated_error, marker_wrong_site_error, marker_unknown_error, active_rule_names]
+use JetFoundation.Syntax
 
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:12
+fn user_policy_decl(state: &JetParserState, is_pub: Bool) -> UserPolicyDecl Diagnostic! {
+    start :: parser_current(&state).span
+    parser_expect_name(&state, "to start a policy declaration")
+    name :: parser_expect_name(&state, "the policy setting name")
+    if parser_current_kind(&state) != TOKEN_LPAREN -> parser_expect(&state, TOKEN_LPAREN, "to open the policy parameter list")
+    params :: parser_parse_param_list(&state)
+    parser_expect(&state, TOKEN_LBRACE, "to open the policy declaration")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    wrap :: parser_expect_name(&state, "`wrap` in a policy declaration")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    if wrap.payload.decoded != Syntax.KW_WRAP -> return Err(diagnostic_from_registry("E0003", Val(wrap.span), "expected `{Syntax.KW_WRAP}` in a policy declaration, found `{wrap.payload.decoded}`", "a user policy has one checked wrapper boundary around the supplied callable", "write `{Syntax.KW_WRAP}`(call) {{ … }}"))
+    parser_expect(&state, TOKEN_LPAREN, "after `wrap` in a policy declaration")
+    call :: parser_expect_name(&state, "the callable name in `wrap(call)`")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    if call.payload.decoded != "call" -> return Err(diagnostic_from_registry("E0003", Val(call.span), "a policy wrapper must receive `call`, found `{call.payload.decoded}`", "D-STRUCT-POLICY1 gives the wrapper one callable value and no AST or signature-edit power", "write `wrap(call) {{ … }}`"))
+    parser_expect(&state, TOKEN_RPAREN, "to close `wrap(call)`")
+    body :: parser_parse_block(&state)
+    parser_skip_semicolons(&state)
+    close :: parser_expect(&state, TOKEN_RBRACE, "to close the policy declaration")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+    if !is_pub -> return Err(diagnostic_from_registry("E0003", Val(start), "a user policy setting must be public", "policy settings are nominal package vocabulary and their users must resolve one package-owned name", "write `pub policy name(...) {{ wrap(call) {{ … }} }}`"))
+    Ok(UserPolicyDecl{is_pub: is_pub, name: ~name.payload.decoded, name_span: name.span, params: ^params, body: ^body.statements, span: Span{start: start.start, end: close.span.end}})
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:83
+fn callable_policy_chain_from_marker(marker: Marker) -> CallablePolicyChain Diagnostic! {
+    CallablePolicyChain.parse(marker.expr_args_owned()).map_err(fn(reason) {
+        names :: CallablePolicyChain.NAMES.map(fn(name) { "{name}(…)" }).join(", ")
+        diagnostic_from_registry("E0355", Val(marker.span), "`#Policy` needs callable policy values: {reason}", "callable policies are typed values and preserve the complete function signature", "write `#Policy({names})`")
+    })
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:106
+// policy_is_file_decl maps to Declarations/Policies.jet:25
+// parser_policy_file_decl_ahead, after callable-shape exclusion at :31.
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:132
+fn callable_policy_marker_shape(state: &JetParserState) -> Bool Never! {
+    parser_kind_at(&state, 3) == TOKEN_IDENT && parser_kind_at(&state, 4) == TOKEN_LPAREN
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:148
+fn policy_decl(state: &JetParserState, scope: PolicyScope) -> [PolicyDeclaration] Diagnostic! {
+    site :: if scope == { .Package | .Organization -> RuleSite.Package .Module -> RuleSite.Module .Function -> RuleSite.Function .Block -> RuleSite.Block }
+    marker :: state.parse_registered_marker_at_site(site)?
+    policy_declarations_from_marker(&state, ^marker, scope)
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:162
+fn retired_memory_policy_diagnostic(name: String, name_span: Span, limit: Int?) -> Diagnostic? Never! {
+    if name != "no_alloc" && name != "zero_rc" && name != "arena_bounded" -> return None
+    replacement :: if name == {
+        "no_alloc" -> "`-[!Mem.Alloc]>`"
+        "zero_rc" -> "`-[!Mem.Rc]>`"
+        else -> if limit == { .Val(bytes) -> "`-[!Mem.Alloc(above: {bytes})]>`" .None -> "`-[!Mem.Alloc(above: N)]>`" }
+    }
+    Val(diagnostic_from_registry("E0355", Val(name_span), "`{name}` is a retired memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature"))
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:187
+fn retired_memory_policy_marker_diagnostic(marker: Marker) -> Diagnostic? Never! {
+    loop expr in marker.expr_args_owned() {
+        (name, span, limit) :: if expr == {
+            .Ident(name, span) -> (name, span, None)
+            .Call(call) -> {
+                limit :: if call.args.len() == 0 { Int?{None} } else if call.args.len() == 1 && call.args[0].label == None && !call.args[0].spread {
+                    if call.args[0].expr == { .Int(value, _, _, _) -> Val(value) else -> continue }
+                } else -> continue
+                (call.name, call.name_span, limit)
+            }
+            else -> continue
+        }
+        if retired_memory_policy_diagnostic(name, span, limit) == .Val(diagnostic) -> return Val(^diagnostic)
+    }
+    None
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:216
+fn policy_declarations_from_marker(state: &JetParserState, marker: ^Marker, scope: PolicyScope) -> [PolicyDeclaration] Diagnostic! {
+    marker_span :: marker.span
+    _ :: state.bound_registered_rule_arguments(marker)?
+    labels :: marker.arg_labels
+    out := [PolicyDeclaration]{}
+    args :: marker.expr_args_owned()
+    loop index in 0..<args.len() {
+        expr :: args[index]
+        label :: labels.get(index).and_then(fn(value) { value.map(fn(named) { named.0 }) })
+        name := ""
+        name_span := marker_span
+        limit := Int?{None}
+        explicit_value := PolicyValue?{None}
+        sentry_value := PolicyValue?{None}
+        if label == Val("copies") || label == Val("sentries") {
+            value :: if expr == {
+                .EnumLit(type_name, variant, _, enum_args, _, span) -> {
+                    if !type_name.is_empty() || !enum_args.is_empty() -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, span))
+                    if variant == {
+                        "Explicit" -> { if label != Val("copies") -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, span)); PolicyValue.Explicit }
+                        "On" -> { if label != Val("sentries") -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, span)); PolicyValue.On }
+                        "Off" -> { if label != Val("sentries") -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, span)); PolicyValue.Off }
+                        else -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, span))
+                    }
+                }
+                else -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, expr_span(expr)))
+            }
+            name = label.expect("named policy")
+            if label == Val("copies") -> explicit_value = Val(value) else -> sentry_value = Val(value)
+        } else {
+            if expr == {
+                .Ident(written, span) -> { name = ~written; name_span = span }
+                .Call(call) -> {
+                    if call.args.len() != 1 -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, expr_span(expr)))
+                    argument :: call.args[0]
+                    value :: if argument.expr == { .Int(value, _, _, _) -> value else -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, marker_span)) }
+                    if argument.label != None -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, marker_span))
+                    name = ~call.name; name_span = call.name_span; limit = Val(value)
+                }
+                else -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, expr_span(expr)))
+            }
+        }
+        if retired_memory_policy_diagnostic(name, name_span, limit) == .Val(diagnostic) -> return Err(^diagnostic)
+        key :: parser_policy_key(name) ?? {
+            site_bound :: applied_rule(name).is_some_and(fn(row) { !row.inherits })
+            package_only :: name == Syntax.POLICY_FIELD_CONTAIN || name == Syntax.POLICY_FIELD_HARDEN
+            why :: if package_only { "contain and harden govern package dependencies and release profiles, not source scopes" } else if site_bound { "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them" } else { "the compiler owns the closed policy registry and its scope rules" }
+            fix :: if package_only { "write `policy: {{ contain: [\"dependency\"], harden: true }}` in `package.jet`" } else if site_bound { "use `#{name}` at its sound site" } else { "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials" }
+            return Err(diagnostic_from_registry("E0355", Val(name_span), "`{name}` is not a scoped policy", why, fix))
+        }
+        value :: if key == {
+            .Copies -> explicit_value ?? return Err(diagnostic_from_registry("E0355", Val(name_span), "`copies` needs an explicit mode", "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax", "write `copies: .Explicit`"))
+            .Sentries -> sentry_value ?? return Err(diagnostic_from_registry("E0355", Val(name_span), "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`"))
+            .ScopedGC | .ExplicitUnits -> {
+                if explicit_value != None || sentry_value != None -> return Err(marker_argument_shape_error(Syntax.MARKER_POLICY, marker_span))
+                PolicyValue.Enabled
+            }
+            .Unsafe | .Impure | .Nondeterministic -> return Err(diagnostic_from_registry("E0355", Val(name_span), "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`"))
+        }
+        &out.push(PolicyDeclaration{key: key, value: value, scope: scope, span: marker_span, target: None, source: "<source>"})
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:349
+fn import_decl(state: &JetParserState) -> ImportDecl Diagnostic! {
+    start :: parser_bump(&state).span
+    token :: parser_current(&state)
+    if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
+        path :: string_literal_token_value(token)?
+        path_span :: parser_bump(&state).span
+        alias := path.rsplit('/').next() ?? "module"
+        alias_span := start
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == Syntax.KW_AS {
+            parser_bump(&state)
+            local :: parser_expect_name(&state, "after `as`")
+            alias = ~local.payload.decoded; alias_span = local.span
+        }
+        parser_expect(&state, TOKEN_SEMI, "after an import")
+        if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+        end :: parser_lookahead(&state, -1).span.end
+        return Ok(ImportDecl{kind: ImportKind.File{path: ^path, span: path_span}, alias: ~alias, alias_span: alias_span, span: Span{start: start.start, end: end}, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None})
+    }
+    if token.kind != TOKEN_IDENT -> return Err(diagnostic_from_registry("E0003", Val(token.span), "expected a file path in quotes or a module name after `{Syntax.KW_USE}`, found {parser_describe_token(token)}", "write `{Syntax.KW_USE} \"path/to/file\";` or `{Syntax.KW_USE} module_name;`", "e.g. `{Syntax.KW_USE} \"util/helpers\";` or `{Syntax.KW_USE} scoring;`"))
+    first :: parser_expect_name(&state, "after `use`")
+    if parser_current_kind(&state) == TOKEN_DOT {
+        if parser_kind_at(&state, 1) == TOKEN_IDENT && first.payload.decoded != Syntax.PROJECT_IMPORT_ROOT && (parser_kind_at(&state, 2) == TOKEN_SEMI || parser_kind_at(&state, 2) == TOKEN_EOF) {
+            parser_bump(&state)
+            item :: parser_expect_name(&state, "after `.` in a `use` import")
+            parser_expect(&state, TOKEN_SEMI, "after an import")
+            if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+            span :: Span{start: start.start, end: parser_lookahead(&state, -1).span.end}
+            return Ok(ImportDecl{kind: ImportKind.Unqualified{module_alias: ~first.payload.decoded, module_alias_span: first.span, items: [ImportedItem{original: ~item.payload.decoded, alias: None}], items_span: item.span, span: span}, alias: ~item.payload.decoded, alias_span: item.span, span: span, item_spans: [item.span], local_spans: [item.span], is_pub: false, is_package_pub: false, inline_version: None})
+        }
+        return import_decl_module_path(&state, start, ~first.payload.decoded, first.span)
+    }
+    version := InlineVersion?{None}
+    if parser_current_kind(&state) == TOKEN_HASH -> version = Val(inline_version(&state)?)
+    alias := ~first.payload.decoded
+    alias_span := first.span
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == Syntax.KW_AS {
+        parser_bump(&state)
+        local :: parser_expect_name(&state, "after `as`")
+        alias = ~local.payload.decoded; alias_span = local.span
+    }
+    parser_expect(&state, TOKEN_SEMI, "after an import")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    Ok(ImportDecl{kind: ImportKind.Module{name: ~first.payload.decoded, span: first.span}, alias: ^alias, alias_span: alias_span, span: Span{start: start.start, end: parser_lookahead(&state, -1).span.end}, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: ^version})
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:485
+fn import_decl_module_path(state: &JetParserState, start: Span, first: ^String, first_span: Span) -> ImportDecl Diagnostic! {
+    name := ^first
+    end := first_span.end
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        next :: parser_kind_at(&state, 1)
+        if next == TOKEN_LBRACKET || next == TOKEN_LBRACE || next == TOKEN_STAR -> break
+        parser_bump(&state)
+        part :: parser_expect_name(&state, "after `.` in an import")
+        if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+        &name.push('.'); &name.push_str(part.payload.decoded)
+        end = part.span.end
+    }
+    module_span :: Span{start: first_span.start, end: end}
+    if parser_current_kind(&state) == TOKEN_DOT -> parser_bump(&state)
+    if parser_current_kind(&state) == TOKEN_STAR {
+        star :: parser_bump(&state).span
+        return Err(diagnostic_from_registry("E0612", Val(star), "wildcard imports are not supported", "`use {name}.*` would hide where each name comes from", "list each item instead: `use {name}.[item, other]`"))
+    }
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        brace :: parser_bump(&state).span
+        depth := 1
+        loop depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
+            kind :: parser_current_kind(&state)
+            if kind == TOKEN_LBRACE -> depth += 1
+            if kind == TOKEN_RBRACE -> depth -= 1
+            parser_bump(&state)
+        }
+        return Err(diagnostic_from_registry("E0003", Val(brace), "brace import groups are not supported", "`use {name}.{{…}}` is the retired grouped-import spelling", "write `use {name}.[item, other as local]`"))
+    }
+    if parser_current_kind(&state) == TOKEN_LBRACKET -> return import_decl_unqualified_list(&state, start, ^name, module_span)
+    alias := name.rsplit('.').next() ?? name
+    alias_span := start
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == Syntax.KW_AS {
+        parser_bump(&state)
+        local :: parser_expect_name(&state, "after `as`")
+        alias = ~local.payload.decoded; alias_span = local.span
+    }
+    parser_expect(&state, TOKEN_SEMI, "after an import")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    Ok(ImportDecl{kind: ImportKind.Module{name: ^name, span: module_span}, alias: ~alias, alias_span: alias_span, span: Span{start: start.start, end: parser_lookahead(&state, -1).span.end}, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None})
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:579
+fn import_decl_unqualified_list(state: &JetParserState, start: Span, module_alias: ^String, module_alias_span: Span) -> ImportDecl Diagnostic! {
+    open :: parser_bump(&state).span
+    if parser_current_kind(&state) == TOKEN_RBRACKET || parser_current_kind(&state) == TOKEN_EOF -> return Err(diagnostic_from_registry("E0003", Val(parser_current(&state).span), "an import member list cannot be empty", "the canonical `.[…]` form must name at least one member", "write `use prefix.[member]`"))
+    items := [ImportedItem]{}
+    item_spans := [Span]{}
+    local_spans := [Span]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        first :: parser_expect_name(&state, "inside `use prefix.[…]`")
+        item := ~first.payload.decoded
+        item_end := first.span.end
+        local_span := first.span
+        loop parser_current_kind(&state) == TOKEN_DOT {
+            parser_bump(&state)
+            part :: parser_expect_name(&state, "after `.` in an import list")
+            if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+            &item.push('.'); &item.push_str(part.payload.decoded)
+            item_end = part.span.end; local_span = part.span
+        }
+        alias := String?{None}
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == Syntax.KW_AS {
+            parser_bump(&state)
+            local :: parser_expect_name(&state, "after `as` in import list")
+            local_span = local.span; alias = Val(~local.payload.decoded)
+        }
+        if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+        &items.push(ImportedItem{original: ^item, alias: ^alias})
+        &item_spans.push(Span{start: first.span.start, end: item_end})
+        &local_spans.push(local_span)
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
+    }
+    close :: parser_current(&state).span
+    parser_expect(&state, TOKEN_RBRACKET, "to close `use prefix.[…]`")
+    parser_expect(&state, TOKEN_SEMI, "after an import")
+    if parser_aborting(&state) -> return Err(&state.diagnostics.pop().expect("parse error"))
+    span :: Span{start: start.start, end: parser_lookahead(&state, -1).span.end}
+    Ok(ImportDecl{kind: ImportKind.Unqualified{module_alias: ~module_alias, module_alias_span: module_alias_span, items: ^items, items_span: Span{start: open.start, end: close.end}, span: span}, alias: ^module_alias, alias_span: module_alias_span, span: span, item_spans: ^item_spans, local_spans: ^local_spans, is_pub: false, is_package_pub: false, inline_version: None})
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:665
+fn inline_version(state: &JetParserState) -> InlineVersion Diagnostic! {
+    hash :: parser_bump(&state).span
+    first :: parser_current(&state)
+    text := if first.kind == {
+        TOKEN_INT -> first.payload.integer.expect("integer payload").to_string()
+        TOKEN_FLOAT -> format_version_segment(first.payload.decimal.expect("float payload"))
+        else -> return Err(diagnostic_from_registry("E0003", Val(first.span), "expected a version number after `#`", "`use pkg#version;` (U11) pins an inline script dependency to a version.", "write digits after `#`, e.g. `use textkit#1.4;` or `use textkit#1.4.2;`"))
+    }
+    end := parser_bump(&state).span.end
+    loop parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_INT {
+        parser_bump(&state)
+        part :: parser_bump(&state)
+        &text.push('.'); &text.push_str(part.payload.integer.expect("integer payload").to_string())
+        end = part.span.end
+    }
+    Ok(InlineVersion{text: ^text, span: Span{start: hash.start, end: end}})
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:707
+// program maps to Entry.jet:264 parser_parse_program with the existing one
+// dispatcher/parser_parse_item_or_import and file-rule path. Arm mapping:
+// 718-744 user-policy -> user_policy_decl above (public flag consumed by entry).
+// 746-788 EOF/Semi/use/effect/file Policy -> Entry:266/267, Items:482/2370,
+// Policies:49; callable-shape and marker-function lookahead must precede file Policy.
+// 789-812 unsafe/extern -> Entry:352 parser_report_foreign_top_word + Items extern.
+// 813-1023 PubFile/NoPrelude/PublicFile/grouped file markers -> Entry:444
+// parser_parse_file_directive and :468 parser_apply_file_marker.
+// 1028-1142 Target/HTML -> Entry:517 parser_apply_file_target / :489 HTML arm,
+// Items parser item modifier target for attached OS impl and bucket module.
+// 1143-1507 every code-bearing item/visibility/marker/binding arm -> existing
+// Items:199 parser_parse_item_or_import and parse-item dispatcher. Disabled
+// foreign test/class/interface/import teaching remains disabled, never revived.
+// 1462-1469 environment reads -> canonical parser expression environment guards.
+// 1473-1500 prep loop/retired @/unknown marker -> item template parser / Entry:273.
+// 1509-1621 module binding / foreign namespace / script -> Entry:306/352/324.
+// 1623-1629 normalize_external_method_item -> canonical item normalization owner.
+// 1630-1671 final policy resolution is the genuine missing suffix below.
+// 1672-1687 Program construction -> ast_program carrier plus move collected
+// state metadata (block spans, policy/user policy/applied rules/rule facts).
+fn resolve_program_policies(state: &JetParserState, program: Program) -> Unit Never! {
+    loop rule in POLICY_RULES {
+        key :: rule.key
+        module_chain :: program.policy_declarations.filter(fn(declaration) { declaration.scope == PolicyScope.Module }).map(fn(declaration) { ~declaration })
+        if policy_resolve(key, module_chain) == .Err(error) {
+            span :: if error == { .ProhibitedScope{span: span, ..} | .Widening{span: span, ..} -> span .Conflict{second: span, ..} -> span }
+            parser_add_error_code(&state, "E0355", span, "invalid module `{key.name()}` policy", "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry", "remove the conflict or tighten the inherited value")
+        }
+        targets :: program.policy_declarations.filter(fn(declaration) { declaration.scope == PolicyScope.Function && declaration.key == key }).filter_map(fn(declaration) { declaration.target })
+        loop target in targets {
+            chain :: program.policy_declarations.filter(fn(declaration) { declaration.scope == PolicyScope.Module || (declaration.scope == PolicyScope.Function && declaration.target == Val(target)) }).map(fn(declaration) { ~declaration })
+            if policy_resolve(key, chain) == .Err(error) {
+                span :: if error == { .ProhibitedScope{span: span, ..} | .Widening{span: span, ..} -> span .Conflict{second: span, ..} -> span }
+                parser_add_error_code(&state, "E0355", span, "invalid function `{key.name()}` policy", "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry", "remove the conflict or tighten the inherited value")
+            }
+        }
+    }
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:1690
+// effect_decl maps to Items.jet:2370 parser_parse_effect_decl and :2385
+// parser_effect_path_name (dotted name, optional $irreversible, declaration span
+// excludes optional trailing Semi exactly as Rust).
+
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:884
+// This program arm preserves grouped-marker admission separately from parsing:
+// field effects remain visible on failure, but applied-rule receipts do not.
+fn apply_grouped_file_markers(state: &JetParserState, program: &Program, markers: ^[Marker], html_seen: &Bool) -> Unit Never! {
+    failed := false
+    had_pub_file :: program.pub_file
+    had_no_prelude :: program.no_prelude
+    loop marker in markers {
+        if marker.name == {
+            Syntax.MARKER_PUB_FILE -> {
+                if program.pub_file {
+                    if had_pub_file -> &state.diagnostics.push(marker_repeated_error(Syntax.MARKER_PUB_FILE, "file", marker.span))
+                    failed = true
+                } else {
+                    program.pub_file = true
+                    state.pub_file_default = true
+                }
+            }
+            Syntax.MARKER_NO_PRELUDE -> {
+                if program.no_prelude {
+                    if had_no_prelude -> &state.diagnostics.push(marker_repeated_error(Syntax.MARKER_NO_PRELUDE, "file", marker.span))
+                    failed = true
+                } else -> program.no_prelude = true
+            }
+            Syntax.MARKER_TARGET -> {
+                if state.web_target_from_marker(marker) == {
+                    .Ok(TargetMarker.DefaultWeb) -> {
+                        if program.default_target == None -> program.default_target = Val(Syntax.BUILD_TARGET_WEB)
+                        else {
+                            &state.diagnostics.push(diagnostic_from_registry("E0003", Val(marker.span), "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`"))
+                            failed = true
+                        }
+                    }
+                    .Ok(TargetMarker.Bucket(target)) -> {
+                        if program.web_target_ceiling == None -> program.web_target_ceiling = Val(target)
+                        else {
+                            &state.diagnostics.push(diagnostic_from_registry("E0003", Val(marker.span), "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`"))
+                            failed = true
+                        }
+                    }
+                    .Ok(_) -> {
+                        &state.diagnostics.push(diagnostic_from_registry("E0003", Val(marker.span), "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`"))
+                        failed = true
+                    }
+                    .Err(diagnostic) -> { &state.diagnostics.push(^diagnostic); failed = true }
+                }
+            }
+            Syntax.MARKER_HTML -> {
+                if state.html_from_marker(marker) == {
+                    .Ok(path) -> {
+                        if !html_seen { html_seen = true; program.html_path = ^path }
+                        else {
+                            &state.diagnostics.push(diagnostic_from_registry("E0003", Val(marker.span), "only one `#HTML(…)` marker is allowed per file", "a file may declare at most one companion host page", "remove the duplicate `#HTML(…)` marker"))
+                            failed = true
+                        }
+                    }
+                    .Err(diagnostic) -> { &state.diagnostics.push(^diagnostic); failed = true }
+                }
+            }
+            else -> {
+                diagnostic :: if applied_rule(marker.name) == {
+                    .Val(row) -> if row.status == RuleStatus.Active {
+                        marker_wrong_site_error(marker.name, RuleSite.File, marker.span)
+                    } else { marker_unknown_error(marker.name, active_rule_names(), marker.name_span) }
+                    .None -> marker_unknown_error(marker.name, active_rule_names(), marker.name_span)
+                }
+                &state.diagnostics.push(^diagnostic)
+                failed = true
+            }
+        }
+    }
+    if failed -> parser_sync_top(&state)
+    else {
+        loop marker in ^markers -> &program.applied_rules.push(AppliedRuleApplication{marker: ^marker, target: None, site: Val(RuleSite.File)})
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:1114
+fn apply_program_html_marker(state: &JetParserState, program: &Program, marker: ^Marker, path: ^String?, html_seen: &Bool) -> Unit Never! {
+    if html_seen {
+        &state.diagnostics.push(diagnostic_from_registry("E0003", Val(parser_current(&state).span), "only one `#HTML(…)` marker is allowed per file", "a file may declare at most one companion host page", "remove the duplicate `#HTML(…)` marker"))
+        parser_sync_top(&state)
+        return
+    }
+    html_seen = true
+    program.html_path = ^path
+    &program.applied_rules.push(AppliedRuleApplication{marker: ^marker, target: None, site: Val(RuleSite.File)})
+}

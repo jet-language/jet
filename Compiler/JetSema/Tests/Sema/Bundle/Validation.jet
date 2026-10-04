@@ -1,0 +1,21 @@
+use jet_foundation.[Span]
+use jet_sema.[EffectSummary, RegionSummary, CallbackObligation, EffectSet]
+use jet_sema.Bundle.Validation.[qualified_effect_facts]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:158
+#Test("nested_region_and_callback_edges_are_module_qualified") {
+    root :: EffectSummary{
+        regions: [RegionSummary{caps: EffectSet.new(), direct: EffectSet.new(), edges: EffectSet.from(["left.same"]), maximal: false, caps_span: Span.new(1, 2)}],
+        callback_obligations: [CallbackObligation{bound: EffectSet.new(), direct: EffectSet.new(), edges: EffectSet.from(["right.same"]), maximal: false, span: Span.new(3, 4)}],
+        ..EffectSummary.default()
+    }
+    modules :: [
+        ("main", ["root": root]),
+        ("left", ["same": EffectSummary.default()]),
+        ("right", ["same": EffectSummary.default()])
+    ]
+    (summaries, _) :: qualified_effect_facts(modules, [], [:])
+    checked_root :: summaries["main::root"]
+    assert(checked_root.regions[0].edges == EffectSet.from(["left::same"]))
+    assert(checked_root.callback_obligations[0].edges == EffectSet.from(["right::same"]))
+}

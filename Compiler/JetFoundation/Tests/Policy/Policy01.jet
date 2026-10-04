@@ -78,13 +78,13 @@ use JetSema.[sema_marker_rules_embedded_catalog]
     }
     retained := [String:Bool]{}
     loop name in expected.keys() {
-        if canonical_rule_arg_variants(name) != None -> &retained.set(name, true)
+        if canonical_rule_arg_variants(name, catalog) != None -> &retained.set(name, true)
     }
     actual := [String:Bool]{}
     loop declaration in catalog.argument_menus -> &actual.set(declaration.name, true)
     assert_eq(actual, retained)
     loop declaration in catalog.argument_menus {
-        assert_eq(declaration.variants, canonical_rule_arg_variants(declaration.name) ?? panic("missing canonical menu"))
+        assert_eq(declaration.variants, canonical_rule_arg_variants(declaration.name, catalog) ?? panic("missing canonical menu"))
     }
     loop row in catalog.rows {
         loop param in row.signature.params {

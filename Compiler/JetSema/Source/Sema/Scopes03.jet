@@ -1,549 +1,288 @@
-// PORT-PENDING 0358 crates-jet-sema-src-sema-bundle-pipeline-failureunion-module-group: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:1-545
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{AccessConvention, Expr, Type};
-//RS use crate::Diagnostics::Span;
-//RS use crate::Sema::Registration::already_defined;
-//RS use crate::Sema::{Checker, LocalInfo};
-//RS use std::borrow::Cow;
-//RS use std::collections::{HashMap, HashSet};
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     pub(crate) fn push_scope(&mut self) {
-//RS         self.flow.enter_scope();
-//RS         self.concrete_unit_values.push(HashMap::new());
-//RS         self.lambda_mut_borrow_stack.push(HashSet::new());
-//RS         self.ct_scopes.push(HashMap::new());
-//RS     }
-//RS 
-//RS     pub(crate) fn pop_scope(&mut self) {
-//RS         self.check_single_use_consumed_in_current_scope();
-//RS         self.drop_scope_no_obligation_checks();
-//RS     }
-//RS 
-//RS     pub(crate) fn drop_scope_no_obligation_checks(&mut self) {
-//RS         // D-FACT-FLOW1: every scope-lived plane — bindings, flow narrowing
-//RS         // and open windows — leaves the one store together.
-//RS         self.flow.leave_scope();
-//RS         self.concrete_unit_values.pop();
-//RS         self.lambda_mut_borrow_stack.pop();
-//RS         self.ct_scopes.pop();
-//RS     }
-//RS 
-//RS     /// Number of open scopes. A fact recorded now leaves at this depth.
-//RS     pub(crate) fn scope_depth(&self) -> usize {
-//RS         self.flow.depth
-//RS     }
-//RS 
-//RS     /// Record a binding in the scope that is open now, with none of
-//RS     /// `declare`'s redefinition checks. Parameters and loop variables use
-//RS     /// this: their own caller already decided the name is free.
-//RS     pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
-//RS         let depth = self.flow.depth;
-//RS         if !info.invalid {
-//RS             self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
-//RS         }
-//RS         // D-FACT-OWN1: every binding enters the shared crossing plane with
-//RS         // the ownership prover's answer. Do not give parameters and other
-//RS         // scope-only bindings a private/default sendability bit.
-//RS         let sendable = self.sendability_problem(&info.ty, true).is_none();
-//RS         self.flow.bindings.set_at(name, depth, info);
-//RS         self.flow.sendability.set_at(name, depth, sendable);
-//RS         self.flow.path_strings.remove_at(name, depth);
-//RS         self.flow
-//RS             .origins
-//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
-//RS     }
-//RS 
-//RS     /// Every name a binding is known by here, at any depth. Callers use it
-//RS     /// to match spellings, so the order carries no meaning.
-//RS     pub(crate) fn visible_names(&self) -> Vec<String> {
-//RS         self.flow
-//RS             .bindings
-//RS             .all()
-//RS             .map(|(name, _)| name.to_string())
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub(crate) fn lambda_mut_borrow_active(&self, name: &str) -> bool {
-//RS         self.lambda_mut_borrow_stack
-//RS             .iter()
-//RS             .any(|s| s.contains(name))
-//RS     }
-//RS 
-//RS     pub(crate) fn current_ct_globals(&self) -> Cow<'_, HashMap<String, crate::Comptime::CtValue>> {
-//RS         // Most semantic expressions do not open a comptime scope. Borrow the
-//RS         // immutable module globals instead of cloning every known value for
-//RS         // each node; overlays still receive the exact old merged snapshot.
-//RS         if self.ct_scopes.iter().all(|scope| scope.is_empty()) {
-//RS             return Cow::Borrowed(self.ct_globals);
-//RS         }
-//RS         let mut globals = self.ct_globals.clone();
-//RS         for scope in &self.ct_scopes {
-//RS             for (name, value) in scope {
-//RS                 globals.insert(name.clone(), value.clone());
-//RS             }
-//RS         }
-//RS         Cow::Owned(globals)
-//RS     }
-//RS 
-//RS     /// Types for names visible to the compile-time evaluator. CtValue erases
-//RS     /// nominal text facts, so folding must carry the checker-owned declaration
-//RS     /// type alongside the value. Only names with values are exposed: the MIR
-//RS     /// fragment receives each typed name as an argument.
-//RS     pub(crate) fn current_ct_binding_types(
-//RS         &self,
-//RS         values: &HashMap<String, crate::Comptime::CtValue>,
-//RS     ) -> HashMap<String, Type> {
-//RS         values
-//RS             .keys()
-//RS             .filter_map(|name| {
-//RS                 self.flow
-//RS                     .bindings
-//RS                     .get(name)
-//RS                     .map(|info| (name.clone(), info.ty.clone()))
-//RS                     .or_else(|| self.consts.get(name).map(|ty| (name.clone(), ty.clone())))
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Record what a folded initializer changed about earlier bindings.
-//RS     /// `r :: Reader.over(bytes)` followed by `magic :: r.read_u32_le()?`
-//RS     /// advances `r`; without writing that back, every later fold reads a
-//RS     /// reader still parked at position zero. Only names a comptime scope
-//RS     /// already holds are updated.
-//RS     pub(crate) fn apply_ct_mutations(
-//RS         &mut self,
-//RS         mutated: HashMap<String, crate::Comptime::CtValue>,
-//RS     ) {
-//RS         for (name, value) in mutated {
-//RS             if let Some(slot) = self
-//RS                 .ct_scopes
-//RS                 .iter_mut()
-//RS                 .rev()
-//RS                 .find_map(|scope| scope.get_mut(&name))
-//RS             {
-//RS                 *slot = value;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether `expr` is an explicit constant, so a diagnostic may evaluate
-//RS     /// it. Compile time is always explicit, so only literal forms qualify:
-//RS     /// literals (including unit literals and their elaborated constructor),
-//RS     /// type-, enum- or module-qualified members such as `Method.Get` or
-//RS     /// `math.PI`, negation and arithmetic over those, module constants with
-//RS     /// a known value (a `prep` constant or a literal initializer), and local
-//RS     /// `prep` bindings whose value is live in the compile-time frame. An
-//RS     /// ordinary binding or a function call never counts as a constant here.
-//RS     pub(crate) fn is_explicit_constant(
-//RS         &self,
-//RS         expr: &Expr,
-//RS         values: &HashMap<String, crate::Comptime::CtValue>,
-//RS     ) -> bool {
-//RS         let constant = |inner: &Expr| self.is_explicit_constant(inner, values);
-//RS         match expr {
-//RS             Expr::Int(..)
-//RS             | Expr::Float(..)
-//RS             | Expr::Bool(..)
-//RS             | Expr::Char(..)
-//RS             | Expr::Unit(_)
-//RS             | Expr::Absent(_)
-//RS             | Expr::UnitLit { .. }
-//RS             | Expr::ComptimeName { .. } => true,
-//RS             Expr::Str(parts, _) => parts.iter().all(|part| match part {
-//RS                 crate::AST::StrPart::Lit(_) => true,
-//RS                 crate::AST::StrPart::Interp(inner, _) => constant(inner),
-//RS             }),
-//RS             Expr::Paren(inner, _) | Expr::Unary(_, inner, _) | Expr::Present(inner, _) => {
-//RS                 constant(inner)
-//RS             }
-//RS             Expr::Binary(_, left, right, _) => constant(left) && constant(right),
-//RS             Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
-//RS                 operands.iter().all(constant)
-//RS             }
-//RS             Expr::TupleLit(fields, ..) => fields.iter().all(|(_, value)| constant(value)),
-//RS             Expr::MapLit(entries, _) => entries
-//RS                 .iter()
-//RS                 .all(|(key, value)| constant(key) && constant(value)),
-//RS             Expr::EnumLit { args, .. } => args.iter().all(|arg| match arg {
-//RS                 crate::AST::EnumLitArg::Positional(value)
-//RS                 | crate::AST::EnumLitArg::Named { expr: value, .. } => constant(value),
-//RS             }),
-//RS             Expr::Ident(name, _) => self.names_explicit_constant(name, values),
-//RS             Expr::Field(base, ..) => self.qualifies_explicit_constant(base, values),
-//RS             // Sema elaborates a unit literal in place: `5s` becomes
-//RS             // `Duration.nanoseconds(5 * scale) ?? panic(…)`, `2.5px` becomes
-//RS             // `Px.float(2.5)` and `4i` becomes `Complex(0.0, 4.0)`.
-//RS             Expr::OrFallback {
-//RS                 value,
-//RS                 fallback: crate::AST::OrFallback::Panic { .. },
-//RS                 ..
-//RS             } => self.is_elaborated_unit_literal(value) && constant(value),
-//RS             Expr::MethodCall { args, .. } => {
-//RS                 self.is_elaborated_unit_literal(expr) && args.iter().all(|arg| constant(&arg.expr))
-//RS             }
-//RS             Expr::Call(call) if call.name == crate::Syntax::TYPE_COMPLEX => {
-//RS                 call.args.iter().all(|arg| constant(&arg.expr))
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// The constructor call sema writes in place of a unit literal.
-//RS     fn is_elaborated_unit_literal(&self, expr: &Expr) -> bool {
-//RS         let Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } = expr
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         let Expr::Ident(owner, _) = receiver.as_ref() else {
-//RS             return false;
-//RS         };
-//RS         if self.lookup(owner).is_some() {
-//RS             return false;
-//RS         }
-//RS         (owner == crate::Syntax::DURATION_TYPE && method == "nanoseconds")
-//RS             || (self.registry.is_distinct(owner)
-//RS                 && crate::Syntax::numeric_conversion_method("Float") == Some(method.as_str()))
-//RS     }
-//RS 
-//RS     /// The base of a member read `base.member` that keeps it constant: a
-//RS     /// type, enum or module name (`Method.Get`, `math.PI`), or a value that
-//RS     /// is itself an explicit constant.
-//RS     fn qualifies_explicit_constant(
-//RS         &self,
-//RS         base: &Expr,
-//RS         values: &HashMap<String, crate::Comptime::CtValue>,
-//RS     ) -> bool {
-//RS         match base {
-//RS             Expr::Field(inner, ..) => self.qualifies_explicit_constant(inner, values),
-//RS             Expr::Ident(name, _) if self.lookup(name).is_none() && !self.consts.contains_key(name) => {
-//RS                 true
-//RS             }
-//RS             _ => self.is_explicit_constant(base, values),
-//RS         }
-//RS     }
-//RS 
-//RS     /// A name read is constant when it is a module constant with a known
-//RS     /// value or a local `prep` binding whose value is live.
-//RS     fn names_explicit_constant(
-//RS         &self,
-//RS         name: &str,
-//RS         values: &HashMap<String, crate::Comptime::CtValue>,
-//RS     ) -> bool {
-//RS         if self.lookup(name).is_none() {
-//RS             // A module-level name: only a constant with a known value.
-//RS             return values.contains_key(name);
-//RS         }
-//RS         let Some(depth) = self.flow.bindings.depth_of(name) else {
-//RS             return false;
-//RS         };
-//RS         // Flow depth counts open scopes, so the function scope is depth 1
-//RS         // while its compile-time frame is `ct_scopes[0]`.
-//RS         let Some(local_value) = depth
-//RS             .checked_sub(1)
-//RS             .and_then(|index| self.ct_scopes.get(index))
-//RS             .and_then(|scope| scope.get(name))
-//RS         else {
-//RS             // This lexical local shadows any same-named outer value, but no
-//RS             // live compile-time value belongs to this binding.
-//RS             return false;
-//RS         };
-//RS         values.get(name) == Some(local_value)
-//RS     }
-//RS 
-//RS     pub(crate) fn evaluate_constant(
-//RS         &self,
-//RS         expr: &crate::AST::Expr,
-//RS     ) -> Option<crate::Comptime::CtValue> {
-//RS         if self.defer_ct_evaluation {
-//RS             return None;
-//RS         }
-//RS         let globals = self.current_ct_globals().into_owned();
-//RS         if !self.is_explicit_constant(expr, &globals) {
-//RS             return None;
-//RS         }
-//RS         let binding_types = self.current_ct_binding_types(&globals);
-//RS         let checked_nominals = self.checked_comptime_nominals();
-//RS         crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-//RS             expr,
-//RS             self.ct_checked_funcs_for_evaluation(),
-//RS             self.ct_externs,
-//RS             self.ct_base_dir,
-//RS             &globals,
-//RS             &binding_types,
-//RS             self.core_imports,
-//RS             self.gates,
-//RS             0,
-//RS             &[],
-//RS             checked_nominals,
-//RS             None,
-//RS         )
-//RS         .ok()
-//RS         .map(|(value, _)| value)
-//RS     }
-//RS 
-//RS 
-//RS     /// What the checker knows about a name here: the innermost declaration,
-//RS     /// or the flow-narrowed refinement of it when a proven test recorded one
-//RS     /// at the same depth or deeper (D-FLOWTYPE1).
-//RS     pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
-//RS         if name == "_" {
-//RS             return None;
-//RS         }
-//RS         let declared = self.flow.bindings.depth_of(name);
-//RS         let narrowed = self.flow.narrow.depth_of(name);
-//RS         match (declared, narrowed) {
-//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => self.flow.narrow.get(name),
-//RS             (Some(_), _) => self.flow.bindings.get(name),
-//RS             (None, Some(_)) => self.flow.narrow.get(name),
-//RS             (None, None) => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Module-level mutable bindings are the one module-level write target.
-//RS     /// Keep the permission fact on the declaration; do not create a second
-//RS     /// mutable-binding table beside `consts`.
-//RS     pub(crate) fn is_global_mutable_binding(&self, name: &str) -> bool {
-//RS         self.items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 crate::AST::Item::Const(c)
-//RS                     if c.name == name && c.mutable && !c.is_comptime
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn sendability_for(&self, name: &str) -> bool {
-//RS         let Some(depth) = self.binding_fact_depth(name) else {
-//RS             return true;
-//RS         };
-//RS         self.flow
-//RS             .sendability
-//RS             .get_at(name, depth)
-//RS             .copied()
-//RS             .unwrap_or(true)
-//RS     }
-//RS 
-//RS     /// D-CONC-FREEZE1=A: read the one frozen proof attached to the active
-//RS     /// binding/refinement. A missing row means the value is not frozen.
-//RS     pub(crate) fn frozen_for(&self, name: &str) -> Option<Span> {
-//RS         let declared = self.flow.bindings.depth_of(name);
-//RS         let narrowed = self.flow.narrow.depth_of(name);
-//RS         match (declared, narrowed) {
-//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => self
-//RS                 .flow
-//RS                 .frozen
-//RS                 .get_at(name, narrowed)
-//RS                 .or_else(|| self.flow.frozen.get_at(name, declared))
-//RS                 .copied(),
-//RS             (Some(declared), _) => self.flow.frozen.get_at(name, declared).copied(),
-//RS             (None, Some(narrowed)) => self.flow.frozen.get_at(name, narrowed).copied(),
-//RS             (None, None) => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn binding_fact_depth(&self, name: &str) -> Option<usize> {
-//RS         let declared = self.flow.bindings.depth_of(name);
-//RS         let narrowed = self.flow.narrow.depth_of(name);
-//RS         match (declared, narrowed) {
-//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => Some(narrowed),
-//RS             (Some(declared), _) => Some(declared),
-//RS             (None, Some(narrowed)) => Some(narrowed),
-//RS             (None, None) => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-CONC-FREEZE1=A: find the proof that a place expression is backed
-//RS     /// by a frozen value. Deep immutability follows every place projection.
-//RS     pub(crate) fn frozen_expr_site(&self, expr: &Expr) -> Option<Span> {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => self.frozen_for(name),
-//RS             Expr::Field(base, ..)
-//RS             | Expr::Index { base, .. }
-//RS             | Expr::Slice { base, .. }
-//RS             | Expr::Place(base, ..)
-//RS             | Expr::Paren(base, _) => self.frozen_expr_site(base),
-//RS             Expr::Call(call) if call.name == crate::Syntax::KW_FREEZE && call.args.len() == 1 => {
-//RS                 Some(call.name_span)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Update the callback representation fact after a function-valued
-//RS     /// local is assigned. The fact is deliberately attached to the
-//RS     /// binding, not inferred again at the eventual host call: an unsafe
-//RS     /// reassignment must not leave a stale `Send` proof behind.
-//RS     pub(crate) fn set_interrupt_sendable(&mut self, name: &str, sendable: bool) {
-//RS         if let Some(info) = self.flow.bindings.get_mut(name) {
-//RS             info.interrupt_sendable = sendable && info.param_conv.is_none();
-//RS         }
-//RS         if let Some(info) = self.flow.narrow.get_mut(name) {
-//RS             info.interrupt_sendable = sendable && info.param_conv.is_none();
-//RS         }
-//RS     }
-//RS 
-//RS     /// A binding is borrowed (a `view`) when it is a `Read` parameter of a
-//RS     /// non-scalar type — in v1 those lower to `&T`, so the value can't be moved
-//RS     /// out of it. Used to decide where a consuming use must clone (B1).
-//RS     pub(crate) fn is_borrowed_binding(&self, name: &str) -> bool {
-//RS         self.lookup(name)
-//RS             .map(|info| {
-//RS                 matches!(info.param_conv, Some(AccessConvention::Read)) && !info.ty.is_scalar()
-//RS             })
-//RS             .unwrap_or(false)
-//RS     }
-//RS 
-//RS     pub(crate) fn declare(&mut self, name: &str, name_span: Span, info: LocalInfo) {
-//RS         if name == "_" {
-//RS             return;
-//RS         }
-//RS         if !info.invalid {
-//RS             self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
-//RS         }
-//RS         if self.lookup(name).is_some()
-//RS             || self.consts.contains_key(name)
-//RS             || self.loop_labels.iter().any(|label| label == name)
-//RS         {
-//RS             self.diags.push(already_defined(name, name_span));
-//RS         }
-//RS         self.clear_moved_binding(name);
-//RS         let depth = self.flow.depth;
-//RS         // A fresh declaration replaces any refinement recorded for the same
-//RS         // name in this scope: the new binding is what the name now means.
-//RS         self.flow.narrow.remove_at(name, depth);
-//RS         self.flow.sendability.remove_at(name, depth);
-//RS         self.flow.frozen.remove_at(name, depth);
-//RS         self.flow.path_strings.remove_at(name, depth);
-//RS         self.flow.bindings.set_at(name, depth, info);
-//RS         self.flow.sendability.set_at(name, depth, true);
-//RS         self.flow
-//RS             .origins
-//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
-//RS     }
-//RS 
-//RS     pub(crate) fn declare_with_sendability(
-//RS         &mut self,
-//RS         name: &str,
-//RS         name_span: Span,
-//RS         info: LocalInfo,
-//RS         sendable: bool,
-//RS     ) {
-//RS         self.declare(name, name_span, info);
-//RS         let depth = self.flow.depth;
-//RS         self.flow.sendability.set_at(name, depth, sendable);
-//RS     }
-//RS 
-//RS     pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
-//RS         if name == "_" {
-//RS             return;
-//RS         }
-//RS         // D-LOOP-SUBJECT1=A: an inner bindingless loop cannot shadow its
-//RS         // outer implicit subject; its diagnostic teaches named bindings.
-//RS         if name == crate::Syntax::KW_IT && self.implicit_loop_subject_depth > 0 {
-//RS             return;
-//RS         }
-//RS         if self.lookup(&name).is_some()
-//RS             || self.consts.contains_key(&name)
-//RS             || self.loop_labels.iter().any(|label| label == &name)
-//RS         {
-//RS             self.diags.push(already_defined(&name, name_span));
-//RS         } else {
-//RS             let depth = self.flow.depth;
-//RS             self.note_unused_binding(&name, name_span, false);
-//RS             // A fresh loop binding is a new value: a move of an earlier
-//RS             // binding with the same name (an earlier loop's variable) is gone.
-//RS             self.clear_moved_binding(&name);
-//RS             self.flow.bindings.set_at(
-//RS                 &name,
-//RS                 depth,
-//RS                 LocalInfo {
-//RS                     def_span: name_span,
-//RS                     binding_sigil_span: None,
-//RS                     ty: ty.clone(),
-//RS                     mutable: false,
-//RS                     param_conv: None,
-//RS                     decl_loop_depth: self.loop_depth,
-//RS                     interrupt_sendable: false,
-//RS                     reactive_local: false,
-//RS                     reactive_shared: false,
-//RS                     single_use_span: None,
-//RS                     invalid: false,
-//RS                 },
-//RS             );
-//RS             self.flow.sendability.set_at(&name, depth, true);
-//RS             self.flow.path_strings.remove_at(&name, depth);
-//RS             self.flow.origins.set_at(
-//RS                 &name,
-//RS                 depth,
-//RS                 crate::Sema::FlowFacts::OriginFact::untracked(),
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     /// Error recovery for a loop whose source failed to check: its item type
-//RS     /// is unknown, so bind each loop variable as invalid. A use then stays
-//RS     /// silent (the source already reported) instead of cascading into E0107
-//RS     /// "nothing named `row`" reports that suggest an unrelated similar name.
-//RS     pub(crate) fn declare_invalid_loop_vars(
-//RS         &mut self,
-//RS         var: &str,
-//RS         var_span: Span,
-//RS         var2: Option<&(String, Span)>,
-//RS     ) {
-//RS         let names = std::iter::once((var, var_span))
-//RS             .chain(var2.map(|(name, span)| (name.as_str(), *span)));
-//RS         for (name, name_span) in names {
-//RS             if name == "_" || self.lookup(name).is_some() {
-//RS                 continue;
-//RS             }
-//RS             let depth = self.flow.depth;
-//RS             self.clear_moved_binding(name);
-//RS             self.flow.bindings.set_at(
-//RS                 name,
-//RS                 depth,
-//RS                 LocalInfo {
-//RS                     def_span: name_span,
-//RS                     binding_sigil_span: None,
-//RS                     ty: Type::Named(String::new()),
-//RS                     mutable: false,
-//RS                     param_conv: None,
-//RS                     decl_loop_depth: self.loop_depth,
-//RS                     interrupt_sendable: false,
-//RS                     reactive_local: false,
-//RS                     reactive_shared: false,
-//RS                     single_use_span: None,
-//RS                     invalid: true,
-//RS                 },
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     /// Replace the active binding's origin with the scoped "not tracked" row.
-//RS     /// Removing it would make an outer shadowed origin visible again.
-//RS     pub(crate) fn clear_origin(&mut self, name: &str) {
-//RS         let depth = self
-//RS             .flow
-//RS             .origins
-//RS             .depth_of(name)
-//RS             .or_else(|| self.binding_fact_depth(name))
-//RS             .unwrap_or_else(|| self.scope_depth());
-//RS         self.flow
-//RS             .origins
-//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
-//RS     }
-//RS 
-//RS     pub(crate) fn declare_loop_label(&mut self, name: &str, name_span: Span) {
-//RS         if self.lookup(name).is_some()
-//RS             || self.consts.contains_key(name)
-//RS             || self.loop_labels.iter().any(|label| label == name)
-//RS         {
-//RS             self.diags.push(already_defined(name, name_span));
-//RS         }
-//RS         self.loop_labels.push(name.to_string());
-//RS     }
-//RS }
-// END-PORT-PENDING 0358 crates/jet-sema/src/Sema/CheckerCore/scopes.rs:1-545
+use jet_foundation.[AccessConvention, Expr, Type, Span, Item, StrPart, EnumLitArg, OrFallback]
+use jet_sema.[Checker, LocalInfo, already_defined, OriginFact]
+use jet_comptime.[CtValue, evaluate_owned_with_imports_opts_collecting_items]
+use std.borrow.[Cow]
+use jet_syntax.[TYPE_COMPLEX, DURATION_TYPE, numeric_conversion_method, KW_FREEZE, KW_IT]
 
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:9
+    pub fn push_scope(&self) Never! {
+        self.flow.enter_scope()
+        self.concrete_unit_values.push([:])
+        self.lambda_mut_borrow_stack.push([:])
+        self.ct_scopes.push([:])
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:16
+    pub fn pop_scope(&self) Never! {
+        self.check_single_use_consumed_in_current_scope()
+        self.drop_scope_no_obligation_checks()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:21
+    pub fn drop_scope_no_obligation_checks(&self) Never! {
+        // Every scope-lived plane leaves the shared store together.
+        self.flow.leave_scope()
+        _ :: self.concrete_unit_values.pop()
+        _ :: self.lambda_mut_borrow_stack.pop()
+        _ :: self.ct_scopes.pop()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:31
+    pub fn scope_depth(self) -> Int Never! { self.flow.depth }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:38
+    pub fn declare_in_scope(&self, name: String, info: ^LocalInfo) Never! {
+        depth :: self.flow.depth
+        if !info.invalid { self.note_unused_binding(name, info.def_span, info.param_conv.is_some()) }
+        sendable :: self.sendability_problem(info.ty, true).is_none()
+        self.flow.bindings.set_at(name, depth, ^info)
+        self.flow.sendability.set_at(name, depth, sendable)
+        self.flow.path_strings.remove_at(name, depth)
+        self.flow.origins.set_at(name, depth, OriginFact.untracked())
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:57
+    pub fn visible_names(self) -> [String] Never! {
+        names := [String]{}
+        loop (name, _) in self.flow.bindings.all() { names.push(~name) }
+        names
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:65
+    pub fn lambda_mut_borrow_active(self, name: String) -> Bool Never! {
+        loop scope in self.lambda_mut_borrow_stack { if scope.contains(name) -> return true }
+        false
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:71
+    pub fn current_ct_globals(self) -> Cow<[String:CtValue]> Never! {
+        overlays := false
+        loop scope in self.ct_scopes { if !scope.is_empty() { overlays = true; break } }
+        if !overlays -> return Cow.Borrowed(self.ct_globals)
+        globals := ~self.ct_globals
+        loop scope in self.ct_scopes {
+            loop (name, value) in scope { globals[~name] = ~value }
+        }
+        Cow.Owned(^globals)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:91
+    pub fn current_ct_binding_types(self, values: [String:CtValue]) -> [String:Type] Never! {
+        types := [String:Type]{}
+        loop name in values.keys() {
+            if self.flow.bindings.get(name) == .Val(info) { types[~name] = ~info.ty }
+            else if self.consts.get(name) == .Val(ty) { types[~name] = ~ty }
+        }
+        types
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:112
+    pub fn apply_ct_mutations(&self, mutated: ^[String:CtValue]) Never! {
+        loop (name, value) in mutated {
+            loop index in (0..<self.ct_scopes.len()).rev() {
+                if self.ct_scopes[index].has_key(name) {
+                    self.ct_scopes[index][~name] = ^value
+                    break
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:136
+    pub fn is_explicit_constant(self, expr: Expr, values: [String:CtValue]) -> Bool Never! {
+        if expr == {
+            .Int, .Float, .Bool, .Char, .Unit, .Absent, .UnitLit, .ComptimeName -> true
+            .Str(parts, _) -> {
+                loop part in parts {
+                    if part == .Interp(inner, _) && !self.is_explicit_constant(inner, values) -> return false
+                }
+                true
+            }
+            .Paren(inner, _), .Unary(_, inner, _), .Present(inner, _) -> self.is_explicit_constant(inner, values)
+            .Binary(_, left, right, _) -> self.is_explicit_constant(left, values) && self.is_explicit_constant(right, values)
+            .CompareChain(operands, _), .ListLit(operands, _) -> {
+                loop operand in operands { if !self.is_explicit_constant(operand, values) -> return false }
+                true
+            }
+            .TupleLit(fields, _) -> {
+                loop (_, value) in fields { if !self.is_explicit_constant(value, values) -> return false }
+                true
+            }
+            .MapLit(entries, _) -> {
+                loop (key, value) in entries { if !self.is_explicit_constant(key, values) || !self.is_explicit_constant(value, values) -> return false }
+                true
+            }
+            .EnumLit(_, _, args, _) -> {
+                loop arg in args {
+                    value :: if arg == { .Positional(v) -> v; .Named(_, v, _) -> v }
+                    if !self.is_explicit_constant(value, values) -> return false
+                }
+                true
+            }
+            .Ident(name, _) -> self.names_explicit_constant(name, values)
+            .Field(base, _) -> self.qualifies_explicit_constant(base, values)
+            .OrFallback(value, .Panic, _) -> self.is_elaborated_unit_literal(value) && self.is_explicit_constant(value, values)
+            .MethodCall -> {
+                if !self.is_elaborated_unit_literal(expr) -> return false
+                loop arg in expr.args { if !self.is_explicit_constant(arg.expr, values) -> return false }
+                true
+            }
+            .Call(call) -> {
+                if call.name != TYPE_COMPLEX -> return false
+                loop arg in call.args { if !self.is_explicit_constant(arg.expr, values) -> return false }
+                true
+            }
+            else -> false
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:191
+    fn is_elaborated_unit_literal(self, expr: Expr) -> Bool Never! {
+        if expr != .MethodCall -> return false
+        if expr.receiver != .Ident -> return false
+        owner :: expr.receiver.name
+        if self.lookup(owner).is_some() -> return false
+        (owner == DURATION_TYPE && expr.method == "nanoseconds") || (self.registry.is_distinct(owner) && numeric_conversion_method("Float") == Val(expr.method))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:212
+    fn qualifies_explicit_constant(self, base: Expr, values: [String:CtValue]) -> Bool Never! {
+        if base == .Field(inner, _) -> return self.qualifies_explicit_constant(inner, values)
+        if base == .Ident(name, _) && self.lookup(name).is_none() && !self.consts.has_key(name) -> return true
+        self.is_explicit_constant(base, values)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:228
+    fn names_explicit_constant(self, name: String, values: [String:CtValue]) -> Bool Never! {
+        if self.lookup(name).is_none() -> return values.has_key(name)
+        if self.flow.bindings.depth_of(name) != .Val(depth) -> return false
+        if depth < 1 || depth > self.ct_scopes.len() -> return false
+        if self.ct_scopes[depth - 1].get(name) != .Val(local_value) -> return false
+        values.get(name) == Val(local_value)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:254
+    pub fn evaluate_constant(self, expr: Expr) -> CtValue? Never! {
+        if self.defer_ct_evaluation -> return None
+        globals :: self.current_ct_globals().into_owned()
+        if !self.is_explicit_constant(expr, globals) -> return None
+        binding_types :: self.current_ct_binding_types(globals)
+        checked_nominals :: self.checked_comptime_nominals()
+        result :: evaluate_owned_with_imports_opts_collecting_items(expr, self.ct_checked_funcs_for_evaluation(), self.ct_externs, self.ct_base_dir, globals, binding_types, self.core_imports, self.gates, 0, [], checked_nominals, None)
+        if result == .Ok((value, _)) -> return Val(^value)
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:289
+    pub fn lookup(self, name: String) -> LocalInfo? Never! from self {
+        if name == "_" -> return None
+        declared :: self.flow.bindings.depth_of(name)
+        narrowed :: self.flow.narrow.depth_of(name)
+        if declared == .Val(d) {
+            if narrowed == .Val(n) && n >= d -> return self.flow.narrow.get(name)
+            return self.flow.bindings.get(name)
+        }
+        if narrowed.is_some() -> return self.flow.narrow.get(name)
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:306
+    pub fn is_global_mutable_binding(self, name: String) -> Bool Never! {
+        loop item in self.items {
+            if item == .Const(c) && c.name == name && c.mutable && !c.is_comptime -> return true
+        }
+        false
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:316
+    pub fn sendability_for(self, name: String) -> Bool Never! {
+        if self.binding_fact_depth(name) != .Val(depth) -> return true
+        self.flow.sendability.get_at(name, depth).unwrap_or(true)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:329
+    pub fn frozen_for(self, name: String) -> Span? Never! {
+        declared :: self.flow.bindings.depth_of(name)
+        narrowed :: self.flow.narrow.depth_of(name)
+        if declared == .Val(d) {
+            if narrowed == .Val(n) && n >= d {
+                if self.flow.frozen.get_at(name, n) == .Val(site) -> return Val(site)
+            }
+            return self.flow.frozen.get_at(name, d)
+        }
+        if narrowed == .Val(n) -> return self.flow.frozen.get_at(name, n)
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:345
+    pub fn binding_fact_depth(self, name: String) -> Int? Never! {
+        declared :: self.flow.bindings.depth_of(name)
+        narrowed :: self.flow.narrow.depth_of(name)
+        if declared == .Val(d) {
+            if narrowed == .Val(n) && n >= d -> return Val(n)
+            return Val(d)
+        }
+        narrowed
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:358
+    pub fn frozen_expr_site(self, expr: Expr) -> Span? Never! {
+        if expr == {
+            .Ident(name, _) -> self.frozen_for(name)
+            .Field(base, _), .Index(base, _), .Slice(base, _), .Place(base, _), .Paren(base, _) -> self.frozen_expr_site(base)
+            .Call(call) -> { if call.name == KW_FREEZE && call.args.len() == 1 -> return Val(call.name_span); None }
+            else -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:377
+    pub fn set_interrupt_sendable(&self, name: String, sendable: Bool) Never! {
+        if self.flow.bindings.get_mut(name) == .Val(info) { info.interrupt_sendable = sendable && info.param_conv.is_none() }
+        if self.flow.narrow.get_mut(name) == .Val(info) { info.interrupt_sendable = sendable && info.param_conv.is_none() }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:389
+    pub fn is_borrowed_binding(self, name: String) -> Bool Never! {
+        if self.lookup(name) == .Val(info) -> return info.param_conv == Val(AccessConvention.Read) && !info.ty.is_scalar()
+        false
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:397
+    pub fn declare(&self, name: String, name_span: Span, info: ^LocalInfo) Never! {
+        if name == "_" -> return
+        if !info.invalid { self.note_unused_binding(name, info.def_span, info.param_conv.is_some()) }
+        if self.lookup(name).is_some() || self.consts.has_key(name) || self.loop_labels.contains(name) { self.diags.push(already_defined(name, name_span)) }
+        self.clear_moved_binding(name)
+        depth :: self.flow.depth
+        self.flow.narrow.remove_at(name, depth)
+        self.flow.sendability.remove_at(name, depth)
+        self.flow.frozen.remove_at(name, depth)
+        self.flow.path_strings.remove_at(name, depth)
+        self.flow.bindings.set_at(name, depth, ^info)
+        self.flow.sendability.set_at(name, depth, true)
+        self.flow.origins.set_at(name, depth, OriginFact.untracked())
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:425
+    pub fn declare_with_sendability(&self, name: String, name_span: Span, info: ^LocalInfo, sendable: Bool) Never! {
+        self.declare(name, name_span, ^info)
+        self.flow.sendability.set_at(name, self.flow.depth, sendable)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:437
+    pub fn declare_loop_var(&self, name: ^String, name_span: Span, ty: Type) Never! {
+        if name == "_" -> return
+        if name == KW_IT && self.implicit_loop_subject_depth > 0 -> return
+        if self.lookup(name).is_some() || self.consts.has_key(name) || self.loop_labels.contains(name) {
+            self.diags.push(already_defined(name, name_span))
+        } else {
+            depth :: self.flow.depth
+            self.note_unused_binding(name, name_span, false)
+            self.clear_moved_binding(name)
+            self.flow.bindings.set_at(name, depth, LocalInfo{def_span: name_span, binding_sigil_span: None, ty: ~ty, mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+            self.flow.sendability.set_at(name, depth, true)
+            self.flow.path_strings.remove_at(name, depth)
+            self.flow.origins.set_at(name, depth, OriginFact.untracked())
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:488
+    pub fn declare_invalid_loop_vars(&self, var: String, var_span: Span, var2: (String, Span)?) Never! {
+        // At most two names, retaining the original declaration order.
+        names := [(String, Span)]{(~var, var_span)}
+        if var2 == .Val(second) { names.push(~second) }
+        loop (name, name_span) in names {
+            if name == "_" || self.lookup(name).is_some() -> continue
+            depth :: self.flow.depth
+            self.clear_moved_binding(name)
+            self.flow.bindings.set_at(name, depth, LocalInfo{def_span: name_span, binding_sigil_span: None, ty: Type.Named(""), mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: true})
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:524
+    pub fn clear_origin(&self, name: String) Never! {
+        depth := self.scope_depth()
+        if self.binding_fact_depth(name) == .Val(d) { depth = d }
+        if self.flow.origins.depth_of(name) == .Val(d) { depth = d }
+        self.flow.origins.set_at(name, depth, OriginFact.untracked())
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:536
+    pub fn declare_loop_label(&self, name: String, name_span: Span) Never! {
+        if self.lookup(name).is_some() || self.consts.has_key(name) || self.loop_labels.contains(name) { self.diags.push(already_defined(name, name_span)) }
+        self.loop_labels.push(~name)
+    }
+}

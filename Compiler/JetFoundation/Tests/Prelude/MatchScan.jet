@@ -1,0 +1,26 @@
+use JetFoundation.Prelude.MatchScan.[JetPatternCapture, JetTextHoleKind, JetTextMatchPart, JetBinMatchPart, JetBinMatchValue, jet_text_match_scan, jet_text_pattern_match, jet_bin_match_scan, jet_binary_pattern_match]
+
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:59
+// No inline Rust tests; controls retain typed capture and byte cursor semantics.
+#Test("text matching captures in source order without type inference") {
+    parts :: [JetTextMatchPart]{JetTextMatchPart.Literal("n="), JetTextMatchPart.Hole(JetTextHoleKind.InlineRange(I64{1}, I64{9})), JetTextMatchPart.Literal(";"), JetTextMatchPart.Hole(JetTextHoleKind.Bool)}
+    result :: jet_text_pattern_match("n=7;True", parts.view(0..<parts.len())) ?? panic("typed text pattern rejected")
+    assert(result == [JetPatternCapture]{JetPatternCapture.Int(I64{7}), JetPatternCapture.Bool(true)})
+    assert(jet_text_pattern_match("n=10;true", parts.view(0..<parts.len())) == None)
+    assert(jet_text_pattern_match("n=7;yes", parts.view(0..<parts.len())) == None)
+    prefix :: [JetTextMatchPart]{JetTextMatchPart.Literal("é")}
+    reached :: jet_text_match_scan("é-tail", prefix.view(0..<1), true) ?? panic("UTF-8 prefix rejected")
+    assert(reached.offset == 2)
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:135
+#Test("binary matching preserves bit order and byte prefix boundaries") {
+    subject :: [U8]{U8{0x12}, U8{0x34}}
+    big :: [JetBinMatchPart]{JetBinMatchPart.Bits(16, false)}
+    little :: [JetBinMatchPart]{JetBinMatchPart.Bits(16, true)}
+    assert((jet_bin_match_scan(subject.view(0..<2), big.view(0..<1), false) ?? panic("big endian scan")).values == [JetBinMatchValue]{JetBinMatchValue.Int(U64{0x1234})})
+    assert((jet_binary_pattern_match(subject.view(0..<2), little.view(0..<1)) ?? panic("little endian scan")) == [JetPatternCapture]{JetPatternCapture.Int(I64{0x3412})})
+    nibble :: [JetBinMatchPart]{JetBinMatchPart.Bits(4, false)}
+    assert(jet_bin_match_scan(subject.view(0..<2), nibble.view(0..<1), true) == None)
+    rest :: [JetBinMatchPart]{JetBinMatchPart.Bits(8, false), JetBinMatchPart.Rest}
+    assert((jet_bin_match_scan(subject.view(0..<2), rest.view(0..<2), false) ?? panic("rest scan")).values == [JetBinMatchValue]{JetBinMatchValue.Int(U64{0x12}), JetBinMatchValue.Rest([U8]{U8{0x34}})})
+}

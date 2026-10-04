@@ -1,0 +1,42 @@
+use JetSema.Sema.Statements07.[expr_is_ident, expr_same_place, expr_place_spell, is_operator_trait_name, type_arg_name, block_source]
+use jet_foundation.[Expr, Type, Span, Syntax]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3939 (behavioral control)
+#Test("index_ident_matching_is_exact") {
+    span :: Span{start: 0, end: 1}
+    assert(expr_is_ident(Expr.Ident("i", span), "i"))
+    assert(!expr_is_ident(Expr.Ident("j", span), "i"))
+    assert(!expr_is_ident(Expr.Paren(Expr.Ident("i", span), span), "i"))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4059 (behavioral control)
+#Test("place_identity_ignores_parentheses_not_field_names") {
+    span :: Span{start: 0, end: 1}
+    base :: Expr.Ident("obj", span)
+    field :: Expr.Field(~base, "field", span)
+    assert(expr_same_place(field, Expr.Paren(~field, span)))
+    assert(!expr_same_place(field, Expr.Field(~base, "other", span)))
+    assert(expr_place_spell(field) == Val("obj.field"))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:45 (behavioral control)
+#Test("type_argument_name_preserves_named_and_empty_application") {
+    assert(type_arg_name(Type.Named("Widget")) == "Widget")
+    assert(type_arg_name(Type.Apply{name: "Widget", args: []}) == "Widget")
+    assert(type_arg_name(Type.Int) == Type.Int.show())
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:139 (behavioral control)
+#Test("operator_trait_admission_does_not_accept_other_traits") {
+    assert(is_operator_trait_name(Syntax.TRAIT_ADD))
+    assert(is_operator_trait_name(Syntax.TRAIT_COMPARABLE))
+    assert(!is_operator_trait_name("Display"))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:328 (behavioral control)
+#Test("empty_block_source_chooses_first_strictly_nested_block") {
+    outer :: Span{start: 0, end: 10}
+    spans :: [Span{start: 5, end: 7}, Span{start: 2, end: 4}, outer]
+    assert(block_source("0123456789", [], spans, outer) == "23")
+    assert(block_source("0123456789", [], [outer], outer) == "")
+}

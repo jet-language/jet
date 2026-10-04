@@ -1,0 +1,64 @@
+// No inline tests in Rust collections_structs.rs; controls exercise the
+// canonical tokens/state and the private literal-body continuation.
+fn collections_packet_state(source: String) -> JetParserState {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty())
+    JetParserState{tokens: lexed.tokens, position: 0, diagnostics: [], source_end: source.len(),
+        block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: source.len(), end: source.len()},
+        result_handler_depth: 0, statement_start: -1, source: source.bytes()}
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/collections_structs.rs:9,20
+#Test("literal record probe distinguishes fields text keys and element bodies") {
+    fields := collections_packet_state("{{name, value: 1}}")
+    assert(brace_body_looks_like_fields(fields.tokens.view(), 1))
+    assert(brace_starts_record(&fields))
+    keyed := collections_packet_state("{{\"key\": 1}}")
+    assert(!brace_body_looks_like_fields(keyed.tokens.view(), 1))
+    assert(brace_starts_record(&keyed))
+    elems := collections_packet_state("{{1, 2}}")
+    assert(!brace_starts_record(&elems))
+    empty := collections_packet_state("{{}}")
+    assert(!brace_starts_inferred_literal(&empty))
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/collections_structs.rs:107,179
+#Test("typed literal flat probes distinguish optional and ordinary collection heads") {
+    loop source in [String]{"[Int]{{1}}", "[Int]?{{1}}", "[[Int]]{{[1]}}", "[Int]?.{{1}}"} {
+        state := collections_packet_state(source)
+        assert(bracket_starts_typed_lit(&state))
+    }
+    ordinary := collections_packet_state("[call([value])]")
+    assert(!bracket_starts_typed_lit(&ordinary))
+    loop source in [String]{"Name?{{value}}", "a.Name?{{value}}", "Name<List<Int>>?{{value}}"} {
+        state := collections_packet_state(source)
+        assert(suffix_optional_typed_head_ahead(&state))
+    }
+    lower := collections_packet_state("name?{{value}}")
+    assert(!suffix_optional_typed_head_ahead(&lower))
+    bad := collections_packet_state("Name<Int>>?{{value}}")
+    assert(!suffix_optional_typed_head_ahead(&bad))
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/collections_structs.rs:354,434
+#Test("typed map whole value and list spread retain body shape") {
+    map := collections_packet_state("{{existing}}")
+    body :: typed_lit_body_for_head(&map, Type.Map{key: Type.String, key_span: None, value: Type.Int}, 0)
+    assert(if body == { .Value(_) -> true; _ -> false })
+    assert(map.diagnostics.is_empty())
+    spread := collections_packet_state("...left + right")
+    expr :: list_elem(&spread, 0)
+    assert(if expr.expr == {
+        .Spread(inner, _) -> if inner == { .Binary(_, _, _, _) -> true; _ -> false }
+        _ -> false
+    })
+    assert(spread.diagnostics.is_empty())
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/collections_structs.rs:1057
+#Test("or alternatives flatten nested or pattern") {
+    span :: Span{start: 0, end: 1}
+    a :: Pattern.Variant{variant: "A", bindings: [], leading_dot: true, span: span}
+    b :: Pattern.Variant{variant: "B", bindings: [], leading_dot: true, span: span}
+    c :: Pattern.Variant{variant: "C", bindings: [], leading_dot: true, span: span}
+    alternatives := [Pattern]{a}
+    push_or_alternative(&alternatives, Pattern.Or{alternatives: [Pattern]{b, c}, span: span})
+    assert(alternatives.len() == 3)
+    assert(alternatives[1] == b && alternatives[2] == c)
+}

@@ -1,13 +1,8 @@
-// PORT-PENDING 0097 crates-jet-foundation-src-schemamigration-module-group: crates/jet-foundation/src/ServiceTree.rs:1-9
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Shared validation for the typed service-tree builder.
-//RS 
-//RS pub const MAX_NAME_BYTES: usize = 256;
-//RS 
-//RS pub fn valid_name(value: &str) -> bool {
-//RS     !value.trim().is_empty()
-//RS         && !value.chars().any(char::is_control)
-//RS         && value.len() <= MAX_NAME_BYTES
-//RS }
-// END-PORT-PENDING 0097 crates/jet-foundation/src/ServiceTree.rs:1-9
-
+// Shared validation for the typed service-tree builder.
+// Rust: crates/jet-foundation/src/ServiceTree.rs:3
+pub const MAX_NAME_BYTES: Int = 256
+// Rust: crates/jet-foundation/src/ServiceTree.rs:5
+pub fn valid_name(value: String) -> Bool Never! {
+    trimmed := value.trim() // #4303
+    !trimmed.is_empty() && !value.chars().any((c) -> c.is_control()) && value.bytes().len() <= MAX_NAME_BYTES
+}

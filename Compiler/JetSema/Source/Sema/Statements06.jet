@@ -1,828 +1,358 @@
-// PORT-PENDING 0372 crates-jet-sema-src-sema-checkercore-statements-slice-2957: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2957-3780
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             Stmt::BreakLabel(name, span) => {
-//RS                 self.check_break_without_value(Some((name, *span)), *span);
-//RS             }
-//RS             Stmt::BreakLabelValue(name, name_span, value, span) => {
-//RS                 self.check_break_value(Some((name, *name_span)), value, *span);
-//RS             }
-//RS             Stmt::ContinueLabel(name, span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
-//RS                 } else if !self.loop_labels.iter().any(|l| l == name) {
-//RS                     self.diags
-//RS                         .push(undefined_loop_label(name, &self.loop_labels, *span));
-//RS                 }
-//RS             }
-//RS             Stmt::CountedLoop {
-//RS                 init,
-//RS                 cond,
-//RS                 body,
-//RS                 step,
-//RS                 label,
-//RS                 span,
-//RS                 arrow_body,
-//RS             } => {
-//RS                 let memory_multiplier = self.memory_control_multiplier;
-//RS                 self.memory_control_multiplier = None;
-//RS                 if let Some((n, label_span)) = label {
-//RS                     self.declare_loop_label(n, *label_span);
-//RS                 }
-//RS                 self.push_scope();
-//RS                 self.check_binding(init);
-//RS                 self.lint_shared_busy_wait(cond, body, *span, false);
-//RS                 crate::Sema::Effects::record_authority_alias(self, init);
-//RS                 self.require_bool(cond, "a `loop` condition");
-//RS                 self.push_loop_value_frame(label.as_ref());
-//RS                 self.push_loop_break_frame();
-//RS                 self.loop_depth += 1;
-//RS                 let before_loop = self.flow.clone();
-//RS                 let previous_arrow_loop_body = self.arrow_loop_body;
-//RS                 self.arrow_loop_body = *arrow_body;
-//RS                 self.check_block(body, true);
-//RS                 self.arrow_loop_body = previous_arrow_loop_body;
-//RS                 if let Some(step) = step {
-//RS                     self.check_stmt(step.as_mut());
-//RS                 }
-//RS                 let after_body = self.flow.clone();
-//RS                 self.join_loop_flow(
-//RS                     &before_loop,
-//RS                     &after_body,
-//RS                     !matches!(cond.without_parens(), Expr::Bool(true, _)),
-//RS                 );
-//RS                 self.loop_depth -= 1;
-//RS                 self.pop_loop_value_frame();
-//RS                 self.pop_scope();
-//RS                 if label.is_some() {
-//RS                     self.loop_labels.pop();
-//RS                 }
-//RS                 self.memory_control_multiplier = memory_multiplier;
-//RS             }
-//RS             Stmt::Loop {
-//RS                 body: inner,
-//RS                 label,
-//RS                 arrow_body,
-//RS                 ..
-//RS             } => {
-//RS                 let memory_multiplier = self.memory_control_multiplier;
-//RS                 self.memory_control_multiplier = None;
-//RS                 if let Some((n, label_span)) = label {
-//RS                     self.declare_loop_label(n, *label_span);
-//RS                 }
-//RS                 self.push_loop_value_frame(label.as_ref());
-//RS                 self.push_loop_break_frame();
-//RS                 self.loop_depth += 1;
-//RS                 let before_loop = self.flow.clone();
-//RS                 let previous_arrow_loop_body = self.arrow_loop_body;
-//RS                 self.arrow_loop_body = *arrow_body;
-//RS                 self.check_block(inner, true);
-//RS                 self.arrow_loop_body = previous_arrow_loop_body;
-//RS                 let after_body = self.flow.clone();
-//RS                 self.join_loop_flow(&before_loop, &after_body, false);
-//RS                 self.loop_depth -= 1;
-//RS                 self.pop_loop_value_frame();
-//RS                 if label.is_some() {
-//RS                     self.loop_labels.pop();
-//RS                 }
-//RS                 self.memory_control_multiplier = memory_multiplier;
-//RS             }
-//RS             Stmt::Unsafe { body, .. } => {
-//RS                 let prev = self.in_unsafe;
-//RS                 self.in_unsafe = true;
-//RS                 self.check_block(body, true);
-//RS                 self.in_unsafe = prev;
-//RS             }
-//RS             // D-CTEFFECT1: `#Impure("reason") { … }` — the Tier-2 comptime effect
-//RS             // gate. At runtime (which is what sema is checking here), this block is
-//RS             // semantically a plain block: it has no runtime significance. The gate is
-//RS             // enforced only inside the comptime interpreter. L3102 fires when no
-//RS             // reason was given.
-//RS             Stmt::Impure {
-//RS                 reason, body, span, ..
-//RS             } => {
-//RS                 let policy_allowed =
-//RS                     self.audited_gate_allowed(crate::Policy::PolicyKey::Impure, *span);
-//RS                 if reason.is_none() {
-//RS                     self.diags.push(Diagnostic::lint(
-//RS                         "L3102",
-//RS                         "this `#Impure` block has no reason".to_string(),
-//RS                         "every comptime effect gate records why ambient I/O is needed".to_string(),
-//RS                         "add the reason: `#Impure(\"reading build config\") { … }`".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 if policy_allowed {
-//RS                     self.ct_impure_depth += 1;
-//RS                 }
-//RS                 self.check_block(body, true);
-//RS                 if policy_allowed {
-//RS                     self.ct_impure_depth -= 1;
-//RS                 }
-//RS             }
-//RS             // D-SHIELDNAME1=A: `#Shield { … }` — a cancellation-shield region.
-//RS             // Legal anywhere ordinary statements are; a no-op outside a task.
-//RS             // Semantically a plain block: check the body, no effects, no gate.
-//RS             Stmt::Shield { body, .. } => {
-//RS                 self.check_block(body, true);
-//RS             }
-//RS             // D-REACTCORE1: `#Reactive { … }` — a reactive effect scope.
-//RS             Stmt::Reactive { body, span } => {
-//RS                 if self.in_comptime {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E2914",
-//RS                             "`#Reactive` can't run at comptime".to_string(),
-//RS                             "reactive effects subscribe to runtime signals and re-run when they change (D-REACTCORE1)"
-//RS                                 .to_string(),
-//RS                             "move `#Reactive { … }` out of the `comptime` block".to_string(),
-//RS                             Some(*span),
-//RS                         ));
-//RS                 }
-//RS                 let mut captures = crate::Sema::block_free_var_reads(body)
-//RS                     .into_iter()
-//RS                     .collect::<Vec<_>>();
-//RS                 captures.sort();
-//RS                 for name in captures {
-//RS                     if self.is_view(&name) {
-//RS                         let read_only = self
-//RS                             .view_facts(&name)
-//RS                             .iter()
-//RS                             .all(|fact| fact.access == ViewAccess::Read);
-//RS                         let copy_ty =
-//RS                             self.lookup(&name)
-//RS                                 .map(|info| info.ty.clone())
-//RS                                 .and_then(|ty| {
-//RS                                     crate::Sema::Diagnostics::owned_type_for_read_view(&ty).or_else(
-//RS                                         || {
-//RS                                             (self.is_string_view(&name)
-//RS                                                 && matches!(ty, Type::String))
-//RS                                             .then_some(Type::String)
-//RS                                         },
-//RS                                     )
-//RS                                 });
-//RS                         if !self.copies_explicit()
-//RS                             && read_only
-//RS                             && copy_ty
-//RS                                 .as_ref()
-//RS                                 .is_some_and(|ty| self.is_cloneable_type(ty))
-//RS                         {
-//RS                             continue;
-//RS                         }
-//RS                         self.report_view_escape(&name, "be captured by a reactive effect", *span);
-//RS                     }
-//RS                 }
-//RS                 // The body runs later in its own move closure. Mutating a
-//RS                 // cloned reactive capture must not make an enclosing
-//RS                 // callback FnMut; only construction-time clone reads cross
-//RS                 // that callback boundary.
-//RS                 let enclosing_mut_captures = std::mem::take(&mut self.inferred_lambda_mut_captures);
-//RS                 self.check_block(body, true);
-//RS                 self.inferred_lambda_mut_captures = enclosing_mut_captures;
-//RS             }
-//RS             Stmt::Switched { marker, body, .. } if crate::AST::switched_off(marker) => {
-//RS                 // D-ERASED-SCOPE1: #Off source is checked for diagnostics, but
-//RS                 // no semantic fact, effect edge, or optimizer evidence may
-//RS                 // escape. Check a disposable AST copy: inference annotates
-//RS                 // expressions in place, and post-check projections must never
-//RS                 // consume annotations from code that emits nowhere.
-//RS                 let original_body = std::mem::take(body);
-//RS                 let mut checked_body = original_body.clone();
-//RS                 self.with_erased_scope(|checker| {
-//RS                     checker.suppress_must_use = true;
-//RS                     checker.push_scope();
-//RS                     for stmt in &mut checked_body {
-//RS                         checker.check_stmt(stmt);
-//RS                     }
-//RS                     checker.check_single_use_consumed_in_current_scope();
-//RS                     checker.drop_scope_no_obligation_checks();
-//RS                 });
-//RS                 *body = original_body;
-//RS                 // Lambda rows are the one post-check projection that needs an
-//RS                 // explicit erased marker; all other checked annotations stay
-//RS                 // on the disposable copy above.
-//RS                 for stmt in body {
-//RS                     stmt.for_each_expr_mut(|expr| {
-//RS                         if let Expr::Lambda(lambda) = expr {
-//RS                             lambda.meta.runtime_erased = true;
-//RS                         }
-//RS                     });
-//RS                 }
-//RS             }
-//RS             Stmt::Switched { marker, body, .. }
-//RS                 if marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {
-//RS                 // DebugOnly may execute in a debug/dev profile, so retain its
-//RS                 // checked AST annotations for that lowering. Its semantic
-//RS                 // ledgers still use the erased-scope boundary: release output
-//RS                 // cannot rely on facts from a body it removes.
-//RS                 self.with_erased_scope(|checker| {
-//RS                     checker.suppress_must_use = true;
-//RS                     checker.push_scope();
-//RS                     for stmt in body {
-//RS                         checker.check_stmt(stmt);
-//RS                         stmt.for_each_expr_mut(|expr| {
-//RS                             if let Expr::Lambda(lambda) = expr {
-//RS                                 lambda.meta.runtime_erased = true;
-//RS                             }
-//RS                         });
-//RS                     }
-//RS                     checker.check_single_use_consumed_in_current_scope();
-//RS                     checker.drop_scope_no_obligation_checks();
-//RS                 });
-//RS             }
-//RS             Stmt::Switched { body, .. } => {
-//RS                 self.check_block(body, true);
-//RS             }
-//RS             // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical
-//RS             // scope: arena `view`s allocated inside cannot escape it (the
-//RS             // E0631 escape rule is enforced against the scope floor, identical
-//RS             // to the implicit scope-inferred region of opt A). The region name
-//RS             // is documentary in v1 — it labels the scope for the reader; the
-//RS             // bound is the scope itself.
-//RS             Stmt::Region { body, .. } => {
-//RS                 self.check_block(body, true);
-//RS             }
-//RS             Stmt::Policy {
-//RS                 declarations,
-//RS                 body,
-//RS                 span,
-//RS             } => {
-//RS                 self.enter_memory_policy_region(declarations.clone(), *span);
-//RS                 self.check_block(body, true);
-//RS                 self.exit_memory_policy_region();
-//RS             }
-//RS             // D-WRAP-SCOPE1=A: one lexical fixed-width arithmetic mode. The
-//RS             // mode is a sema fact only; codegen sees the ordinary shared
-//RS             // checked/wrapping/saturating operation after expression typing.
-//RS             Stmt::ScopeMember {
-//RS                 name,
-//RS                 args,
-//RS                 body,
-//RS                 span,
-//RS                 ..
-//RS             } if name == crate::Syntax::MARKER_ARITHMETIC => {
-//RS                 let Some(mode) = args.first().and_then(crate::AST::ArithmeticMode::from_expr)
-//RS                 else {
-//RS                     self.diags.push(crate::Policy::marker_argument_shape_error(
-//RS                         crate::Syntax::MARKER_ARITHMETIC,
-//RS                         *span,
-//RS                     ));
-//RS                     self.check_block(body, true);
-//RS                     return;
-//RS                 };
-//RS                 self.arithmetic_policy_stack
-//RS                     .push(crate::AST::ArithmeticPolicyFact {
-//RS                         mode,
-//RS                         scope_span: *span,
-//RS                         operation_span: *span,
-//RS                         operation: None,
-//RS                     });
-//RS                 self.check_block(body, true);
-//RS                 self.arithmetic_policy_stack.pop();
-//RS             }
-//RS             // D-CONC-SPAWN1=D: `task.group g { … }` — structured task scope.
-//RS             Stmt::TaskGroup {
-//RS                 name,
-//RS                 name_span,
-//RS                 limit,
-//RS                 body,
-//RS                 ..
-//RS             } => {
-//RS                 if let Some(limit) = limit {
-//RS                     if let Some(limit_ty) = self.infer(limit) {
-//RS                         if !matches!(limit_ty, Type::InlineRange { .. }) {
-//RS                             self.check_type_assignable(&Type::Int, &limit_ty, limit.span());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 self.push_scope();
-//RS                 self.declare(
-//RS                     name,
-//RS                     *name_span,
-//RS                     LocalInfo {
-//RS                         def_span: *name_span,
-//RS                         binding_sigil_span: None,
-//RS                         ty: Type::Named(Syntax::TYPE_TASKGROUP.to_string()),
-//RS                         mutable: false,
-//RS                         param_conv: None,
-//RS                         decl_loop_depth: self.loop_depth,
-//RS                         interrupt_sendable: false,
-//RS                         reactive_local: false,
-//RS                         reactive_shared: false,
-//RS                         single_use_span: None,
-//RS                         invalid: false,
-//RS                     },
-//RS                 );
-//RS                 // The group name is the lexical handle that owns this scope;
-//RS                 // `task` calls inside the body are rewritten to it even when
-//RS                 // the source never spells the handle again. Count that
-//RS                 // implicit ownership use so the label is not reported as an
-//RS                 // unused local.
-//RS                 self.mark_local_name_reference(name);
-//RS                 self.taskgroup_stack
-//RS                     .push(TaskGroupCtx::new(name.clone(), *name_span));
-//RS                 self.check_block(body, false);
-//RS                 self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Lexical);
-//RS                 self.taskgroup_stack.pop();
-//RS                 self.pop_scope();
-//RS             }
-//RS             // D-LAYOUT1: `layout NAME { … }` — a
-//RS             // Cassowary-style constraint block. Unlike `region`/`task.group`,
-//RS             // `name` is declared in the CURRENT scope (not pushed/popped
-//RS             // around it) so the handle outlives the block — later code reads
-//RS             // solved values (`NAME.value(v)`) or calls `NAME.suggest(...)`.
-//RS             // The parser already desugared every `box.anchor` read into a
-//RS             // `NAME.h(box, anchor)`/`NAME.v(box, anchor)` call, so every line
-//RS             // is an ordinary expression checked by the general GATE-1/GATE-2
-//RS             // machinery (`infer_binary`'s layout block, `layout_method_return`)
-//RS             // — the only layout-specific rule left to enforce here is that
-//RS             // each line's RESULT is a `Constraint` (E2933 otherwise).
-//RS             Stmt::Layout {
-//RS                 name,
-//RS                 name_span,
-//RS                 body,
-//RS                 ..
-//RS             } => {
-//RS                 self.declare(
-//RS                     name,
-//RS                     *name_span,
-//RS                     LocalInfo {
-//RS                         def_span: *name_span,
-//RS                         binding_sigil_span: None,
-//RS                         ty: Type::Named(Syntax::LAYOUT_TYPE.to_string()),
-//RS                         mutable: false,
-//RS                         param_conv: None,
-//RS                         decl_loop_depth: self.loop_depth,
-//RS                         interrupt_sendable: false,
-//RS                         reactive_local: false,
-//RS                         reactive_shared: false,
-//RS                         single_use_span: None,
-//RS                         invalid: false,
-//RS                     },
-//RS                 );
-//RS                 self.push_scope();
-//RS                 // D-LAYOUT1: E2934 (lint) — a constraint line that is a
-//RS                 // byte-for-byte structural duplicate of an earlier one in the
-//RS                 // SAME block is almost always a copy-paste mistake (a real,
-//RS                 // if narrow, notion of "redundant": exact duplicates only —
-//RS                 // proving general LP redundancy, i.e. "implied by the
-//RS                 // others", is a much larger problem than this lint needs).
-//RS                 let mut seen_constraints: HashSet<String> = HashSet::new();
-//RS                 for stmt in body.iter_mut() {
-//RS                     if let Stmt::Expr(_) = stmt {
-//RS                         let Stmt::Expr(e) = stmt else { unreachable!() };
-//RS                         let fp = layout_constraint_fingerprint(e);
-//RS                         let t = self.infer(e);
-//RS                         let is_constraint = matches!(&t, Some(Type::Named(n)) if n == Syntax::LAYOUT_CONSTRAINT_TYPE);
-//RS                         if !is_constraint && t.is_some() {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E2933",
-//RS                                     format!(
-//RS                                         "this element inside `{} {} {}.{{ … }}` doesn't produce a constraint (found `{}`)",
-//RS                                         name,
-//RS                                         Syntax::SIGIL_BIND_IMMUT,
-//RS                                         Syntax::LAYOUT_TYPE,
-//RS                                         t.as_ref().map(|ty| ty.name()).unwrap_or_default()
-//RS                                     ),
-//RS                                     format!(
-//RS                                         "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated",
-//RS                                         Syntax::LAYOUT_TYPE
-//RS                                     ),
-//RS                                     "write a comparison, e.g. `label.width >= 80.0`".to_string(),
-//RS                                     Some(e.span()),
-//RS                                 ));
-//RS                         } else if is_constraint && !seen_constraints.insert(fp) {
-//RS                             self.diags.push(Diagnostic::lint(
-//RS                                     "E2934",
-//RS                                     format!(
-//RS                                         "this constraint repeats one already written in this `{}.{{ … }}` body",
-//RS                                         Syntax::LAYOUT_TYPE
-//RS                                     ),
-//RS                                     "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
-//RS                                     "remove the duplicate line, or change it if a different constraint was meant".to_string(),
-//RS                                     Some(e.span()),
-//RS                                 ));
-//RS                         }
-//RS                     } else if let Stmt::Val(_) = stmt {
-//RS                         let fp = if let Stmt::Val(b) = stmt {
-//RS                             layout_constraint_fingerprint(&b.init)
-//RS                         } else {
-//RS                             unreachable!()
-//RS                         };
-//RS                         self.check_stmt(stmt);
-//RS                         if let Stmt::Val(b) = stmt {
-//RS                             let bname = b.name.clone();
-//RS                             let name_span = b.name_span;
-//RS                             let is_constraint = self
-//RS                                     .lookup(&bname)
-//RS                                     .map(|info| {
-//RS                                         matches!(&info.ty, Type::Named(n) if n == Syntax::LAYOUT_CONSTRAINT_TYPE)
-//RS                                     })
-//RS                                     .unwrap_or(false);
-//RS                             if !is_constraint {
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                         "E2933",
-//RS                                         format!(
-//RS                                             "this binding inside `{} {} {}.{{ … }}` doesn't capture a constraint",
-//RS                                             name,
-//RS                                             Syntax::SIGIL_BIND_IMMUT,
-//RS                                             Syntax::LAYOUT_TYPE
-//RS                                         ),
-//RS                                         format!(
-//RS                                             "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`",
-//RS                                             Syntax::LAYOUT_TYPE
-//RS                                         ),
-//RS                                         "bind a comparison: `c :: label.width >= 80.0`".to_string(),
-//RS                                         Some(name_span),
-//RS                                     ));
-//RS                             } else if !seen_constraints.insert(fp) {
-//RS                                 self.diags.push(Diagnostic::lint(
-//RS                                         "E2934",
-//RS                                         format!(
-//RS                                             "this constraint repeats one already written in this `{}.{{ … }}` body",
-//RS                                             Syntax::LAYOUT_TYPE
-//RS                                         ),
-//RS                                         "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
-//RS                                         "remove the duplicate line, or change it if a different constraint was meant".to_string(),
-//RS                                         Some(name_span),
-//RS                                     ));
-//RS                             }
-//RS                         }
-//RS                     } else {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E2933",
-//RS                                 format!(
-//RS                                     "only constraint elements belong directly inside a `{}.{{ … }}` body",
-//RS                                     Syntax::LAYOUT_TYPE
-//RS                                 ),
-//RS                                 format!(
-//RS                                     "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`",
-//RS                                     Syntax::LAYOUT_TYPE
-//RS                                 ),
-//RS                                 "write a comparison, e.g. `label.width >= 80.0`".to_string(),
-//RS                                 Some(stmt.span()),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 self.pop_scope();
-//RS             }
-//RS             // D-EFF1 / D-ABILITY-NAME2: bare `#FX(Net, DB) { … }`
-//RS             // restricts effects. A named `#FX(grant: FS, Net) { … }`
-//RS             // also binds a scoped Authority handle and uses the same
-//RS             // subset check for both forms.
-//RS             Stmt::AuthorityScope {
-//RS                 caps,
-//RS                 caps_span,
-//RS                 binding,
-//RS                 binding_span,
-//RS                 body,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 let mut cap_set = crate::Sema::EffectSet::new();
-//RS                 let mut bad = false;
-//RS                 for (name, span) in caps.iter() {
-//RS                     match crate::Sema::resolve_effect_name(name, self.effect_facts) {
-//RS                         Ok(e) => {
-//RS                             if let Some(diagnostic) =
-//RS                                 crate::Sema::reject_positive_deny_only_effect(&e, *span)
-//RS                             {
-//RS                                 self.diags.push(diagnostic);
-//RS                                 bad = true;
-//RS                             } else {
-//RS                                 cap_set.insert(e);
-//RS                             }
-//RS                         }
-//RS                         Err(suggestion) => {
-//RS                             if crate::Sema::parse_effect_name(name).is_some() {
-//RS                                 self.diags.push(crate::Sema::undeclared_effect(
-//RS                                     name,
-//RS                                     suggestion.as_deref(),
-//RS                                     Some(*span),
-//RS                                 ));
-//RS                             } else {
-//RS                                 self.diags.push(unknown_effect(name, *span));
-//RS                             }
-//RS                             bad = true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-AUTHORITY-MODEL1: a nested scope may attenuate the
-//RS                 // enclosing grant, but it cannot mint a right the outer
-//RS                 // scope did not hold. Check the declaration boundary before
-//RS                 // walking the body so an empty nested block cannot widen by
-//RS                 // accident.
-//RS                 if let Some(outer) = self.region_stack.last() {
-//RS                     let widening = crate::Sema::effects_uncovered(&cap_set, &outer.caps);
-//RS                     if !widening.is_empty() {
-//RS                         self.diags.push(crate::Sema::e0712(
-//RS                             &widening,
-//RS                             &outer.caps,
-//RS                             *caps_span,
-//RS                             crate::Syntax::KW_FX,
-//RS                         ));
-//RS                         bad = true;
-//RS                     }
-//RS                 }
-//RS                 if let Some(binding) = binding {
-//RS                     let binding_span = binding_span
-//RS                         .as_ref()
-//RS                         .copied()
-//RS                         .expect("named #FX binding has a span");
-//RS                     self.push_scope();
-//RS                     self.declare_loop_var(
-//RS                         binding.clone(),
-//RS                         binding_span,
-//RS                         &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
-//RS                     );
-//RS                 }
-//RS                 self.region_stack.push(crate::Sema::RegionAccum {
-//RS                     binding: binding.clone(),
-//RS                     aliases: std::collections::BTreeMap::new(),
-//RS                     caps: cap_set,
-//RS                     caps_span: *caps_span,
-//RS                     direct: crate::Sema::EffectSet::new(),
-//RS                     edges: std::collections::BTreeSet::new(),
-//RS                     maximal: false,
-//RS                 });
-//RS                 self.check_block(body, true);
-//RS                 let acc = self.region_stack.pop().expect("pushed above");
-//RS                 if let Some(binding) = binding {
-//RS                     for delegation in crate::Sema::authority_delegations(body, binding, *span) {
-//RS                         if !self.fx_authority_delegations.iter().any(|existing| {
-//RS                             existing.span == delegation.span
-//RS                                 && existing.resource == delegation.resource
-//RS                                 && existing.operation == delegation.operation
-//RS                         }) {
-//RS                             self.fx_authority_delegations.push(delegation);
-//RS                         }
-//RS                     }
-//RS                     if let Some(escape_span) = grant_handle_escape(body, binding) {
-//RS                         self.diags.push(crate::Sema::e0711(
-//RS                             binding,
-//RS                             crate::Syntax::KW_FX,
-//RS                             escape_span,
-//RS                         ));
-//RS                     }
-//RS                     self.pop_scope();
-//RS                 }
-//RS                 // Skip the subset check when a cap name was invalid (the cap
-//RS                 // set is incomplete) — E0119 is the real problem to fix.
-//RS                 if !bad {
-//RS                     self.fx_regions.push(crate::Sema::RegionSummary {
-//RS                         caps: acc.caps,
-//RS                         direct: acc.direct,
-//RS                         edges: acc.edges,
-//RS                         maximal: acc.maximal,
-//RS                         caps_span: acc.caps_span,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             // `#Context(field: value) { … }`.
-//RS             // Type-check each field value: `allocator` must be an allocator
-//RS             // handle type; `deadline` must be an Int epoch-ms instant; `logger`
-//RS             // is currently unconstrained. E0762 on mismatch.
-//RS             // Q1 = A2: explicit allocator args at call sites override the
-//RS             // ambient — no static binding done here, only type validation and
-//RS             // block body checking. Q2 = Cβ: restore is per-block (RAII guard).
-//RS             // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input
-//RS             // block. No type-checking beyond the body; the block is impure (IO
-//RS             // effect), so it is rejected inside `#Pure fn` (same rule as `io.input`).
-//RS             // `use core.term` is NOT required to write a `live` block — the block
-//RS             // is its own syntactic gate. `term.read_key()` does need the import.
-//RS             // E3301: no-OS targets have no terminal device.
-//RS             Stmt::Live { body, span } => {
-//RS                 if self.in_pure {
-//RS                     self.diags.push(crate::Sema::e3401(
-//RS                         &self.fn_name.clone(),
-//RS                         "#Live { … }",
-//RS                         &[],
-//RS                         *span,
-//RS                     ));
-//RS                 }
-//RS                 if self.no_os {
-//RS                     self.diags.push(crate::Sema::e3301(
-//RS                             "#Live { … }",
-//RS                             "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider.",
-//RS                             *span,
-//RS                         ));
-//RS                 }
-//RS                 self.check_block(body, true);
-//RS             }
-//RS             // D-DOTSCOPE1: a scope-member statement (`.setup`/`.expect_fail`/
-//RS             // `.timeout`/`.skip` inside a `#Test` block). Member legality, args,
-//RS             // position, and nesting are validated by the `ScopeMembers` pass; here
-//RS             // the checker type-checks the region body's ordinary statements.
-//RS             // `.timeout` is the one member with a value argument: its canonical
-//RS             // Time literal or binding is inferred here, after `.setup` bindings
-//RS             // have entered scope, and must be a Duration.
-//RS             // `.setup` is init sugar: its bindings leak into the test scope (no new
-//RS             // scope), so the rest of the body can use them. Every other member is
-//RS             // its own region (a closure / block / dead branch in codegen), so its
-//RS             // bindings are scoped — referencing them later is a normal unknown-name
-//RS             // error, never reaching codegen.
-//RS             Stmt::ScopeMember {
-//RS                 name, args, body, ..
-//RS             } => {
-//RS                 if name == crate::Syntax::SCOPE_TEST_TIMEOUT {
-//RS                     if let [arg] = args.as_mut_slice() {
-//RS                         let expected = Type::Named(crate::Syntax::DURATION_TYPE.to_string());
-//RS                         if let Some(got) = self.infer_with_expected(arg, &expected) {
-//RS                             let reported = self.check_type_assignable(&expected, &got, arg.span());
-//RS                             if !reported && got != expected {
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                     "E0112",
-//RS                                     format!(
-//RS                                         "`.timeout` wants {}, but this is {}",
-//RS                                         expected.show(),
-//RS                                         got.show()
-//RS                                     ),
-//RS                                     "a timeout budget is a Duration value".to_string(),
-//RS                                     type_fix_hint(&expected, &got),
-//RS                                     Some(arg.span()),
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-DSLBLOCK1: the optional SQL row header is a type
-//RS                 // position, not a runtime expression. Validate it through
-//RS                 // the ordinary declared-type rules so local, imported,
-//RS                 // generic, alias, and unknown names all receive the same
-//RS                 // visibility and teaching diagnostics as any other type.
-//RS                 let has_type_parameter = crate::Policy::applied_rule(name).is_some_and(|row| {
-//RS                     row.signature
-//RS                         .params
-//RS                         .first()
-//RS                         .is_some_and(|parameter| parameter.source_type == "Type")
-//RS                 });
-//RS                 if has_type_parameter {
-//RS                     if let [Expr::Ident(type_name, type_span)] = args.as_slice() {
-//RS                         self.check_declared_type_rules(&Type::Named(type_name.clone()), *type_span);
-//RS                     }
-//RS                 }
-//RS                 let leak = name == crate::Syntax::SCOPE_TEST_SETUP;
-//RS                 self.check_block(body, !leak);
-//RS             }
-//RS             // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
-//RS             // expert determinism-escape. Raise the suppression depth so the
-//RS             // determinism rejections inside a `#Pure fn` (E3403 non-deterministic
-//RS             // Core call / E3401 impure Core call) are suspended for the body. This
-//RS             // does NOT relax memory/type safety — only the determinism check. A
-//RS             // lexical scope; erased in codegen (I3 — a plain Rust block).
-//RS             Stmt::AssumeDet { body, span, .. } => {
-//RS                 let policy_allowed =
-//RS                     self.audited_gate_allowed(crate::Policy::PolicyKey::Nondeterministic, *span);
-//RS                 if policy_allowed {
-//RS                     self.det_suppress += 1;
-//RS                 }
-//RS                 self.check_block(body, true);
-//RS                 if policy_allowed {
-//RS                     self.det_suppress -= 1;
-//RS                 }
-//RS             }
-//RS             // `#Transact(name) { … }`.
-//RS             // Bind the user-chosen handle `name` (typed `Transaction`) so
-//RS             // `name.on_commit(() -> { … })` resolves inside the block, then check
-//RS             // the body with the transaction depth raised: an irreversible Core
-//RS             // effect (Net/FS/Exec) reached directly in the block is E0746
-//RS             // (D-TXN2) at its call site. A lexical scope; erased in codegen (I3).
-//RS             Stmt::Transact {
-//RS                 name,
-//RS                 name_span,
-//RS                 body,
-//RS                 implicit,
-//RS                 ..
-//RS             } => {
-//RS                 let implicit = *implicit;
-//RS                 self.push_scope();
-//RS                 if let (Some(name), Some(name_span)) = (name, name_span) {
-//RS                     self.declare_loop_var(
-//RS                         name.clone(),
-//RS                         *name_span,
-//RS                         &Type::Named(crate::Syntax::TXN_HANDLE_TYPE.to_string()),
-//RS                     );
-//RS                 }
-//RS                 self.txn_depth += 1;
-//RS                 // D-CONC-SHARE1=A: only a transaction the author opened
-//RS                 // raises the D-TXN2 effect wall. A synthesized
-//RS                 // one-statement commit carries the commit plane alone.
-//RS                 if !implicit {
-//RS                     self.txn_wall_depth += 1;
-//RS                 }
-//RS                 self.check_block(body, true);
-//RS                 if !implicit {
-//RS                     self.txn_wall_depth -= 1;
-//RS                 }
-//RS                 self.txn_depth -= 1;
-//RS                 self.pop_scope();
-//RS             }
-//RS             Stmt::ContextBlock { fields, body, span } => {
-//RS                 let rule_fact = self.take_rule_fact(crate::Syntax::CTX_BLOCK, *span);
-//RS                 let signature_checked = rule_fact.is_some();
-//RS                 let validated = rule_fact.and_then(|mut marker| {
-//RS                     for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
-//RS                         if let Some(argument) = argument.as_expr_mut() {
-//RS                             std::mem::swap(argument, value);
-//RS                         }
-//RS                     }
-//RS                     let validated = self.validate_rule_signature(&mut marker);
-//RS                     for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
-//RS                         if let Some(argument) = argument.as_expr_mut() {
-//RS                             std::mem::swap(argument, value);
-//RS                         }
-//RS                     }
-//RS                     validated
-//RS                 });
-//RS                 let signature_valid = !signature_checked || validated.is_some();
-//RS                 for (source_index, (field_name, value_expr, field_span)) in
-//RS                     fields.iter_mut().enumerate()
-//RS                 {
-//RS                     let ty = if signature_checked {
-//RS                         validated.as_ref().and_then(|arguments| {
-//RS                             let binding = arguments
-//RS                                 .bindings
-//RS                                 .iter()
-//RS                                 .find(|binding| binding.source_index == source_index)?;
-//RS                             if binding.ty == crate::Policy::RuleArgType::Any {
-//RS                                 self.infer(value_expr)
-//RS                             } else {
-//RS                                 arguments.type_for_source(source_index)
-//RS                             }
-//RS                         })
-//RS                     } else {
-//RS                         self.infer(value_expr)
-//RS                     };
-//RS                     match field_name.as_str() {
-//RS                         crate::Syntax::CTX_FIELD_ALLOCATOR => {
-//RS                             if !signature_valid {
-//RS                                 continue;
-//RS                             }
-//RS                             // Must be one of the known allocator handle types.
-//RS                             let ok = match &ty {
-//RS                                 Some(Type::Named(n)) => {
-//RS                                     crate::Syntax::alloc_handle_rust_type(n).is_some()
-//RS                                 }
-//RS                                 _ => false,
-//RS                             };
-//RS                             if !ok {
-//RS                                 let got = ty
-//RS                                     .as_ref()
-//RS                                     .map(|t| t.show())
-//RS                                     .unwrap_or_else(|| "unknown".to_string());
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                         "E0762",
-//RS                                         format!("`allocator` needs an allocator, got {}", got),
-//RS                                         "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value".to_string(),
-//RS                                         "pass an allocator, e.g. `mem.Arena.new()`".to_string(),
-//RS                                         Some(*field_span),
-//RS                                     ));
-//RS                             }
-//RS                         }
-//RS                         crate::Syntax::CTX_FIELD_LOGGER => {
-//RS                             // v1: any value accepted for logger; a future Logger
-//RS                             // type will narrow this. No E0762 for logger yet.
-//RS                             let _ = ty;
-//RS                         }
-//RS                         crate::Syntax::CTX_FIELD_DEADLINE => {
-//RS                             if !signature_valid {
-//RS                                 continue;
-//RS                             }
-//RS                             if !matches!(ty, Some(Type::Int | Type::InlineRange { .. })) {
-//RS                                 let got = ty
-//RS                                     .as_ref()
-//RS                                     .map(|t| t.show())
-//RS                                     .unwrap_or_else(|| "unknown".to_string());
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                         "E0762",
-//RS                                         format!("`deadline` needs an Int epoch-millis instant, got {}", got),
-//RS                                         "the `deadline` field carries an absolute time budget in milliseconds".to_string(),
-//RS                                         "pass an Int, e.g. `time.now() + 200`".to_string(),
-//RS                                         Some(*field_span),
-//RS                                     ));
-//RS                             }
-//RS                         }
-//RS                         _ => {
-//RS                             // Parser already rejected unknown fields (E0761);
-//RS                             // this arm is unreachable in practice.
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let has_allocator = fields
-//RS                     .iter()
-//RS                     .any(|(n, _, _)| n == crate::Syntax::CTX_FIELD_ALLOCATOR);
-//RS                 let saved_depth = self.context_depth;
-//RS                 let saved_alloc = self.context_allocator_active;
-//RS                 self.context_depth += 1;
-//RS                 if has_allocator {
-//RS                     self.context_allocator_active = true;
-//RS                 }
-//RS                 self.check_block(body, true);
-//RS                 self.context_allocator_active = saved_alloc;
-//RS                 self.context_depth = saved_depth;
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0372 crates/jet-sema/src/Sema/CheckerCore/statements.rs:2957-3780
+use jet_foundation.[Binding, Stmt, Expr, Type, Span, Marker, PolicyDeclaration, PolicyKey, ArithmeticMode, ArithmeticPolicyFact, Diagnostic, ViewAccess, switched_off]
+use jet_foundation.Syntax.[KW_NEXT, MARKER_DEBUG_ONLY, MARKER_ARITHMETIC, TYPE_TASKGROUP, LAYOUT_TYPE, LAYOUT_CONSTRAINT_TYPE, SIGIL_BIND_IMMUT, KW_FX, AUTHORITY_HANDLE_TYPE, SCOPE_TEST_TIMEOUT, SCOPE_TEST_SETUP, DURATION_TYPE, TXN_HANDLE_TYPE, CTX_BLOCK, CTX_FIELD_ALLOCATOR, CTX_FIELD_LOGGER, CTX_FIELD_DEADLINE, alloc_handle_rust_type]
+use jet_sema.[Checker, LocalInfo, TaskGroupCtx, TaskGroupOrigin, RegionAccum, RegionSummary, EffectSet, loop_control_outside, undefined_loop_label, block_free_var_reads, owned_type_for_read_view, layout_constraint_fingerprint, resolve_effect_name, reject_positive_deny_only_effect, parse_effect_name, undeclared_effect, unknown_effect, effects_uncovered, e0712, e0711, authority_delegations, grant_handle_escape, e3401, e3301, type_fix_hint, record_authority_alias]
+use jet_foundation.Policy.[marker_argument_shape_error, applied_rule, RuleArgType]
+use std.mem.[swap] // GATE #4494: in-place swap of retained expression slots.
 
+// Private payload helpers of the canonical Checker.check_stmt_inner dispatch.
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2957
+    fn check_stmt_break_label(&self, name: String, span: Span) Never! { &self.check_break_without_value(Val((name, span)), span) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2960
+    fn check_stmt_break_label_value(&self, name: String, name_span: Span, value: &Expr, span: Span) Never! { &self.check_break_value(Val((name, name_span)), &value, span) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2963
+    fn check_stmt_continue_label(&self, name: String, span: Span) Never! {
+        if self.loop_depth == 0 {
+            &self.diags.push(loop_control_outside(KW_NEXT, span))
+        } else if !self.loop_labels.any(fn(label) { label == name }) {
+            &self.diags.push(undefined_loop_label(name, self.loop_labels, span))
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2972
+    fn check_stmt_counted_loop(&self, init: &Binding, cond: &Expr, body: &[Stmt], step: &Stmt?, label: (String, Span)?, span: Span, arrow_body: Bool) Never! {
+        memory_multiplier :: self.memory_control_multiplier
+        self.memory_control_multiplier = None
+        if label == .Val((name, label_span)) -> &self.declare_loop_label(name, label_span)
+        &self.push_scope()
+        &self.check_binding(&init)
+        &self.lint_shared_busy_wait(cond, body, span, false)
+        record_authority_alias(&self, init)
+        &self.require_bool(&cond, "a `loop` condition")
+        &self.push_loop_value_frame(label)
+        &self.push_loop_break_frame()
+        self.loop_depth += 1
+        before_loop :: ~self.flow
+        previous_arrow_loop_body :: self.arrow_loop_body
+        self.arrow_loop_body = arrow_body
+        &self.check_block(&body, true)
+        self.arrow_loop_body = previous_arrow_loop_body
+        if step == .Val(step_stmt) -> &self.check_stmt(&step_stmt)
+        after_body :: ~self.flow
+        may_skip := true
+        if cond.without_parens() == .Bool(true, _) -> may_skip = false
+        &self.join_loop_flow(before_loop, after_body, may_skip)
+        self.loop_depth -= 1
+        &self.pop_loop_value_frame()
+        &self.pop_scope()
+        if label != None -> _ :: &self.loop_labels.pop()
+        self.memory_control_multiplier = memory_multiplier
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3016
+    fn check_stmt_loop(&self, inner: &[Stmt], label: (String, Span)?, arrow_body: Bool) Never! {
+        memory_multiplier :: self.memory_control_multiplier
+        self.memory_control_multiplier = None
+        if label == .Val((name, label_span)) -> &self.declare_loop_label(name, label_span)
+        &self.push_loop_value_frame(label)
+        &self.push_loop_break_frame()
+        self.loop_depth += 1
+        before_loop :: ~self.flow
+        previous_arrow_loop_body :: self.arrow_loop_body
+        self.arrow_loop_body = arrow_body
+        &self.check_block(&inner, true)
+        self.arrow_loop_body = previous_arrow_loop_body
+        after_body :: ~self.flow
+        &self.join_loop_flow(before_loop, after_body, false)
+        self.loop_depth -= 1
+        &self.pop_loop_value_frame()
+        if label != None -> _ :: &self.loop_labels.pop()
+        self.memory_control_multiplier = memory_multiplier
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3044
+    fn check_stmt_unsafe(&self, body: &[Stmt]) Never! {
+        prev :: self.in_unsafe
+        self.in_unsafe = true
+        &self.check_block(&body, true)
+        self.in_unsafe = prev
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3055
+    fn check_stmt_impure(&self, reason: String?, body: &[Stmt], span: Span) Never! {
+        policy_allowed :: self.audited_gate_allowed(PolicyKey.Impure, span)
+        if reason == None -> &self.diags.push(Diagnostic.lint("L3102", "this `#Impure` block has no reason", "every comptime effect gate records why ambient I/O is needed", "add the reason: `#Impure(\"reading build config\") { … }`", Val(span)))
+        if policy_allowed -> self.ct_impure_depth += 1
+        &self.check_block(&body, true)
+        if policy_allowed -> self.ct_impure_depth -= 1
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3080
+    fn check_stmt_shield(&self, body: &[Stmt]) Never! { &self.check_block(&body, true) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3084
+    fn check_stmt_reactive(&self, body: &[Stmt], span: Span) Never! {
+        if self.in_comptime -> &self.diags.push(Diagnostic.error("E2914", "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change (D-REACTCORE1)", "move `#Reactive { … }` out of the `comptime` block", Val(span)))
+        captures := block_free_var_reads(body).collect()
+        &captures.sort()
+        loop name in captures {
+            if self.is_view(name) {
+                read_only :: self.view_facts(name).all(fn(fact) { fact.access == ViewAccess.Read })
+                copy_ty :: self.lookup(name).map(fn(info) { ~info.ty }).and_then(fn(ty) {
+                    owned_type_for_read_view(ty).or_else(fn() {
+                        if self.is_string_view(name) && ty == Type.String -> return Val(Type.String)
+                        None
+                    })
+                })
+                if !self.copies_explicit() && read_only && copy_ty.is_some_and(fn(ty) { self.is_cloneable_type(ty) }) -> continue
+                &self.report_view_escape(name, "be captured by a reactive effect", span)
+            }
+        }
+        enclosing_mut_captures :: ^self.inferred_lambda_mut_captures
+        self.inferred_lambda_mut_captures = [:]
+        &self.check_block(&body, true)
+        self.inferred_lambda_mut_captures = enclosing_mut_captures
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3136
+    fn check_stmt_switched(&self, marker: Marker, body: &[Stmt]) Never! {
+        if switched_off(marker) {
+            original_body :: ^body
+            body = []
+            checked_body := ~original_body
+            &self.with_erased_scope(fn(checker: &Checker) Never! {
+                checker.suppress_must_use = true
+                &checker.push_scope()
+                loop &stmt in &checked_body -> &checker.check_stmt(&stmt)
+                &checker.check_single_use_consumed_in_current_scope()
+                &checker.drop_scope_no_obligation_checks()
+            })
+            body = original_body
+            loop &stmt in &body -> &stmt.for_each_expr_mut(fn(expr: &Expr) Never! {
+                if expr == .Lambda(lambda) -> lambda.meta.runtime_erased = true
+            })
+            return
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3165
+        if marker.name == MARKER_DEBUG_ONLY {
+            &self.with_erased_scope(fn(checker: &Checker) Never! {
+                checker.suppress_must_use = true
+                &checker.push_scope()
+                loop &stmt in &body {
+                    &checker.check_stmt(&stmt)
+                    &stmt.for_each_expr_mut(fn(expr: &Expr) Never! {
+                        if expr == .Lambda(lambda) -> lambda.meta.runtime_erased = true
+                    })
+                }
+                &checker.check_single_use_consumed_in_current_scope()
+                &checker.drop_scope_no_obligation_checks()
+            })
+            return
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3186
+        &self.check_block(&body, true)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3195
+    fn check_stmt_region(&self, body: &[Stmt]) Never! { &self.check_block(&body, true) }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3198
+    fn check_stmt_policy(&self, declarations: [PolicyDeclaration], body: &[Stmt], span: Span) Never! {
+        &self.enter_memory_policy_region(~declarations, span)
+        &self.check_block(&body, true)
+        &self.exit_memory_policy_region()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3210
+    fn check_stmt_arithmetic_scope(&self, args: [Expr], body: &[Stmt], span: Span) Never! {
+        mode :: args.first().and_then(ArithmeticMode.from_expr)
+        if mode == .Val(arithmetic_mode) {
+            &self.arithmetic_policy_stack.push(ArithmeticPolicyFact{mode: arithmetic_mode, scope_span: span, operation_span: span, operation: None})
+            &self.check_block(&body, true)
+            _ :: &self.arithmetic_policy_stack.pop()
+        } else {
+            &self.diags.push(marker_argument_shape_error(MARKER_ARITHMETIC, span))
+            &self.check_block(&body, true)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3237
+    fn check_stmt_task_group(&self, name: String, name_span: Span, limit: &Expr?, body: &[Stmt]) Never! {
+        if limit == .Val(limit_expr) {
+            if self.infer(&limit_expr) == .Val(limit_ty) && !(limit_ty is Type.InlineRange) -> _ :: &self.check_type_assignable(Type.Int, limit_ty, limit_expr.span())
+        }
+        &self.push_scope()
+        &self.declare(name, name_span, LocalInfo{def_span: name_span, binding_sigil_span: None, ty: Type.Named(TYPE_TASKGROUP), mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+        &self.mark_local_name_reference(name)
+        &self.taskgroup_stack.push(TaskGroupCtx.new(~name, name_span))
+        &self.check_block(&body, false)
+        &self.mark_taskgroup_spawns_owned(TaskGroupOrigin.Lexical)
+        _ :: &self.taskgroup_stack.pop()
+        &self.pop_scope()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3293
+    fn check_stmt_layout(&self, name: String, name_span: Span, body: &[Stmt]) Never! {
+        &self.declare(name, name_span, LocalInfo{def_span: name_span, binding_sigil_span: None, ty: Type.Named(LAYOUT_TYPE), mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+        &self.push_scope()
+        seen_constraints := [String:Bool]{}
+        loop &stmt in &body {
+            if stmt == .Expr(e) {
+                fp :: layout_constraint_fingerprint(e)
+                t :: self.infer(&e)
+                is_constraint := false
+                if t == .Val(.Named(n)) && n == LAYOUT_CONSTRAINT_TYPE -> is_constraint = true
+                if !is_constraint && t != None {
+                    found :: t.map(fn(ty) { ty.name() }).unwrap_or_default()
+                    &self.diags.push(Diagnostic.error("E2933", "this element inside `{name} {SIGIL_BIND_IMMUT} {LAYOUT_TYPE}.{{ … }}` doesn't produce a constraint (found `{found}`)", "every element inside a `{LAYOUT_TYPE}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated", "write a comparison, e.g. `label.width >= 80.0`", Val(e.span())))
+                } else if is_constraint {
+                    if seen_constraints.has_key(fp) {
+                        &self.diags.push(Diagnostic.lint("E2934", "this constraint repeats one already written in this `{LAYOUT_TYPE}.{{ … }}` body", "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "remove the duplicate line, or change it if a different constraint was meant", Val(e.span())))
+                    } else { seen_constraints[fp] = true }
+                }
+            } else if stmt == .Val(b) {
+                fp :: layout_constraint_fingerprint(b.init)
+                &self.check_stmt(&stmt)
+                if stmt == .Val(checked_binding) {
+                    bname :: ~checked_binding.name
+                    binding_span :: checked_binding.name_span
+                    is_constraint :: self.lookup(bname).map(fn(info) { if info.ty == .Named(n) -> return n == LAYOUT_CONSTRAINT_TYPE; false }).unwrap_or(false)
+                    if !is_constraint {
+                        &self.diags.push(Diagnostic.error("E2933", "this binding inside `{name} {SIGIL_BIND_IMMUT} {LAYOUT_TYPE}.{{ … }}` doesn't capture a constraint", "every element inside a `{LAYOUT_TYPE}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`", "bind a comparison: `c :: label.width >= 80.0`", Val(binding_span)))
+                    } else if seen_constraints.has_key(fp) {
+                        &self.diags.push(Diagnostic.lint("E2934", "this constraint repeats one already written in this `{LAYOUT_TYPE}.{{ … }}` body", "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "remove the duplicate line, or change it if a different constraint was meant", Val(binding_span)))
+                    } else { seen_constraints[fp] = true }
+                }
+            } else {
+                &self.diags.push(Diagnostic.error("E2933", "only constraint elements belong directly inside a `{LAYOUT_TYPE}.{{ … }}` body", "every element inside a `{LAYOUT_TYPE}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`", "write a comparison, e.g. `label.width >= 80.0`", Val(stmt.span())))
+            }
+        }
+        &self.pop_scope()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3426
+    fn check_stmt_authority_scope(&self, caps: [(String, Span)], caps_span: Span, binding: String?, binding_span: Span?, body: &[Stmt], span: Span) Never! {
+        cap_set := EffectSet.new()
+        bad := false
+        loop (name, effect_span) in caps {
+            resolved :: resolve_effect_name(name, self.effect_facts)
+            if resolved == .Ok(e) {
+                if reject_positive_deny_only_effect(e, effect_span) == .Val(diagnostic) {
+                    &self.diags.push(diagnostic)
+                    bad = true
+                } else { &cap_set.insert(e) }
+            } else if resolved == .Err(suggestion) {
+                if parse_effect_name(name) != None {
+                    &self.diags.push(undeclared_effect(name, suggestion, Val(effect_span)))
+                } else { &self.diags.push(unknown_effect(name, effect_span)) }
+                bad = true
+            }
+        }
+        if self.region_stack.last() == .Val(outer) {
+            widening :: effects_uncovered(cap_set, outer.caps)
+            if !widening.is_empty() {
+                &self.diags.push(e0712(widening, outer.caps, caps_span, KW_FX))
+                bad = true
+            }
+        }
+        if binding == .Val(binding_name) {
+            handle_span :: binding_span.expect("named #FX binding has a span")
+            &self.push_scope()
+            &self.declare_loop_var(~binding_name, handle_span, Type.Named(AUTHORITY_HANDLE_TYPE))
+        }
+        &self.region_stack.push(RegionAccum{binding: ~binding, aliases: [:], caps: cap_set, caps_span: caps_span, direct: EffectSet.new(), edges: [:], maximal: false})
+        &self.check_block(&body, true)
+        acc :: &self.region_stack.pop().expect("pushed above")
+        if binding == .Val(binding_name) {
+            loop delegation in authority_delegations(body, binding_name, span) {
+                if !self.fx_authority_delegations.any(fn(existing) { existing.span == delegation.span && existing.resource == delegation.resource && existing.operation == delegation.operation }) -> &self.fx_authority_delegations.push(delegation)
+            }
+            if grant_handle_escape(body, binding_name) == .Val(escape_span) -> &self.diags.push(e0711(binding_name, KW_FX, escape_span))
+            &self.pop_scope()
+        }
+        if !bad -> &self.fx_regions.push(RegionSummary{caps: ^acc.caps, direct: ^acc.direct, edges: ^acc.edges, maximal: acc.maximal, caps_span: acc.caps_span})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3547
+    fn check_stmt_live(&self, body: &[Stmt], span: Span) Never! {
+        if self.in_pure -> &self.diags.push(e3401(self.fn_name, "#Live { … }", [], span))
+        if self.no_os -> &self.diags.push(e3301("#Live { … }", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider.", span))
+        &self.check_block(&body, true)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3577
+    fn check_stmt_scope_member(&self, name: String, args: &[Expr], body: &[Stmt]) Never! {
+        if name == SCOPE_TEST_TIMEOUT && args.len() == 1 {
+            expected :: Type.Named(DURATION_TYPE)
+            if self.infer_with_expected(&args[0], expected) == .Val(got) {
+                reported :: self.check_type_assignable(expected, got, args[0].span())
+                if !reported && got != expected -> &self.diags.push(Diagnostic.error("E0112", "`.timeout` wants {expected.show()}, but this is {got.show()}", "a timeout budget is a Duration value", type_fix_hint(expected, got), Val(args[0].span())))
+            }
+        }
+        has_type_parameter :: applied_rule(name).is_some_and(fn(row) { row.signature.params.first().is_some_and(fn(parameter) { parameter.source_type == "Type" }) })
+        if has_type_parameter && args.len() == 1 {
+            if args[0] == .Ident(type_name, type_span) -> &self.check_declared_type_rules(Type.Named(~type_name), type_span)
+        }
+        leak :: name == SCOPE_TEST_SETUP
+        &self.check_block(&body, !leak)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3626
+    fn check_stmt_assume_det(&self, body: &[Stmt], span: Span) Never! {
+        policy_allowed :: self.audited_gate_allowed(PolicyKey.Nondeterministic, span)
+        if policy_allowed -> self.det_suppress += 1
+        &self.check_block(&body, true)
+        if policy_allowed -> self.det_suppress -= 1
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3643
+    fn check_stmt_transact(&self, name: String?, name_span: Span?, body: &[Stmt], implicit: Bool) Never! {
+        &self.push_scope()
+        if name == .Val(handle) && name_span == .Val(handle_span) -> &self.declare_loop_var(~handle, handle_span, Type.Named(TXN_HANDLE_TYPE))
+        self.txn_depth += 1
+        if !implicit -> self.txn_wall_depth += 1
+        &self.check_block(&body, true)
+        if !implicit -> self.txn_wall_depth -= 1
+        self.txn_depth -= 1
+        &self.pop_scope()
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3673
+    fn check_stmt_context_block(&self, fields: &[(String, Expr, Span)], body: &[Stmt], span: Span) Never! {
+        rule_fact :: self.take_rule_fact(CTX_BLOCK, span)
+        signature_checked :: rule_fact != None
+        validated :: rule_fact.and_then(fn(marker) {
+            loop index in 0..<min(marker.args.len(), fields.len()) {
+                if marker.args[index].as_expr_mut() == .Val(argument) -> swap(&argument, &fields[index].1)
+            }
+            result :: self.validate_rule_signature(&marker)
+            loop index in 0..<min(marker.args.len(), fields.len()) {
+                if marker.args[index].as_expr_mut() == .Val(argument) -> swap(&argument, &fields[index].1)
+            }
+            result
+        })
+        signature_valid :: !signature_checked || validated != None
+        loop source_index in 0..<fields.len() {
+            field_name :: fields[source_index].0
+            field_span :: fields[source_index].2
+            ty :: if signature_checked {
+                validated.and_then(fn(arguments) {
+                    arguments.bindings.find(fn(binding) { binding.source_index == source_index }).and_then(fn(binding) {
+                        if binding.ty == RuleArgType.Any -> return self.infer(&fields[source_index].1)
+                        arguments.type_for_source(source_index)
+                    })
+                })
+            } else { self.infer(&fields[source_index].1) }
+            if field_name == CTX_FIELD_ALLOCATOR {
+                if !signature_valid -> continue
+                ok := false
+                if ty == .Val(.Named(n)) -> ok = alloc_handle_rust_type(n) != None
+                if !ok {
+                    got :: ty.map(fn(t) { t.show() }).unwrap_or_else(fn() { "unknown" })
+                    &self.diags.push(Diagnostic.error("E0762", "`allocator` needs an allocator, got {got}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`", Val(field_span)))
+                }
+            } else if field_name == CTX_FIELD_LOGGER {
+                _ :: ty
+            } else if field_name == CTX_FIELD_DEADLINE {
+                if !signature_valid -> continue
+                valid_deadline := false
+                if ty == .Val(.Int) -> valid_deadline = true
+                if ty == .Val(.InlineRange(..)) -> valid_deadline = true
+                if !valid_deadline {
+                    got :: ty.map(fn(t) { t.show() }).unwrap_or_else(fn() { "unknown" })
+                    &self.diags.push(Diagnostic.error("E0762", "`deadline` needs an Int epoch-millis instant, got {got}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`", Val(field_span)))
+                }
+            }
+        }
+        has_allocator :: fields.any(fn(field) { field.0 == CTX_FIELD_ALLOCATOR })
+        saved_depth :: self.context_depth
+        saved_alloc :: self.context_allocator_active
+        self.context_depth += 1
+        if has_allocator -> self.context_allocator_active = true
+        &self.check_block(&body, true)
+        self.context_allocator_active = saved_alloc
+        self.context_depth = saved_depth
+    }
+}

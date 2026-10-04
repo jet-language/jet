@@ -1,0 +1,79 @@
+// Rust: crates/jet-lexer/src/lib.rs:12
+use JetLexer.Lexer.Terminators.[lex]
+use JetLexer.Lexer.Tokens.[Token, StringPart, TOKEN_COMPARE, TOKEN_LE, TOKEN_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, STRING_PART_TEXT, STRING_PART_INTERPOLATION]
+
+fn entry_without_comments(tokens: [Token]) -> [Token] Never! {
+    code := [Token]{}
+    loop token in tokens {
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &code.push(~token)
+    }
+    ^code
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:15
+#Test("spaceship_is_one_longest_match_before_le") {
+    lexed :: lex("a <=> b <= c".bytes())
+    assert(lexed.diagnostics.is_empty(), "{lexed.diagnostics:?}")
+    code :: entry_without_comments(lexed.tokens)
+    assert(code[1].kind == TOKEN_COMPARE)
+    assert_eq(code[1].span.end - code[1].span.start, 3)
+    assert(code[3].kind == TOKEN_LE)
+    assert_eq(code[3].span.end - code[3].span.start, 2)
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:30
+fn first_string_lit(src: String) -> String Never! {
+    lexed :: lex(src.bytes())
+    assert(lexed.diagnostics.is_empty(), "{lexed.diagnostics:?}")
+    loop token in entry_without_comments(lexed.tokens) {
+        if token.kind == TOKEN_STRING {
+            parts :: token.payload.string_parts
+            if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT -> return ~parts[0].text
+            panic("expected one literal string part, got {parts:?}")
+        }
+    }
+    panic("no string token in {src:?}")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:45
+#Test("typed_head_keeps_backslash_literal") {
+    assert_eq(first_string_lit("Regex.{{\"\\d+\"}}"), "\\d+")
+    assert_eq(first_string_lit("Regex.{{\"a\\nb\"}}"), "a\\nb")
+    assert_eq(first_string_lit("\"a\\nb\""), "a\nb")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:52
+#Test("typed_head_quote_stays_in_body_when_slashed") {
+    assert_eq(first_string_lit("Regex.{{\"a\\\"b\"}}"), "a\\\"b")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:57
+#Test("typed_head_doubled_braces_stay_literal") {
+    assert_eq(first_string_lit("Regex.{{\"\\d{{{{2}}}}\"}}"), "\\d{{2}}")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:62
+#Test("typed_head_holes_still_split_interpolation") {
+    lexed :: lex("URL.{{\"https://x/{{name}}\"}}".bytes())
+    assert(lexed.diagnostics.is_empty(), "{lexed.diagnostics:?}")
+    found := false
+    loop token in entry_without_comments(lexed.tokens) {
+        if token.kind == TOKEN_STRING {
+            parts :: token.payload.string_parts
+            assert(parts.len() == 2 && parts[0].kind == STRING_PART_TEXT && parts[1].kind == STRING_PART_INTERPOLATION && parts[0].text == "https://x/", "{parts:?}")
+            found = true
+            break
+        }
+    }
+    assert(found, "typed head string")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:83
+#Test("plain_string_still_rejects_unknown_escapes") {
+    lexed :: lex("\"C:\\path\"".bytes())
+    found := false
+    loop diagnostic in lexed.diagnostics {
+        if diagnostic.what.contains("isn't an escape") -> found = true
+    }
+    assert(found, "{lexed.diagnostics:?}")
+}

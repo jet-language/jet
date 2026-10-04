@@ -1,1852 +1,736 @@
-// PORT-PENDING 0084 crates-jet-foundation-src-performancebudget-slice-1: crates/jet-foundation/src/PerformanceBudget.rs:1-1848
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-PERFBUDGET-REPORT1: shared, deterministic performance-budget math.
-//RS //!
-//RS //! This module is deliberately in `jet-foundation`: producers (`jet budget`),
-//RS //! proof readers (`jet prove`), and future dossier readers must call the same
-//RS //! implementation.  It contains no rendering or filesystem policy.
-//RS 
-//RS use crate::SHA256;
-//RS use std::cmp::Ordering;
-//RS use std::collections::BTreeMap;
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum CanonicalJson {
-//RS     Null,
-//RS     Bool(bool),
-//RS     Integer(String),
-//RS     String(String),
-//RS     Array(Vec<CanonicalJson>),
-//RS     Object(BTreeMap<String, CanonicalJson>),
-//RS }
-//RS 
-//RS impl CanonicalJson {
-//RS     pub fn integer(value: impl Into<String>) -> Result<Self, String> {
-//RS         let value = value.into();
-//RS         if !valid_integer(&value) {
-//RS             return Err(format!("non-canonical integer `{value}`"));
-//RS         }
-//RS         Ok(Self::Integer(value))
-//RS     }
-//RS 
-//RS     pub fn object(
-//RS         fields: impl IntoIterator<Item = (String, CanonicalJson)>,
-//RS     ) -> Result<Self, String> {
-//RS         let mut out = BTreeMap::new();
-//RS         for (key, value) in fields {
-//RS             if out.insert(key.clone(), value).is_some() {
-//RS                 return Err(format!("duplicate JSON key `{key}`"));
-//RS             }
-//RS         }
-//RS         Ok(Self::Object(out))
-//RS     }
-//RS 
-//RS     pub fn bytes(&self) -> Vec<u8> {
-//RS         let mut out = String::new();
-//RS         encode_json(self, &mut out);
-//RS         out.push('\n');
-//RS         out.into_bytes()
-//RS     }
-//RS 
-//RS     pub fn sha256(&self) -> String {
-//RS         SHA256::sha256_hex(&self.bytes())
-//RS     }
-//RS 
-//RS     pub fn parse_canonical(bytes: &[u8]) -> Result<Self, String> {
-//RS         let text = std::str::from_utf8(bytes).map_err(|_| "canonical JSON is not UTF-8")?;
-//RS         if text.as_bytes().starts_with(&[0xef, 0xbb, 0xbf]) {
-//RS             return Err("canonical JSON has a BOM".into());
-//RS         }
-//RS         if !text.ends_with('\n') || text[..text.len() - 1].ends_with('\n') {
-//RS             return Err("canonical JSON must end in exactly one LF".into());
-//RS         }
-//RS         let mut parser = JSONParser {
-//RS             bytes: &text.as_bytes()[..text.len() - 1],
-//RS             at: 0,
-//RS         };
-//RS         let value = parser.value()?;
-//RS         if parser.at != parser.bytes.len() {
-//RS             return Err("trailing bytes after canonical JSON value".into());
-//RS         }
-//RS         if value.bytes() != bytes {
-//RS             return Err("JSON is valid but not A-canonical".into());
-//RS         }
-//RS         Ok(value)
-//RS     }
-//RS }
-//RS 
-//RS struct JSONParser<'a> {
-//RS     bytes: &'a [u8],
-//RS     at: usize,
-//RS }
-//RS impl<'a> JSONParser<'a> {
-//RS     fn peek(&self) -> Option<u8> {
-//RS         self.bytes.get(self.at).copied()
-//RS     }
-//RS     fn take(&mut self) -> Option<u8> {
-//RS         let byte = self.peek()?;
-//RS         self.at += 1;
-//RS         Some(byte)
-//RS     }
-//RS     fn value(&mut self) -> Result<CanonicalJson, String> {
-//RS         match self.peek() {
-//RS             Some(b'n') => {
-//RS                 self.literal(b"null")?;
-//RS                 Ok(CanonicalJson::Null)
-//RS             }
-//RS             Some(b't') => {
-//RS                 self.literal(b"true")?;
-//RS                 Ok(CanonicalJson::Bool(true))
-//RS             }
-//RS             Some(b'f') => {
-//RS                 self.literal(b"false")?;
-//RS                 Ok(CanonicalJson::Bool(false))
-//RS             }
-//RS             Some(b'"') => Ok(CanonicalJson::String(self.string()?)),
-//RS             Some(b'[') => self.array(),
-//RS             Some(b'{') => self.object(),
-//RS             Some(b'-' | b'0'..=b'9') => self.integer(),
-//RS             Some(_) => Err("invalid canonical JSON token".into()),
-//RS             None => Err("unexpected end of JSON".into()),
-//RS         }
-//RS     }
-//RS     fn literal(&mut self, literal: &[u8]) -> Result<(), String> {
-//RS         if self.bytes.get(self.at..self.at + literal.len()) != Some(literal) {
-//RS             return Err("invalid JSON literal".into());
-//RS         }
-//RS         self.at += literal.len();
-//RS         Ok(())
-//RS     }
-//RS     fn integer(&mut self) -> Result<CanonicalJson, String> {
-//RS         let start = self.at;
-//RS         if self.peek() == Some(b'-') {
-//RS             self.at += 1;
-//RS         }
-//RS         while matches!(self.peek(), Some(b'0'..=b'9')) {
-//RS             self.at += 1;
-//RS         }
-//RS         let text =
-//RS             std::str::from_utf8(&self.bytes[start..self.at]).map_err(|_| "invalid integer")?;
-//RS         CanonicalJson::integer(text)
-//RS     }
-//RS     fn string(&mut self) -> Result<String, String> {
-//RS         if self.take() != Some(b'"') {
-//RS             return Err("expected JSON string".into());
-//RS         }
-//RS         let mut raw = Vec::new();
-//RS         loop {
-//RS             match self.take() {
-//RS                 Some(b'"') => {
-//RS                     return String::from_utf8(raw).map_err(|_| "JSON string is not UTF-8".into())
-//RS                 }
-//RS                 Some(b'\\') => match self.take() {
-//RS                     Some(b'"') => raw.push(b'"'),
-//RS                     Some(b'\\') => raw.push(b'\\'),
-//RS                     Some(b'b') => raw.push(8),
-//RS                     Some(b'f') => raw.push(12),
-//RS                     Some(b'n') => raw.push(b'\n'),
-//RS                     Some(b'r') => raw.push(b'\r'),
-//RS                     Some(b't') => raw.push(b'\t'),
-//RS                     Some(b'u') => {
-//RS                         let digits = self
-//RS                             .bytes
-//RS                             .get(self.at..self.at + 4)
-//RS                             .ok_or("short Unicode escape")?;
-//RS                         self.at += 4;
-//RS                         let hex =
-//RS                             std::str::from_utf8(digits).map_err(|_| "invalid Unicode escape")?;
-//RS                         let scalar =
-//RS                             u32::from_str_radix(hex, 16).map_err(|_| "invalid Unicode escape")?;
-//RS                         if (0xd800..=0xdfff).contains(&scalar) {
-//RS                             return Err("unpaired surrogate in JSON string".into());
-//RS                         }
-//RS                         let ch = char::from_u32(scalar).ok_or("invalid Unicode scalar")?;
-//RS                         let mut encoded = [0; 4];
-//RS                         raw.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
-//RS                     }
-//RS                     _ => return Err("invalid JSON string escape".into()),
-//RS                 },
-//RS                 Some(byte) if byte < 0x20 => return Err("unescaped control in JSON string".into()),
-//RS                 Some(byte) => raw.push(byte),
-//RS                 None => return Err("unterminated JSON string".into()),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn array(&mut self) -> Result<CanonicalJson, String> {
-//RS         self.at += 1;
-//RS         let mut values = Vec::new();
-//RS         if self.peek() == Some(b']') {
-//RS             self.at += 1;
-//RS             return Ok(CanonicalJson::Array(values));
-//RS         }
-//RS         loop {
-//RS             values.push(self.value()?);
-//RS             match self.take() {
-//RS                 Some(b',') => {}
-//RS                 Some(b']') => return Ok(CanonicalJson::Array(values)),
-//RS                 _ => return Err("invalid JSON array".into()),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn object(&mut self) -> Result<CanonicalJson, String> {
-//RS         self.at += 1;
-//RS         let mut values = BTreeMap::new();
-//RS         if self.peek() == Some(b'}') {
-//RS             self.at += 1;
-//RS             return Ok(CanonicalJson::Object(values));
-//RS         }
-//RS         loop {
-//RS             let key = self.string()?;
-//RS             if self.take() != Some(b':') {
-//RS                 return Err("missing JSON object colon".into());
-//RS             }
-//RS             let value = self.value()?;
-//RS             if values.insert(key.clone(), value).is_some() {
-//RS                 return Err(format!("duplicate JSON key `{key}`"));
-//RS             }
-//RS             match self.take() {
-//RS                 Some(b',') => {}
-//RS                 Some(b'}') => return Ok(CanonicalJson::Object(values)),
-//RS                 _ => return Err("invalid JSON object".into()),
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn valid_integer(value: &str) -> bool {
-//RS     if value == "0" {
-//RS         return true;
-//RS     }
-//RS     let digits = value.strip_prefix('-').unwrap_or(value);
-//RS     !digits.is_empty()
-//RS         && !digits.starts_with('0')
-//RS         && digits.bytes().all(|byte| byte.is_ascii_digit())
-//RS }
-//RS 
-//RS fn encode_json(value: &CanonicalJson, out: &mut String) {
-//RS     match value {
-//RS         CanonicalJson::Null => out.push_str("null"),
-//RS         CanonicalJson::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-//RS         CanonicalJson::Integer(value) => out.push_str(value),
-//RS         CanonicalJson::String(value) => encode_string(value, out),
-//RS         CanonicalJson::Array(values) => {
-//RS             out.push('[');
-//RS             for (index, value) in values.iter().enumerate() {
-//RS                 if index != 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 encode_json(value, out);
-//RS             }
-//RS             out.push(']');
-//RS         }
-//RS         CanonicalJson::Object(fields) => {
-//RS             out.push('{');
-//RS             for (index, (key, value)) in fields.iter().enumerate() {
-//RS                 if index != 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 encode_string(key, out);
-//RS                 out.push(':');
-//RS                 encode_json(value, out);
-//RS             }
-//RS             out.push('}');
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn encode_string(value: &str, out: &mut String) {
-//RS     out.push('"');
-//RS     for ch in value.chars() {
-//RS         match ch {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\u{08}' => out.push_str("\\b"),
-//RS             '\u{0c}' => out.push_str("\\f"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             ch if ch <= '\u{1f}' => out.push_str(&format!("\\u{:04x}", ch as u32)),
-//RS             ch => out.push(ch),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS }
-//RS 
-//RS /// A signed, arbitrary precision wire integer. Limbs are little-endian base 1e9.
-//RS /// Zero has sign 0 and no limbs; all other values have sign -1 or 1.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct BigInt {
-//RS     sign: i8,
-//RS     limbs: Vec<u32>,
-//RS }
-//RS 
-//RS impl BigInt {
-//RS     pub fn zero() -> Self {
-//RS         Self {
-//RS             sign: 0,
-//RS             limbs: Vec::new(),
-//RS         }
-//RS     }
-//RS     pub fn one() -> Self {
-//RS         Self::from_i128(1)
-//RS     }
-//RS     pub fn from_i128(value: i128) -> Self {
-//RS         Self::parse(&value.to_string()).expect("i128 decimal is canonical")
-//RS     }
-//RS     pub fn parse(text: &str) -> Result<Self, String> {
-//RS         if !valid_integer(text) {
-//RS             return Err(format!("non-canonical integer `{text}`"));
-//RS         }
-//RS         let (sign, digits) = match text.strip_prefix('-') {
-//RS             Some(v) => (-1, v),
-//RS             None => (1, text),
-//RS         };
-//RS         if digits == "0" {
-//RS             return Ok(Self::zero());
-//RS         }
-//RS         let mut limbs = Vec::new();
-//RS         let mut end = digits.len();
-//RS         while end != 0 {
-//RS             let start = end.saturating_sub(9);
-//RS             limbs.push(
-//RS                 digits[start..end]
-//RS                     .parse::<u32>()
-//RS                     .map_err(|_| "invalid integer")?,
-//RS             );
-//RS             end = start;
-//RS         }
-//RS         Ok(Self { sign, limbs })
-//RS     }
-//RS     pub fn parse_source(text: &str) -> Result<Self, String> {
-//RS         let (negative, unsigned) = match text.strip_prefix('-') {
-//RS             Some(value) => (true, value),
-//RS             None => (false, text),
-//RS         };
-//RS         let (radix, digits) = if let Some(value) = unsigned.strip_prefix("0x") {
-//RS             (16, value)
-//RS         } else if let Some(value) = unsigned.strip_prefix("0o") {
-//RS             (8, value)
-//RS         } else if let Some(value) = unsigned.strip_prefix("0b") {
-//RS             (2, value)
-//RS         } else {
-//RS             (10, unsigned)
-//RS         };
-//RS         let mut value = Self::zero();
-//RS         let mut saw_digit = false;
-//RS         for ch in digits
-//RS             .chars()
-//RS             .filter(|ch| *ch != crate::Syntax::DIGIT_SEPARATOR)
-//RS         {
-//RS             let digit = ch
-//RS                 .to_digit(radix)
-//RS                 .ok_or_else(|| format!("invalid base-{radix} integer `{text}`"))?;
-//RS             value = value
-//RS                 .mul_small(radix)
-//RS                 .add(&Self::from_i128(i128::from(digit)));
-//RS             saw_digit = true;
-//RS         }
-//RS         if !saw_digit {
-//RS             return Err(format!("invalid integer `{text}`"));
-//RS         }
-//RS         Ok(if negative { value.neg() } else { value })
-//RS     }
-//RS     pub fn is_zero(&self) -> bool {
-//RS         self.sign == 0
-//RS     }
-//RS     pub fn is_negative(&self) -> bool {
-//RS         self.sign < 0
-//RS     }
-//RS     pub fn abs(&self) -> Self {
-//RS         let mut out = self.clone();
-//RS         if out.sign < 0 {
-//RS             out.sign = 1;
-//RS         }
-//RS         out
-//RS     }
-//RS     pub fn neg(&self) -> Self {
-//RS         let mut out = self.clone();
-//RS         out.sign = -out.sign;
-//RS         out
-//RS     }
-//RS     fn normalize(&mut self) {
-//RS         while self.limbs.last() == Some(&0) {
-//RS             self.limbs.pop();
-//RS         }
-//RS         if self.limbs.is_empty() {
-//RS             self.sign = 0;
-//RS         }
-//RS     }
-//RS     fn abs_cmp(&self, rhs: &Self) -> Ordering {
-//RS         self.limbs
-//RS             .len()
-//RS             .cmp(&rhs.limbs.len())
-//RS             .then_with(|| self.limbs.iter().rev().cmp(rhs.limbs.iter().rev()))
-//RS     }
-//RS     fn abs_add(&self, rhs: &Self) -> Self {
-//RS         const B: u64 = 1_000_000_000;
-//RS         let mut out = Vec::with_capacity(self.limbs.len().max(rhs.limbs.len()) + 1);
-//RS         let mut carry = 0;
-//RS         for i in 0..self.limbs.len().max(rhs.limbs.len()) {
-//RS             let n = u64::from(*self.limbs.get(i).unwrap_or(&0))
-//RS                 + u64::from(*rhs.limbs.get(i).unwrap_or(&0))
-//RS                 + carry;
-//RS             out.push((n % B) as u32);
-//RS             carry = n / B;
-//RS         }
-//RS         if carry != 0 {
-//RS             out.push(carry as u32);
-//RS         }
-//RS         Self {
-//RS             sign: 1,
-//RS             limbs: out,
-//RS         }
-//RS     }
-//RS     fn abs_sub(&self, rhs: &Self) -> Self {
-//RS         // |self| >= |rhs|
-//RS         const B: i64 = 1_000_000_000;
-//RS         let mut out = Vec::with_capacity(self.limbs.len());
-//RS         let mut borrow = 0;
-//RS         for i in 0..self.limbs.len() {
-//RS             let mut n =
-//RS                 i64::from(self.limbs[i]) - i64::from(*rhs.limbs.get(i).unwrap_or(&0)) - borrow;
-//RS             if n < 0 {
-//RS                 n += B;
-//RS                 borrow = 1;
-//RS             } else {
-//RS                 borrow = 0;
-//RS             }
-//RS             out.push(n as u32);
-//RS         }
-//RS         let mut value = Self {
-//RS             sign: 1,
-//RS             limbs: out,
-//RS         };
-//RS         value.normalize();
-//RS         value
-//RS     }
-//RS     pub fn add(&self, rhs: &Self) -> Self {
-//RS         if self.sign == 0 {
-//RS             return rhs.clone();
-//RS         }
-//RS         if rhs.sign == 0 {
-//RS             return self.clone();
-//RS         }
-//RS         if self.sign == rhs.sign {
-//RS             let mut out = self.abs_add(rhs);
-//RS             out.sign = self.sign;
-//RS             out
-//RS         } else {
-//RS             match self.abs_cmp(rhs) {
-//RS                 Ordering::Greater => {
-//RS                     let mut out = self.abs_sub(rhs);
-//RS                     out.sign = self.sign;
-//RS                     out
-//RS                 }
-//RS                 Ordering::Less => {
-//RS                     let mut out = rhs.abs_sub(self);
-//RS                     out.sign = rhs.sign;
-//RS                     out
-//RS                 }
-//RS                 Ordering::Equal => Self::zero(),
-//RS             }
-//RS         }
-//RS     }
-//RS     pub fn sub(&self, rhs: &Self) -> Self {
-//RS         self.add(&rhs.neg())
-//RS     }
-//RS     pub fn mul(&self, rhs: &Self) -> Self {
-//RS         const B: u64 = 1_000_000_000;
-//RS         if self.is_zero() || rhs.is_zero() {
-//RS             return Self::zero();
-//RS         }
-//RS         let mut out = vec![0u64; self.limbs.len() + rhs.limbs.len()];
-//RS         for (i, &a) in self.limbs.iter().enumerate() {
-//RS             let mut carry = 0u64;
-//RS             for (j, &b) in rhs.limbs.iter().enumerate() {
-//RS                 let at = i + j;
-//RS                 let n = out[at] + u64::from(a) * u64::from(b) + carry;
-//RS                 out[at] = n % B;
-//RS                 carry = n / B;
-//RS             }
-//RS             out[i + rhs.limbs.len()] += carry;
-//RS         }
-//RS         let mut value = Self {
-//RS             sign: self.sign * rhs.sign,
-//RS             limbs: out.into_iter().map(|v| v as u32).collect(),
-//RS         };
-//RS         value.normalize();
-//RS         value
-//RS     }
-//RS     fn mul_small(&self, rhs: u32) -> Self {
-//RS         if rhs == 0 || self.is_zero() {
-//RS             return Self::zero();
-//RS         }
-//RS         let mut out = Vec::with_capacity(self.limbs.len() + 1);
-//RS         let mut carry = 0u64;
-//RS         for &a in &self.limbs {
-//RS             let n = u64::from(a) * u64::from(rhs) + carry;
-//RS             out.push((n % 1_000_000_000) as u32);
-//RS             carry = n / 1_000_000_000;
-//RS         }
-//RS         if carry > 0 {
-//RS             out.push(carry as u32);
-//RS         }
-//RS         Self {
-//RS             sign: 1,
-//RS             limbs: out,
-//RS         }
-//RS     }
-//RS     pub fn div_rem_abs(&self, rhs: &Self) -> Result<(Self, Self), String> {
-//RS         if rhs.is_zero() {
-//RS             return Err("integer division by zero".into());
-//RS         }
-//RS         let divisor = rhs.abs();
-//RS         let dividend = self.abs();
-//RS         if dividend.abs_cmp(&divisor) == Ordering::Less {
-//RS             return Ok((Self::zero(), dividend));
-//RS         }
-//RS         let mut quotient = vec![0u32; dividend.limbs.len()];
-//RS         let mut remainder = Self::zero();
-//RS         for i in (0..dividend.limbs.len()).rev() {
-//RS             remainder.limbs.insert(0, dividend.limbs[i]);
-//RS             remainder.sign = 1;
-//RS             remainder.normalize();
-//RS             let mut lo = 0u32;
-//RS             let mut hi = 999_999_999u32;
-//RS             while lo < hi {
-//RS                 let mid = lo + (hi - lo) / 2 + 1;
-//RS                 if divisor.mul_small(mid).abs_cmp(&remainder) != Ordering::Greater {
-//RS                     lo = mid;
-//RS                 } else {
-//RS                     hi = mid - 1;
-//RS                 }
-//RS             }
-//RS             quotient[i] = lo;
-//RS             if lo != 0 {
-//RS                 remainder = remainder.abs_sub(&divisor.mul_small(lo));
-//RS             }
-//RS         }
-//RS         let mut q = Self {
-//RS             sign: if quotient.iter().all(|x| *x == 0) {
-//RS                 0
-//RS             } else {
-//RS                 1
-//RS             },
-//RS             limbs: quotient,
-//RS         };
-//RS         q.normalize();
-//RS         Ok((q, remainder))
-//RS     }
-//RS     pub fn exact_div(&self, rhs: &Self) -> Result<Self, String> {
-//RS         let (mut q, r) = self.div_rem_abs(rhs)?;
-//RS         if !r.is_zero() {
-//RS             return Err("integer division is not exact".into());
-//RS         }
-//RS         q.sign = self.sign * rhs.sign;
-//RS         q.normalize();
-//RS         Ok(q)
-//RS     }
-//RS     pub fn gcd(mut left: Self, mut right: Self) -> Result<Self, String> {
-//RS         left = left.abs();
-//RS         right = right.abs();
-//RS         while !right.is_zero() {
-//RS             let (_, r) = left.div_rem_abs(&right)?;
-//RS             left = right;
-//RS             right = r;
-//RS         }
-//RS         Ok(left)
-//RS     }
-//RS }
-//RS impl std::fmt::Display for BigInt {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         if self.sign < 0 {
-//RS             write!(f, "-")?;
-//RS         }
-//RS         if self.sign == 0 {
-//RS             return write!(f, "0");
-//RS         }
-//RS         let mut it = self.limbs.iter().rev();
-//RS         write!(f, "{}", it.next().unwrap())?;
-//RS         for limb in it {
-//RS             write!(f, "{limb:09}")?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS impl Ord for BigInt {
-//RS     fn cmp(&self, rhs: &Self) -> Ordering {
-//RS         self.sign.cmp(&rhs.sign).then_with(|| {
-//RS             if self.sign < 0 {
-//RS                 self.abs_cmp(rhs).reverse()
-//RS             } else {
-//RS                 self.abs_cmp(rhs)
-//RS             }
-//RS         })
-//RS     }
-//RS }
-//RS impl PartialOrd for BigInt {
-//RS     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
-//RS         Some(self.cmp(rhs))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Rational {
-//RS     pub num: BigInt,
-//RS     pub den: BigInt,
-//RS }
-//RS 
-//RS impl Rational {
-//RS     pub fn new(num: i128, den: i128) -> Result<Self, String> {
-//RS         Self::from_bigints(BigInt::from_i128(num), BigInt::from_i128(den))
-//RS     }
-//RS     pub fn parse(num: &str, den: &str) -> Result<Self, String> {
-//RS         Self::from_bigints(BigInt::parse(num)?, BigInt::parse(den)?)
-//RS     }
-//RS     pub fn parse_source(num: &str, den: &str) -> Result<Self, String> {
-//RS         Self::from_bigints(BigInt::parse_source(num)?, BigInt::parse_source(den)?)
-//RS     }
-//RS     pub fn from_bigints(mut num: BigInt, mut den: BigInt) -> Result<Self, String> {
-//RS         if den.is_zero() {
-//RS             return Err("rational denominator is zero".into());
-//RS         }
-//RS         if den.is_negative() {
-//RS             num = num.neg();
-//RS             den = den.neg();
-//RS         }
-//RS         if num.is_zero() {
-//RS             return Ok(Self::zero());
-//RS         }
-//RS         let divisor = BigInt::gcd(num.clone(), den.clone())?;
-//RS         Ok(Self {
-//RS             num: num.exact_div(&divisor)?,
-//RS             den: den.exact_div(&divisor)?,
-//RS         })
-//RS     }
-//RS     pub fn zero() -> Self {
-//RS         Self {
-//RS             num: BigInt::zero(),
-//RS             den: BigInt::one(),
-//RS         }
-//RS     }
-//RS     pub fn integer(value: i128) -> Self {
-//RS         Self {
-//RS             num: BigInt::from_i128(value),
-//RS             den: BigInt::one(),
-//RS         }
-//RS     }
-//RS     pub fn add(&self, rhs: &Self) -> Result<Self, String> {
-//RS         Self::from_bigints(
-//RS             self.num.mul(&rhs.den).add(&rhs.num.mul(&self.den)),
-//RS             self.den.mul(&rhs.den),
-//RS         )
-//RS     }
-//RS     pub fn sub(&self, rhs: &Self) -> Result<Self, String> {
-//RS         self.add(&rhs.neg())
-//RS     }
-//RS     pub fn mul(&self, rhs: &Self) -> Result<Self, String> {
-//RS         Self::from_bigints(self.num.mul(&rhs.num), self.den.mul(&rhs.den))
-//RS     }
-//RS     pub fn div(&self, rhs: &Self) -> Result<Self, String> {
-//RS         if rhs.num.is_zero() {
-//RS             return Err("rational division by zero".into());
-//RS         }
-//RS         Self::from_bigints(self.num.mul(&rhs.den), self.den.mul(&rhs.num))
-//RS     }
-//RS     pub fn neg(&self) -> Self {
-//RS         Self {
-//RS             num: self.num.neg(),
-//RS             den: self.den.clone(),
-//RS         }
-//RS     }
-//RS     pub fn abs(&self) -> Self {
-//RS         Self {
-//RS             num: self.num.abs(),
-//RS             den: self.den.clone(),
-//RS         }
-//RS     }
-//RS     pub fn max_zero(&self) -> Self {
-//RS         if self.num.is_negative() {
-//RS             Self::zero()
-//RS         } else {
-//RS             self.clone()
-//RS         }
-//RS     }
-//RS     pub fn to_json(&self) -> CanonicalJson {
-//RS         CanonicalJson::object([
-//RS             ("den".into(), CanonicalJson::Integer(self.den.to_string())),
-//RS             ("num".into(), CanonicalJson::Integer(self.num.to_string())),
-//RS         ])
-//RS         .expect("unique rational keys")
-//RS     }
-//RS }
-//RS 
-//RS impl Ord for Rational {
-//RS     fn cmp(&self, rhs: &Self) -> Ordering {
-//RS         self.num.mul(&rhs.den).cmp(&rhs.num.mul(&self.den))
-//RS     }
-//RS }
-//RS impl PartialOrd for Rational {
-//RS     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
-//RS         Some(self.cmp(rhs))
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for Rational {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         if self.den == BigInt::one() {
-//RS             write!(f, "{}", self.num)
-//RS         } else {
-//RS             write!(f, "{}/{}", self.num, self.den)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Statistics {
-//RS     pub p50: Rational,
-//RS     pub p90: Rational,
-//RS     pub p95: Rational,
-//RS     pub p99: Rational,
-//RS     pub p999: Rational,
-//RS     pub mean: Rational,
-//RS     pub mad: Rational,
-//RS }
-//RS 
-//RS pub fn statistics(samples: &[Rational]) -> Result<Statistics, String> {
-//RS     if samples.is_empty() {
-//RS         return Err("statistics require at least one sample".into());
-//RS     }
-//RS     let mut sorted = samples.to_vec();
-//RS     sorted.sort();
-//RS     let p50 = nearest_rank(&sorted, 500, 1000)?;
-//RS     let mut sum = Rational::zero();
-//RS     for sample in &sorted {
-//RS         sum = sum.add(sample)?;
-//RS     }
-//RS     let mean = sum.div(&Rational::integer(sorted.len() as i128))?;
-//RS     let mut deviations = sorted
-//RS         .iter()
-//RS         .map(|sample| sample.sub(&p50).map(|v| v.abs()))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     deviations.sort();
-//RS     Ok(Statistics {
-//RS         p50,
-//RS         p90: nearest_rank(&sorted, 900, 1000)?,
-//RS         p95: nearest_rank(&sorted, 950, 1000)?,
-//RS         p99: nearest_rank(&sorted, 990, 1000)?,
-//RS         p999: nearest_rank(&sorted, 999, 1000)?,
-//RS         mean,
-//RS         mad: nearest_rank(&deviations, 500, 1000)?,
-//RS     })
-//RS }
-//RS 
-//RS fn nearest_rank(
-//RS     sorted: &[Rational],
-//RS     numerator: usize,
-//RS     denominator: usize,
-//RS ) -> Result<Rational, String> {
-//RS     if sorted.is_empty() {
-//RS         return Err("rank requires at least one value".into());
-//RS     }
-//RS     let rank = sorted
-//RS         .len()
-//RS         .checked_mul(numerator)
-//RS         .ok_or("rank overflow")?
-//RS         .div_ceil(denominator);
-//RS     Ok(sorted[rank.max(1) - 1].clone())
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Percentile {
-//RS     P50,
-//RS     P90,
-//RS     P95,
-//RS     P99,
-//RS     P999,
-//RS }
-//RS pub fn estimator(samples: &[Rational], percentile: Option<Percentile>) -> Result<Rational, String> {
-//RS     if samples.len() == 1 && percentile.is_none() {
-//RS         return Ok(samples[0].clone());
-//RS     }
-//RS     let stats = statistics(samples)?;
-//RS     Ok(match percentile.unwrap_or(Percentile::P50) {
-//RS         Percentile::P50 => stats.p50,
-//RS         Percentile::P90 => stats.p90,
-//RS         Percentile::P95 => stats.p95,
-//RS         Percentile::P99 => stats.p99,
-//RS         Percentile::P999 => stats.p999,
-//RS     })
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Direction {
-//RS     LowerIsBetter,
-//RS     HigherIsBetter,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum LimitDirection {
-//RS     AtMost,
-//RS     AtLeast,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum RelativeGoal {
-//RS     RegressionAtMost,
-//RS     ImprovementAtLeast,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Evidence {
-//RS     Pass,
-//RS     Regression,
-//RS     Inconclusive,
-//RS     Unavailable,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Enforcement {
-//RS     Warn,
-//RS     Fail,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum PolicyOutcome {
-//RS     Pass,
-//RS     Warn,
-//RS     Fail,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum Comparison {
-//RS     Absolute {
-//RS         limit: Rational,
-//RS         direction: LimitDirection,
-//RS     },
-//RS     AbsoluteFrom {
-//RS         limit: Rational,
-//RS         direction: LimitDirection,
-//RS     },
-//RS     RelativeTo {
-//RS         limit_basis_points: BigInt,
-//RS         goal: RelativeGoal,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct MeasurementPolicy {
-//RS     pub bootstrap_resamples: usize,
-//RS     pub lower_rank: usize,
-//RS     pub upper_rank: usize,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Evaluation {
-//RS     pub point: Rational,
-//RS     pub lower95: Option<Rational>,
-//RS     pub upper95: Option<Rational>,
-//RS     pub evidence: Evidence,
-//RS     pub outcome: PolicyOutcome,
-//RS     pub bootstrap: Vec<Rational>,
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS pub fn evaluate(
-//RS     evidence_id: &str,
-//RS     context_key: &str,
-//RS     baseline_report_ids: &[String],
-//RS     candidate: &[Rational],
-//RS     baseline: &[Rational],
-//RS     percentile: Option<Percentile>,
-//RS     comparison: &Comparison,
-//RS     direction: Direction,
-//RS     enforcement: Enforcement,
-//RS     policy: Option<&MeasurementPolicy>,
-//RS ) -> Result<Evaluation, String> {
-//RS     if candidate.is_empty() {
-//RS         return Err("candidate samples are empty".into());
-//RS     }
-//RS     let candidate_point = estimator(candidate, percentile)?;
-//RS     let (point, bootstrap) = match comparison {
-//RS         Comparison::Absolute { limit, direction } => {
-//RS             let pass = match direction {
-//RS                 LimitDirection::AtMost => candidate_point <= *limit,
-//RS                 LimitDirection::AtLeast => candidate_point >= *limit,
-//RS             };
-//RS             return Ok(finish(
-//RS                 candidate_point,
-//RS                 None,
-//RS                 None,
-//RS                 if pass {
-//RS                     Evidence::Pass
-//RS                 } else {
-//RS                     Evidence::Regression
-//RS                 },
-//RS                 enforcement,
-//RS                 Vec::new(),
-//RS             ));
-//RS         }
-//RS         Comparison::AbsoluteFrom {
-//RS             limit,
-//RS             direction: limit_direction,
-//RS         } => {
-//RS             let point = match limit_direction {
-//RS                 LimitDirection::AtMost => candidate_point.sub(limit)?,
-//RS                 LimitDirection::AtLeast => limit.sub(&candidate_point)?,
-//RS             };
-//RS             let policy = policy.ok_or("AbsoluteFrom requires a measurement policy")?;
-//RS             let values = bootstrap_values(
-//RS                 evidence_id,
-//RS                 context_key,
-//RS                 baseline_report_ids,
-//RS                 candidate,
-//RS                 &[],
-//RS                 percentile,
-//RS                 comparison,
-//RS                 direction,
-//RS                 policy,
-//RS             )?;
-//RS             (point, values)
-//RS         }
-//RS         Comparison::RelativeTo {
-//RS             limit_basis_points,
-//RS             goal,
-//RS         } => {
-//RS             if baseline.is_empty() {
-//RS                 return Err("RelativeTo baseline samples are empty".into());
-//RS             }
-//RS             let baseline_point = estimator(baseline, percentile)?;
-//RS             if baseline_point == Rational::zero() {
-//RS                 return Ok(finish(
-//RS                     Rational::zero(),
-//RS                     None,
-//RS                     None,
-//RS                     Evidence::Unavailable,
-//RS                     enforcement,
-//RS                     Vec::new(),
-//RS                 ));
-//RS             }
-//RS             let point = relative_stat(
-//RS                 candidate_point,
-//RS                 baseline_point,
-//RS                 limit_basis_points.clone(),
-//RS                 *goal,
-//RS                 direction,
-//RS             )?;
-//RS             let policy = policy.ok_or("RelativeTo requires a measurement policy")?;
-//RS             let values = bootstrap_values(
-//RS                 evidence_id,
-//RS                 context_key,
-//RS                 baseline_report_ids,
-//RS                 candidate,
-//RS                 baseline,
-//RS                 percentile,
-//RS                 comparison,
-//RS                 direction,
-//RS                 policy,
-//RS             )?;
-//RS             (point, values)
-//RS         }
-//RS     };
-//RS     let policy = policy.expect("statistical branches require policy");
-//RS     if policy.lower_rank == 0
-//RS         || policy.upper_rank == 0
-//RS         || policy.lower_rank > bootstrap.len()
-//RS         || policy.upper_rank > bootstrap.len()
-//RS     {
-//RS         return Err("bootstrap ranks are outside the replicate set".into());
-//RS     }
-//RS     let lower = bootstrap[policy.lower_rank - 1].clone();
-//RS     let upper = bootstrap[policy.upper_rank - 1].clone();
-//RS     let evidence = if upper <= Rational::zero() {
-//RS         Evidence::Pass
-//RS     } else if lower > Rational::zero() {
-//RS         Evidence::Regression
-//RS     } else {
-//RS         Evidence::Inconclusive
-//RS     };
-//RS     Ok(finish(
-//RS         point,
-//RS         Some(lower),
-//RS         Some(upper),
-//RS         evidence,
-//RS         enforcement,
-//RS         bootstrap,
-//RS     ))
-//RS }
-//RS 
-//RS fn finish(
-//RS     point: Rational,
-//RS     lower95: Option<Rational>,
-//RS     upper95: Option<Rational>,
-//RS     evidence: Evidence,
-//RS     enforcement: Enforcement,
-//RS     bootstrap: Vec<Rational>,
-//RS ) -> Evaluation {
-//RS     let outcome = match (evidence, enforcement) {
-//RS         (Evidence::Pass, _) => PolicyOutcome::Pass,
-//RS         (_, Enforcement::Warn) => PolicyOutcome::Warn,
-//RS         (_, Enforcement::Fail) => PolicyOutcome::Fail,
-//RS     };
-//RS     Evaluation {
-//RS         point,
-//RS         lower95,
-//RS         upper95,
-//RS         evidence,
-//RS         outcome,
-//RS         bootstrap,
-//RS     }
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn bootstrap_values(
-//RS     evidence_id: &str,
-//RS     context_key: &str,
-//RS     baseline_report_ids: &[String],
-//RS     candidate: &[Rational],
-//RS     baseline: &[Rational],
-//RS     percentile: Option<Percentile>,
-//RS     comparison: &Comparison,
-//RS     direction: Direction,
-//RS     policy: &MeasurementPolicy,
-//RS ) -> Result<Vec<Rational>, String> {
-//RS     if policy.bootstrap_resamples == 0 {
-//RS         return Err("bootstrap requires at least one replicate".into());
-//RS     }
-//RS     let mut values = Vec::with_capacity(policy.bootstrap_resamples);
-//RS     for replicate in 0..policy.bootstrap_resamples {
-//RS         let mut stream = ShaStream::new(
-//RS             evidence_id,
-//RS             context_key,
-//RS             baseline_report_ids,
-//RS             replicate as u64,
-//RS         );
-//RS         let candidate_resample = resample(candidate, candidate.len(), &mut stream)?;
-//RS         let candidate_estimator = estimator(&candidate_resample, percentile)?;
-//RS         let value = match comparison {
-//RS             Comparison::AbsoluteFrom { limit, direction } => match direction {
-//RS                 LimitDirection::AtMost => candidate_estimator.sub(limit)?,
-//RS                 LimitDirection::AtLeast => limit.sub(&candidate_estimator)?,
-//RS             },
-//RS             Comparison::RelativeTo {
-//RS                 limit_basis_points,
-//RS                 goal,
-//RS             } => {
-//RS                 let baseline_resample = resample(baseline, baseline.len(), &mut stream)?;
-//RS                 let baseline_estimator = estimator(&baseline_resample, percentile)?;
-//RS                 if baseline_estimator == Rational::zero() {
-//RS                     return Err("RelativeTo bootstrap baseline estimator is zero".into());
-//RS                 }
-//RS                 relative_stat(
-//RS                     candidate_estimator,
-//RS                     baseline_estimator,
-//RS                     limit_basis_points.clone(),
-//RS                     *goal,
-//RS                     direction,
-//RS                 )?
-//RS             }
-//RS             Comparison::Absolute { .. } => return Err("Absolute does not bootstrap".into()),
-//RS         };
-//RS         values.push(value);
-//RS     }
-//RS     values.sort();
-//RS     Ok(values)
-//RS }
-//RS 
-//RS fn relative_stat(
-//RS     candidate: Rational,
-//RS     baseline: Rational,
-//RS     limit_basis_points: BigInt,
-//RS     goal: RelativeGoal,
-//RS     direction: Direction,
-//RS ) -> Result<Rational, String> {
-//RS     let delta = match (goal, direction) {
-//RS         (RelativeGoal::RegressionAtMost, Direction::LowerIsBetter)
-//RS         | (RelativeGoal::ImprovementAtLeast, Direction::HigherIsBetter) => {
-//RS             candidate.sub(&baseline)?.max_zero()
-//RS         }
-//RS         (RelativeGoal::RegressionAtMost, Direction::HigherIsBetter)
-//RS         | (RelativeGoal::ImprovementAtLeast, Direction::LowerIsBetter) => {
-//RS             baseline.sub(&candidate)?.max_zero()
-//RS         }
-//RS     };
-//RS     let basis_points = delta.mul(&Rational::integer(10_000))?.div(&baseline)?;
-//RS     let limit = Rational::from_bigints(limit_basis_points, BigInt::one())?;
-//RS     match goal {
-//RS         RelativeGoal::RegressionAtMost => basis_points.sub(&limit),
-//RS         RelativeGoal::ImprovementAtLeast => limit.sub(&basis_points),
-//RS     }
-//RS }
-//RS 
-//RS const BOOTSTRAP_DOMAIN: &[u8] = b"jet.performance-budget.bootstrap.v1\0";
-//RS struct ShaStream<'a> {
-//RS     evidence_id: &'a str,
-//RS     context_key: &'a str,
-//RS     baseline_ids: &'a [String],
-//RS     replicate: u64,
-//RS     block: u64,
-//RS     words: Vec<u64>,
-//RS }
-//RS impl<'a> ShaStream<'a> {
-//RS     fn new(
-//RS         evidence_id: &'a str,
-//RS         context_key: &'a str,
-//RS         baseline_ids: &'a [String],
-//RS         replicate: u64,
-//RS     ) -> Self {
-//RS         Self {
-//RS             evidence_id,
-//RS             context_key,
-//RS             baseline_ids,
-//RS             replicate,
-//RS             block: 0,
-//RS             words: Vec::new(),
-//RS         }
-//RS     }
-//RS     fn word(&mut self) -> u64 {
-//RS         if self.words.is_empty() {
-//RS             let mut input = Vec::new();
-//RS             input.extend_from_slice(BOOTSTRAP_DOMAIN);
-//RS             input.extend_from_slice(self.evidence_id.as_bytes());
-//RS             input.extend_from_slice(self.context_key.as_bytes());
-//RS             for id in self.baseline_ids {
-//RS                 input.extend_from_slice(id.as_bytes());
-//RS             }
-//RS             input.extend_from_slice(&self.replicate.to_be_bytes());
-//RS             input.extend_from_slice(&self.block.to_be_bytes());
-//RS             self.block += 1;
-//RS             self.words = SHA256::sha256(&input)
-//RS                 .chunks_exact(8)
-//RS                 .rev()
-//RS                 .map(|chunk| u64::from_be_bytes(chunk.try_into().expect("eight bytes")))
-//RS                 .collect();
-//RS         }
-//RS         self.words.pop().expect("digest contains four words")
-//RS     }
-//RS     fn index(&mut self, population: usize) -> Result<usize, String> {
-//RS         if population == 0 {
-//RS             return Err("cannot sample an empty population".into());
-//RS         }
-//RS         let k = population as u64;
-//RS         let threshold = ((u128::from(u64::MAX) + 1) / u128::from(k) * u128::from(k)) as u128;
-//RS         loop {
-//RS             let word = self.word();
-//RS             if u128::from(word) < threshold {
-//RS                 return Ok((word % k) as usize);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS fn resample(
-//RS     values: &[Rational],
-//RS     count: usize,
-//RS     stream: &mut ShaStream<'_>,
-//RS ) -> Result<Vec<Rational>, String> {
-//RS     (0..count)
-//RS         .map(|_| {
-//RS             stream
-//RS                 .index(values.len())
-//RS                 .map(|index| values[index].clone())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Trend {
-//RS     pub report_ids: Vec<String>,
-//RS     pub estimators: Vec<Rational>,
-//RS     pub score: Option<Rational>,
-//RS     pub label: TrendLabel,
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TrendLabel {
-//RS     Improving,
-//RS     Stable,
-//RS     Regressing,
-//RS     Insufficient,
-//RS }
-//RS pub fn trend(
-//RS     report_ids: &[String],
-//RS     estimators: &[Rational],
-//RS     direction: Direction,
-//RS ) -> Result<Trend, String> {
-//RS     if report_ids.len() != estimators.len() {
-//RS         return Err("trend ids and estimators differ in length".into());
-//RS     }
-//RS     if estimators.len() < 3 {
-//RS         return Ok(Trend {
-//RS             report_ids: report_ids.to_vec(),
-//RS             estimators: estimators.to_vec(),
-//RS             score: None,
-//RS             label: TrendLabel::Insufficient,
-//RS         });
-//RS     }
-//RS     let mut slopes = Vec::new();
-//RS     for left in 0..estimators.len() {
-//RS         for right in left + 1..estimators.len() {
-//RS             let numerator = match direction {
-//RS                 Direction::LowerIsBetter => estimators[left].sub(&estimators[right])?,
-//RS                 Direction::HigherIsBetter => estimators[right].sub(&estimators[left])?,
-//RS             };
-//RS             slopes.push(numerator.div(&Rational::integer((right - left) as i128))?);
-//RS         }
-//RS     }
-//RS     slopes.sort();
-//RS     let score = nearest_rank(&slopes, 500, 1000)?;
-//RS     let label = if score > Rational::zero() {
-//RS         TrendLabel::Improving
-//RS     } else if score < Rational::zero() {
-//RS         TrendLabel::Regressing
-//RS     } else {
-//RS         TrendLabel::Stable
-//RS     };
-//RS     Ok(Trend {
-//RS         report_ids: report_ids.to_vec(),
-//RS         estimators: estimators.to_vec(),
-//RS         score: Some(score),
-//RS         label,
-//RS     })
-//RS }
-//RS 
-//RS pub fn stable_id(content: &CanonicalJson) -> String {
-//RS     content.sha256()
-//RS }
-//RS pub fn verify_stable_id(content: &CanonicalJson, claimed: &str) -> Result<(), String> {
-//RS     let actual = stable_id(content);
-//RS     if actual == claimed {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!(
-//RS             "content hash mismatch: claimed {claimed}, recomputed {actual}"
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS pub fn budget_report(content: CanonicalJson) -> CanonicalJson {
-//RS     let report_id = stable_id(&content);
-//RS     CanonicalJson::object([
-//RS         ("content".into(), content),
-//RS         ("report_id".into(), CanonicalJson::String(report_id)),
-//RS         (
-//RS             "schema".into(),
-//RS             CanonicalJson::String("jet.budget-report".into()),
-//RS         ),
-//RS         ("version".into(), CanonicalJson::Integer("1".into())),
-//RS     ])
-//RS     .expect("fixed report keys are unique")
-//RS }
-//RS 
-//RS pub fn verify_budget_report(bytes: &[u8]) -> Result<CanonicalJson, String> {
-//RS     let report = CanonicalJson::parse_canonical(bytes)?;
-//RS     let fields = match &report {
-//RS         CanonicalJson::Object(fields) => fields,
-//RS         _ => return Err("budget report wrapper is not an object".into()),
-//RS     };
-//RS     let expected = ["content", "report_id", "schema", "version"];
-//RS     if fields.len() != expected.len() || !expected.iter().all(|key| fields.contains_key(*key)) {
-//RS         return Err("budget report wrapper has missing or unknown keys".into());
-//RS     }
-//RS     if fields.get("schema") != Some(&CanonicalJson::String("jet.budget-report".into()))
-//RS         || fields.get("version") != Some(&CanonicalJson::Integer("1".into()))
-//RS     {
-//RS         return Err("unsupported budget report schema/version".into());
-//RS     }
-//RS     let content = fields.get("content").expect("checked content key");
-//RS     validate_report_content(content)?;
-//RS     let claimed = match fields.get("report_id") {
-//RS         Some(CanonicalJson::String(id)) => id,
-//RS         _ => return Err("budget report_id is not text".into()),
-//RS     };
-//RS     if claimed.len() != 64
-//RS         || !claimed
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS     {
-//RS         return Err("budget report_id is not lowercase Hex64".into());
-//RS     }
-//RS     verify_stable_id(content, claimed)?;
-//RS     Ok(report)
-//RS }
-//RS 
-//RS fn object<'a>(
-//RS     value: &'a CanonicalJson,
-//RS     name: &str,
-//RS     keys: &[&str],
-//RS ) -> Result<&'a BTreeMap<String, CanonicalJson>, String> {
-//RS     let fields = match value {
-//RS         CanonicalJson::Object(v) => v,
-//RS         _ => return Err(format!("{name} is not an object")),
-//RS     };
-//RS     if fields.len() != keys.len() || !keys.iter().all(|key| fields.contains_key(*key)) {
-//RS         return Err(format!("{name} has missing or unknown fields"));
-//RS     }
-//RS     Ok(fields)
-//RS }
-//RS fn text<'a>(value: &'a CanonicalJson, name: &str) -> Result<&'a str, String> {
-//RS     match value {
-//RS         CanonicalJson::String(v) => Ok(v),
-//RS         _ => Err(format!("{name} is not text")),
-//RS     }
-//RS }
-//RS fn integer(value: &CanonicalJson, name: &str) -> Result<BigInt, String> {
-//RS     match value {
-//RS         CanonicalJson::Integer(v) => {
-//RS             BigInt::parse(v).map_err(|_| format!("{name} is not a canonical integer"))
-//RS         }
-//RS         _ => Err(format!("{name} is not an integer")),
-//RS     }
-//RS }
-//RS fn unsigned(value: &CanonicalJson, name: &str) -> Result<BigInt, String> {
-//RS     let v = integer(value, name)?;
-//RS     if v.is_negative() {
-//RS         Err(format!("{name} is negative"))
-//RS     } else {
-//RS         Ok(v)
-//RS     }
-//RS }
-//RS fn boolean(value: &CanonicalJson, name: &str) -> Result<bool, String> {
-//RS     match value {
-//RS         CanonicalJson::Bool(v) => Ok(*v),
-//RS         _ => Err(format!("{name} is not boolean")),
-//RS     }
-//RS }
-//RS fn array<'a>(value: &'a CanonicalJson, name: &str) -> Result<&'a [CanonicalJson], String> {
-//RS     match value {
-//RS         CanonicalJson::Array(v) => Ok(v),
-//RS         _ => Err(format!("{name} is not an array")),
-//RS     }
-//RS }
-//RS fn hex64<'a>(value: &'a CanonicalJson, name: &str) -> Result<&'a str, String> {
-//RS     let v = text(value, name)?;
-//RS     if v.len() == 64
-//RS         && v.bytes()
-//RS             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-//RS     {
-//RS         Ok(v)
-//RS     } else {
-//RS         Err(format!("{name} is not lowercase Hex64"))
-//RS     }
-//RS }
-//RS fn nullable(
-//RS     value: &CanonicalJson,
-//RS     validate: impl FnOnce(&CanonicalJson) -> Result<(), String>,
-//RS ) -> Result<(), String> {
-//RS     if matches!(value, CanonicalJson::Null) {
-//RS         Ok(())
-//RS     } else {
-//RS         validate(value)
-//RS     }
-//RS }
-//RS fn one_of(value: &CanonicalJson, name: &str, allowed: &[&str]) -> Result<(), String> {
-//RS     let v = text(value, name)?;
-//RS     if allowed.contains(&v) {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!("{name} has unknown value `{v}`"))
-//RS     }
-//RS }
-//RS 
-//RS fn validate_rational(
-//RS     value: &CanonicalJson,
-//RS     quantity: bool,
-//RS     name: &str,
-//RS ) -> Result<Rational, String> {
-//RS     let f = object(value, name, &["num", "den"])?;
-//RS     let n = integer(&f["num"], &format!("{name}.num"))?;
-//RS     let d = integer(&f["den"], &format!("{name}.den"))?;
-//RS     if d.is_zero() || d.is_negative() {
-//RS         return Err(format!("{name}.den must be positive"));
-//RS     }
-//RS     if quantity && n.is_negative() {
-//RS         return Err(format!("{name} quantity is negative"));
-//RS     }
-//RS     let reduced = Rational::from_bigints(n.clone(), d.clone())?;
-//RS     if reduced.num != n || reduced.den != d {
-//RS         return Err(format!("{name} is not gcd-reduced"));
-//RS     }
-//RS     Ok(reduced)
-//RS }
-//RS fn validate_policy(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "measurement policy",
-//RS         &[
-//RS             "min_candidate_samples",
-//RS             "min_baseline_samples",
-//RS             "baseline_generations",
-//RS             "bootstrap_resamples",
-//RS             "lower_rank",
-//RS             "upper_rank",
-//RS             "stale_after_seconds",
-//RS             "trend_generations",
-//RS         ],
-//RS     )?;
-//RS     for key in f.keys() {
-//RS         unsigned(&f[key], &format!("measurement policy.{key}"))?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS fn validate_statistics(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "statistics",
-//RS         &[
-//RS             "count",
-//RS             "sorted_samples",
-//RS             "p50",
-//RS             "p90",
-//RS             "p95",
-//RS             "p99",
-//RS             "p999",
-//RS             "mean",
-//RS             "mad",
-//RS         ],
-//RS     )?;
-//RS     let count = unsigned(&f["count"], "statistics.count")?;
-//RS     let raw = array(&f["sorted_samples"], "statistics.sorted_samples")?;
-//RS     let mut samples = Vec::with_capacity(raw.len());
-//RS     for sample in raw {
-//RS         samples.push(validate_rational(sample, true, "statistics sample")?);
-//RS     }
-//RS     if samples.windows(2).any(|w| w[0] > w[1]) {
-//RS         return Err("statistics.sorted_samples is not sorted".into());
-//RS     }
-//RS     if count.to_string() != samples.len().to_string() {
-//RS         return Err("statistics.count does not match sorted_samples".into());
-//RS     }
-//RS     let actual = statistics(&samples)?;
-//RS     for (key, want) in [
-//RS         ("p50", actual.p50),
-//RS         ("p90", actual.p90),
-//RS         ("p95", actual.p95),
-//RS         ("p99", actual.p99),
-//RS         ("p999", actual.p999),
-//RS         ("mean", actual.mean),
-//RS         ("mad", actual.mad),
-//RS     ] {
-//RS         if validate_rational(&f[key], true, &format!("statistics.{key}"))? != want {
-//RS             return Err(format!(
-//RS                 "statistics.{key} does not match independent recomputation"
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS fn validate_history(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(value, "history selection", &["state_id", "report_ids"])?;
-//RS     hex64(&f["state_id"], "history.state_id")?;
-//RS     for id in array(&f["report_ids"], "history.report_ids")? {
-//RS         hex64(id, "history report id")?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS fn validate_baseline(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "statistical baseline",
-//RS         &["history", "pooled_samples", "statistics", "policy"],
-//RS     )?;
-//RS     validate_history(&f["history"])?;
-//RS     for q in array(&f["pooled_samples"], "baseline.pooled_samples")? {
-//RS         validate_rational(q, true, "baseline sample")?;
-//RS     }
-//RS     validate_statistics(&f["statistics"])?;
-//RS     validate_policy(&f["policy"])
-//RS }
-//RS fn validate_trend(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "trend",
-//RS         &["label", "report_ids", "estimators", "score"],
-//RS     )?;
-//RS     one_of(
-//RS         &f["label"],
-//RS         "trend.label",
-//RS         &["improving", "stable", "regressing", "insufficient"],
-//RS     )?;
-//RS     let ids = array(&f["report_ids"], "trend.report_ids")?;
-//RS     for id in ids {
-//RS         hex64(id, "trend report id")?;
-//RS     }
-//RS     let estimators = array(&f["estimators"], "trend.estimators")?;
-//RS     if ids.len() != estimators.len() {
-//RS         return Err("trend inputs are not index-aligned".into());
-//RS     }
-//RS     for q in estimators {
-//RS         validate_rational(q, true, "trend estimator")?;
-//RS     }
-//RS     nullable(&f["score"], |v| {
-//RS         validate_rational(v, false, "trend.score").map(|_| ())
-//RS     })
-//RS }
-//RS fn validate_decision(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "decision",
-//RS         &[
-//RS             "evidence",
-//RS             "reason",
-//RS             "point",
-//RS             "lower95",
-//RS             "upper95",
-//RS             "trend",
-//RS             "policy_outcome",
-//RS         ],
-//RS     )?;
-//RS     one_of(
-//RS         &f["evidence"],
-//RS         "decision.evidence",
-//RS         &["pass", "regression", "inconclusive", "unavailable"],
-//RS     )?;
-//RS     nullable(&f["reason"], |v| text(v, "decision.reason").map(|_| ()))?;
-//RS     nullable(&f["point"], |v| {
-//RS         validate_rational(v, false, "decision.point").map(|_| ())
-//RS     })?;
-//RS     nullable(&f["lower95"], |v| {
-//RS         validate_rational(v, false, "decision.lower95").map(|_| ())
-//RS     })?;
-//RS     nullable(&f["upper95"], |v| {
-//RS         validate_rational(v, false, "decision.upper95").map(|_| ())
-//RS     })?;
-//RS     validate_trend(&f["trend"])?;
-//RS     one_of(
-//RS         &f["policy_outcome"],
-//RS         "decision.policy_outcome",
-//RS         &["pass", "warn", "fail"],
-//RS     )
-//RS }
-//RS fn validate_metric(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(value, "metric", &["name", "percentile"])?;
-//RS     text(&f["name"], "metric.name")?;
-//RS     nullable(&f["percentile"], |v| {
-//RS         one_of(
-//RS             v,
-//RS             "metric.percentile",
-//RS             &["p50", "p90", "p95", "p99", "p999"],
-//RS         )
-//RS     })
-//RS }
-//RS fn validate_provider(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = object(
-//RS         value,
-//RS         "provider",
-//RS         &[
-//RS             "kind",
-//RS             "identity",
-//RS             "version",
-//RS             "isolation",
-//RS             "cpu_arch",
-//RS             "cpu_model",
-//RS             "logical_cpus",
-//RS             "memory_bytes",
-//RS             "os",
-//RS             "kernel",
-//RS             "power_governor",
-//RS             "hardware_fingerprint",
-//RS         ],
-//RS     )?;
-//RS     for key in [
-//RS         "kind",
-//RS         "identity",
-//RS         "version",
-//RS         "isolation",
-//RS         "cpu_arch",
-//RS         "cpu_model",
-//RS         "os",
-//RS         "kernel",
-//RS         "power_governor",
-//RS     ] {
-//RS         text(&f[key], &format!("provider.{key}"))?;
-//RS     }
-//RS     unsigned(&f["logical_cpus"], "provider.logical_cpus")?;
-//RS     unsigned(&f["memory_bytes"], "provider.memory_bytes")?;
-//RS     hex64(&f["hardware_fingerprint"], "provider.hardware_fingerprint")?;
-//RS     let mut unhashed = f.clone();
-//RS     unhashed.remove("hardware_fingerprint");
-//RS     verify_stable_id(
-//RS         &CanonicalJson::Object(unhashed),
-//RS         text(&f["hardware_fingerprint"], "provider.hardware_fingerprint")?,
-//RS     )
-//RS     .map_err(|_| "provider hardware_fingerprint mismatch".into())
-//RS }
-//RS fn validate_comparison(value: &CanonicalJson) -> Result<(), String> {
-//RS     let f = match value {
-//RS         CanonicalJson::Object(f) => f,
-//RS         _ => return Err("comparison is not an object".into()),
-//RS     };
-//RS     let kind = text(
-//RS         f.get("kind").ok_or("comparison missing kind")?,
-//RS         "comparison.kind",
-//RS     )?;
-//RS     match kind {
-//RS         "absolute" => {
-//RS             let f = object(
-//RS                 value,
-//RS                 "absolute comparison",
-//RS                 &["kind", "limit", "direction"],
-//RS             )?;
-//RS             validate_rational(&f["limit"], true, "comparison.limit")?;
-//RS             one_of(
-//RS                 &f["direction"],
-//RS                 "comparison.direction",
-//RS                 &["at_most", "at_least"],
-//RS             )
-//RS         }
-//RS         "absolute_from" => {
-//RS             let f = object(
-//RS                 value,
-//RS                 "absolute_from comparison",
-//RS                 &["kind", "baseline", "limit", "direction"],
-//RS             )?;
-//RS             text(&f["baseline"], "comparison.baseline")?;
-//RS             validate_rational(&f["limit"], true, "comparison.limit")?;
-//RS             one_of(
-//RS                 &f["direction"],
-//RS                 "comparison.direction",
-//RS                 &["at_most", "at_least"],
-//RS             )
-//RS         }
-//RS         "relative_to" => {
-//RS             let f = object(
-//RS                 value,
-//RS                 "relative_to comparison",
-//RS                 &[
-//RS                     "kind",
-//RS                     "baseline",
-//RS                     "limit_basis_points",
-//RS                     "goal",
-//RS                     "direction",
-//RS                 ],
-//RS             )?;
-//RS             text(&f["baseline"], "comparison.baseline")?;
-//RS             unsigned(&f["limit_basis_points"], "comparison.limit_basis_points")?;
-//RS             one_of(
-//RS                 &f["goal"],
-//RS                 "comparison.goal",
-//RS                 &["regression_at_most", "improvement_at_least"],
-//RS             )?;
-//RS             one_of(
-//RS                 &f["direction"],
-//RS                 "comparison.direction",
-//RS                 &["lower_is_better", "higher_is_better"],
-//RS             )
-//RS         }
-//RS         _ => Err(format!("comparison has unknown kind `{kind}`")),
-//RS     }
-//RS }
-//RS fn validate_measurement(value: &CanonicalJson) -> Result<(), String> {
-//RS     let fields = match value {
-//RS         CanonicalJson::Object(fields) => fields,
-//RS         _ => return Err("measurement is not an object".into()),
-//RS     };
-//RS     let required = [
-//RS         "budget_id",
-//RS         "budget_spec",
-//RS         "budget_spec_sha256",
-//RS         "source",
-//RS         "metric",
-//RS         "target_class",
-//RS         "unit",
-//RS         "direction",
-//RS         "provider",
-//RS         "comparison",
-//RS         "enforcement",
-//RS         "context_key",
-//RS         "policy",
-//RS         "samples",
-//RS         "statistics",
-//RS         "history",
-//RS         "baseline",
-//RS         "decision",
-//RS     ];
-//RS     let has_compile = fields.contains_key("compile");
-//RS     if fields.len() != required.len() + usize::from(has_compile)
-//RS         || !required.iter().all(|key| fields.contains_key(*key))
-//RS         || fields
-//RS             .keys()
-//RS             .any(|key| key != "compile" && !required.contains(&key.as_str()))
-//RS     {
-//RS         return Err("measurement has missing or unknown fields".into());
-//RS     }
-//RS     text(&fields["budget_id"], "measurement.budget_id")?;
-//RS     if !matches!(fields["budget_spec"], CanonicalJson::Object(_)) {
-//RS         return Err("measurement.budget_spec is not an object".into());
-//RS     }
-//RS     hex64(
-//RS         &fields["budget_spec_sha256"],
-//RS         "measurement.budget_spec_sha256",
-//RS     )?;
-//RS     verify_stable_id(
-//RS         &fields["budget_spec"],
-//RS         text(
-//RS             &fields["budget_spec_sha256"],
-//RS             "measurement.budget_spec_sha256",
-//RS         )?,
-//RS     )
-//RS     .map_err(|_| "measurement budget_spec_sha256 mismatch".to_string())?;
-//RS     text(&fields["source"], "measurement.source")?;
-//RS     validate_metric(&fields["metric"])?;
-//RS     text(&fields["target_class"], "measurement.target_class")?;
-//RS     text(&fields["unit"], "measurement.unit")?;
-//RS     one_of(
-//RS         &fields["direction"],
-//RS         "measurement.direction",
-//RS         &["lower_is_better", "higher_is_better"],
-//RS     )?;
-//RS     validate_provider(&fields["provider"])?;
-//RS     validate_comparison(&fields["comparison"])?;
-//RS     one_of(
-//RS         &fields["enforcement"],
-//RS         "measurement.enforcement",
-//RS         &["warn", "fail"],
-//RS     )?;
-//RS     hex64(&fields["context_key"], "measurement.context_key")?;
-//RS     nullable(&fields["policy"], validate_policy)?;
-//RS     for q in array(&fields["samples"], "measurement.samples")? {
-//RS         validate_rational(q, true, "measurement sample")?;
-//RS     }
-//RS     nullable(&fields["statistics"], validate_statistics)?;
-//RS     nullable(&fields["history"], validate_history)?;
-//RS     nullable(&fields["baseline"], validate_baseline)?;
-//RS     nullable(&fields["decision"], validate_decision)?;
-//RS     let provider_kind = match &fields["provider"] {
-//RS         CanonicalJson::Object(provider) => text(&provider["kind"], "provider.kind")?,
-//RS         _ => unreachable!(),
-//RS     };
-//RS     if has_compile {
-//RS         let metric = match &fields["metric"] {
-//RS             CanonicalJson::Object(metric) => metric,
-//RS             _ => unreachable!(),
-//RS         };
-//RS         if text(&metric["name"], "metric.name")? != "CompileTime"
-//RS             || provider_kind != "CompilerProbe"
-//RS             || fields["unit"] != CanonicalJson::String("Duration".into())
-//RS             || matches!(&metric["percentile"], CanonicalJson::Null)
-//RS         {
-//RS             return Err("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit".into());
-//RS         }
-//RS         validate_compile_metadata(
-//RS             fields.get("compile").expect("compile field exists"),
-//RS             &fields["samples"],
-//RS         )?;
-//RS     } else if provider_kind == "CompilerProbe" {
-//RS         return Err("CompilerProbe measurement has no compile metadata".into());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_compile_metadata(
-//RS     value: &CanonicalJson,
-//RS     measurement_samples: &CanonicalJson,
-//RS ) -> Result<(), String> {
-//RS     let fields = object(
-//RS         value,
-//RS         "compile metadata",
-//RS         &[
-//RS             "backend",
-//RS             "cache_state",
-//RS             "clock",
-//RS             "compiler_digest",
-//RS             "core_digest",
-//RS             "edit_bytes",
-//RS             "edit_sha256",
-//RS             "host",
-//RS             "linker",
-//RS             "peak_rss_bytes",
-//RS             "phase_totals",
-//RS             "profile",
-//RS             "sample_records",
-//RS             "samples",
-//RS             "source_tree_sha256",
-//RS             "target",
-//RS             "variance",
-//RS             "warmups",
-//RS             "workload_bytes",
-//RS         ],
-//RS     )?;
-//RS     text(&fields["backend"], "compile.backend")?;
-//RS     one_of(
-//RS         &fields["cache_state"],
-//RS         "compile.cache_state",
-//RS         &["Clean", "NoChange", "Edit"],
-//RS     )?;
-//RS     one_of(
-//RS         &fields["clock"],
-//RS         "compile.clock",
-//RS         &["process_cpu"],
-//RS     )?;
-//RS     hex64(&fields["compiler_digest"], "compile.compiler_digest")?;
-//RS     hex64(&fields["core_digest"], "compile.core_digest")?;
-//RS     unsigned(&fields["edit_bytes"], "compile.edit_bytes")?;
-//RS     hex64(&fields["edit_sha256"], "compile.edit_sha256")?;
-//RS     text(&fields["host"], "compile.host")?;
-//RS     text(&fields["linker"], "compile.linker")?;
-//RS     unsigned(&fields["peak_rss_bytes"], "compile.peak_rss_bytes")?;
-//RS     text(&fields["profile"], "compile.profile")?;
-//RS     hex64(&fields["source_tree_sha256"], "compile.source_tree_sha256")?;
-//RS     text(&fields["target"], "compile.target")?;
-//RS     for (key, name) in [
-//RS         ("backend", "compile.backend"),
-//RS         ("host", "compile.host"),
-//RS         ("linker", "compile.linker"),
-//RS         ("profile", "compile.profile"),
-//RS         ("target", "compile.target"),
-//RS     ] {
-//RS         if text(&fields[key], name)?.is_empty() {
-//RS             return Err(format!("{name} is empty"));
-//RS         }
-//RS     }
-//RS     let samples = usize_wire(&fields["samples"], "compile.samples")?;
-//RS     let warmups = usize_wire(&fields["warmups"], "compile.warmups")?;
-//RS     if samples != 20 || warmups != 1 {
-//RS         return Err("compile metadata does not use the pinned warmup/sample policy".into());
-//RS     }
-//RS     let records = array(&fields["sample_records"], "compile.sample_records")?;
-//RS     if records.len() != samples {
-//RS         return Err("compile.sample_records count does not match compile.samples".into());
-//RS     }
-//RS     let mut elapsed = Vec::with_capacity(records.len());
-//RS     let mut aggregate = BTreeMap::<String, BigInt>::new();
-//RS     let mut peak_rss_bytes = BigInt::zero();
-//RS     for record in records {
-//RS         validate_compile_record(
-//RS             record,
-//RS             fields,
-//RS             &mut aggregate,
-//RS             &mut elapsed,
-//RS             &mut peak_rss_bytes,
-//RS         )?;
-//RS     }
-//RS     if peak_rss_bytes != unsigned(&fields["peak_rss_bytes"], "compile.peak_rss_bytes")? {
-//RS         return Err("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS".into());
-//RS     }
-//RS     let measured_samples = array(measurement_samples, "measurement.samples")?;
-//RS     if measured_samples.len() != elapsed.len() {
-//RS         return Err("measurement.samples count does not match compile.sample_records".into());
-//RS     }
-//RS     for (index, sample) in measured_samples.iter().enumerate() {
-//RS         if validate_rational(sample, true, &format!("measurement.samples[{index}]"))?
-//RS             != elapsed[index]
-//RS         {
-//RS             return Err("measurement.samples does not match compile.sample_records".into());
-//RS         }
-//RS     }
-//RS     let root_phases = validate_phase_totals(&fields["phase_totals"], "compile.phase_totals")?;
-//RS     if root_phases != aggregate {
-//RS         return Err("compile.phase_totals does not equal the per-sample phase totals".into());
-//RS     }
-//RS     let mean = elapsed
-//RS         .iter()
-//RS         .try_fold(Rational::zero(), |sum, value| sum.add(value))?
-//RS         .div(&Rational::integer(elapsed.len() as i128))?;
-//RS     let variance = elapsed
-//RS         .iter()
-//RS         .try_fold(Rational::zero(), |sum, value| {
-//RS             let delta = value.sub(&mean)?;
-//RS             sum.add(&delta.mul(&delta)?)
-//RS         })?
-//RS         .div(&Rational::integer(elapsed.len() as i128))?;
-//RS     if validate_rational(&fields["variance"], true, "compile.variance")? != variance {
-//RS         return Err("compile.variance does not match elapsed samples".into());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 0084 crates/jet-foundation/src/PerformanceBudget.rs:1-1848
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1
+// CanonicalJson (11) -> CanonicalJSON, JSONParser (76) -> CanonicalJSONParser.
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:22
+// integer -> canonical_json_integer; object (30) -> canonical_json_object;
+// bytes (42) -> canonical_json_bytes; sha256 (49) -> canonical_json_sha256;
+// parse_canonical (53) -> canonical_json_parse. The existing canonical parser
+// owns peek (81), take (84), value (89), literal (111), integer (118),
+// string (130), array (173), object (189), valid_integer (214), encode_json
+// (224) and encode_string (255), with the same wire/error behavior.
 
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:276
+pub struct BigInt {
+    sign: Int
+    limbs: [U32]
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:282
+    pub fn zero() -> BigInt Never! { BigInt{sign: 0, limbs: []} }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:288
+    pub fn one() -> BigInt Never! { BigInt.from_i128(1) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:291
+    pub fn from_i128(value: I128) -> BigInt Never! {
+        if BigInt.parse("{value}") == { .Ok(v) -> v .Err(_) -> panic("i128 decimal is canonical") }
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:294
+    pub fn parse(text: String) -> BigInt Err! {
+        if !canonical_json_valid_integer(text) -> return Err("non-canonical integer `{text}`")
+        negative :: text.starts_with("-")
+        digits :: if negative -> text[1..] else -> text
+        if digits == "0" -> return Ok(BigInt.zero())
+        limbs := [U32]{}
+        end := digits.len()
+        loop end != 0 {
+            start :: max(0, end - 9)
+            limb :: U32.parse(digits[start..<end]) ?? return Err("invalid integer")
+            &limbs.push(limb)
+            end = start
+        }
+        Ok(BigInt{sign: if negative -> -1 else -> 1, limbs: limbs})
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:318
+    pub fn parse_source(text: String) -> BigInt Err! {
+        negative :: text.starts_with("-")
+        unsigned :: if negative -> text[1..] else -> text
+        radix :: if unsigned.starts_with("0x") -> 16 else if unsigned.starts_with("0o") -> 8 else if unsigned.starts_with("0b") -> 2 else -> 10
+        digits :: if radix == 10 -> unsigned else -> unsigned[2..]
+        value := BigInt.zero()
+        saw_digit := false
+        loop ch in digits.chars() {
+            if ch == DIGIT_SEPARATOR -> next
+            digit :: ch.to_digit(radix) ?? return Err("invalid base-{radix} integer `{text}`")
+            value = value.mul_small(U32{radix}).add(BigInt.from_i128(I128{digit}))
+            saw_digit = true
+        }
+        if !saw_digit -> return Err("invalid integer `{text}`")
+        Ok(if negative -> value.neg() else -> value)
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:351
+    pub fn is_zero(self) -> Bool Never! { self.sign == 0 }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:354
+    pub fn is_negative(self) -> Bool Never! { self.sign < 0 }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:357
+    pub fn abs(self) -> BigInt Never! { out := self; if out.sign < 0 -> out.sign = 1; out }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:364
+    pub fn neg(self) -> BigInt Never! { out := self; out.sign = -out.sign; out }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:369
+    fn normalize(&self) Never! {
+        loop self.limbs.last() == Val(U32{0}) -> _ :: &self.limbs.pop()
+        if self.limbs.is_empty() -> self.sign = 0
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:377
+    fn abs_cmp(self, rhs: BigInt) -> Ordering Never! {
+        if self.limbs.len() != rhs.limbs.len() -> return self.limbs.len() <=> rhs.limbs.len()
+        index := self.limbs.len()
+        loop index > 0 {
+            index -= 1
+            if self.limbs[index] != rhs.limbs[index] -> return self.limbs[index] <=> rhs.limbs[index]
+        }
+        Ordering.Equal
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:383
+    fn abs_add(self, rhs: BigInt) -> BigInt Never! {
+        out := [U32]{}
+        carry := U64{0}
+        loop i in 0..<max(self.limbs.len(), rhs.limbs.len()) {
+            n :: U64{self.limbs.get(i) ?? U32{0}} + U64{rhs.limbs.get(i) ?? U32{0}} + carry
+            &out.push(U32{n % 1000000000})
+            carry = n / 1000000000
+        }
+        if carry != 0 -> &out.push(U32{carry})
+        BigInt{sign: 1, limbs: out}
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:402
+    fn abs_sub(self, rhs: BigInt) -> BigInt Never! {
+        out := [U32]{}
+        borrow := I64{0}
+        loop i in 0..<self.limbs.len() {
+            n := I64{self.limbs[i]} - I64{rhs.limbs.get(i) ?? U32{0}} - borrow
+            if n < 0 { n += 1000000000; borrow = 1 } else -> borrow = 0
+            &out.push(U32{n})
+        }
+        value := BigInt{sign: 1, limbs: out}
+        &value.normalize()
+        value
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:425
+    pub fn add(self, rhs: BigInt) -> BigInt Never! {
+        if self.sign == 0 -> return rhs
+        if rhs.sign == 0 -> return self
+        if self.sign == rhs.sign { out := self.abs_add(rhs); out.sign = self.sign; return out }
+        if self.abs_cmp(rhs) == {
+            .Greater -> { out := self.abs_sub(rhs); out.sign = self.sign; out }
+            .Less -> { out := rhs.abs_sub(self); out.sign = rhs.sign; out }
+            .Equal -> BigInt.zero()
+        }
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:452
+    pub fn sub(self, rhs: BigInt) -> BigInt Never! { self.add(rhs.neg()) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:455
+    pub fn mul(self, rhs: BigInt) -> BigInt Never! {
+        if self.is_zero() || rhs.is_zero() -> return BigInt.zero()
+        out := [U64]{}
+        loop _ in 0..<(self.limbs.len() + rhs.limbs.len()) -> &out.push(U64{0})
+        loop (i, a) in self.limbs {
+            carry := U64{0}
+            loop (j, b) in rhs.limbs {
+                at :: i + j
+                n :: out[at] + U64{a} * U64{b} + carry
+                out[at] = n % 1000000000
+                carry = n / 1000000000
+            }
+            out[i + rhs.limbs.len()] += carry
+        }
+        value := BigInt{sign: self.sign * rhs.sign, limbs: out.map(v -> U32{v})}
+        &value.normalize()
+        value
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:478
+    fn mul_small(self, rhs: U32) -> BigInt Never! {
+        if rhs == 0 || self.is_zero() -> return BigInt.zero()
+        out := [U32]{}
+        carry := U64{0}
+        loop a in self.limbs {
+            n :: U64{a} * U64{rhs} + carry
+            &out.push(U32{n % 1000000000})
+            carry = n / 1000000000
+        }
+        if carry > 0 -> &out.push(U32{carry})
+        BigInt{sign: 1, limbs: out}
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:497
+    pub fn div_rem_abs(self, rhs: BigInt) -> (BigInt, BigInt) Err! {
+        if rhs.is_zero() -> return Err("integer division by zero")
+        divisor :: rhs.abs()
+        dividend :: self.abs()
+        if dividend.abs_cmp(divisor) == Ordering.Less -> return Ok((BigInt.zero(), dividend))
+        quotient := [U32]{}
+        loop _ in dividend.limbs -> &quotient.push(U32{0})
+        remainder := BigInt.zero()
+        i := dividend.limbs.len()
+        loop i > 0 {
+            i -= 1
+            &remainder.limbs.insert(0, dividend.limbs[i])
+            remainder.sign = 1
+            &remainder.normalize()
+            lo := U32{0}
+            hi := U32{999999999}
+            loop lo < hi {
+                mid :: lo + (hi - lo) / 2 + 1
+                if divisor.mul_small(mid).abs_cmp(remainder) != Ordering.Greater -> lo = mid else -> hi = mid - 1
+            }
+            quotient[i] = lo
+            if lo != 0 -> remainder = remainder.abs_sub(divisor.mul_small(lo))
+        }
+        q := BigInt{sign: 1, limbs: quotient}
+        &q.normalize()
+        Ok((q, remainder))
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:538
+    pub fn exact_div(self, rhs: BigInt) -> BigInt Err! {
+        (quotient, r) :: self.div_rem_abs(rhs)
+        if !r.is_zero() -> return Err("integer division is not exact")
+        q := quotient
+        q.sign = self.sign * rhs.sign
+        &q.normalize()
+        Ok(q)
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:547
+    pub fn gcd(left: BigInt, right: BigInt) -> BigInt Err! {
+        a := left.abs()
+        b := right.abs()
+        loop !b.is_zero() { (_, r) :: a.div_rem_abs(b); a = b; b = r }
+        Ok(a)
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:559
+    pub fn to_string(self) -> String Never! {
+        if self.sign == 0 -> return "0"
+        pieces := [String]{}
+        if self.sign < 0 -> &pieces.push("-")
+        i := self.limbs.len() - 1
+        &pieces.push("{self.limbs[i]}")
+        loop i > 0 { i -= 1; &pieces.push("{self.limbs[i]:09}") }
+        pieces.join("")
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:575
+    pub fn cmp(self, rhs: BigInt) -> Ordering Never! {
+        if self.sign != rhs.sign -> return self.sign <=> rhs.sign
+        order :: self.abs_cmp(rhs)
+        if self.sign < 0 -> order.reverse() else -> order
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:586
+    pub fn partial_cmp(self, rhs: BigInt) -> Ordering? Never! { Val(self.cmp(rhs)) }
+}
+
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:592
+pub struct Rational {
+    pub num: BigInt
+    pub den: BigInt
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:598
+    pub fn new(num: I128, den: I128) -> Rational Err! { Rational.from_bigints(BigInt.from_i128(num), BigInt.from_i128(den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:601
+    pub fn parse(num: String, den: String) -> Rational Err! { Rational.from_bigints(BigInt.parse(num), BigInt.parse(den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:604
+    pub fn parse_source(num: String, den: String) -> Rational Err! { Rational.from_bigints(BigInt.parse_source(num), BigInt.parse_source(den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:607
+    pub fn from_bigints(num: BigInt, den: BigInt) -> Rational Err! {
+        if den.is_zero() -> return Err("rational denominator is zero")
+        n := num
+        d := den
+        if d.is_negative() { n = n.neg(); d = d.neg() }
+        if n.is_zero() -> return Ok(Rational.zero())
+        divisor :: BigInt.gcd(n, d)
+        Ok(Rational{num: n.exact_div(divisor), den: d.exact_div(divisor)})
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:624
+    pub fn zero() -> Rational Never! { Rational{num: BigInt.zero(), den: BigInt.one()} }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:630
+    pub fn integer(value: I128) -> Rational Never! { Rational{num: BigInt.from_i128(value), den: BigInt.one()} }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:636
+    pub fn add(self, rhs: Rational) -> Rational Err! { Rational.from_bigints(self.num.mul(rhs.den).add(rhs.num.mul(self.den)), self.den.mul(rhs.den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:642
+    pub fn sub(self, rhs: Rational) -> Rational Err! { self.add(rhs.neg()) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:645
+    pub fn mul(self, rhs: Rational) -> Rational Err! { Rational.from_bigints(self.num.mul(rhs.num), self.den.mul(rhs.den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:648
+    pub fn div(self, rhs: Rational) -> Rational Err! {
+        if rhs.num.is_zero() -> return Err("rational division by zero")
+        Rational.from_bigints(self.num.mul(rhs.den), self.den.mul(rhs.num))
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:654
+    pub fn neg(self) -> Rational Never! { Rational{num: self.num.neg(), den: self.den} }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:660
+    pub fn abs(self) -> Rational Never! { Rational{num: self.num.abs(), den: self.den} }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:666
+    pub fn max_zero(self) -> Rational Never! { if self.num.is_negative() -> Rational.zero() else -> self }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:673
+    pub fn to_json(self) -> CanonicalJSON Never! {
+        CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "den", value: CanonicalJSON.Integer(self.den.to_string())}, CanonicalJSONField{key: "num", value: CanonicalJSON.Integer(self.num.to_string())}})
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:683
+    pub fn cmp(self, rhs: Rational) -> Ordering Never! { self.num.mul(rhs.den).cmp(rhs.num.mul(self.den)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:688
+    pub fn partial_cmp(self, rhs: Rational) -> Ordering? Never! { Val(self.cmp(rhs)) }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:695
+    pub fn to_string(self) -> String Never! {
+        if self.den == BigInt.one() -> self.num.to_string() else -> "{self.num.to_string()}/{self.den.to_string()}"
+    }
+}
+
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:704
+pub struct Statistics { pub p50: Rational pub p90: Rational pub p95: Rational pub p99: Rational pub p999: Rational pub mean: Rational pub mad: Rational }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:714
+pub fn statistics(samples: [Rational]) -> Statistics Err! {
+    if samples.is_empty() -> return Err("statistics require at least one sample")
+    sorted := samples
+    &sorted.sort_by((a, b) -> a.cmp(b))
+    p50 :: nearest_rank(sorted, 500, 1000)
+    sum := Rational.zero()
+    loop sample in sorted -> sum = sum.add(sample)
+    mean :: sum.div(Rational.integer(I128{sorted.len()}))
+    deviations := [Rational]{}
+    loop sample in sorted -> &deviations.push(sample.sub(p50).abs())
+    &deviations.sort_by((a, b) -> a.cmp(b))
+    Ok(Statistics{p50: p50, p90: nearest_rank(sorted, 900, 1000), p95: nearest_rank(sorted, 950, 1000), p99: nearest_rank(sorted, 990, 1000), p999: nearest_rank(sorted, 999, 1000), mean: mean, mad: nearest_rank(deviations, 500, 1000)})
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:742
+fn nearest_rank(sorted: [Rational], numerator: Int, denominator: Int) -> Rational Err! {
+    if sorted.is_empty() -> return Err("rank requires at least one value")
+    product :: sorted.len().checked_mul(numerator) ?? return Err("rank overflow")
+    rank :: product.div_ceil(denominator)
+    Ok(sorted[max(1, rank) - 1])
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:758
+pub enum Percentile { P50 P90 P95 P99 P999 }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:766
+pub fn estimator(samples: [Rational], percentile: Percentile?) -> Rational Err! {
+    if samples.len() == 1 && percentile == None -> return Ok(samples[0])
+    stats :: statistics(samples)
+    Ok(if (percentile ?? Percentile.P50) == { .P50 -> stats.p50 .P90 -> stats.p90 .P95 -> stats.p95 .P99 -> stats.p99 .P999 -> stats.p999 })
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:780
+pub enum Direction { LowerIsBetter HigherIsBetter }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:785
+pub enum LimitDirection { AtMost AtLeast }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:790
+pub enum RelativeGoal { RegressionAtMost ImprovementAtLeast }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:795
+pub enum Evidence { Pass Regression Inconclusive Unavailable }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:802
+pub enum Enforcement { Warn Fail }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:807
+pub enum PolicyOutcome { Pass Warn Fail }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:814
+pub enum Comparison {
+    Absolute(limit: Rational, direction: LimitDirection)
+    AbsoluteFrom(limit: Rational, direction: LimitDirection)
+    RelativeTo(limit_basis_points: BigInt, goal: RelativeGoal)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:831
+pub struct MeasurementPolicy { pub bootstrap_resamples: Int pub lower_rank: Int pub upper_rank: Int }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:838
+pub struct Evaluation { pub point: Rational pub lower95: Rational? pub upper95: Rational? pub evidence: Evidence pub outcome: PolicyOutcome pub bootstrap: [Rational] }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:848
+pub fn evaluate(evidence_id: String, context_key: String, baseline_report_ids: [String], candidate: [Rational], baseline: [Rational], percentile: Percentile?, comparison: Comparison, direction: Direction, enforcement: Enforcement, policy: MeasurementPolicy?) -> Evaluation Err! {
+    if candidate.is_empty() -> return Err("candidate samples are empty")
+    candidate_point :: estimator(candidate, percentile)
+    point :: if comparison == {
+        .Absolute(limit, limit_direction) -> {
+            pass :: if limit_direction == LimitDirection.AtMost -> candidate_point.cmp(limit) != Ordering.Greater else -> candidate_point.cmp(limit) != Ordering.Less
+            return Ok(finish(candidate_point, None, None, if pass -> Evidence.Pass else -> Evidence.Regression, enforcement, []))
+        }
+        .AbsoluteFrom(limit, limit_direction) -> {
+            value :: if limit_direction == LimitDirection.AtMost -> candidate_point.sub(limit) else -> limit.sub(candidate_point)
+            _ :: policy ?? return Err("AbsoluteFrom requires a measurement policy")
+            value
+        }
+        .RelativeTo(limit_basis_points, goal) -> {
+            if baseline.is_empty() -> return Err("RelativeTo baseline samples are empty")
+            baseline_point :: estimator(baseline, percentile)
+            if baseline_point == Rational.zero() -> return Ok(finish(Rational.zero(), None, None, Evidence.Unavailable, enforcement, []))
+            value :: relative_stat(candidate_point, baseline_point, limit_basis_points, goal, direction)
+            _ :: policy ?? return Err("RelativeTo requires a measurement policy")
+            value
+        }
+    }
+    selected :: policy ?? panic("statistical branches require policy")
+    bootstrap :: bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, if comparison == .AbsoluteFrom(_, _) -> [] else -> baseline, percentile, comparison, direction, selected)
+    if selected.lower_rank == 0 || selected.upper_rank == 0 || selected.lower_rank > bootstrap.len() || selected.upper_rank > bootstrap.len() -> return Err("bootstrap ranks are outside the replicate set")
+    lower :: bootstrap[selected.lower_rank - 1]
+    upper :: bootstrap[selected.upper_rank - 1]
+    evidence :: if upper.cmp(Rational.zero()) != Ordering.Greater -> Evidence.Pass else if lower.cmp(Rational.zero()) == Ordering.Greater -> Evidence.Regression else -> Evidence.Inconclusive
+    Ok(finish(point, Val(lower), Val(upper), evidence, enforcement, bootstrap))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:972
+fn finish(point: Rational, lower95: Rational?, upper95: Rational?, evidence: Evidence, enforcement: Enforcement, bootstrap: [Rational]) -> Evaluation Never! {
+    outcome :: if evidence == Evidence.Pass -> PolicyOutcome.Pass else if enforcement == Enforcement.Warn -> PolicyOutcome.Warn else -> PolicyOutcome.Fail
+    Evaluation{point: point, lower95: lower95, upper95: upper95, evidence: evidence, outcome: outcome, bootstrap: bootstrap}
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:996
+fn bootstrap_values(evidence_id: String, context_key: String, baseline_report_ids: [String], candidate: [Rational], baseline: [Rational], percentile: Percentile?, comparison: Comparison, direction: Direction, policy: MeasurementPolicy) -> [Rational] Err! {
+    if policy.bootstrap_resamples == 0 -> return Err("bootstrap requires at least one replicate")
+    values := [Rational]{}
+    loop replicate in 0..<policy.bootstrap_resamples {
+        stream := ShaStream.new(evidence_id, context_key, baseline_report_ids, U64{replicate})
+        candidate_resample :: resample(candidate, candidate.len(), &stream)
+        candidate_estimator :: estimator(candidate_resample, percentile)
+        value :: if comparison == {
+            .AbsoluteFrom(limit, limit_direction) -> if limit_direction == LimitDirection.AtMost -> candidate_estimator.sub(limit) else -> limit.sub(candidate_estimator)
+            .RelativeTo(limit_basis_points, goal) -> {
+                baseline_resample :: resample(baseline, baseline.len(), &stream)
+                baseline_estimator :: estimator(baseline_resample, percentile)
+                if baseline_estimator == Rational.zero() -> return Err("RelativeTo bootstrap baseline estimator is zero")
+                relative_stat(candidate_estimator, baseline_estimator, limit_basis_points, goal, direction)
+            }
+            .Absolute(_, _) -> return Err("Absolute does not bootstrap")
+        }
+        &values.push(value)
+    }
+    &values.sort_by((a, b) -> a.cmp(b))
+    Ok(values)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1050
+fn relative_stat(candidate: Rational, baseline: Rational, limit_basis_points: BigInt, goal: RelativeGoal, direction: Direction) -> Rational Err! {
+    forward :: (goal == RelativeGoal.RegressionAtMost && direction == Direction.LowerIsBetter) || (goal == RelativeGoal.ImprovementAtLeast && direction == Direction.HigherIsBetter)
+    delta :: (if forward -> candidate.sub(baseline) else -> baseline.sub(candidate)).max_zero()
+    basis_points :: delta.mul(Rational.integer(10000)).div(baseline)
+    limit :: Rational.from_bigints(limit_basis_points, BigInt.one())
+    if goal == RelativeGoal.RegressionAtMost -> basis_points.sub(limit) else -> limit.sub(basis_points)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1075
+let BOOTSTRAP_DOMAIN: String = "jet.performance-budget.bootstrap.v1" + TEXT_NUL
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1076
+struct ShaStream {
+    evidence_id: String
+    context_key: String
+    baseline_ids: [String]
+    replicate: U64
+    block: U64
+    words: [U64]
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:1085
+    fn new(evidence_id: String, context_key: String, baseline_ids: [String], replicate: U64) -> ShaStream Never! {
+        ShaStream{evidence_id: evidence_id, context_key: context_key, baseline_ids: baseline_ids, replicate: replicate, block: 0, words: []}
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:1100
+    fn word(&self) -> U64 Never! {
+        if self.words.is_empty() {
+            input := BOOTSTRAP_DOMAIN.bytes()
+            &input.extend(self.evidence_id.bytes())
+            &input.extend(self.context_key.bytes())
+            loop id in self.baseline_ids -> &input.extend(id.bytes())
+            &input.extend(self.replicate.to_be_bytes())
+            &input.extend(self.block.to_be_bytes())
+            self.block += 1
+            digest :: mir_sha256_bytes(input)
+            chunk := 4
+            loop chunk > 0 {
+                chunk -= 1
+                value := U64{0}
+                loop i in (chunk * 8)..<(chunk * 8 + 8) -> value = (value << 8) | U64{digest[i]}
+                &self.words.push(value)
+            }
+        }
+        &self.words.pop() ?? panic("digest contains four words")
+    }
+    // Rust: crates/jet-foundation/src/PerformanceBudget.rs:1120
+    fn index(&self, population: Int) -> Int Err! {
+        if population == 0 -> return Err("cannot sample an empty population")
+        k :: U64{population}
+        threshold :: ((U128{U64.MAX} + 1) / U128{k}) * U128{k}
+        loop { word :: &self.word(); if U128{word} < threshold -> return Ok(Int{word % k}) }
+    }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1134
+fn resample(values: [Rational], count: Int, stream: &ShaStream) -> [Rational] Err! {
+    out := [Rational]{}
+    loop _ in 0..<count -> &out.push(values[&stream.index(values.len())])
+    Ok(out)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1149
+pub struct Trend { pub report_ids: [String] pub estimators: [Rational] pub score: Rational? pub label: TrendLabel }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1156
+pub enum TrendLabel { Improving Stable Regressing Insufficient }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1162
+pub fn trend(report_ids: [String], estimators: [Rational], direction: Direction) -> Trend Err! {
+    if report_ids.len() != estimators.len() -> return Err("trend ids and estimators differ in length")
+    if estimators.len() < 3 -> return Ok(Trend{report_ids: report_ids, estimators: estimators, score: None, label: TrendLabel.Insufficient})
+    slopes := [Rational]{}
+    loop left in 0..<estimators.len() {
+        loop right in (left + 1)..<estimators.len() {
+            numerator :: if direction == Direction.LowerIsBetter -> estimators[left].sub(estimators[right]) else -> estimators[right].sub(estimators[left])
+            &slopes.push(numerator.div(Rational.integer(I128{right - left})))
+        }
+    }
+    &slopes.sort_by((a, b) -> a.cmp(b))
+    score :: nearest_rank(slopes, 500, 1000)
+    label :: if score.cmp(Rational.zero()) == Ordering.Greater -> TrendLabel.Improving else if score.cmp(Rational.zero()) == Ordering.Less -> TrendLabel.Regressing else -> TrendLabel.Stable
+    Ok(Trend{report_ids: report_ids, estimators: estimators, score: Val(score), label: label})
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1205
+pub fn stable_id(content: CanonicalJSON) -> String Never! { canonical_json_sha256(content) }
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1208
+pub fn verify_stable_id(content: CanonicalJSON, claimed: String) Err! {
+    actual :: stable_id(content)
+    if actual != claimed -> return Err("content hash mismatch: claimed {claimed}, recomputed {actual}")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1219
+pub fn budget_report(content: CanonicalJSON) -> CanonicalJSON Never! {
+    report_id :: stable_id(content)
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "content", value: content},
+        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(report_id)},
+        CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
+        CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
+    })
+}
+
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1233
+pub fn verify_budget_report(bytes: [U8]) -> CanonicalJSON Err! {
+    report :: if canonical_json_parse(bytes) == { .Ok(v) -> v .Err(e) -> return Err(e.message) }
+    fields :: budget_json_fields(report, "budget report wrapper")
+    expected :: [String]{"content", "report_id", "schema", "version"}
+    if fields.len() != expected.len() || !expected.all(key -> fields.has_key(key)) -> return Err("budget report wrapper has missing or unknown keys")
+    if fields.get("schema") != Val(CanonicalJSON.String("jet.budget-report")) || fields.get("version") != Val(CanonicalJSON.Integer("1")) -> return Err("unsupported budget report schema/version")
+    content :: fields["content"]
+    validate_report_content(content)
+    claimed :: if fields["report_id"] == { .String(id) -> id else -> return Err("budget report_id is not text") }
+    if claimed.len() != 64 || !claimed.bytes().all(byte -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) -> return Err("budget report_id is not lowercase Hex64")
+    verify_stable_id(content, claimed)
+    Ok(report)
+}
+
+// CanonicalJSON owns sorted field arrays; validators use a linear indexed
+// projection so repeated key reads never become a quadratic field scan.
+fn budget_json_fields(value: CanonicalJSON, name: String) -> [String:CanonicalJSON] Err! {
+    fields :: if value == { .Object(v) -> v else -> return Err("{name} is not an object") }
+    out := [String:CanonicalJSON]{}
+    loop field in fields -> &out.set(field.key, field.value)
+    Ok(out)
+}
+fn budget_json_from_fields(fields: [String:CanonicalJSON]) -> CanonicalJSON Never! {
+    keys := fields.keys().to_list()
+    &keys.sort()
+    CanonicalJSON.Object(keys.map(key -> CanonicalJSONField{key: key, value: fields[key]}))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1265
+fn object(value: CanonicalJSON, name: String, keys: [String]) -> [String:CanonicalJSON] Err! {
+    fields :: budget_json_fields(value, name)
+    if fields.len() != keys.len() || !keys.all(key -> fields.has_key(key)) -> return Err("{name} has missing or unknown fields")
+    Ok(fields)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1279
+fn text(value: CanonicalJSON, name: String) -> String Err! {
+    if value == { .String(v) -> Ok(v) else -> Err("{name} is not text") }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1285
+fn integer(value: CanonicalJSON, name: String) -> BigInt Err! {
+    if value == {
+        .Integer(v) -> if BigInt.parse(v) == { .Ok(n) -> Ok(n) .Err(_) -> Err("{name} is not a canonical integer") }
+        else -> Err("{name} is not an integer")
+    }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1293
+fn unsigned(value: CanonicalJSON, name: String) -> BigInt Err! {
+    v :: integer(value, name)
+    if v.is_negative() -> return Err("{name} is negative")
+    Ok(v)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1301
+fn boolean(value: CanonicalJSON, name: String) -> Bool Err! {
+    if value == { .Bool(v) -> Ok(v) else -> Err("{name} is not boolean") }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1307
+fn array(value: CanonicalJSON, name: String) -> [CanonicalJSON] Err! {
+    if value == { .Array(v) -> Ok(v) else -> Err("{name} is not an array") }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1313
+fn hex64(value: CanonicalJSON, name: String) -> String Err! {
+    v :: text(value, name)
+    if v.len() != 64 || !v.bytes().all(b -> b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) -> return Err("{name} is not lowercase Hex64")
+    Ok(v)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1324
+fn nullable(value: CanonicalJSON, validate: fn(CanonicalJSON) Err!) Err! {
+    if value != CanonicalJSON.Null -> validate(value)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1334
+fn one_of(value: CanonicalJSON, name: String, allowed: [String]) Err! {
+    v :: text(value, name)
+    if !allowed.contains(v) -> return Err("{name} has unknown value `{v}`")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1343
+fn validate_rational(value: CanonicalJSON, quantity: Bool, name: String) -> Rational Err! {
+    f :: object(value, name, ["num", "den"])
+    n :: integer(f["num"], "{name}.num")
+    d :: integer(f["den"], "{name}.den")
+    if d.is_zero() || d.is_negative() -> return Err("{name}.den must be positive")
+    if quantity && n.is_negative() -> return Err("{name} quantity is negative")
+    reduced :: Rational.from_bigints(n, d)
+    if reduced.num != n || reduced.den != d -> return Err("{name} is not gcd-reduced")
+    Ok(reduced)
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1363
+fn validate_policy(value: CanonicalJSON) Err! {
+    f :: object(value, "measurement policy", ["min_candidate_samples", "min_baseline_samples", "baseline_generations", "bootstrap_resamples", "lower_rank", "upper_rank", "stale_after_seconds", "trend_generations"])
+    keys := f.keys().to_list()
+    &keys.sort()
+    loop key in keys -> _ :: unsigned(f[key], "measurement policy.{key}")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1383
+fn validate_statistics(value: CanonicalJSON) Err! {
+    f :: object(value, "statistics", ["count", "sorted_samples", "p50", "p90", "p95", "p99", "p999", "mean", "mad"])
+    count :: unsigned(f["count"], "statistics.count")
+    raw :: array(f["sorted_samples"], "statistics.sorted_samples")
+    samples := [Rational]{}
+    loop sample in raw -> &samples.push(validate_rational(sample, true, "statistics sample"))
+    loop i in 1..<samples.len() { if samples[i - 1].cmp(samples[i]) == Ordering.Greater -> return Err("statistics.sorted_samples is not sorted") }
+    if count.to_string() != "{samples.len()}" -> return Err("statistics.count does not match sorted_samples")
+    actual :: statistics(samples)
+    loop (key, want) in [(String, Rational)]{("p50", actual.p50), ("p90", actual.p90), ("p95", actual.p95), ("p99", actual.p99), ("p999", actual.p999), ("mean", actual.mean), ("mad", actual.mad)} {
+        if validate_rational(f[key], true, "statistics.{key}") != want -> return Err("statistics.{key} does not match independent recomputation")
+    }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1429
+fn validate_history(value: CanonicalJSON) Err! {
+    f :: object(value, "history selection", ["state_id", "report_ids"])
+    _ :: hex64(f["state_id"], "history.state_id")
+    loop id in array(f["report_ids"], "history.report_ids") -> _ :: hex64(id, "history report id")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1437
+fn validate_baseline(value: CanonicalJSON) Err! {
+    f :: object(value, "statistical baseline", ["history", "pooled_samples", "statistics", "policy"])
+    validate_history(f["history"])
+    loop q in array(f["pooled_samples"], "baseline.pooled_samples") -> _ :: validate_rational(q, true, "baseline sample")
+    validate_statistics(f["statistics"])
+    validate_policy(f["policy"])
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1450
+fn validate_trend(value: CanonicalJSON) Err! {
+    f :: object(value, "trend", ["label", "report_ids", "estimators", "score"])
+    one_of(f["label"], "trend.label", ["improving", "stable", "regressing", "insufficient"])
+    ids :: array(f["report_ids"], "trend.report_ids")
+    loop id in ids -> _ :: hex64(id, "trend report id")
+    estimators :: array(f["estimators"], "trend.estimators")
+    if ids.len() != estimators.len() -> return Err("trend inputs are not index-aligned")
+    loop q in estimators -> _ :: validate_rational(q, true, "trend estimator")
+    nullable(f["score"], (v) -> { _ :: validate_rational(v, false, "trend.score") })
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1476
+fn validate_decision(value: CanonicalJSON) Err! {
+    f :: object(value, "decision", ["evidence", "reason", "point", "lower95", "upper95", "trend", "policy_outcome"])
+    one_of(f["evidence"], "decision.evidence", ["pass", "regression", "inconclusive", "unavailable"])
+    nullable(f["reason"], (v) -> { _ :: text(v, "decision.reason") })
+    nullable(f["point"], (v) -> { _ :: validate_rational(v, false, "decision.point") })
+    nullable(f["lower95"], (v) -> { _ :: validate_rational(v, false, "decision.lower95") })
+    nullable(f["upper95"], (v) -> { _ :: validate_rational(v, false, "decision.upper95") })
+    validate_trend(f["trend"])
+    one_of(f["policy_outcome"], "decision.policy_outcome", ["pass", "warn", "fail"])
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1512
+fn validate_metric(value: CanonicalJSON) Err! {
+    f :: object(value, "metric", ["name", "percentile"])
+    _ :: text(f["name"], "metric.name")
+    nullable(f["percentile"], (v) -> one_of(v, "metric.percentile", ["p50", "p90", "p95", "p99", "p999"]))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1523
+fn validate_provider(value: CanonicalJSON) Err! {
+    f :: object(value, "provider", ["kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"])
+    loop key in [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "os", "kernel", "power_governor"} -> _ :: text(f[key], "provider.{key}")
+    _ :: unsigned(f["logical_cpus"], "provider.logical_cpus")
+    _ :: unsigned(f["memory_bytes"], "provider.memory_bytes")
+    _ :: hex64(f["hardware_fingerprint"], "provider.hardware_fingerprint")
+    unhashed := f
+    _ :: &unhashed.remove("hardware_fingerprint", .Slot)
+    if verify_stable_id(budget_json_from_fields(unhashed), text(f["hardware_fingerprint"], "provider.hardware_fingerprint")) == { .Err(_) -> return Err("provider hardware_fingerprint mismatch") .Ok(_) -> {} }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1566
+fn validate_comparison(value: CanonicalJSON) Err! {
+    fields :: budget_json_fields(value, "comparison")
+    kind :: text(fields.get("kind") ?? return Err("comparison missing kind"), "comparison.kind")
+    if kind == {
+        "absolute" -> {
+            f :: object(value, "absolute comparison", ["kind", "limit", "direction"])
+            _ :: validate_rational(f["limit"], true, "comparison.limit")
+            one_of(f["direction"], "comparison.direction", ["at_most", "at_least"])
+        }
+        "absolute_from" -> {
+            f :: object(value, "absolute_from comparison", ["kind", "baseline", "limit", "direction"])
+            _ :: text(f["baseline"], "comparison.baseline")
+            _ :: validate_rational(f["limit"], true, "comparison.limit")
+            one_of(f["direction"], "comparison.direction", ["at_most", "at_least"])
+        }
+        "relative_to" -> {
+            f :: object(value, "relative_to comparison", ["kind", "baseline", "limit_basis_points", "goal", "direction"])
+            _ :: text(f["baseline"], "comparison.baseline")
+            _ :: unsigned(f["limit_basis_points"], "comparison.limit_basis_points")
+            one_of(f["goal"], "comparison.goal", ["regression_at_most", "improvement_at_least"])
+            one_of(f["direction"], "comparison.direction", ["lower_is_better", "higher_is_better"])
+        }
+        else -> return Err("comparison has unknown kind `{kind}`")
+    }
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1631
+fn validate_measurement(value: CanonicalJSON) Err! {
+    fields :: budget_json_fields(value, "measurement")
+    required :: [String]{"budget_id", "budget_spec", "budget_spec_sha256", "source", "metric", "target_class", "unit", "direction", "provider", "comparison", "enforcement", "context_key", "policy", "samples", "statistics", "history", "baseline", "decision"}
+    has_compile :: fields.has_key("compile")
+    if fields.len() != required.len() + (if has_compile -> 1 else -> 0) || !required.all(key -> fields.has_key(key)) || fields.keys().any(key -> key != "compile" && !required.contains(key)) -> return Err("measurement has missing or unknown fields")
+    _ :: text(fields["budget_id"], "measurement.budget_id")
+    if fields["budget_spec"] != .Object(_) -> return Err("measurement.budget_spec is not an object")
+    _ :: hex64(fields["budget_spec_sha256"], "measurement.budget_spec_sha256")
+    if verify_stable_id(fields["budget_spec"], text(fields["budget_spec_sha256"], "measurement.budget_spec_sha256")) == { .Err(_) -> return Err("measurement budget_spec_sha256 mismatch") .Ok(_) -> {} }
+    _ :: text(fields["source"], "measurement.source")
+    validate_metric(fields["metric"])
+    _ :: text(fields["target_class"], "measurement.target_class")
+    _ :: text(fields["unit"], "measurement.unit")
+    one_of(fields["direction"], "measurement.direction", ["lower_is_better", "higher_is_better"])
+    validate_provider(fields["provider"])
+    validate_comparison(fields["comparison"])
+    one_of(fields["enforcement"], "measurement.enforcement", ["warn", "fail"])
+    _ :: hex64(fields["context_key"], "measurement.context_key")
+    nullable(fields["policy"], validate_policy)
+    loop q in array(fields["samples"], "measurement.samples") -> _ :: validate_rational(q, true, "measurement sample")
+    nullable(fields["statistics"], validate_statistics)
+    nullable(fields["history"], validate_history)
+    nullable(fields["baseline"], validate_baseline)
+    nullable(fields["decision"], validate_decision)
+    provider :: budget_json_fields(fields["provider"], "provider")
+    provider_kind :: text(provider["kind"], "provider.kind")
+    if has_compile {
+        metric :: budget_json_fields(fields["metric"], "metric")
+        if text(metric["name"], "metric.name") != "CompileTime" || provider_kind != "CompilerProbe" || fields["unit"] != CanonicalJSON.String("Duration") || metric["percentile"] == CanonicalJSON.Null -> return Err("compile metadata requires the CompilerProbe provider, CompileTime percentile, and Duration unit")
+        validate_compile_metadata(fields["compile"], fields["samples"])
+    } else if provider_kind == "CompilerProbe" -> return Err("CompilerProbe measurement has no compile metadata")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:1732
+fn validate_compile_metadata(value: CanonicalJSON, measurement_samples: CanonicalJSON) Err! {
+    fields :: object(value, "compile metadata", ["backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "edit_sha256", "host", "linker", "peak_rss_bytes", "phase_totals", "profile", "sample_records", "samples", "source_tree_sha256", "target", "variance", "warmups", "workload_bytes"])
+    _ :: text(fields["backend"], "compile.backend")
+    one_of(fields["cache_state"], "compile.cache_state", ["Clean", "NoChange", "Edit"])
+    one_of(fields["clock"], "compile.clock", ["process_cpu"])
+    _ :: hex64(fields["compiler_digest"], "compile.compiler_digest")
+    _ :: hex64(fields["core_digest"], "compile.core_digest")
+    _ :: unsigned(fields["edit_bytes"], "compile.edit_bytes")
+    _ :: hex64(fields["edit_sha256"], "compile.edit_sha256")
+    _ :: text(fields["host"], "compile.host")
+    _ :: text(fields["linker"], "compile.linker")
+    _ :: unsigned(fields["peak_rss_bytes"], "compile.peak_rss_bytes")
+    _ :: text(fields["profile"], "compile.profile")
+    _ :: hex64(fields["source_tree_sha256"], "compile.source_tree_sha256")
+    _ :: text(fields["target"], "compile.target")
+    loop (key, name) in [(String, String)]{("backend", "compile.backend"), ("host", "compile.host"), ("linker", "compile.linker"), ("profile", "compile.profile"), ("target", "compile.target")} {
+        if text(fields[key], name).is_empty() -> return Err("{name} is empty")
+    }
+    samples :: usize_wire(fields["samples"], "compile.samples")
+    warmups :: usize_wire(fields["warmups"], "compile.warmups")
+    if samples != 20 || warmups != 1 -> return Err("compile metadata does not use the pinned warmup/sample policy")
+    records :: array(fields["sample_records"], "compile.sample_records")
+    if records.len() != samples -> return Err("compile.sample_records count does not match compile.samples")
+    elapsed := [Rational]{}
+    aggregate := [String:BigInt]{}
+    peak_rss_bytes := BigInt.zero()
+    loop record in records -> validate_compile_record(record, fields, &aggregate, &elapsed, &peak_rss_bytes)
+    if peak_rss_bytes != unsigned(fields["peak_rss_bytes"], "compile.peak_rss_bytes") -> return Err("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS")
+    measured_samples :: array(measurement_samples, "measurement.samples")
+    if measured_samples.len() != elapsed.len() -> return Err("measurement.samples count does not match compile.sample_records")
+    loop (index, sample) in measured_samples {
+        if validate_rational(sample, true, "measurement.samples[{index}]") != elapsed[index] -> return Err("measurement.samples does not match compile.sample_records")
+    }
+    root_phases :: validate_phase_totals(fields["phase_totals"], "compile.phase_totals")
+    if root_phases != aggregate -> return Err("compile.phase_totals does not equal the per-sample phase totals")
+    sum := Rational.zero()
+    loop value in elapsed -> sum = sum.add(value)
+    mean :: sum.div(Rational.integer(I128{elapsed.len()}))
+    squares := Rational.zero()
+    loop value in elapsed { delta :: value.sub(mean); squares = squares.add(delta.mul(delta)) }
+    variance :: squares.div(Rational.integer(I128{elapsed.len()}))
+    if validate_rational(fields["variance"], true, "compile.variance") != variance -> return Err("compile.variance does not match elapsed samples")
+}

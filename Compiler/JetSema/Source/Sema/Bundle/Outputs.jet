@@ -1,747 +1,371 @@
-// PORT-PENDING 0354 crates-jet-sema-src-sema-bundle-liveness-module-group: crates/jet-sema/src/Sema/Bundle/Outputs.rs:1-743
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS pub(super) fn is_fallible_void_entry_return(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Type::Result { ok, .. }
-//RS             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
-//RS     )
-//RS }
-//RS /// D-CLI-GLOBAL1=E: what `fn run`'s single parameter type turned out to be.
-//RS pub(super) enum CLIEntryShape {
-//RS     /// A `#[CLI]`-derived struct — flags come straight from its fields.
-//RS     Struct,
-//RS     /// Neither of the above (E1308).
-//RS     Invalid,
-//RS }
-//RS 
-//RS /// D-CLI-GLOBAL1=E: classify `fn run`'s parameter type against its defining module.
-//RS /// The entry signature stays in the entry file; its public `#[CLI]` type may
-//RS /// live in one directly imported module.
-//RS pub(super) fn cli_entry_param_shape(
-//RS     _items: &[Item],
-//RS     ty: &Type,
-//RS     reg: &TraitRegistry,
-//RS ) -> CLIEntryShape {
-//RS     let Type::Named(name) = ty else {
-//RS         return CLIEntryShape::Invalid;
-//RS     };
-//RS     let name = name
-//RS         .rsplit_once("::")
-//RS         .map_or(name.as_str(), |(_, leaf)| leaf);
-//RS     let name = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
-//RS     if reg.implements_trait(name, "CLI") {
-//RS         return CLIEntryShape::Struct;
-//RS     }
-//RS     CLIEntryShape::Invalid
-//RS }
-//RS 
-//RS /// E0101: the entry file has no canonical `fn run`.
-//RS pub(super) fn no_run_error() -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0101",
-//RS         "this program has no `run` function".to_string(),
-//RS         "running a program starts at `fn run`, and the entry file doesn't define one".to_string(),
-//RS         "add `fn run() { ... }` to the entry file".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn output_error(what: String, why: String, fix: String, span: Span) -> Diagnostic {
-//RS     Diagnostic::error("E1321", what, why, fix, Some(span))
-//RS }
-//RS fn validate_entry_contract(
-//RS     kind: crate::AST::OutputKind,
-//RS     source_name: &str,
-//RS     signature: &FuncSig,
-//RS     module_items: &[Item],
-//RS     trait_reg: &TraitRegistry,
-//RS     span: Span,
-//RS     fix: String,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> bool {
-//RS     let params_ok = match kind {
-//RS         crate::AST::OutputKind::Executable if signature.params.len() == 1 => {
-//RS             let param_ty = &signature.params[0].1;
-//RS             matches!(
-//RS                 cli_entry_param_shape(module_items, param_ty, trait_reg),
-//RS                 CLIEntryShape::Struct
-//RS             )
-//RS         }
-//RS         crate::AST::OutputKind::Executable => signature.params.is_empty(),
-//RS         crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => {
-//RS             signature.params.is_empty()
-//RS         }
-//RS         _ => false,
-//RS     };
-//RS     let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
-//RS         matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-//RS             || is_fallible_void_entry_return(ty)
-//RS     });
-//RS     if params_ok && return_ok {
-//RS         return true;
-//RS     }
-//RS     let contract = if kind == crate::AST::OutputKind::Executable {
-//RS         "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
-//RS     } else {
-//RS         "a Service or Check takes no parameters and returns `()` or `() ?`"
-//RS     };
-//RS     diags.push(output_error(
-//RS         format!("Output entry `{source_name}` has the wrong callable contract"),
-//RS         contract.to_string(),
-//RS         fix,
-//RS         span,
-//RS     ));
-//RS     false
-//RS }
-//RS 
-//RS fn output_string(expr: &Expr) -> Option<String> {
-//RS     let Expr::Str(parts, _) = expr else {
-//RS         return None;
-//RS     };
-//RS     match parts.as_slice() {
-//RS         [StrPart::Lit(value)] => Some(value.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn output_fields<'a>(
-//RS     args: &'a [EnumLitArg],
-//RS     span: Span,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> Option<HashMap<&'a str, &'a Expr>> {
-//RS     let mut fields = HashMap::new();
-//RS     for arg in args {
-//RS         let EnumLitArg::Named { label, expr } = arg else {
-//RS             diags.push(output_error(
-//RS                 "an Output payload uses named fields".to_string(),
-//RS                 "Output facts need stable field names for checking and inspection".to_string(),
-//RS                 "write `.Executable.{ name: \"app\", entry: run }`".to_string(),
-//RS                 span,
-//RS             ));
-//RS             return None;
-//RS         };
-//RS         if fields.insert(label.as_str(), expr).is_some() {
-//RS             diags.push(output_error(
-//RS                 format!("Output field `{label}` is written twice"),
-//RS                 "one Output field has one checked value".to_string(),
-//RS                 format!("remove one `{label}:` field"),
-//RS                 expr.span(),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS     }
-//RS     Some(fields)
-//RS }
-//RS 
-//RS fn output_module_path(entry: &Expr) -> Option<(String, Span, Vec<(String, Span)>)> {
-//RS     let mut members = Vec::new();
-//RS     let mut cursor = entry;
-//RS     while let Expr::Field(base, member, span) = cursor {
-//RS         members.push((member.clone(), *span));
-//RS         cursor = base.as_ref();
-//RS     }
-//RS     let Expr::Ident(alias, alias_span) = cursor else {
-//RS         return None;
-//RS     };
-//RS     members.reverse();
-//RS     Some((alias.clone(), *alias_span, members))
-//RS }
-//RS 
-//RS fn record_output_import_use(
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     module_idx: usize,
-//RS     name: &str,
-//RS ) {
-//RS     if let Some(span) = name_ledger
-//RS         .effective_alias(module_idx, name)
-//RS         .map(|alias| alias.span)
-//RS     {
-//RS         name_ledger.record_alias_use(module_idx, span);
-//RS     }
-//RS }
-//RS 
-//RS fn output_module_alias_visible(
-//RS     from_module: usize,
-//RS     owner_module: usize,
-//RS     alias: &str,
-//RS     name_ledger: &jet_foundation::Names::NameLedger,
-//RS ) -> bool {
-//RS     let Some(import) = name_ledger.alias(owner_module, alias) else {
-//RS         return false;
-//RS     };
-//RS     match import.visibility {
-//RS         jet_foundation::Names::NameVisibility::Public => true,
-//RS         jet_foundation::Names::NameVisibility::Package => name_ledger
-//RS             .module(from_module)
-//RS             .zip(name_ledger.module(owner_module))
-//RS             .is_some_and(|(from, owner)| from.package == owner.package),
-//RS         jet_foundation::Names::NameVisibility::Private => from_module == owner_module,
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_output_callable(
-//RS     module_idx: usize,
-//RS     address: String,
-//RS     kind: crate::AST::OutputKind,
-//RS     output_name: String,
-//RS     entry: &Expr,
-//RS     bundle: &ProgramBundle,
-//RS     states: &[ModuleState],
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> Option<crate::AST::ResolvedOutput> {
-//RS     let (target, source_name, lowered_name) = match entry {
-//RS         Expr::Ident(name, span) => {
-//RS             let state = &states[module_idx];
-//RS             if state.funcs.contains_key(name) {
-//RS                 (module_idx, name.clone(), name.clone())
-//RS             } else if let Some(mangled) = state.unqualified.get(name) {
-//RS                 record_output_import_use(name_ledger, module_idx, name);
-//RS                 (module_idx, name.clone(), mangled.clone())
-//RS             } else if let Some((real, target)) = state.unqualified_file.get(name) {
-//RS                 record_output_import_use(name_ledger, module_idx, name);
-//RS                 (*target, real.clone(), real.clone())
-//RS             } else {
-//RS                 diags.push(output_error(
-//RS                     format!("Output entry `{name}` does not resolve to a function"),
-//RS                     "an Output entry is an ordinary checked function reference, not a text lookup"
-//RS                         .to_string(),
-//RS                     format!("define `fn {name}(...)`, import it, or update `entry:`"),
-//RS                     *span,
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         Expr::Field(..) => {
-//RS             let Some((alias, alias_span, members)) = output_module_path(entry) else {
-//RS                 diags.push(output_error(
-//RS                     "Output entry has no resolvable module owner".to_string(),
-//RS                     "qualified function references use one imported or inline module alias"
-//RS                         .to_string(),
-//RS                     "write `entry: module_name.function`".to_string(),
-//RS                     entry.span(),
-//RS                 ));
-//RS                 return None;
-//RS             };
-//RS             let member_path = members
-//RS                 .iter()
-//RS                 .map(|(member, _)| member.as_str())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(".");
-//RS             record_output_import_use(name_ledger, module_idx, &alias);
-//RS             let state = &states[module_idx];
-//RS             if let Some(canonical) = state.code_modules.get(&alias) {
-//RS                 if members.len() != 1 {
-//RS                     diags.push(output_error(
-//RS                         format!("module `{alias}` has no function `{member_path}`"),
-//RS                         "Output entries use ordinary module member resolution".to_string(),
-//RS                         "update `entry:` to a function that exists".to_string(),
-//RS                         members
-//RS                             .last()
-//RS                             .map(|(_, span)| *span)
-//RS                             .unwrap_or(entry.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 let member = &members[0].0;
-//RS                 let span = members[0].1;
-//RS                 let lowered = jet_foundation::Names::member_name(canonical, member);
-//RS                 if !state.funcs.contains_key(&lowered) {
-//RS                     diags.push(output_error(
-//RS                         format!("module `{alias}` has no function `{member}`"),
-//RS                         "Output entries use ordinary module member resolution".to_string(),
-//RS                         "update `entry:` to a function that exists".to_string(),
-//RS                         span,
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 (module_idx, member.clone(), lowered)
-//RS             } else if let Some(mut current) = state.imports.get(&alias).copied() {
-//RS                 let mut resolved = None;
-//RS                 for (index, (member, member_span)) in members.iter().enumerate() {
-//RS                     let is_last = index + 1 == members.len();
-//RS                     if let Some(next) = states[current].imports.get(member).copied() {
-//RS                         record_output_import_use(name_ledger, current, member);
-//RS                         if current != module_idx
-//RS                             && !output_module_alias_visible(
-//RS                                 module_idx,
-//RS                                 current,
-//RS                                 member,
-//RS                                 name_ledger,
-//RS                             )
-//RS                         {
-//RS                             diags.push(output_error(
-//RS                                 format!("module `{alias}.{member_path}` is private"),
-//RS                                 "an Output can only invoke code visible from its declaring module"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "make the `{member}` module import public, or keep the Output beside it"
-//RS                                 ),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         if is_last {
-//RS                             diags.push(output_error(
-//RS                                 format!("module `{alias}` has no function `{member_path}`"),
-//RS                                 "Output entries use ordinary module member resolution".to_string(),
-//RS                                 "update `entry:` to a function that exists".to_string(),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         current = next;
-//RS                         continue;
-//RS                     }
-//RS                     if !is_last {
-//RS                         diags.push(output_error(
-//RS                             format!("module `{alias}` has no function `{member_path}`"),
-//RS                             "Output entries use ordinary module member resolution".to_string(),
-//RS                             "update `entry:` to a function that exists".to_string(),
-//RS                             *member_span,
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     if let Some((real, target)) = states[current].reexports.get(member) {
-//RS                         record_output_import_use(name_ledger, current, member);
-//RS                         if !name_ledger.visible(module_idx, *target, real) {
-//RS                             diags.push(output_error(
-//RS                                 format!("function `{alias}.{member_path}` is private"),
-//RS                                 "an Output can only invoke code visible from its declaring module"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "make `fn {real}` public to this package, or keep the Output beside it"
-//RS                                 ),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         resolved = Some((*target, real.clone(), real.clone()));
-//RS                     } else if let Some((real, target)) =
-//RS                         states[current].unqualified_file.get(member)
-//RS                     {
-//RS                         record_output_import_use(name_ledger, current, member);
-//RS                         if current != module_idx
-//RS                             && !output_module_alias_visible(
-//RS                                 module_idx,
-//RS                                 current,
-//RS                                 member,
-//RS                                 name_ledger,
-//RS                             )
-//RS                         {
-//RS                             diags.push(output_error(
-//RS                                 format!("function `{alias}.{member_path}` is private"),
-//RS                                 "an Output can only invoke code visible from its declaring module"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "make the `{member}` import public, or keep the Output beside it"
-//RS                                 ),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         if !name_ledger.visible(module_idx, *target, real) {
-//RS                             diags.push(output_error(
-//RS                                 format!("function `{alias}.{member_path}` is private"),
-//RS                                 "an Output can only invoke code visible from its declaring module"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "make `fn {real}` public to this package, or keep the Output beside it"
-//RS                                 ),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         resolved = Some((*target, real.clone(), real.clone()));
-//RS                     } else if states[current].funcs.contains_key(member) {
-//RS                         if !name_ledger.visible(module_idx, current, member) {
-//RS                             diags.push(output_error(
-//RS                                 format!("function `{alias}.{member_path}` is private"),
-//RS                                 "an Output can only invoke code visible from its declaring module"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "make `fn {member}` public to this package, or keep the Output beside it"
-//RS                                 ),
-//RS                                 *member_span,
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                         resolved = Some((current, member.clone(), member.clone()));
-//RS                     } else {
-//RS                         diags.push(output_error(
-//RS                             format!("module `{alias}` has no function `{member_path}`"),
-//RS                             "Output entries use ordinary module member resolution".to_string(),
-//RS                             "update `entry:` to a function that exists".to_string(),
-//RS                             *member_span,
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 let Some(resolved) = resolved else {
-//RS                     return None;
-//RS                 };
-//RS                 resolved
-//RS             } else {
-//RS                 diags.push(output_error(
-//RS                     format!("no module named `{alias}` is in scope"),
-//RS                     "qualified Output entries use ordinary imported module aliases".to_string(),
-//RS                     format!("import the module before `entry: {alias}.{member_path}`"),
-//RS                     alias_span,
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         _ => {
-//RS             diags.push(output_error(
-//RS                 "Output entry is not a function reference".to_string(),
-//RS                 "text names, calls, and runtime reflection are not Output links".to_string(),
-//RS                 "write a bare or qualified function reference, such as `entry: run`".to_string(),
-//RS                 entry.span(),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS     };
-//RS     let semantic_name = lowered_name;
-//RS     let signature = states[target]
-//RS         .funcs
-//RS         .get(&semantic_name)
-//RS         .or_else(|| states[target].funcs.get(&source_name))?;
-//RS     let failure_contract = signature.failure_contract();
-//RS     if signature.is_extern || signature.is_unsafe {
-//RS         diags.push(output_error(
-//RS             format!("Output entry `{source_name}` is not an ordinary safe Jet function"),
-//RS             "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary".to_string(),
-//RS             "wrap the boundary in an ordinary safe Jet function and reference that function".to_string(),
-//RS             entry.span(),
-//RS         ));
-//RS         return None;
-//RS     }
-//RS     if !validate_entry_contract(
-//RS         kind,
-//RS         &source_name,
-//RS         signature,
-//RS         &bundle.modules[target].items,
-//RS         &states[target].trait_reg,
-//RS         entry.span(),
-//RS         format!("change `fn {source_name}` to match the {kind:?} contract"),
-//RS         diags,
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     let module_alias = name_ledger
-//RS         .module_alias(target)
-//RS         .unwrap_or(&bundle.modules[target].alias);
-//RS     let rust_path = if target == bundle.entry {
-//RS         crate::AST::mangle(&semantic_name)
-//RS     } else {
-//RS         format!(
-//RS             "{}::{}",
-//RS             crate::AST::mangle(module_alias),
-//RS             crate::AST::mangle(&source_name),
-//RS         )
-//RS     };
-//RS     Some(crate::AST::ResolvedOutput {
-//RS         address,
-//RS         kind,
-//RS         output_name,
-//RS         module: target,
-//RS         source_path: bundle.modules[target].display.clone(),
-//RS         source_name: source_name.clone(),
-//RS         semantic_name: semantic_name.clone(),
-//RS         lowered_name: rust_path,
-//RS         params: signature.params.clone(),
-//RS         return_type: signature.return_type.clone(),
-//RS         failure_contract,
-//RS         reference: entry.span(),
-//RS         definition: name_ledger
-//RS             .declaration(target, &semantic_name)
-//RS             .or_else(|| name_ledger.declaration(target, &source_name))
-//RS             .map(|declaration| declaration.span)
-//RS             .unwrap_or(entry.span()),
-//RS         authority: crate::AST::OutputCallableAuthority::SafeJet,
-//RS         effects: Vec::new(),
-//RS         selected: false,
-//RS         selection_reason: "not selected".to_string(),
-//RS     })
-//RS }
-//RS 
-//RS fn output_default(
-//RS     bundle: &ProgramBundle,
-//RS     field: &str,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> Option<String> {
-//RS     let value = bundle.modules[bundle.entry].items.iter().find_map(|item| {
-//RS         let Item::Const(value) = item else {
-//RS             return None;
-//RS         };
-//RS         matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT_DEFAULTS)
-//RS             .then_some(&value.value)
-//RS     })?;
-//RS     let Expr::StructLit { fields, .. } = value else {
-//RS         diags.push(output_error(
-//RS             "`defaults:` needs one checked record".to_string(),
-//RS             "Output defaults map singular tool intents to Output addresses".to_string(),
-//RS             "write `defaults: { run: app }`".to_string(),
-//RS             value.span(),
-//RS         ));
-//RS         return None;
-//RS     };
-//RS     fields.iter().find_map(|(name, _, value)| {
-//RS         if name != field {
-//RS             return None;
-//RS         }
-//RS         match value {
-//RS             Expr::Ident(address, _) => Some(address.clone()),
-//RS             _ => {
-//RS                 diags.push(output_error(
-//RS                     format!("default `{field}` is not an Output address"),
-//RS                     "defaults use checked Output references, not text or calls".to_string(),
-//RS                     format!("write `{field}: output_name`"),
-//RS                     value.span(),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn resolve_outputs(
-//RS     bundle: &mut ProgramBundle,
-//RS     states: &[ModuleState],
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     mode: CompileMode,
-//RS     explicit: Option<&str>,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     let mut resolved = Vec::new();
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         for (item_idx, item) in module.items.iter().enumerate() {
-//RS             let Item::Const(value) = item else { continue };
-//RS             if !matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {
-//RS                 continue;
-//RS             }
-//RS             let Expr::EnumLit {
-//RS                 variant,
-//RS                 args,
-//RS                 span,
-//RS                 ..
-//RS             } = &value.value
-//RS             else {
-//RS                 diags.push(output_error(
-//RS                     "Output needs one closed kind".to_string(),
-//RS                     "Output is the closed sum of the nine ratified kinds".to_string(),
-//RS                     "write `.Executable.{ ... }`, `.Service.{ ... }`, or another Output kind"
-//RS                         .to_string(),
-//RS                     value.value.span(),
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             let Some(kind) = crate::AST::OutputKind::from_name(variant) else {
-//RS                 diags.push(output_error(
-//RS                     format!("`{variant}` is not an Output kind"),
-//RS                     "Output has exactly nine ratified kinds".to_string(),
-//RS                     format!("use one of: {}", Syntax::OUTPUT_KINDS.join(", ")),
-//RS                     *span,
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             let Some(fields) = output_fields(args, *span, diags) else {
-//RS                 continue;
-//RS             };
-//RS             let Some(name_expr) = fields.get(Syntax::OUTPUT_FIELD_NAME) else {
-//RS                 diags.push(output_error(
-//RS                     "Output is missing `name:`".to_string(),
-//RS                     "every Output has one stable user-facing name".to_string(),
-//RS                     "add `name: \"...\"`".to_string(),
-//RS                     *span,
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             let Some(output_name) = output_string(name_expr) else {
-//RS                 diags.push(output_error(
-//RS                     "Output `name:` must be fixed text".to_string(),
-//RS                     "graph identity cannot depend on runtime interpolation".to_string(),
-//RS                     "write a plain string literal".to_string(),
-//RS                     name_expr.span(),
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             if !kind.is_runnable() {
-//RS                 if let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) {
-//RS                     diags.push(output_error(
-//RS                         format!("{kind:?} Output is not runnable"),
-//RS                         "only Executable, Service, and Check link to functions".to_string(),
-//RS                         "remove `entry:` from this Output".to_string(),
-//RS                         entry.span(),
-//RS                     ));
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if let Some((field, value)) = args.iter().find_map(|arg| match arg {
-//RS                 EnumLitArg::Named { label, expr }
-//RS                     if label != Syntax::OUTPUT_FIELD_NAME
-//RS                         && label != Syntax::OUTPUT_FIELD_ENTRY =>
-//RS                 {
-//RS                     Some((label, expr))
-//RS                 }
-//RS                 _ => None,
-//RS             }) {
-//RS                 diags.push(output_error(
-//RS                     format!("`{field}:` is not a runnable Output field"),
-//RS                     "Executable, Service, and Check Outputs contain only their stable name and checked entry reference".to_string(),
-//RS                     format!("remove `{field}:` from this Output"),
-//RS                     value.span(),
-//RS                 ));
-//RS                 continue;
-//RS             }
-//RS             let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) else {
-//RS                 diags.push(output_error(
-//RS                     format!("{kind:?} Output is missing `entry:`"),
-//RS                     "every runnable Output links to one checked function".to_string(),
-//RS                     "add `entry: function_name`".to_string(),
-//RS                     *span,
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             if let Some(fact) = resolve_output_callable(
-//RS                 module_idx,
-//RS                 value.name.clone(),
-//RS                 kind,
-//RS                 output_name,
-//RS                 entry,
-//RS                 bundle,
-//RS                 states,
-//RS                 name_ledger,
-//RS                 diags,
-//RS             ) {
-//RS                 resolved.push((module_idx, item_idx, fact));
-//RS             }
-//RS         }
-//RS     }
-//RS     let has_legacy_run = bundle.modules[bundle.entry]
-//RS         .items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::Func(function) if function.name == "run"));
-//RS     let run_default = output_default(bundle, Syntax::OUTPUT_DEFAULT_RUN, diags);
-//RS     let run_default_index = run_default.as_ref().and_then(|address| {
-//RS         resolved.iter().position(|(_, _, fact)| {
-//RS             fact.kind == crate::AST::OutputKind::Executable && fact.address == *address
-//RS         })
-//RS     });
-//RS     if let Some(default) = run_default.as_ref().filter(|_| run_default_index.is_none()) {
-//RS         diags.push(output_error(
-//RS             format!("default `run` names incompatible Output `{default}`"),
-//RS             "the run default must name an Executable Output in this Package".to_string(),
-//RS             "point `defaults.run` at one checked Executable address".to_string(),
-//RS             Span::new(0, 0),
-//RS         ));
-//RS     }
-//RS     if mode == CompileMode::Run {
-//RS         if let Some(address) = explicit {
-//RS             if let Some((_, _, fact)) = resolved.iter_mut().find(|(_, _, fact)| {
-//RS                 fact.address == address
-//RS                     && matches!(
-//RS                         fact.kind,
-//RS                         crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
-//RS                     )
-//RS             }) {
-//RS                 fact.selected = true;
-//RS                 fact.selection_reason = "explicit address".to_string();
-//RS             } else {
-//RS                 let mut choices = resolved
-//RS                     .iter()
-//RS                     .filter(|(_, _, fact)| {
-//RS                         matches!(
-//RS                             fact.kind,
-//RS                             crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
-//RS                         )
-//RS                     })
-//RS                     .map(|(_, _, fact)| fact.address.clone())
-//RS                     .collect::<Vec<_>>();
-//RS                 choices.sort();
-//RS                 diags.push(output_error(
-//RS                     format!("`{address}` is not an Output compatible with `jet run`"),
-//RS                     "an explicit run address must name one checked Executable or Service Output"
-//RS                         .to_string(),
-//RS                     format!("choose one of: {}", choices.join(", ")),
-//RS                     Span::new(0, 0),
-//RS                 ));
-//RS             }
-//RS         } else if !has_legacy_run {
-//RS             let executable = resolved
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .filter(|(_, (_, _, fact))| fact.kind == crate::AST::OutputKind::Executable)
-//RS                 .map(|(index, _)| index)
-//RS                 .collect::<Vec<_>>();
-//RS             if executable.len() == 1 {
-//RS                 resolved[executable[0]].2.selected = true;
-//RS                 resolved[executable[0]].2.selection_reason = "sole compatible Output".to_string();
-//RS             } else if executable.len() > 1 {
-//RS                 if let Some(index) = run_default_index {
-//RS                     resolved[index].2.selected = true;
-//RS                     resolved[index].2.selection_reason = "checked defaults.run".to_string();
-//RS                 } else if run_default.is_none() {
-//RS                     let mut names = executable
-//RS                         .iter()
-//RS                         .map(|index| resolved[*index].2.address.clone())
-//RS                         .collect::<Vec<_>>();
-//RS                     names.sort();
-//RS                     diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: {{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
-//RS                 }
-//RS             }
-//RS         }
-//RS     } else if matches!(mode, CompileMode::Test | CompileMode::TestOverride) {
-//RS         for (_, _, fact) in &mut resolved {
-//RS             fact.selected = fact.kind == crate::AST::OutputKind::Check;
-//RS             if fact.selected {
-//RS                 fact.selection_reason = "all Check Outputs".to_string();
-//RS             }
-//RS         }
-//RS     }
-//RS     let selected_output = resolved.iter().any(|(_, _, fact)| fact.selected);
-//RS     if has_legacy_run
-//RS         && matches!(mode, CompileMode::Run | CompileMode::Check)
-//RS         && !selected_output
-//RS     {
-//RS         if let Some(signature) = states[bundle.entry].funcs.get("run") {
-//RS             let span = bundle.modules[bundle.entry]
-//RS                 .items
-//RS                 .iter()
-//RS                 .find_map(|item| match item {
-//RS                     Item::Func(function) if function.name == "run" => Some(function.span),
-//RS                     _ => None,
-//RS                 })
-//RS                 .unwrap_or_else(|| Span::new(0, 0));
-//RS             // D-WEBAPP1=D: an App-returning `fn run` is a serving entry, not
-//RS             // an Executable entry. `bundle_serves_until_stopped` and the App
-//RS             // graph use this same canonical return-type fact.
-//RS             if !signature
-//RS                 .return_type
-//RS                 .as_ref()
-//RS                 .is_some_and(crate::AST::type_is_app)
-//RS             {
-//RS                 validate_entry_contract(
-//RS                     crate::AST::OutputKind::Executable,
-//RS                     "run",
-//RS                     signature,
-//RS                     &bundle.modules[bundle.entry].items,
-//RS                     &states[bundle.entry].trait_reg,
-//RS                     span,
-//RS                     "declare the entry as `fn run()` or `fn run() ()?`".to_string(),
-//RS                     diags,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     for (module, item, fact) in resolved {
-//RS         if let Item::Const(value) = &mut bundle.modules[module].items[item] {
-//RS             value.resolved_output = Some(fact);
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0354 crates/jet-sema/src/Sema/Bundle/Outputs.rs:1-743
+use jet_foundation.[Type, Item, FuncSig, TraitRegistry, Diagnostic, Span, Expr, StrPart, EnumLitArg, ProgramBundle, NameLedger, NameVisibility, OutputKind, ResolvedOutput, OutputCallableAuthority, expr_span, mangle, member_name, type_is_app, INTERNAL_UNIT_TYPE, TYPE_OUTPUT_DEFAULTS, TYPE_OUTPUT, OUTPUT_KINDS, OUTPUT_FIELD_NAME, OUTPUT_FIELD_ENTRY, OUTPUT_DEFAULT_RUN]
+use jet_sema.Sema.Bundle.[ModuleState, CompileMode]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:3
+pub fn is_fallible_void_entry_return(ty: Type) -> Bool Never! {
+    if ty == .Result(ok, _) { if ok == .Named(name) -> return name == INTERNAL_UNIT_TYPE }
+    false
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:11
+pub enum CLIEntryShape { Struct, Invalid }
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:21
+pub fn cli_entry_param_shape(_items: [Item], ty: Type, reg: TraitRegistry) -> CLIEntryShape Never! {
+    if ty != .Named(qualified) -> return CLIEntryShape.Invalid
+    name := qualified
+    if name.rsplit_once("::") == .Val((_, leaf)) -> name = leaf
+    if name.rsplit_once(".") == .Val((_, leaf)) -> name = leaf
+    if reg.implements_trait(name, "CLI") -> return CLIEntryShape.Struct
+    CLIEntryShape.Invalid
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:40
+pub fn no_run_error() -> Diagnostic Never! {
+    Diagnostic.error("E0101", "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file", None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:50
+fn output_error(what: String, why: String, fix: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E1321", what, why, fix, Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:53
+fn validate_entry_contract(kind: OutputKind, source_name: String, signature: FuncSig, module_items: [Item], trait_reg: TraitRegistry, span: Span, fix: String, diags: &[Diagnostic]) -> Bool Never! {
+    params_ok :: if kind == {
+        .Executable -> if signature.params.len() == 1 -> cli_entry_param_shape(module_items, signature.params[0].1, trait_reg) == CLIEntryShape.Struct else -> signature.params.is_empty()
+        .Service | .Check -> signature.params.is_empty()
+        _ -> false
+    }
+    return_ok :: signature.return_type.is_none_or(ty -> if ty == {
+        .Named(name) -> name == INTERNAL_UNIT_TYPE
+        _ -> is_fallible_void_entry_return(ty)
+    })
+    if params_ok && return_ok -> return true
+    contract :: if kind == OutputKind.Executable -> "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`" else -> "a Service or Check takes no parameters and returns `()` or `() ?`"
+    &diags.push(output_error("Output entry `{source_name}` has the wrong callable contract", contract, fix, span))
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:98
+fn output_string(expr: Expr) -> String? Never! {
+    if expr == .Str(parts, _) {
+        if parts.len() == 1 && parts[0] == .Lit(value) -> return Val(~value)
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:108
+fn output_fields(args: [EnumLitArg], span: Span, diags: &[Diagnostic]) -> [String:&Expr]? Never! {
+    fields := [String:&Expr]{}
+    loop arg in args {
+        if arg != .Named(label, expr) {
+            &diags.push(output_error("an Output payload uses named fields", "Output facts need stable field names for checking and inspection", "write `.Executable.{{ name: \"app\", entry: run }}`", span))
+            return None
+        }
+        previous :: &fields.insert(label, &expr)
+        if previous.is_some() {
+            &diags.push(output_error("Output field `{label}` is written twice", "one Output field has one checked value", "remove one `{label}:` field", expr_span(expr)))
+            return None
+        }
+    }
+    Val(fields)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:137
+fn output_module_path(entry: Expr) -> (String, Span, [(String, Span)])? Never! {
+    members := [(String, Span)]{}
+    cursor := entry
+    loop cursor == .Field(base, member, span) {
+        &members.push((~member, span))
+        cursor = base
+    }
+    if cursor != .Ident(alias, alias_span) -> return None
+    &members.reverse()
+    Val((~alias, alias_span, ^members))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:151
+fn record_output_import_use(name_ledger: &NameLedger, module_idx: Int, name: String) Never! {
+    if name_ledger.effective_alias(module_idx, name) == .Val(alias) -> name_ledger.record_alias_use(module_idx, alias.span)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:164
+fn output_module_alias_visible(from_module: Int, owner_module: Int, alias: String, name_ledger: NameLedger) -> Bool Never! {
+    import :: name_ledger.alias(owner_module, alias) ?? return false
+    if import.visibility == {
+        .Public -> true
+        .Package -> {
+            from :: name_ledger.module(from_module) ?? return false
+            owner :: name_ledger.module(owner_module) ?? return false
+            from.package == owner.package
+        }
+        .Private -> from_module == owner_module
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:183
+fn resolve_output_callable(module_idx: Int, address: ^String, kind: OutputKind, output_name: ^String, entry: Expr, bundle: ProgramBundle, states: [ModuleState], name_ledger: &NameLedger, diags: &[Diagnostic]) -> ResolvedOutput? Never! {
+    (target, source_name, lowered_name) :: if entry == {
+        .Ident(name, span) -> {
+            state :: states[module_idx]
+            if state.funcs.contains_key(name) -> (module_idx, ~name, ~name)
+            else if state.unqualified.get(name) == .Val(mangled) {
+                record_output_import_use(&name_ledger, module_idx, name)
+                (module_idx, ~name, ~mangled)
+            } else if state.unqualified_file.get(name) == .Val((real, target)) {
+                record_output_import_use(&name_ledger, module_idx, name)
+                (target, ~real, ~real)
+            } else {
+                &diags.push(output_error("Output entry `{name}` does not resolve to a function", "an Output entry is an ordinary checked function reference, not a text lookup", "define `fn {name}(...)`, import it, or update `entry:`", span))
+                return None
+            }
+        }
+        .Field(..) -> {
+            path :: output_module_path(entry) ?? {
+                &diags.push(output_error("Output entry has no resolvable module owner", "qualified function references use one imported or inline module alias", "write `entry: module_name.function`", expr_span(entry)))
+                return None
+            }
+            (alias, alias_span, members) :: path
+            member_path :: members.map(member -> member.0).join(".")
+            record_output_import_use(&name_ledger, module_idx, alias)
+            state :: states[module_idx]
+            if state.code_modules.get(alias) == .Val(canonical) {
+                if members.len() != 1 {
+                    span :: members.last().map(member -> member.1) ?? expr_span(entry)
+                    &diags.push(output_error("module `{alias}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists", span))
+                    return None
+                }
+                (member, span) :: members[0]
+                lowered :: member_name(canonical, member)
+                if !state.funcs.contains_key(lowered) {
+                    &diags.push(output_error("module `{alias}` has no function `{member}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists", span))
+                    return None
+                }
+                (module_idx, ~member, lowered)
+            } else if state.imports.get(alias) == .Val(first) {
+                current := first
+                resolved := (Int, String, String)?{None}
+                loop index in 0..<members.len() {
+                    (member, member_span) :: members[index]
+                    is_last :: index + 1 == members.len()
+                    if states[current].imports.get(member) == .Val(next_module) {
+                        record_output_import_use(&name_ledger, current, member)
+                        if current != module_idx && !output_module_alias_visible(module_idx, current, member, name_ledger) {
+                            &diags.push(output_error("module `{alias}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make the `{member}` module import public, or keep the Output beside it", member_span))
+                            return None
+                        }
+                        if is_last {
+                            &diags.push(output_error("module `{alias}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists", member_span))
+                            return None
+                        }
+                        current = next_module
+                        next
+                    }
+                    if !is_last {
+                        &diags.push(output_error("module `{alias}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists", member_span))
+                        return None
+                    }
+                    if states[current].reexports.get(member) == .Val((real, owner)) {
+                        record_output_import_use(&name_ledger, current, member)
+                        if !name_ledger.visible(module_idx, owner, real) {
+                            &diags.push(output_error("function `{alias}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make `fn {real}` public to this package, or keep the Output beside it", member_span))
+                            return None
+                        }
+                        resolved = Val((owner, ~real, ~real))
+                    } else if states[current].unqualified_file.get(member) == .Val((real, owner)) {
+                        record_output_import_use(&name_ledger, current, member)
+                        if current != module_idx && !output_module_alias_visible(module_idx, current, member, name_ledger) {
+                            &diags.push(output_error("function `{alias}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make the `{member}` import public, or keep the Output beside it", member_span))
+                            return None
+                        }
+                        if !name_ledger.visible(module_idx, owner, real) {
+                            &diags.push(output_error("function `{alias}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make `fn {real}` public to this package, or keep the Output beside it", member_span))
+                            return None
+                        }
+                        resolved = Val((owner, ~real, ~real))
+                    } else if states[current].funcs.contains_key(member) {
+                        if !name_ledger.visible(module_idx, current, member) {
+                            &diags.push(output_error("function `{alias}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make `fn {member}` public to this package, or keep the Output beside it", member_span))
+                            return None
+                        }
+                        resolved = Val((current, ~member, ~member))
+                    } else {
+                        &diags.push(output_error("module `{alias}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists", member_span))
+                        return None
+                    }
+                }
+                resolved ?? return None
+            } else {
+                &diags.push(output_error("no module named `{alias}` is in scope", "qualified Output entries use ordinary imported module aliases", "import the module before `entry: {alias}.{member_path}`", alias_span))
+                return None
+            }
+        }
+        _ -> {
+            &diags.push(output_error("Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`", expr_span(entry)))
+            return None
+        }
+    }
+    semantic_name :: lowered_name
+    signature :: states[target].funcs.get(semantic_name).or_else(() -> states[target].funcs.get(source_name)) ?? return None
+    failure_contract :: signature.failure_contract()
+    if signature.is_extern || signature.is_unsafe {
+        &diags.push(output_error("Output entry `{source_name}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function", expr_span(entry)))
+        return None
+    }
+    if !validate_entry_contract(kind, source_name, signature, bundle.modules[target].items, states[target].trait_reg, expr_span(entry), "change `fn {source_name}` to match the {kind:Debug} contract", &diags) -> return None
+    module_alias :: name_ledger.module_alias(target) ?? bundle.modules[target].alias
+    lowered_path :: if target == bundle.entry -> mangle(semantic_name) else -> "{mangle(module_alias)}::{mangle(source_name)}"
+    definition :: name_ledger.declaration(target, semantic_name).or_else(() -> name_ledger.declaration(target, source_name))
+    Val(ResolvedOutput{
+        address: ^address, kind: kind, output_name: ^output_name, module: target,
+        source_path: ~bundle.modules[target].display, source_name: ~source_name,
+        semantic_name: ^semantic_name, lowered_name: lowered_path,
+        params: ~signature.params, return_type: ~signature.return_type,
+        failure_contract: failure_contract, reference: expr_span(entry),
+        definition: definition.map(declaration -> declaration.span) ?? expr_span(entry),
+        authority: OutputCallableAuthority.SafeJet, effects: [], selected: false,
+        selection_reason: "not selected",
+    })
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:469
+fn output_default(bundle: ProgramBundle, field: String, diags: &[Diagnostic]) -> String? Never! {
+    value := Expr?{None}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Const(constant) {
+            if constant.ty == .Val(.Named(name)) && name == TYPE_OUTPUT_DEFAULTS {
+                value = Val(constant.value)
+                break
+            }
+        }
+    }
+    defaults :: value ?? return None
+    if defaults != .StructLit(_, fields, ..) {
+        &diags.push(output_error("`defaults:` needs one checked record", "Output defaults map singular tool intents to Output addresses", "write `defaults: {{ run: app }}`", expr_span(defaults)))
+        return None
+    }
+    // Rust find_map continues after an invalid matching field.
+    loop (name, _, expr) in fields {
+        if name != field -> next
+        if expr == .Ident(address, _) -> return Val(~address)
+        &diags.push(output_error("default `{field}` is not an Output address", "defaults use checked Output references, not text or calls", "write `{field}: output_name`", expr_span(expr)))
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Outputs.rs:509
+pub fn resolve_outputs(bundle: &ProgramBundle, states: [ModuleState], name_ledger: &NameLedger, mode: CompileMode, explicit: String?, diags: &[Diagnostic]) Never! {
+    resolved := [(Int, Int, ResolvedOutput)]{}
+    loop module_idx in 0..<bundle.modules.len() {
+        module :: bundle.modules[module_idx]
+        loop item_idx in 0..<module.items.len() {
+            if module.items[item_idx] != .Const(value) -> next
+            if value.ty != .Val(.Named(name)) || name != TYPE_OUTPUT -> next
+            if value.value != .EnumLit(_, variant, args, span) {
+                &diags.push(output_error("Output needs one closed kind", "Output is the closed sum of the nine ratified kinds", "write `.Executable.{{ ... }}`, `.Service.{{ ... }}`, or another Output kind", expr_span(value.value)))
+                next
+            }
+            kind :: OutputKind.from_name(variant) ?? {
+                &diags.push(output_error("`{variant}` is not an Output kind", "Output has exactly nine ratified kinds", "use one of: {OUTPUT_KINDS.join(\", \")}", span))
+                next
+            }
+            fields :: output_fields(args, span, &diags) ?? next
+            name_expr :: fields.get(OUTPUT_FIELD_NAME) ?? {
+                &diags.push(output_error("Output is missing `name:`", "every Output has one stable user-facing name", "add `name: \"...\"`", span))
+                next
+            }
+            output_name :: output_string(name_expr) ?? {
+                &diags.push(output_error("Output `name:` must be fixed text", "graph identity cannot depend on runtime interpolation", "write a plain string literal", expr_span(name_expr)))
+                next
+            }
+            if !kind.is_runnable() {
+                if fields.get(OUTPUT_FIELD_ENTRY) == .Val(entry) -> &diags.push(output_error("{kind:Debug} Output is not runnable", "only Executable, Service, and Check link to functions", "remove `entry:` from this Output", expr_span(entry)))
+                next
+            }
+            invalid_field := false
+            loop arg in args {
+                if arg == .Named(label, expr) {
+                    if label != OUTPUT_FIELD_NAME && label != OUTPUT_FIELD_ENTRY {
+                        &diags.push(output_error("`{label}:` is not a runnable Output field", "Executable, Service, and Check Outputs contain only their stable name and checked entry reference", "remove `{label}:` from this Output", expr_span(expr)))
+                        invalid_field = true
+                        break
+                    }
+                }
+            }
+            if invalid_field -> next
+            entry :: fields.get(OUTPUT_FIELD_ENTRY) ?? {
+                &diags.push(output_error("{kind:Debug} Output is missing `entry:`", "every runnable Output links to one checked function", "add `entry: function_name`", span))
+                next
+            }
+            if resolve_output_callable(module_idx, ~value.name, kind, ^output_name, entry, bundle, states, &name_ledger, &diags) == .Val(fact) -> &resolved.push((module_idx, item_idx, ^fact))
+        }
+    }
+    has_legacy_run :: bundle.modules[bundle.entry].items.any(item -> if item == {
+        .Func(function) -> function.name == "run"
+        _ -> false
+    })
+    run_default :: output_default(bundle, OUTPUT_DEFAULT_RUN, &diags)
+    run_default_index := Int?{None}
+    if run_default == .Val(address) {
+        loop index in 0..<resolved.len() {
+            if resolved[index].2.kind == OutputKind.Executable && resolved[index].2.address == address {
+                run_default_index = Val(index)
+                break
+            }
+        }
+        if run_default_index.is_none() -> &diags.push(output_error("default `run` names incompatible Output `{address}`", "the run default must name an Executable Output in this Package", "point `defaults.run` at one checked Executable address", Span{start: 0, end: 0}))
+    }
+    if mode == CompileMode.Run {
+        if explicit == .Val(address) {
+            selected := false
+            loop index in 0..<resolved.len() {
+                fact :: resolved[index].2
+                if fact.address == address && (fact.kind == OutputKind.Executable || fact.kind == OutputKind.Service) {
+                    resolved[index].2.selected = true
+                    resolved[index].2.selection_reason = "explicit address"
+                    selected = true
+                    break
+                }
+            }
+            if !selected {
+                choices := [String]{}
+                loop (_, _, fact) in resolved { if fact.kind == OutputKind.Executable || fact.kind == OutputKind.Service -> &choices.push(~fact.address) }
+                &choices.sort()
+                &diags.push(output_error("`{address}` is not an Output compatible with `jet run`", "an explicit run address must name one checked Executable or Service Output", "choose one of: {choices.join(\", \")}", Span{start: 0, end: 0}))
+            }
+        } else if !has_legacy_run {
+            executable := [Int]{}
+            loop index in 0..<resolved.len() { if resolved[index].2.kind == OutputKind.Executable -> &executable.push(index) }
+            if executable.len() == 1 {
+                resolved[executable[0]].2.selected = true
+                resolved[executable[0]].2.selection_reason = "sole compatible Output"
+            } else if executable.len() > 1 {
+                if run_default_index == .Val(index) {
+                    resolved[index].2.selected = true
+                    resolved[index].2.selection_reason = "checked defaults.run"
+                } else if run_default.is_none() {
+                    names := [String]{}
+                    loop index in executable -> &names.push(~resolved[index].2.address)
+                    &names.sort()
+                    &diags.push(Diagnostic.error("E1321", "this Package has more than one runnable Executable", "without `fn run`, a singular run selects only a sole compatible Output or a checked default", "choose an explicit Output or add `defaults: {{ run: {names[0]} }}`; candidates: {names.join(\", \")}", None))
+                }
+            }
+        }
+    } else if mode == CompileMode.Test || mode == CompileMode.TestOverride {
+        loop index in 0..<resolved.len() {
+            resolved[index].2.selected = resolved[index].2.kind == OutputKind.Check
+            if resolved[index].2.selected -> resolved[index].2.selection_reason = "all Check Outputs"
+        }
+    }
+    selected_output :: resolved.any(row -> row.2.selected)
+    if has_legacy_run && (mode == CompileMode.Run || mode == CompileMode.Check) && !selected_output {
+        if states[bundle.entry].funcs.get("run") == .Val(signature) {
+            span := Span{start: 0, end: 0}
+            loop item in bundle.modules[bundle.entry].items {
+                if item == .Func(function) && function.name == "run" {
+                    span = function.span
+                    break
+                }
+            }
+            // D-WEBAPP1=D: App-returning run serves, rather than executing once.
+            if !signature.return_type.is_some_and(type_is_app) {
+                _ :: validate_entry_contract(OutputKind.Executable, "run", signature, bundle.modules[bundle.entry].items, states[bundle.entry].trait_reg, span, "declare the entry as `fn run()` or `fn run() ()?`", &diags)
+            }
+        }
+    }
+    loop (module, item, fact) in resolved {
+        if bundle.modules[module].items[item] == .Const(value) -> value.resolved_output = Val(^fact)
+    }
+}

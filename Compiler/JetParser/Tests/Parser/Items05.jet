@@ -1,0 +1,50 @@
+use JetLexer.[lex]
+
+fn imports_policy_state(source: String) -> JetParserState Never! {
+    lexed :: lex(source.bytes())
+    JetParserState{tokens: ^lexed.tokens, position: 0, diagnostics: ^lexed.diagnostics, source_end: source.len(), block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: source.len(), end: source.len()}, result_handler_depth: 0, statement_start: -1}
+}
+// No original inline tests in imports_policy.rs; faithful checked controls.
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:162
+#Test("retired_memory_policy_preserves_exact_replacements_and_span") {
+    span :: Span{start: 3, end: 16}
+    assert(retired_memory_policy_diagnostic("gc", span, None) == None)
+    no_alloc :: retired_memory_policy_diagnostic("no_alloc", span, None).expect("retired")
+    assert(no_alloc.code == "E0355")
+    assert(no_alloc.span == Val(span))
+    assert(no_alloc.fix == "write `-[!Mem.Alloc]>` on the function signature")
+    bounded :: retired_memory_policy_diagnostic("arena_bounded", span, Val(2048)).expect("retired")
+    assert(bounded.fix == "write `-[!Mem.Alloc(above: 2048)]>` on the function signature")
+    unknown :: retired_memory_policy_diagnostic("arena_bounded", span, None).expect("retired")
+    assert(unknown.fix == "write `-[!Mem.Alloc(above: N)]>` on the function signature")
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:349
+#Test("two_segment_member_import_preserves_item_and_local_spans") {
+    state := imports_policy_state("use library.member\n")
+    declaration :: import_decl(&state).expect("import")
+    assert(if declaration.kind == { .Unqualified(module_alias, _, items, _, _) -> module_alias == "library" && items[0].original == "member" else -> false })
+    assert(declaration.alias == "member")
+    assert(declaration.item_spans == declaration.local_spans)
+    assert(declaration.item_spans.len() == 1)
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:485
+#Test("wildcard_import_is_not_admitted_as_a_module") {
+    state := imports_policy_state("use core.math.*\n")
+    error :: import_decl(&state).expect_err("wildcard")
+    assert(error.code == "E0612")
+    assert(error.what == "wildcard imports are not supported")
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:579
+#Test("dotted_import_member_alias_retains_local_alias_span") {
+    state := imports_policy_state("use core.[encoding.json as json]\n")
+    declaration :: import_decl(&state).expect("list import")
+    assert(if declaration.kind == { .Unqualified(_, _, items, _, _) -> items[0].original == "encoding.json" && items[0].alias == Val("json") else -> false })
+    assert(declaration.local_spans[0].start > declaration.item_spans[0].start)
+}
+// Rust: crates/jet-parser/src/Parser/Items/imports_policy.rs:665
+#Test("inline_version_is_rebuilt_from_numeric_payloads") {
+    state := imports_policy_state("use textkit#1.10.2\n")
+    declaration :: import_decl(&state).expect("version")
+    version :: declaration.inline_version.expect("selector")
+    assert(version.text == "1.1.2")
+}

@@ -1,6 +1,7 @@
 // Real checked-loader producer witness: original inline nesting, exact loaded
 // membership including a symbol-free module, and a canonical interface consumer.
 // Native OS-path graph composition is separately gated; no text-path substitute.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_compiler_check, jet_driver_compiler_check_loaded_module_rows, jet_driver_compiler_package_bundle, jet_driver_embedded_core_sources]
 use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
 use jet_foundation.[CanonicalASTParsedDefaults, CompilerPackageKind, PackageIdentityOsPaths, PackageKeySourceFile, compiler_package_graph, compiler_package_of, compiler_package_components, compiler_package_source_digest, compiler_package_interface_digest, package_key_source_digest, package_identity_project_module, record_blob_key, foundation_embedded_core]
@@ -24,7 +25,7 @@ fn package_identity_producer_request(source: String, load_core: Bool{false}) -> 
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: package_identity_producer_path("/identity"), identity: "identity-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "identity-root", entry_path: package_identity_producer_path("/identity/Main.jet")},
         canonical_effect_source: core.effect_source(), core_sources: if load_core -> jet_driver_embedded_core_sources(core) else -> [],
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("identity-test"), build_stamp: Val(BuildStamp{git: Val("identity-fixture"), dirty: false, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("identity-test"), build_stamp: Val(BuildStamp{git: Val("identity-fixture"), dirty: false, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

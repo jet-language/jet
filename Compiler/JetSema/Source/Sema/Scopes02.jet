@@ -1,929 +1,205 @@
-// PORT-PENDING 0350 crates-jet-sema-src-sema-bundle-slice-1768: crates/jet-sema/src/Sema/Bundle.rs:1768-2692
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn populate_name_ledger(
-//RS     bundle: &ProgramBundle,
-//RS     states: &[ModuleState],
-//RS     ledger: &mut jet_foundation::Names::NameLedger,
-//RS ) {
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
-//RS         ledger.set_module(
-//RS             module_idx,
-//RS             module.alias.clone(),
-//RS             module.display.clone(),
-//RS             package,
-//RS         );
-//RS     }
-//RS 
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         let state = &states[module_idx];
-//RS         for item in &module.items {
-//RS             declare_item_names(ledger, module_idx, &module.alias, item);
-//RS             if let Item::CodeModule(instance) = item {
-//RS                 if instance.instance_identity.is_some() {
-//RS                     for (internal, display) in GenericModules::instance_display_paths(instance) {
-//RS                         ledger.record_display_path(
-//RS                             module_idx,
-//RS                             format!("{}.{}", module.alias, internal),
-//RS                             display,
-//RS                         );
-//RS                     }
-//RS                     for (internal, display) in
-//RS                         GenericModules::top_level_instance_display_paths(instance, &module.items)
-//RS                     {
-//RS                         ledger.record_display_path(
-//RS                             module_idx,
-//RS                             format!("{}.{}", module.alias, internal),
-//RS                             display,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 // A plain inline module's member types are lifted with the same
-//RS                 // member naming (`hoist_inline_module_member_types`), so project
-//RS                 // them back to `module.Type` for every message and tool.
-//RS                 if instance.instance_identity.is_none() && instance.body.is_some() {
-//RS                     for (internal, display) in
-//RS                         GenericModules::plain_inline_module_display_paths(instance, &module.items)
-//RS                     {
-//RS                         ledger.record_display_path(
-//RS                             module_idx,
-//RS                             format!("{}.{}", module.alias, internal),
-//RS                             display,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for import in &module.imports {
-//RS             let import_alias = import.import_alias();
-//RS             let alias_visibility = jet_foundation::Names::NameVisibility::from_flags(
-//RS                 import.is_pub,
-//RS                 import.is_package_pub,
-//RS             );
-//RS             let (import_target, target_module) =
-//RS                 if let Some(target) = ledger.import_target(module_idx, import.span) {
-//RS                     (bundle.modules[target].alias.clone(), Some(target))
-//RS                 } else if let Some(profile) = crate::AST::target_profile_path(import) {
-//RS                     (profile, None)
-//RS                 } else if let Some(core_path) = import.core_module_path() {
-//RS                     (core_path, None)
-//RS                 } else {
-//RS                     let target = match &import.kind {
-//RS                         ImportKind::File(path, _) | ImportKind::Module(path, _) => path.clone(),
-//RS                         ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
-//RS                     };
-//RS                     (target, None)
-//RS                 };
-//RS             // `use dep.[names]` names members; the namespace itself is bound
-//RS             // by the module or file import beside it (the loader's package
-//RS             // binding), which must keep its own target and span.
-//RS             let namespace_bound_elsewhere = matches!(import.kind, ImportKind::Unqualified { .. })
-//RS                 && module.imports.iter().any(|other| {
-//RS                     matches!(other.kind, ImportKind::File(..) | ImportKind::Module(..))
-//RS                         && other.import_alias() == import_alias
-//RS                 });
-//RS             if !namespace_bound_elsewhere {
-//RS                 ledger.record_alias(
-//RS                     module_idx,
-//RS                     import_alias,
-//RS                     import_target,
-//RS                     target_module,
-//RS                     import.alias_span,
-//RS                     alias_visibility,
-//RS                 );
-//RS             }
-//RS 
-//RS             for binding in import.walk_bindings() {
-//RS                 let Some(original) = binding.original else {
-//RS                     continue;
-//RS                 };
-//RS                 let local = binding.local.as_str();
-//RS                 let target =
-//RS                     if let Some(core_prefix) = crate::AST::core_list_prefix(binding.module_alias) {
-//RS                         Some((format!("{core_prefix}.{original}"), None))
-//RS                     } else if let Some(target_module) = state.imports.get(local) {
-//RS                         Some((
-//RS                             bundle.modules[*target_module].alias.clone(),
-//RS                             Some(*target_module),
-//RS                         ))
-//RS                     } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
-//RS                         Some((
-//RS                             format!("{}.{}", bundle.modules[*target_module].alias, real),
-//RS                             Some(*target_module),
-//RS                         ))
-//RS                     } else if let Some(resolved) = state.unqualified.get(local) {
-//RS                         Some((resolved.clone(), Some(module_idx)))
-//RS                     } else if let Some(target_module) = state.imports.get(binding.module_alias) {
-//RS                         // D-MOD-CYCLE1=A: a dependency package is bound through
-//RS                         // one member file; the name belongs to whichever member
-//RS                         // declares it.
-//RS                         let owner = std::iter::once(*target_module)
-//RS                             .chain(ledger.namespace_siblings(*target_module))
-//RS                             .find(|&candidate| {
-//RS                                 module_declares(&bundle.modules[candidate].items, original)
-//RS                             })
-//RS                             .unwrap_or(*target_module);
-//RS                         Some((
-//RS                             format!("{}.{}", bundle.modules[owner].alias, original),
-//RS                             Some(owner),
-//RS                         ))
-//RS                     } else {
-//RS                         None
-//RS                     };
-//RS                 if let Some((target, target_module)) = target {
-//RS                     ledger.record_alias(
-//RS                         module_idx,
-//RS                         local.to_string(),
-//RS                         target,
-//RS                         target_module,
-//RS                         binding.local_span,
-//RS                         alias_visibility,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Whether `items` declare the top-level name `name`.
-//RS fn module_declares(items: &[Item], name: &str) -> bool {
-//RS     items.iter().any(|item| match item {
-//RS         Item::Func(definition) => definition.name == name,
-//RS         Item::Struct(definition) => definition.name == name,
-//RS         Item::Enum(definition) => definition.name == name,
-//RS         Item::Distinct(definition) => definition.name == name,
-//RS         Item::TypeAlias(definition) => definition.name == name,
-//RS         Item::Trait(definition) => definition.name == name,
-//RS         Item::Tag(definition) => definition.name == name,
-//RS         Item::Const(definition) => definition.name == name,
-//RS         Item::ProtocolDecl(definition) => definition.name == name,
-//RS         Item::UnitFamily(family) => family.distinct_defs().iter().any(|member| member.name == name),
-//RS         _ => false,
-//RS     })
-//RS }
-//RS 
-//RS /// D-MOD2: inside an inline `module math { … }`, a call to a sibling function
-//RS /// `helper(x)` must lower to the mangled `__jet_math__helper`. This pre-pass rewrites
-//RS 
-//RS pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         false,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         None,
-//RS     )
-//RS     .0
-//RS }
-//RS 
-//RS fn validate_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-//RS     let mut diags = Vec::new();
-//RS     validate_script_entry_bodies(bundle, &mut diags);
-//RS     diags
-//RS }
-//RS 
-//RS /// D-ENTRY-SCRIPT1=C: only an explicit `fn run` may contain executable
-//RS /// entry code. Imported files and entry files alike reject loose statements
-//RS /// before registration so no source-level side effect becomes implicit.
-//RS fn validate_script_entry_bodies(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
-//RS     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
-//RS         let body = std::mem::take(&mut module.script_body);
-//RS         if body.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let script_span = Span::new(
-//RS             body.first().map_or(0, |stmt| stmt.span().start),
-//RS             body.last().map_or(0, |stmt| stmt.span().end),
-//RS         );
-//RS 
-//RS         if module_idx != bundle.entry {
-//RS             diags.push(Diagnostic::error(
-//RS                 "E0620",
-//RS                 format!("imported script `{}` has executable top-level statements", module.display),
-//RS                 "imported files provide declarations; executable code belongs in an explicit `fn run`"
-//RS                     .to_string(),
-//RS                 "move the statements into the entry file's `fn run`, or import a declaration-only file"
-//RS                     .to_string(),
-//RS                 Some(script_span),
-//RS             ));
-//RS         } else {
-//RS             diags.push(Diagnostic::error(
-//RS                 "E0621",
-//RS                 "top-level executable statements require an explicit `fn run`".to_string(),
-//RS                 "Jet does not invent a runtime function for ordinary files; only `fn run` executes code"
-//RS                     .to_string(),
-//RS                 "move the statements into `fn run`".to_string(),
-//RS                 Some(script_span),
-//RS             ));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Check one explicitly addressed runnable Output. Sema marks that resolved
-//RS /// callable as the sole runtime entry; lower tiers consume only the fact.
-//RS pub fn check_bundle_for_output(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     output: &str,
-//RS ) -> Vec<Diagnostic> {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         false,
-//RS         crate::Policy::GateSet::default(),
-//RS         Some(output),
-//RS         None,
-//RS     )
-//RS     .0
-//RS }
-//RS 
-//RS pub fn check_bundle_for_output_opts(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     output: &str,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS ) -> Vec<Diagnostic> {
-//RS     pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None).0
-//RS }
-//RS pub fn check_bundle_for_output_opts_with_effect_facts(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     output: &str,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None)
-//RS }
-//RS 
-//RS /// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
-//RS pub fn check_bundle_with_effect_facts(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         false,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Check the compiler-host build entry with the read-only compiler API enabled.
-//RS ///
-//RS /// This is a separate authority from ordinary runtime/check sema. The caller
-//RS /// must have selected the package/workspace `fn build`; the checker still
-//RS /// limits the exception to that entry function in the entry module.
-//RS pub fn check_bundle_with_effect_facts_for_build(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output_with_context(
-//RS         bundle,
-//RS         mode,
-//RS         false,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         None,
-//RS         true,
-//RS     )
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1: the selected root build entry's function name. Compiler-known
-//RS /// only while the build session runs; never part of the runtime program.
-//RS const BUILD_ENTRY_FN: &str = "build";
-//RS 
-//RS /// D-BUILDENTRY1: is this function the programmable-build root entry?
-//RS ///
-//RS /// Identity is the name plus the one `BuildContext` parameter. `BuildContext`
-//RS /// is a compiler value with no runtime representation, so a function that takes
-//RS /// one is build-only whatever else its signature says — including a malformed
-//RS /// one, which must still be kept out of runtime codegen while `E3501` explains
-//RS /// it. The return clause is graded separately by
-//RS /// [`build_entry_signature_is_valid`].
-//RS ///
-//RS /// The name alone is not enough: an ordinary `fn build(count: Int) -> Int ->` is a
-//RS /// normal runtime function, and dropping it would emit calls to a name that has
-//RS /// no definition.
-//RS pub fn is_build_entry(func: &Func) -> bool {
-//RS     func.name == BUILD_ENTRY_FN
-//RS         && func.params.len() == 1
-//RS         && func.params[0].ty == Type::Named(Syntax::TYPE_BUILD_CONTEXT.to_string())
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1: does the build entry carry its one typed success contract,
-//RS /// `fn build(b: BuildContext) BuildPlan`? A bare return type uses the ordinary
-//RS /// implicit `!Err` failure route; an explicit result remains available only when
-//RS /// it names a non-default expert error domain. The retired `BuildPlan!` spelling
-//RS /// therefore stays invalid and reaches `E3501`. Build authority and graph
-//RS /// handoff are one contract, so a build entry with any other success type is
-//RS /// selected, rejected, and never emitted.
-//RS pub fn build_entry_signature_is_valid(func: &Func) -> bool {
-//RS     is_build_entry(func)
-//RS         && match func.return_type.as_ref() {
-//RS             Some(Type::Named(name)) => name == Syntax::TYPE_BUILD_PLAN,
-//RS             Some(Type::Result { ok, err }) => {
-//RS                 **ok == Type::Named(Syntax::TYPE_BUILD_PLAN.to_string())
-//RS                     && !matches!(
-//RS                         err.as_ref(),
-//RS                         Type::Named(name) if name == Syntax::TYPE_ERR
-//RS                     )
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1 / I2 / I3 / I9: project a checked bundle down to the program
-//RS /// the user actually runs by removing every build-only entry.
-//RS ///
-//RS /// `fn build` is compiler-host code. It is type-checked like any other
-//RS /// function, and `jet build` evaluates it in the comptime build interpreter,
-//RS /// but it is not runtime code: its `BuildContext` parameter and `BuildPlan`
-//RS /// result are compiler values with no runtime representation. A build entry
-//RS /// left in the program therefore reaches `Codegen::emit_func`, fails the typed
-//RS /// IR coverage gate, and raises an internal compiler error — a compiler bug by
-//RS /// I2, and by I3 a decision the front end owes codegen rather than one codegen
-//RS /// discovers (Tower card 2008).
-//RS ///
-//RS /// The removal belongs to the front end, so it happens exactly once for every
-//RS /// consumer: AOT emit, the Cranelift JIT, and the interpreter all receive the
-//RS /// same runtime program instead of each engine having to know that one function
-//RS /// or build-only error conversion is not theirs (I9).
-//RS pub fn strip_build_only_entries(bundle: &mut ProgramBundle) {
-//RS     for module in &mut bundle.modules {
-//RS         module.items.retain(|item| match item {
-//RS             Item::Func(func) => !is_build_entry(func),
-//RS             // `BuildError` exists only in the compiler-host build interpreter.
-//RS             // Its Prelude conversion is needed while `fn build` runs, but the
-//RS             // conversion has no runtime source type after that entry is gone.
-//RS             Item::ErrorConv(conversion) => {
-//RS                 conversion.from_ty != "BuildError" && conversion.to_ty != "BuildError"
-//RS             }
-//RS             _ => true,
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS /// Canonical batch sema entry with reusable per-function checking.
-//RS pub fn check_bundle_with_effect_facts_incremental(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     cache: &mut IncrementalSemaCache,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         false,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         Some(cache),
-//RS     )
-//RS }
-//RS 
-//RS /// Like `check_bundle` but with extra build options (E2-M15).
-//RS pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         true,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         None,
-//RS     )
-//RS     .0
-//RS }
-//RS /// Like [`check_bundle_no_os`], but retain the exact effect facts produced by
-//RS /// that same no-OS semantic pipeline for canonical MIR lowering.
-//RS pub fn check_bundle_no_os_with_effect_facts(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output(
-//RS         bundle,
-//RS         mode,
-//RS         true,
-//RS         crate::Policy::GateSet::default(),
-//RS         None,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub fn check_bundle_no_os_with_gates(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     gates: crate::Policy::GateSet,
-//RS ) -> Vec<Diagnostic> {
-//RS     pipeline_check_bundle_opts_for_output(bundle, mode, true, gates, None, None).0
-//RS }
-//RS 
-//RS /// Check the audited-escape family with one invocation gate set and retain the
-//RS /// effect facts produced by that same semantic pipeline.
-//RS pub fn check_bundle_gates_with_effect_facts(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     gates: crate::Policy::GateSet,
-//RS ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-//RS     pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None)
-//RS }
-//RS 
-//RS /// Check the audited-escape family with one invocation gate set.
-//RS pub fn check_bundle_gates(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     gates: crate::Policy::GateSet,
-//RS ) -> Vec<Diagnostic> {
-//RS     check_bundle_gates_with_effect_facts(bundle, mode, gates).0
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod structure_tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn duplicate_unknown_name_at_one_span_is_reported_once() {
-//RS         let span = Span::new(4, 8);
-//RS         let unknown = || {
-//RS             Diagnostic::error(
-//RS                 "E0107",
-//RS                 "nothing named `x` exists here".to_string(),
-//RS                 "a name must be declared before it is used".to_string(),
-//RS                 "declare it first".to_string(),
-//RS                 Some(span),
-//RS             )
-//RS         };
-//RS         let mut diagnostics = vec![unknown(), unknown()];
-//RS         dedupe_unknown_names(&mut diagnostics);
-//RS         assert_eq!(diagnostics.len(), 1);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn same_unknown_name_span_in_two_modules_is_preserved() {
-//RS         let unknown = || {
-//RS             Diagnostic::error(
-//RS                 "E0107",
-//RS                 "nothing named `x` exists here".to_string(),
-//RS                 "a name must be declared before it is used".to_string(),
-//RS                 "declare it first".to_string(),
-//RS                 Some(Span::new(4, 8)),
-//RS             )
-//RS         };
-//RS         let mut first_module = vec![unknown(), unknown()];
-//RS         let mut second_module = vec![unknown(), unknown()];
-//RS         dedupe_unknown_names(&mut first_module);
-//RS         dedupe_unknown_names(&mut second_module);
-//RS         let diagnostics = [first_module, second_module].concat();
-//RS         assert_eq!(diagnostics.len(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn duplicate_soft_public_lint_at_one_occurrence_is_reported_once() {
-//RS         let span = Span::new(4, 8);
-//RS         let soft_public = || {
-//RS             Diagnostic::lint(
-//RS                 "L0601",
-//RS                 "`_x` is a soft-public API".to_string(),
-//RS                 "a leading underscore allows outside use".to_string(),
-//RS                 "use a public name".to_string(),
-//RS                 Some(span),
-//RS             )
-//RS         };
-//RS         let mut diagnostics = vec![soft_public(), soft_public()];
-//RS         dedupe_soft_public_lints(&mut diagnostics);
-//RS         assert_eq!(diagnostics.len(), 1);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn distinct_soft_public_names_at_one_occurrence_are_preserved() {
-//RS         let span = Span::new(4, 8);
-//RS         let soft_public = |name: &str| {
-//RS             Diagnostic::lint(
-//RS                 "L0601",
-//RS                 format!("`{name}` is a soft-public API"),
-//RS                 "a leading underscore allows outside use".to_string(),
-//RS                 "use a public name".to_string(),
-//RS                 Some(span),
-//RS             )
-//RS         };
-//RS         let mut diagnostics = vec![soft_public("_x"), soft_public("_y")];
-//RS         dedupe_soft_public_lints(&mut diagnostics);
-//RS         assert_eq!(diagnostics.len(), 2);
-//RS         assert_eq!(diagnostics[0].what, "`_x` is a soft-public API");
-//RS         assert_eq!(diagnostics[1].what, "`_y` is a soft-public API");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn soft_public_lints_at_distinct_occurrences_are_preserved() {
-//RS         let soft_public = |span| {
-//RS             Diagnostic::lint(
-//RS                 "L0601",
-//RS                 "`_x` is a soft-public API".to_string(),
-//RS                 "a leading underscore allows outside use".to_string(),
-//RS                 "use a public name".to_string(),
-//RS                 Some(span),
-//RS             )
-//RS         };
-//RS         let mut diagnostics = vec![soft_public(Span::new(4, 8)), soft_public(Span::new(12, 16))];
-//RS         dedupe_soft_public_lints(&mut diagnostics);
-//RS         assert_eq!(diagnostics.len(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn loose_script_body_is_rejected_without_an_edit() {
-//RS         let mut bundle = incremental_bundle("print(\"before\")\nfn run() { print(\"middle\") }\n");
-//RS         let diagnostics = validate_script_entries(&mut bundle);
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == "E0621"),
-//RS             "expected explicit-run diagnostic: {diagnostics:?}"
-//RS         );
-//RS         assert!(
-//RS             diagnostics.iter().all(|diagnostic| diagnostic.edit.is_none()),
-//RS             "script validation must not offer an implicit-run edit: {diagnostics:?}"
-//RS         );
-//RS     }
-//RS     fn incremental_bundle(source: &str) -> ProgramBundle {
-//RS         let (tokens, lexer_diagnostics) = crate::Lexer::lex(source);
-//RS         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-//RS         let mut program = crate::Parser::parse(&tokens).unwrap();
-//RS         ProgramBundle {
-//RS             entry: 0,
-//RS             project_root: std::path::PathBuf::from("."),
-//RS             modules: vec![crate::AST::LoadedModule {
-//RS                 path: std::path::PathBuf::from("cache-accounting.jet"),
-//RS                 display: "cache-accounting.jet".to_string(),
-//RS                 source: source.to_string(),
-//RS                 alias: "main".to_string(),
-//RS                 imports: std::mem::take(&mut program.imports),
-//RS                 items: std::mem::take(&mut program.items),
-//RS                 script_body: std::mem::take(&mut program.script_body),
-//RS                 block_spans: std::mem::take(&mut program.block_spans),
-//RS                 web_target_ceiling: program.web_target_ceiling,
-//RS                 pub_file: program.pub_file,
-//RS                 no_prelude: program.no_prelude,
-//RS                 default_target: program.default_target,
-//RS                 html_path: program.html_path,
-//RS                 policy_declarations: program.policy_declarations,
-//RS                 user_policy_declarations: program.user_policy_declarations,
-//RS                 rule_facts: program.rule_facts,
-//RS             }],
-//RS             devtools_registry: crate::AST::DevtoolsRegistry::default(),
-//RS             parse_teaching: Vec::new(),
-//RS             used_core: HashSet::new(),
-//RS             ffi_callback_fns: HashSet::new(),
-//RS             cffi: crate::AST::CFfi::default(),
-//RS             comptime_inputs: Vec::new(),
-//RS             name_ledger: jet_foundation::Names::NameLedger::default(),
-//RS             layer_ceiling: None,
-//RS             inferred_layer: crate::Syntax::RuntimeLayer::Core,
-//RS             web_partitions: HashMap::new(),
-//RS             web_partition_enforced: false,
-//RS             web_partition_report: None,
-//RS             dep_roots: HashMap::new(),
-//RS             package_guarantees: Default::default(),
-//RS             program_allocator: Default::default(),
-//RS             active_os: crate::Syntax::OSTarget::host(),
-//RS             build_facts: Default::default(),
-//RS             edition: "2027".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS 
-//RS     #[test]
-//RS     fn incremental_environment_ignores_build_stamp_clock() {
-//RS         let mut left = incremental_bundle("fn run() {}\n");
-//RS         let mut right = incremental_bundle("fn run() {}\n");
-//RS         left.build_facts.stamp.at = "2026-01-01T00:00:00Z".into();
-//RS         right.build_facts.stamp.at = "2026-01-02T00:00:00Z".into();
-//RS         assert_eq!(
-//RS             incremental_global_environment(&left, "plugin"),
-//RS             incremental_global_environment(&right, "plugin"),
-//RS             "a build-stamp clock must not dirty the incremental environment"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn body_only_edit_reuses_unchanged_function() {
-//RS         let before = concat!(
-//RS             "fn alpha() -> Int { return 1 }\n",
-//RS             "fn beta() -> Int { return 2 }\n",
-//RS             "fn run() { print(alpha() + beta()) }\n",
-//RS         );
-//RS         let after = concat!(
-//RS             "fn alpha() -> Int { return 1 }\n",
-//RS             "fn beta() -> Int { return 20 }\n",
-//RS             "fn run() { print(alpha() + beta()) }\n",
-//RS         );
-//RS         let before_interface = incremental_module_interface(&incremental_bundle(before).modules[0]);
-//RS         let after_interface = incremental_module_interface(&incremental_bundle(after).modules[0]);
-//RS         assert_eq!(
-//RS             before_interface,
-//RS             after_interface,
-//RS             "a same-length body edit must not change the module interface fingerprint"
-//RS         );
-//RS 
-//RS         let mut cache = IncrementalSemaCache::new();
-//RS         let mut first = incremental_bundle(before);
-//RS         let (first_diags, _) = check_bundle_with_effect_facts_incremental(
-//RS             &mut first,
-//RS             CompileMode::Check,
-//RS             &mut cache,
-//RS         );
-//RS         let first_errors: Vec<_> = first_diags
-//RS             .iter()
-//RS             .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
-//RS             .cloned()
-//RS             .collect();
-//RS         assert!(first_errors.is_empty(), "{first_errors:#?}");
-//RS         let cold = cache.stats();
-//RS         cache.clear_measurement();
-//RS 
-//RS         let mut second = incremental_bundle(after);
-//RS         let (second_diags, _) = check_bundle_with_effect_facts_incremental(
-//RS             &mut second,
-//RS             CompileMode::Check,
-//RS             &mut cache,
-//RS         );
-//RS         let second_errors: Vec<_> = second_diags
-//RS             .iter()
-//RS             .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
-//RS             .cloned()
-//RS             .collect();
-//RS         assert!(second_errors.is_empty(), "{second_errors:#?}");
-//RS         let warm = cache.stats();
-//RS         assert_eq!(
-//RS             warm.hits - cold.hits,
-//RS             2,
-//RS             "alpha and run must reuse checked bodies: cold={cold:?} warm={warm:?} recomputed={:?}",
-//RS             warm.recomputed_items
-//RS         );
-//RS         assert_eq!(
-//RS             warm.recomputes - cold.recomputes,
-//RS             1,
-//RS             "only beta may recheck: cold={cold:?} warm={warm:?} recomputed={:?}",
-//RS             warm.recomputed_items
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ordinary_units_prelude_supplies_standard_axes_and_provenance() {
-//RS         let mut bundle = incremental_bundle(
-//RS             "#UnitFamily(Token, dimension, base: token) { token }\n\
-//RS              #UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) { token_per_second }\n\
-//RS              fn touch_mass() { _ :: 1dalton }\n",
-//RS         );
-//RS         assert!(inject_units_prelude(&mut bundle).is_empty());
-//RS         assert!(resolve_unit_dimensions(&mut bundle).is_empty());
-//RS 
-//RS         let families = bundle.modules[0]
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 Item::UnitFamily(family) => Some(family),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let token = families
-//RS             .iter()
-//RS             .find(|family| family.family == "Token")
-//RS             .unwrap();
-//RS         let time = families
-//RS             .iter()
-//RS             .find(|family| family.family == "Time")
-//RS             .unwrap();
-//RS         let rate = families
-//RS             .iter()
-//RS             .find(|family| family.family == "TokenRate")
-//RS             .unwrap();
-//RS         assert_eq!(
-//RS             rate.resolved_dimension,
-//RS             token
-//RS                 .resolved_dimension
-//RS                 .as_ref()
-//RS                 .unwrap()
-//RS                 .divide(time.resolved_dimension.as_ref().unwrap())
-//RS         );
-//RS 
-//RS         let mass = families
-//RS             .iter()
-//RS             .find(|family| family.family == "Mass")
-//RS             .unwrap();
-//RS         let dalton = mass
-//RS             .members
-//RS             .iter()
-//RS             .find(|member| member.name == "dalton")
-//RS             .unwrap();
-//RS         assert!(matches!(
-//RS             dalton.scale_provenance,
-//RS             crate::AST::UnitScaleProvenance::Measured { .. }
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn imported_public_dimension_participates_in_derived_claims() {
-//RS         let mut bundle = incremental_bundle(
-//RS             "use dep\n\
-//RS              #UnitFamily(InventoryRate, dimension: Inventory / Time, base: item_per_second) { item_per_second }\n",
-//RS         );
-//RS         let import_span = bundle.modules[0].imports[0].span;
-//RS         let mut dependency =
-//RS             incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n")
-//RS                 .modules
-//RS                 .remove(0);
-//RS         dependency.path = "deps/dep.jet".into();
-//RS         dependency.display = "deps/dep.jet".to_string();
-//RS         dependency.alias = "dep".to_string();
-//RS         bundle.modules.push(dependency);
-//RS         bundle.name_ledger.record_import_target(0, import_span, 1);
-//RS 
-//RS         assert!(inject_units_prelude(&mut bundle).is_empty());
-//RS         assert!(resolve_unit_dimensions(&mut bundle).is_empty());
-//RS         let dimension = |module: usize, family: &str| {
-//RS             bundle.modules[module]
-//RS                 .items
-//RS                 .iter()
-//RS                 .find_map(|item| match item {
-//RS                     Item::UnitFamily(definition) if definition.family == family => {
-//RS                         definition.resolved_dimension.clone()
-//RS                     }
-//RS                     _ => None,
-//RS                 })
-//RS                 .unwrap()
-//RS         };
-//RS         assert_eq!(
-//RS             dimension(0, "InventoryRate"),
-//RS             dimension(1, "Inventory")
-//RS                 .divide(&dimension(0, "Time"))
-//RS                 .unwrap()
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn incremental_dependencies_include_nested_module_imports() {
-//RS         let mut bundle = incremental_bundle(
-//RS             "module api {\n    use dep.[value]\n    pub fn call() -> Int { return value() }\n}\n",
-//RS         );
-//RS         let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
-//RS             .modules
-//RS             .remove(0);
-//RS         dependency.path = "dep.jet".into();
-//RS         dependency.display = "dep.jet".to_string();
-//RS         dependency.alias = "dep".to_string();
-//RS         bundle.modules.push(dependency);
-//RS 
-//RS         let dependencies = incremental_module_dependencies(&bundle);
-//RS         assert_eq!(dependencies["cache-accounting.jet"], vec!["dep.jet"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn incremental_dependencies_match_directory_module_imports() {
-//RS         let mut bundle =
-//RS             incremental_bundle("use archive\nfn run() -> Int { return archive.value() }\n");
-//RS         let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
-//RS             .modules
-//RS             .remove(0);
-//RS         dependency.path = "archive/run.jet".into();
-//RS         dependency.display = "archive/run.jet".to_string();
-//RS         dependency.alias = "run".to_string();
-//RS         bundle.modules.push(dependency);
-//RS 
-//RS         let dependencies = incremental_module_dependencies(&bundle);
-//RS         assert_eq!(
-//RS             dependencies["cache-accounting.jet"],
-//RS             vec!["archive/run.jet"]
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn pending_diagnostics_have_exact_retained_byte_cost() {
-//RS         let mut bundle = incremental_bundle("fn run() {}\n");
-//RS         let mut cache = IncrementalSemaCache::new();
-//RS         let (diagnostics, _) =
-//RS             check_bundle_with_effect_facts_incremental(&mut bundle, CompileMode::Check, &mut cache);
-//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-//RS         assert_eq!(cache.functions.len(), 1);
-//RS 
-//RS         let before = cache.stats().live_item_bytes;
-//RS         let pending = PendingFunctionDiagnostic {
-//RS             function_key: "run".to_string(),
-//RS             function_span: Span::new(0, 11),
-//RS             diagnostic: Diagnostic::error(
-//RS                 "E2702",
-//RS                 "crypto API misuse".to_string(),
-//RS                 "known nonce length".to_string(),
-//RS                 "pass the exact nonce length".to_string(),
-//RS                 Some(Span::new(3, 6)),
-//RS             ),
-//RS         };
-//RS         let expected_delta = format!("{:?}", vec![pending.clone()]).len()
-//RS             - format!("{:?}", Vec::<PendingFunctionDiagnostic>::new()).len();
-//RS         cache
-//RS             .functions
-//RS             .values_mut()
-//RS             .next()
-//RS             .unwrap()
-//RS             .pending_diagnostics
-//RS             .push(pending);
-//RS 
-//RS         assert_eq!(cache.stats().live_item_bytes - before, expected_delta);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bundle_stays_split_without_reordering_passes() {
-//RS         const MAX_MODULE_LINES: usize = 2500;
-//RS         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-//RS         let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
-//RS         let bundle = read("src/Sema/Bundle.rs");
-//RS         let comptime = read("src/Sema/Bundle/Comptime.rs");
-//RS         let units = read("src/Sema/Bundle/Units.rs");
-//RS         let generic = read("src/Sema/Bundle/GenericModules.rs");
-//RS         let substitution = read("src/Sema/Bundle/GenericModules/Substitution.rs");
-//RS         let expansion = read("src/Sema/Bundle/GenericModules/Expansion.rs");
-//RS         let outputs = read("src/Sema/Bundle/Outputs.rs");
-//RS         let inline_calls = read("src/Sema/Bundle/InlineCalls.rs");
-//RS         let pipeline = read("src/Sema/Bundle/Pipeline.rs");
-//RS         let check_inner = read("src/Sema/Bundle/Pipeline/CheckInner.rs");
-//RS         let inline_imports = read("src/Sema/Bundle/Pipeline/InlineImports.rs");
-//RS         let completion = read("src/Sema/Bundle/Pipeline/Completion.rs");
-//RS         let validation = read("src/Sema/Bundle/Validation.rs");
-//RS         let core_usage = read("src/Sema/Bundle/Validation/CoreUsage.rs");
-//RS         let body_check = read("src/Sema/Bundle/Validation/BodyCheck.rs");
-//RS         let production = bundle
-//RS             .split("#[cfg(test)]\nmod structure_tests")
-//RS             .next()
-//RS             .unwrap();
-//RS         for (relative, source) in [
-//RS             ("src/Sema/Bundle.rs", production),
-//RS             ("src/Sema/Bundle/Comptime.rs", comptime.as_str()),
-//RS             ("src/Sema/Bundle/Units.rs", units.as_str()),
-//RS             ("src/Sema/Bundle/GenericModules.rs", generic.as_str()),
-//RS             (
-//RS                 "src/Sema/Bundle/GenericModules/Substitution.rs",
-//RS                 substitution.as_str(),
-//RS             ),
-//RS             (
-//RS                 "src/Sema/Bundle/GenericModules/Expansion.rs",
-//RS                 expansion.as_str(),
-//RS             ),
-//RS             ("src/Sema/Bundle/InlineCalls.rs", inline_calls.as_str()),
-//RS             ("src/Sema/Bundle/Outputs.rs", outputs.as_str()),
-//RS             ("src/Sema/Bundle/Pipeline.rs", pipeline.as_str()),
-//RS             (
-//RS                 "src/Sema/Bundle/Pipeline/CheckInner.rs",
-//RS                 check_inner.as_str(),
-//RS             ),
-//RS             (
-//RS                 "src/Sema/Bundle/Pipeline/InlineImports.rs",
-//RS                 inline_imports.as_str(),
-//RS             ),
-//RS             (
-//RS                 "src/Sema/Bundle/Pipeline/Completion.rs",
-//RS                 completion.as_str(),
-//RS             ),
-//RS             ("src/Sema/Bundle/Validation.rs", validation.as_str()),
-//RS             (
-//RS                 "src/Sema/Bundle/Validation/CoreUsage.rs",
-//RS                 core_usage.as_str(),
-//RS             ),
-//RS             (
-//RS                 "src/Sema/Bundle/Validation/BodyCheck.rs",
-//RS                 body_check.as_str(),
-//RS             ),
-//RS         ] {
-//RS             assert!(
-//RS                 source.lines().count() < MAX_MODULE_LINES,
-//RS                 "{relative} must stay below the card #510 module boundary"
-//RS             );
-//RS             assert!(!source.contains("include!("));
-//RS             assert!(!source.contains("#[path"));
-//RS         }
-//RS         assert!(production.contains(
-//RS             "\nmod GenericModules;\nmod InlineCalls;\nmod Liveness;\nmod Outputs;\nmod Pipeline;\nmod TargetMachine;\nmod Validation;\n"
-//RS         ));
-//RS         assert!(generic.contains("\nmod Substitution;\nmod Expansion;\n"));
-//RS         assert!(validation.contains("\nmod CoreUsage;\nmod BodyCheck;\n"));
-//RS 
-//RS         let ordered = [
-//RS             "expand_generic_module_aliases(bundle, &mut diags);",
-//RS             "mangle_inline_sibling_calls(bundle);",
-//RS             "super::super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);",
-//RS             "super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);",
-//RS             "register_type_methods(&module.items, &mut st.registry, &mut diags);",
-//RS             "register_impl_methods(&module.items, &mut st.registry, &mut diags);",
-//RS             "let mut module_diags = check_module_bodies(",
-//RS             "collect_used_core(bundle, &states)",
-//RS             "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);",
-//RS         ];
-//RS         let ordered_source = format!("{production}\n{pipeline}\n{check_inner}\n{inline_imports}\n{completion}");
-//RS         let positions: Vec<usize> = ordered
-//RS             .iter()
-//RS             .map(|needle| ordered_source.find(needle).unwrap())
-//RS             .collect();
-//RS         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-//RS     }
-//RS }
-// END-PORT-PENDING 0350 crates/jet-sema/src/Sema/Bundle.rs:1768-2692
+use jet_foundation.[ProgramBundle, Item, ImportKind, NameLedger, NameVisibility, package_scope_for, Diagnostic, Span, Func, Type, CompileMode, GateSet, TYPE_BUILD_CONTEXT, TYPE_BUILD_PLAN, TYPE_ERR, target_profile_path, core_list_prefix]
+use jet_sema.[ModuleState, IncrementalSemaCache, SemIndexEffectFacts, declare_item_names, pipeline_check_bundle_opts_for_output, pipeline_check_bundle_opts_for_output_with_context]
+use jet_sema.Bundle.GenericModules.[instance_display_paths, top_level_instance_display_paths, plain_inline_module_display_paths]
 
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1768
+fn populate_name_ledger(bundle: ProgramBundle, states: [ModuleState], ledger: &NameLedger) Never! {
+    loop module_idx in 0..<bundle.modules.len() {
+        module :: bundle.modules[module_idx]
+        package :: package_scope_for(module.path, bundle.project_root)
+        &ledger.set_module(module_idx, ~module.alias, ~module.display, package)
+    }
+    loop module_idx in 0..<bundle.modules.len() {
+        module :: bundle.modules[module_idx]
+        state :: states[module_idx]
+        loop item in module.items {
+            declare_item_names(&ledger, module_idx, module.alias, item)
+            if item == .CodeModule(instance) {
+                if instance.instance_identity != None {
+                    loop (internal, display) in instance_display_paths(instance) -> &ledger.record_display_path(module_idx, "{module.alias}.{internal}", display)
+                    loop (internal, display) in top_level_instance_display_paths(instance, module.items) -> &ledger.record_display_path(module_idx, "{module.alias}.{internal}", display)
+                }
+                // Lifted plain-inline member types retain their source display paths.
+                if instance.instance_identity == None && instance.body != None {
+                    loop (internal, display) in plain_inline_module_display_paths(instance, module.items) -> &ledger.record_display_path(module_idx, "{module.alias}.{internal}", display)
+                }
+            }
+        }
+        loop import in module.imports {
+            import_alias :: import.import_alias()
+            alias_visibility :: NameVisibility.from_flags(import.is_pub, import.is_package_pub)
+            import_target := ""
+            target_module := None as Int?
+            if ledger.import_target(module_idx, import.span) == .Val(target) {
+                import_target = ~bundle.modules[target].alias
+                target_module = Val(target)
+            } else if target_profile_path(import) == .Val(profile) {
+                import_target = ^profile
+            } else if import.core_module_path() == .Val(core_path) {
+                import_target = ^core_path
+            } else if import.kind == .File(path, _) {
+                import_target = ~path
+            } else if import.kind == .Module(path, _) {
+                import_target = ~path
+            } else if import.kind == .Unqualified(module_alias, _) {
+                import_target = ~module_alias
+            }
+            namespace_bound_elsewhere := false
+            if import.kind == .Unqualified(_, _) {
+                loop other in module.imports {
+                    namespace_import := false
+                    if other.kind == .File(_, _) -> namespace_import = true
+                    if other.kind == .Module(_, _) -> namespace_import = true
+                    if namespace_import && other.import_alias() == import_alias {
+                        namespace_bound_elsewhere = true
+                        break
+                    }
+                }
+            }
+            if !namespace_bound_elsewhere -> &ledger.record_alias(module_idx, import_alias, import_target, target_module, import.alias_span, alias_visibility)
+            loop binding in import.walk_bindings() {
+                if binding.original == .Val(original) {
+                    local :: binding.local
+                    target := None as (String, Int?)?
+                    if core_list_prefix(binding.module_alias) == .Val(core_prefix) {
+                        target = Val(("{core_prefix}.{original}", None))
+                    } else if state.imports.get(local) == .Val(owner) {
+                        target = Val((~bundle.modules[owner].alias, Val(owner)))
+                    } else if state.unqualified_file.get(local) == .Val((real, owner)) {
+                        target = Val(("{bundle.modules[owner].alias}.{real}", Val(owner)))
+                    } else if state.unqualified.get(local) == .Val(resolved) {
+                        target = Val((~resolved, Val(module_idx)))
+                    } else if state.imports.get(binding.module_alias) == .Val(owner_module) {
+                        // The dependency namespace may bind through any member file.
+                        owner := owner_module
+                        if !module_declares(bundle.modules[owner].items, original) {
+                            loop candidate in ledger.namespace_siblings(owner_module) {
+                                if module_declares(bundle.modules[candidate].items, original) {
+                                    owner = candidate
+                                    break
+                                }
+                            }
+                        }
+                        target = Val(("{bundle.modules[owner].alias}.{original}", Val(owner)))
+                    }
+                    if target == .Val((path, owner)) -> &ledger.record_alias(module_idx, ~local, path, owner, binding.local_span, alias_visibility)
+                }
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1914
+fn module_declares(items: [Item], name: String) -> Bool Never! {
+    loop item in items {
+        if item == .Func(d) && d.name == name -> return true
+        if item == .Struct(d) && d.name == name -> return true
+        if item == .Enum(d) && d.name == name -> return true
+        if item == .Distinct(d) && d.name == name -> return true
+        if item == .TypeAlias(d) && d.name == name -> return true
+        if item == .Trait(d) && d.name == name -> return true
+        if item == .Tag(d) && d.name == name -> return true
+        if item == .Const(d) && d.name == name -> return true
+        if item == .ProtocolDecl(d) && d.name == name -> return true
+        if item == .UnitFamily(family) {
+            loop member in family.distinct_defs() -> if member.name == name -> return true
+        }
+    }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1933
+pub fn check_bundle(bundle: &ProgramBundle, mode: CompileMode) -> [Diagnostic] Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, false, GateSet.default(), None, None).0
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1945
+fn validate_script_entries(bundle: &ProgramBundle) -> [Diagnostic] Never! {
+    diags := [Diagnostic]{}
+    validate_script_entry_bodies(&bundle, &diags)
+    diags
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1954
+fn validate_script_entry_bodies(bundle: &ProgramBundle, diags: &[Diagnostic]) Never! {
+    loop module_idx in 0..<bundle.modules.len() {
+        body :: ^bundle.modules[module_idx].script_body
+        bundle.modules[module_idx].script_body = []
+        if body.is_empty() -> continue
+        script_span :: Span.new(body[0].span().start, body[body.len() - 1].span().end)
+        if module_idx != bundle.entry {
+            &diags.push(Diagnostic.error("E0620", "imported script `{bundle.modules[module_idx].display}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`", "move the statements into the entry file's `fn run`, or import a declaration-only file", Val(script_span)))
+        } else {
+            &diags.push(Diagnostic.error("E0621", "top-level executable statements require an explicit `fn run`", "Jet does not invent a runtime function for ordinary files; only `fn run` executes code", "move the statements into `fn run`", Val(script_span)))
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:1991
+pub fn check_bundle_for_output(bundle: &ProgramBundle, mode: CompileMode, output: String) -> [Diagnostic] Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, false, GateSet.default(), Val(output), None).0
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2007
+pub fn check_bundle_for_output_opts(bundle: &ProgramBundle, mode: CompileMode, output: String, no_os: Bool, gates: GateSet) -> [Diagnostic] Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, no_os, gates, Val(output), None).0
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2016
+pub fn check_bundle_for_output_opts_with_effect_facts(bundle: &ProgramBundle, mode: CompileMode, output: String, no_os: Bool, gates: GateSet) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, no_os, gates, Val(output), None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2027
+pub fn check_bundle_with_effect_facts(bundle: &ProgramBundle, mode: CompileMode) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, false, GateSet.default(), None, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2046
+pub fn check_bundle_with_effect_facts_for_build(bundle: &ProgramBundle, mode: CompileMode) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output_with_context(&bundle, mode, false, GateSet.default(), None, None, true)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2063
+const BUILD_ENTRY_FN: String = "build"
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2077
+pub fn is_build_entry(func: Func) -> Bool Never! {
+    func.name == BUILD_ENTRY_FN && func.params.len() == 1 && func.params[0].ty == Type.Named(TYPE_BUILD_CONTEXT)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2090
+pub fn build_entry_signature_is_valid(func: Func) -> Bool Never! {
+    if !is_build_entry(func) -> return false
+    if func.return_type == .Val(.Named(name)) -> return name == TYPE_BUILD_PLAN
+    if func.return_type == .Val(.Result(ok, err)) {
+        if ok != Type.Named(TYPE_BUILD_PLAN) -> return false
+        if err == .Named(name) && name == TYPE_ERR -> return false
+        return true
+    }
+    false
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2121
+pub fn strip_build_only_entries(bundle: &ProgramBundle) Never! {
+    loop &module in &bundle.modules {
+        &module.items.retain(fn(item: Item) -> Bool Never! {
+            if item == .Func(func) -> return !is_build_entry(func)
+            if item == .ErrorConv(conversion) -> return conversion.from_ty != "BuildError" && conversion.to_ty != "BuildError"
+            true
+        })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2137
+pub fn check_bundle_with_effect_facts_incremental(bundle: &ProgramBundle, mode: CompileMode, cache: &IncrementalSemaCache) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, false, GateSet.default(), None, Val(&cache))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2153
+pub fn check_bundle_no_os(bundle: &ProgramBundle, mode: CompileMode) -> [Diagnostic] Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, true, GateSet.default(), None, None).0
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2166
+pub fn check_bundle_no_os_with_effect_facts(bundle: &ProgramBundle, mode: CompileMode) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, true, GateSet.default(), None, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2180
+pub fn check_bundle_no_os_with_gates(bundle: &ProgramBundle, mode: CompileMode, gates: GateSet) -> [Diagnostic] Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, true, gates, None, None).0
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2190
+pub fn check_bundle_gates_with_effect_facts(bundle: &ProgramBundle, mode: CompileMode, gates: GateSet) -> ([Diagnostic], SemIndexEffectFacts) Never! {
+    pipeline_check_bundle_opts_for_output(&bundle, mode, false, gates, None, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2199
+pub fn check_bundle_gates(bundle: &ProgramBundle, mode: CompileMode, gates: GateSet) -> [Diagnostic] Never! {
+    check_bundle_gates_with_effect_facts(&bundle, mode, gates).0
+}

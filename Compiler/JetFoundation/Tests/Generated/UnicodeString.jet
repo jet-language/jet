@@ -1,0 +1,27 @@
+use JetFoundation.Generated.UnicodeString.[jet_unicode_lower, jet_unicode_upper, jet_unicode_trim, jet_unicode_trim_start, jet_unicode_trim_end, jet_unicode_index_of, jet_unicode_last_index_of, jet_unicode_count, jet_unicode_split_once, jet_unicode_cut_last]
+
+// Rust: crates/jet-foundation/src/generated/UnicodeString.rs:70
+#Test("unicode_full_case_and_final_sigma") {
+    assert(jet_unicode_lower("ΟΣ") == "ος")
+    assert(jet_unicode_lower("ΟΣΑ") == "οσα")
+    assert(jet_unicode_lower("İ") == "i̇")
+    assert(jet_unicode_upper("straße") == "STRASSE")
+}
+// Rust: crates/jet-foundation/src/generated/UnicodeString.rs:93
+#Test("unicode_pinned_whitespace") {
+    assert(jet_unicode_trim("　\ttext ") == "text")
+    assert(jet_unicode_trim_start("　text ") == "text ")
+    assert(jet_unicode_trim_end("　text ") == "　text")
+}
+// Rust: crates/jet-foundation/src/generated/UnicodeString.rs:109
+#Test("unicode_character_offsets_and_nonoverlap") {
+    assert(jet_unicode_index_of("é🙂é", "é") == Val(I64{0}))
+    assert(jet_unicode_last_index_of("é🙂é", "é") == Val(I64{2}))
+    assert(jet_unicode_index_of("é🙂é", "x") == None)
+    assert(jet_unicode_count("aaaaa", "aa") == I64{2})
+    assert(jet_unicode_count("abc", "") == I64{0})
+    assert(jet_unicode_split_once("é:🙂:x", ":") == Val(("é", "🙂:x")))
+    assert(jet_unicode_cut_last("é:🙂:x", ":") == Val(("é:🙂", "x")))
+    assert(jet_unicode_split_once("abc", "") == Val(("", "abc")))
+    assert(jet_unicode_cut_last("abc", "") == Val(("abc", "")))
+}

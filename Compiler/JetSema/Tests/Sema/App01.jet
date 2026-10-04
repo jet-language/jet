@@ -1,0 +1,74 @@
+// Rust App.rs has no inline tests; controls cover the canonical App extraction
+// helpers and the exact gaps supplied by the private continuation.
+use jet_foundation.[AccessConvention, CallArg, CallLabel, Expr, Span, Type, TEXT_NUL,
+    ast_empty_call_arg_flags]
+
+// Rust: crates/jet-sema/src/Sema/App.rs:442
+#Test("form labels uppercase a Unicode scalar and preserve the remaining text") {
+    assert(form_label("first_name") == "First Name")
+    assert(form_label("__first__name_") == "First Name")
+    assert(form_label("école_ßeta") == "École SSeta")
+    assert(form_label("") == "")
+}
+
+// Rust: crates/jet-sema/src/Sema/App.rs:132,228,319
+#Test("App discovery keys retain exact tuple identity including NUL text") {
+    // GATE #4499: the two keys collide under the obsolete NUL concatenation,
+    // but are distinct Rust tuple keys and must both survive discovery.
+    facts := [(key: String, footprint: String, source: String, kind: String):Int]{}
+    left :: (key: "a{TEXT_NUL}b", footprint: "c", source: "page", kind: "live")
+    right :: (key: "a", footprint: "b{TEXT_NUL}c", source: "page", kind: "live")
+    facts[left] = 1
+    facts[right] = 2
+    assert(facts.len() == 2)
+    assert(facts.get(left) == Val(1) && facts.get(right) == Val(2))
+    facts[left] = 3
+    assert(facts.len() == 2 && facts.get(left) == Val(3))
+}
+
+// Rust: crates/jet-sema/src/Sema/App.rs:1965,1977
+#Test("nonconstant labelled Bool falls back to the last unlabelled Bool") {
+    span :: Span{start: 0, end: 1}
+    args :: [CallArg]{
+        CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: "dynamic", span: span},
+            span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "preload", span: span}), spread: false},
+        CallArg{convention: AccessConvention.Read, expr: Expr.Bool{value: true, span: span},
+            span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    assert(labeled_bool_arg(args, "preload") == Val(true))
+    assert(const_bool_expr(Expr.Paren{value: Expr.Bool{value: true, span: span}, span: span}) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/App.rs:1669,1687,1691
+#Test("App effect lookup prefers module qualified then bare then suffix keys") {
+    solved :: [String:[String]]{"entry::page": [String]{"FS.Read"}, "page": [String]{"Net.HTTP"}, "other__page": [String]{"IO"}}
+    assert(lookup_effects(solved, "entry", "page") == Val([String]{"FS.Read"}))
+    assert(lookup_effects(solved, "missing", "page") == Val([String]{"Net.HTTP"}))
+    suffix :: [String:[String]]{"other__page": [String]{"IO"}}
+    assert(lookup_effects(suffix, "entry", "page") == Val([String]{"IO"}))
+    assert(lookup_effects(suffix, "entry", "absent") == None)
+    assert(effect_root("FS.Read") == "FS" && effect_root("FS(leaf)") == "FS(leaf)")
+    assert(is_runtime_effect("RequestContext.Header"))
+    assert(!is_runtime_effect("Browser.DOM") && !is_runtime_effect("FS(leaf)"))
+}
+
+// Rust: crates/jet-sema/src/Sema/App.rs:974,1003,1025,1902,1925
+#Test("App route specificity and conventions retain static dynamic and catchall meaning") {
+    assert(sema_app_canonical_path("/users/{id}") == "/users/:id")
+    assert(sema_app_routes_overlap("/users/:id", "/users/:name"))
+    assert(!sema_app_routes_overlap("/users/a", "/users/b"))
+    assert(sema_app_routes_overlap("/users/*rest", "/users/a/b"))
+    assert(sema_app_route_precedence("/users/:id") == [Int]{1, 2})
+    assert(sema_app_precedence_name("/users/:id") == "static-before-dynamic")
+    assert(sema_app_convention_path("users/[id]/page.jet") == "/users/:id")
+    assert(sema_app_convention_handler("users/[id]/page.jet") == "users__id__page")
+}
+
+// Rust: crates/jet-sema/src/Sema/App.rs:1748
+#Test("resumption serialization keeps the shared closed type shape") {
+    named :: [String:Bool]{"Record": true}
+    assert(sema_app_resume_type_serializable(Type.Named{name: "Record"}, named))
+    assert(!sema_app_resume_type_serializable(Type.Named{name: "Socket"}, named))
+    assert(sema_app_resume_type_serializable(Type.Map{key: Type.String, key_span: None, value: Type.Int}, named))
+    assert(!sema_app_resume_type_serializable(Type.Map{key: Type.Int, key_span: None, value: Type.Int}, named))
+    assert(sema_app_resume_type_serializable(Type.Result{ok: Type.Int, err: Type.Named{name: "Record"}}, named))
+}

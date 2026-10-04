@@ -1,1449 +1,358 @@
-// PORT-PENDING 0325 crates-jet-parser-src-parser-expressions-primary: crates/jet-parser/src/Parser/Expressions/primary.rs:1-1445
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{
-//RS     describe, AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Lambda, LambdaBody,
-//RS     LambdaMeta, Parser, Span, StrPart, StrTokPart, Syntax, TokKind,
-//RS };
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         if let Some(result) = self.simple_primary(allow_struct_lit) {
-//RS             return result;
-//RS         }
-//RS         // D-DOTCTOR3 / D-TYPE-SUFFIX1=A: `T?{ body }` — the optional
-//RS         // typed-literal head. A retired prefix `?T{` still parses the head so
-//RS         // the type parser can teach `T?`.
-//RS         if allow_struct_lit
-//RS             && (matches!(self.peek().kind, TokKind::Question)
-//RS                 || self.suffix_optional_typed_head_ahead())
-//RS         {
-//RS             if let Some(lit) = self.parse_optional_typed_lit()? {
-//RS                 return Ok(lit);
-//RS             }
-//RS         }
-//RS         match self.peek().kind.clone() {
-//RS             // D-SUBJECT-CALL1=A: keep the bare lower-case member atom in
-//RS             // the primary path so the ordinary postfix loop parses the
-//RS             // rest of `.member.method(args)`.
-//RS             TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(name) if name.chars().next().is_some_and(char::is_lowercase)) =>
-//RS             {
-//RS                 let dot = self.bump().span;
-//RS                 let (member, member_span) =
-//RS                     self.expect_ident("after `.` in a bare member shorthand")?;
-//RS                 Ok(Expr::Field(
-//RS                     Box::new(Expr::Ident(String::new(), dot)),
-//RS                     member,
-//RS                     member_span,
-//RS                 ))
-//RS             }
-//RS             TokKind::KwLoop => self.yielding_loop_expr(),
-//RS             TokKind::Ident(name)
-//RS                 if name == Syntax::LIT_VALUE
-//RS                     && matches!(
-//RS                         self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS                         Some(TokKind::LParen)
-//RS                     ) =>
-//RS             {
-//RS                 let span = self.bump().span;
-//RS                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-//RS                 let inner = self.expr()?;
-//RS                 self.expect(
-//RS                     TokKind::RParen,
-//RS                     &format!("after the value inside `{}(...)`", Syntax::LIT_VALUE),
-//RS                 )?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::EnumLit {
-//RS                     type_name: String::new(),
-//RS                     variant: Syntax::LIT_VALUE.to_string(),
-//RS                     variant_span: Some(span),
-//RS                     args: vec![EnumLitArg::Positional(inner)],
-//RS                     leading_dot: false,
-//RS                     span: full,
-//RS                 })
-//RS             }
-//RS             // D-VERDICT-1455-1: one marker read at expression position. The
-//RS             // shared reader takes the name — any name, open vocabulary
-//RS             // included — and only then does this classify what it means.
-//RS             TokKind::Hash
-//RS                 if matches!(
-//RS                     self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS                     Some(TokKind::Ident(_))
-//RS                 ) =>
-//RS             {
-//RS                 let head = self.read_marker_head()?;
-//RS                 let start = head.span.start;
-//RS                 if let Some(rule) = crate::Policy::applied_rule(&head.name) {
-//RS                     if matches!(rule.status, crate::Policy::RuleStatus::Active)
-//RS                         && !crate::Policy::rule_allows(
-//RS                             &head.name,
-//RS                             crate::Policy::RuleSite::Expression,
-//RS                         )
-//RS                     {
-//RS                         return Err(crate::Policy::marker_wrong_site_error(
-//RS                             &head.name,
-//RS                             crate::Policy::RuleSite::Expression,
-//RS                             head.span,
-//RS                         ));
-//RS                     }
-//RS                 } else if matches!(
-//RS                     self.peek().kind,
-//RS                     TokKind::Semi
-//RS                         | TokKind::RBrace
-//RS                         | TokKind::RParen
-//RS                         | TokKind::RBracket
-//RS                         | TokKind::Comma
-//RS                         | TokKind::Eof
-//RS                 ) {
-//RS                     return Err(crate::Policy::marker_unknown_error(
-//RS                         &head.name,
-//RS                         &crate::Policy::active_rule_names(),
-//RS                         head.name_span,
-//RS                     ));
-//RS                 }
-//RS                 return match head.name.as_str() {
-//RS                         Syntax::MARKER_META => {
-//RS                             Err(self.meta_attr_wrong_place_diag(head.span, "binding or function"))
-//RS                         }
-//RS                         Syntax::MARKER_OFF | Syntax::MARKER_DEBUG_ONLY => Err(Diagnostic::error(
-//RS                             "E0343",
-//RS                             format!("`#{}` does not produce a value", head.name),
-//RS                             "statement switch attributes control a whole statement; expressions must still produce values in every build".to_string(),
-//RS                             format!("put it before the statement: `#{} <statement>`", head.name),
-//RS                             Some(head.span),
-//RS                         )),
-//RS                         // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed goal — valid in any
-//RS                         // expression position; sema fills `expected_type`; codegen emits a
-//RS                         // panic.
-//RS                         Syntax::KW_TODO => Ok(Expr::Todo {
-//RS                             span: head.span,
-//RS                             expected_type: None,
-//RS                         }),
-//RS                         // D-TAG-SURFACE1=A: recover retired `#Tainted[(Kind)] value`
-//RS                         // as the corresponding ordinary tag application.
-//RS                         Syntax::KW_TAINTED => {
-//RS                             // Optional `(Kind)` argument after the keyword.
-//RS                             let kind: Option<String> =
-//RS                                 if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::LParen)) {
-//RS                                     self.bump(); // `(`
-//RS                                     let kind_name = if let Some(tok) = self.toks.get(self.pos) {
-//RS                                         if let TokKind::Ident(n) = &tok.kind {
-//RS                                             let n = n.clone();
-//RS                                             self.bump();
-//RS                                             n
-//RS                                         } else {
-//RS                                             String::new()
-//RS                                         }
-//RS                                     } else {
-//RS                                         String::new()
-//RS                                     };
-//RS                                     // Consume the closing `)`.
-//RS                                     if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::RParen)) {
-//RS                                         self.bump();
-//RS                                     }
-//RS                                     if kind_name.is_empty() { None } else { Some(kind_name) }
-//RS                                 } else {
-//RS                                     None
-//RS                                 };
-//RS                             let tag = kind.unwrap_or_else(|| "Input".to_string());
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0927",
-//RS                                 "`#Tainted` is retired".to_string(),
-//RS                                 "taint kinds are ordinary declared fact tags".to_string(),
-//RS                                 format!("write `#{tag} value`"),
-//RS                                 Some(head.span),
-//RS                             ));
-//RS                             let inner = self.expr_primary(allow_struct_lit)?;
-//RS                             let span = Span::new(start, inner.span().end);
-//RS                             Ok(Expr::Tainted(Box::new(inner), Some(tag), span))
-//RS                         }
-//RS                         // The four old SIMD reduce selectors remain parser
-//RS                         // recovery nodes until their retirement diagnostic fires.
-//RS                         "Add" | "Mul" | "Min" | "Max" => {
-//RS                             Ok(Expr::ReduceMarker(head.name.clone(), head.span))
-//RS                         }
-//RS                         // D-TAG-SURFACE1=A: any declared tag may prefix a value.
-//RS                         _ => {
-//RS                             let inner = self.expr_primary(allow_struct_lit)?;
-//RS                             let span = Span::new(start, inner.span().end);
-//RS                             Ok(Expr::Tainted(Box::new(inner), Some(head.name.clone()), span))
-//RS                         }
-//RS                     };
-//RS             }
-//RS             // A lone `$`: config surfaces read `$NAME` as one token, and in
-//RS             // code a fact is always `$name` (D-COMPILER-NS1=A).
-//RS             TokKind::Dollar => {
-//RS                 let mark = self.bump();
-//RS                 return Err(if self.allow_environment_reads {
-//RS                     self.invalid_environment_read(mark.span)
-//RS                 } else {
-//RS                     self.unknown_fact_root(Syntax::COMPTIME_MARK, mark.span)
-//RS                 });
-//RS             }
-//RS             // D-PREP-SURFACE2=A: `prep { … }` in value position. The block's
-//RS             // final expression is its value, but no build-time value fold
-//RS             // exists yet, so the whole block is consumed and E0391 teaches
-//RS             // the statement form. Where a struct literal cannot follow
-//RS             // (`if prep { … }`), `prep` stays an ordinary name.
-//RS             TokKind::Ident(name)
-//RS                 if allow_struct_lit
-//RS                     && name == Syntax::KW_PREP
-//RS                     && matches!(self.peek2().kind, TokKind::LBrace) =>
-//RS             {
-//RS                 let start = self.bump().span.start;
-//RS                 self.bump(); // `{`
-//RS                 let _ = self.block_stmts();
-//RS                 let end = self.toks[self.pos - 1].span.end;
-//RS                 Err(Diagnostic::from_row("E0391", &[], Some(Span::new(start, end))))
-//RS             }
-//RS             TokKind::At => {
-//RS                 let span = self.bump().span;
-//RS                 return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "`@` needs a compile-time name or a package ref here".to_string(),
-//RS                         "prefix `@` marks compile-time names and fact reads; infix `@` joins a package target to its source (D-ONCE-AT1=D)".to_string(),
-//RS                         "write `@name`, `T.$layout`, or a complete `target@source` ref".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS             }
-//RS             TokKind::Ident(name) if false && name == Syntax::FOREIGN_TODO => {
-//RS                 // S14: bare lowercase `todo` is the retired spelling (E0054).
-//RS                 let t = self.bump();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E0054",
-//RS                         format!(
-//RS                             "the typed hole is written `#{}`, not bare `{}`",
-//RS                             Syntax::KW_TODO,
-//RS                             Syntax::FOREIGN_TODO
-//RS                         ),
-//RS                         format!(
-//RS                             "`#{}` is a marker, like every other `#`-tag, so an unfinished spot draws the eye",
-//RS                             Syntax::KW_TODO
-//RS                         ),
-//RS                         format!("write: #{}", Syntax::KW_TODO),
-//RS                         Some(t.span),
-//RS                     ));
-//RS                 return Ok(Expr::Todo {
-//RS                     span: t.span,
-//RS                     expected_type: None,
-//RS                 });
-//RS             }
-//RS             TokKind::Ident(name)
-//RS                 if false
-//RS                     && matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>
-//RS             {
-//RS                 let t = self.bump();
-//RS                 let foreign = name.clone();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0026",
-//RS                     format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-//RS                     "a function that can fail returns `T E!` and signals failure with `Err(...)`"
-//RS                         .to_string(),
-//RS                     format!("return `Err(...)` instead of `{}`", foreign),
-//RS                     Some(t.span),
-//RS                 ));
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             TokKind::Ident(name)
-//RS                 if matches!(
-//RS                     name.as_str(),
-//RS                     Syntax::FOREIGN_CATCH | Syntax::FOREIGN_EXCEPT
-//RS                 ) && false =>
-//RS             {
-//RS                 let t = self.bump();
-//RS                 let foreign = name.clone();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0024",
-//RS                     format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-//RS                     "handle a failure with `or` for a fallback, or test with `== .Err(...)`"
-//RS                         .to_string(),
-//RS                     format!(
-//RS                         "write `parse(x) or 0` or `if x == .Err(e) {{ ... }}` instead of `{}`",
-//RS                         foreign
-//RS                     ),
-//RS                     Some(t.span),
-//RS                 ));
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             TokKind::Ident(name)
-//RS                 if matches!(
-//RS                     name.as_str(),
-//RS                     Syntax::FOREIGN_UNWRAP | Syntax::FOREIGN_EXPECT
-//RS                 ) && false =>
-//RS             {
-//RS                 let t = self.bump();
-//RS                 let foreign = name.clone();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0025",
-//RS                     format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-//RS                     "when failure should stop the program, use `or panic(\"…\")`".to_string(),
-//RS                     format!(
-//RS                         "write `parse(x) or panic(\"…\")` instead of `.{}()`",
-//RS                         foreign
-//RS                     ),
-//RS                     Some(t.span),
-//RS                 ));
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
-//RS                 let start = self.peek().span.start;
-//RS                 self.struct_lit_inferred(start)
-//RS             }
-//RS             // S68 (D-SG2): `if` used as a value. Statement-position `if` is
-//RS             // handled earlier in `stmt`, so reaching here means expression use.
-//RS             TokKind::KwIf => self.parse_if_expr(),
-//RS             TokKind::KwMove
-//RS                 if matches!(
-//RS                     self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS                     Some(TokKind::LParen)
-//RS                 ) =>
-//RS             {
-//RS                 let takes = self.parse_lambda_takes()?;
-//RS                 Ok(Expr::Lambda(Box::new(self.parse_lambda(takes)?)))
-//RS             }
-//RS             TokKind::LParen if self.after_lparen_is_lambda() => {
-//RS                 Ok(Expr::Lambda(Box::new(self.parse_lambda(vec![])?)))
-//RS             }
-//RS             // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
-//RS             // lambda with no parens — `m -> m.hp > 0`. Sema accepts it only
-//RS             // where the expected type fixes the param type (E0801 elsewhere).
-//RS             //
-//RS             // Not inside a control header. `allow_struct_lit` is false
-//RS             // exactly where a trailing arrow introduces a BODY —
-//RS             // `loop x in xs -> f(x)`, `if cond -> stmt`, an arm head. Once
-//RS             // D-ARROW-UNIFY1 made one arrow serve both roles, a bare
-//RS             // `xs -> f(x)` there read as a lambda and swallowed the body,
-//RS             // so the header reported "this loop has no body". A lambda in
-//RS             // that position writes its parameter list in parentheses.
-//RS             TokKind::Ident(_)
-//RS                 if allow_struct_lit && Self::at_unified_arrow_token(&self.peek2().kind) =>
-//RS             {
-//RS                 Ok(Expr::Lambda(Box::new(self.parse_bare_lambda()?)))
-//RS             }
-//RS             TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
-//RS             TokKind::Ident(name) if false && name == Syntax::FOREIGN_LAMBDA => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0032",
-//RS                     format!(
-//RS                         "{} doesn't use the `{}` keyword for short functions",
-//RS                         Syntax::LANG_NAME,
-//RS                         Syntax::FOREIGN_LAMBDA
-//RS                     ),
-//RS                     "write a lambda with parentheses and `->` instead".to_string(),
-//RS                     "e.g. `(x) -> x + 1` instead of `lambda x { ... }`".to_string(),
-//RS                     Some(span),
-//RS                 ));
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             TokKind::Ident(name) if false && name == Syntax::FOREIGN_AS => {
-//RS                 let t = self.bump();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0030",
-//RS                     format!(
-//RS                         "{} doesn't use `{}` for conversions",
-//RS                         Syntax::LANG_NAME,
-//RS                         Syntax::FOREIGN_AS
-//RS                     ),
-//RS                     "the destination type owns conversion with `Target.from_source(value)`"
-//RS                         .to_string(),
-//RS                     "e.g. `Float.from_int(x)` instead of `x as Float`".to_string(),
-//RS                     Some(t.span),
-//RS                 ));
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             TokKind::Ident(name) if false && name == Syntax::FOREIGN_APPEND => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0027",
-//RS                     format!("lists use `{}`, not `{}`", "push", Syntax::FOREIGN_APPEND),
-//RS                     "add an item to the end of a list with `.push(value)`".to_string(),
-//RS                     "e.g. `items.push(x)`".to_string(),
-//RS                     Some(span),
-//RS                 ));
-//RS                 if matches!(self.peek().kind, TokKind::LParen) {
-//RS                     self.bump();
-//RS                     let _ = self.expr();
-//RS                     let _ = self.expect(TokKind::RParen, "after append args");
-//RS                 }
-//RS                 return self.expr_primary(allow_struct_lit);
-//RS             }
-//RS             // D-PREP-SURFACE2=A: a constant is an ordinary name, declared
-//RS             // `NAME :: prep { value }` when evaluated while building. A retired
-//RS             // `@NAME` read teaches E0388 and reads `NAME`. A called
-//RS             // `@ROOT(…)` is a retired metadata query, not a constant.
-//RS             TokKind::Ident(name)
-//RS                 if self.reads_retired_constant(name.as_str())
-//RS                     && Syntax::retired_fact_spelling(name.as_str()).is_none()
-//RS                     && !matches!(self.peek2().kind, TokKind::LParen) =>
-//RS             {
-//RS                 let span = self.bump().span;
-//RS                 let name = self.retire_const_mark(name, span);
-//RS                 Ok(Expr::Ident(name, span))
-//RS             }
-//RS             // D-NAME-SPLICE1=B: inside a derive or marker template, the retired
-//RS             // `@name` splice of a template binding teaches E0388 and reads as
-//RS             // `$name`.
-//RS             TokKind::Ident(name)
-//RS                 if self.derive_template_depth > 0
-//RS                     && name.starts_with(Syntax::RETIRED_COMPTIME_MARK)
-//RS                     && Syntax::retired_fact_spelling(name.as_str()).is_none() =>
-//RS             {
-//RS                 let span = self.bump().span;
-//RS                 let new = format!(
-//RS                     "{}{}",
-//RS                     Syntax::COMPTIME_MARK,
-//RS                     &name[Syntax::RETIRED_COMPTIME_MARK.len()..]
-//RS                 );
-//RS                 self.diags.push(
-//RS                     Diagnostic::from_row("E0388", &[("old", name.as_str()), ("new", new.as_str())], Some(span))
-//RS                         .with_edit(crate::Diagnostics::TextEdit {
-//RS                             span,
-//RS                             new_text: new.clone(),
-//RS                         }),
-//RS                 );
-//RS                 Ok(Expr::ComptimeName {
-//RS                     name: new,
-//RS                     span,
-//RS                     value: None,
-//RS                 })
-//RS             }
-//RS             // D-COMPILER-NS1=A / D-META-ROOT3=A: `$build`, `$package`,
-//RS             // `$phase` and `$program` are the subjectless fact roots. The
-//RS             // lexer merges the mark into one `Ident` token. Config surfaces
-//RS             // read the same token as a `$NAME` environment read
-//RS             // (D-ONCE-DOLLAR1=B). Inside a template, any other `$name`
-//RS             // splices a template binding (D-NAME-SPLICE1=B).
-//RS             TokKind::Ident(name)
-//RS                 if Syntax::is_comptime_name(name.as_str())
-//RS                     && !(self.derive_template_depth > 0
-//RS                         && allow_struct_lit
-//RS                         && self
-//RS                             .toks
-//RS                             .get(self.pos + 1)
-//RS                             .is_some_and(|token| matches!(&token.kind, TokKind::Lt))) =>
-//RS             {
-//RS                 let span = self.bump().span;
-//RS                 if !self.allow_environment_reads
-//RS                     && self.derive_template_depth == 0
-//RS                     && !Syntax::is_fact_root(name.as_str())
-//RS                 {
-//RS                     return Err(self.unknown_fact_root(name.as_str(), span));
-//RS                 }
-//RS                 Ok(Expr::ComptimeName {
-//RS                     name,
-//RS                     span,
-//RS                     value: None,
-//RS                 })
-//RS             }
-//RS             TokKind::KwIn => {
-//RS                 let span = self.bump().span;
-//RS                 Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
-//RS                     format!(
-//RS                         "the `{}` keyword marks the boundary between a loop binding and its source",
-//RS                         Syntax::KW_IN
-//RS                     ),
-//RS                     format!(
-//RS                         "choose a different identifier name, or use `{}` in a source loop; after `.` it is allowed as a member name",
-//RS                         Syntax::KW_IN
-//RS                     ),
-//RS                     Some(span),
-//RS                 ))
-//RS             }
-//RS             TokKind::Ident(name) if name == Syntax::KW_CONC_TASK => self.task_surface_expr(),
-//RS             TokKind::Ident(name) => {
-//RS                 let span = self.bump().span;
-//RS                 let type_name = name.clone();
-//RS                 let mut type_args = Vec::new();
-//RS                 if allow_struct_lit
-//RS                     && matches!(self.peek().kind, TokKind::Lt)
-//RS                     && (type_name.chars().next().is_some_and(|c| c.is_uppercase())
-//RS                         || (self.derive_template_depth > 0 && Syntax::is_comptime_name(&type_name)))
-//RS                 {
-//RS                     self.expect_type_args_open(&type_name)?;
-//RS                     loop {
-//RS                         let (arg, _) = self.type_()?;
-//RS                         type_args.push(arg);
-//RS                         if matches!(self.peek().kind, TokKind::Comma) {
-//RS                             self.bump();
-//RS                             if matches!(self.peek().kind, TokKind::Gt | TokKind::Shr) {
-//RS                                 break;
-//RS                             }
-//RS                             continue;
-//RS                         }
-//RS                         break;
-//RS                     }
-//RS                     self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
-//RS                 }
-//RS                 if allow_struct_lit && self.at_literal_head_path() {
-//RS                     let (type_name, retired_dot) = self.consume_literal_head_path(type_name)?;
-//RS                     if retired_dot {
-//RS                         let message = if type_name.contains('.') {
-//RS                             format!(
-//RS                                 "literal construction uses `{}{{…}}`, not `{}.{{…}}`",
-//RS                                 type_name, type_name
-//RS                             )
-//RS                         } else {
-//RS                             format!(
-//RS                                 "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
-//RS                                 type_name, type_name
-//RS                             )
-//RS                         };
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0320",
-//RS                             message,
-//RS                             "literal heads place no dot before their brace (D-LIT-DOT1)"
-//RS                                 .to_string(),
-//RS                             format!("write `{}{{…}}`", type_name),
-//RS                             Some(self.peek().span),
-//RS                         ));
-//RS                     }
-//RS                     return self.struct_lit_after_path(type_name, type_args, span);
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::Dot) {
-//RS                     self.bump();
-//RS                     // D-CAP9: postfix `name.*` — dereference a raw pointer.
-//RS                     // Returning the `Deref` lets `expr_postfix`'s loop pick up a
-//RS                     // following `.field`, giving `name.*.field`.
-//RS                     if matches!(self.peek().kind, TokKind::Star) {
-//RS                         let star = self.bump().span;
-//RS                         let full = Span::new(span.start, star.end);
-//RS                         return Ok(Expr::Deref(Box::new(Expr::Ident(type_name, span)), full));
-//RS                     }
-//RS                     // D-SPREAD1=A: `prefix.[a, b, c]` member spread (primary path —
-//RS                     // bare idents consume `.` here before postfix sees them).
-//RS                     if matches!(self.peek().kind, TokKind::LBracket) {
-//RS                         let base = Expr::Ident(type_name, span);
-//RS                         return self.parse_member_spread(base, span.start);
-//RS                     }
-//RS                     let (member, member_span) = self.expect_field_name()?;
-//RS                     // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
-//RS                     // pointer constructor through a `core.mem` alias. Recognise
-//RS                     // the `<…>` here (primary position, where `alias.Member` is
-//RS                     // consumed) so `<` is read as a type-arg list, not a
-//RS                     // comparison. Mirrors the postfix-position trigger.
-//RS                     if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
-//RS                         return self.ptr_from_addr(type_name, span);
-//RS                     }
-//RS                     // D-GENERIC-CALL1=A: optional call-site type arguments on
-//RS                     // every qualified call, such as `csv.decode<Order>(raw)`.
-//RS                     // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a
-//RS                     // capitalized receiver's OWN turbofish (`Pool<Player>.new()`,
-//RS                     // parsed above at the type-name position) has no call-site
-//RS                     // turbofish of its own (`self.at_turbofish()` is false right
-//RS                     // after `.new`), so this used to silently clobber it with an
-//RS                     // empty `Vec`, losing `Player` entirely. The two positions are
-//RS                     // mutually exclusive in practice (a lowercase alias like `csv`
-//RS                     // never reaches the type-name turbofish parse above), so
-//RS                     // falling back to the outer `type_args` when there's no
-//RS                     // call-site turbofish is a pure bug fix, not a behavior change.
-//RS                     let method_type_args = if self.at_turbofish() {
-//RS                         self.parse_turbofish()?
-//RS                     } else {
-//RS                         Vec::new()
-//RS                     };
-//RS                     if matches!(self.peek().kind, TokKind::LParen) {
-//RS                         // D-JPK-BUILDRECIPE1: the finite build-step values
-//RS                         // use lower-case leading-dot names (`.exec(...)`,
-//RS                         // `.install(...)`). Keep that spelling scoped to
-//RS                         // the ratified Recipe.build call; ordinary value
-//RS                         // expressions retain the existing upper-case-only
-//RS                         // leading-dot enum grammar.
-//RS                         let recipe_build = type_name == Syntax::RECIPE_TYPE
-//RS                             && member == Syntax::RECIPE_BUILD_METHOD;
-//RS                         let previous_lowercase = self.allow_lowercase_leading_dot;
-//RS                         if recipe_build {
-//RS                             self.allow_lowercase_leading_dot = true;
-//RS                         }
-//RS                         self.bump();
-//RS                         let mut args = Vec::new();
-//RS                         if member == Syntax::METHOD_TAKE_PATTERN {
-//RS                             // D-SHIFT1: `cursor.take_pattern("…")` — mirrors the
-//RS                             // identical carve-out in `expr_postfix` above, for
-//RS                             // the bare-leading-ident receiver fast path.
-//RS                             let pat = self.parse_take_pattern_literal()?;
-//RS                             let pat_span = pat.span();
-//RS                             args.push(CallArg {
-//RS                                 convention: AccessConvention::Read,
-//RS                                 expr: pat,
-//RS                                 span: pat_span,
-//RS                                 flags: crate::AST::CallArgFlags::default(),
-//RS                                 label: None,
-//RS                                 spread: false,
-//RS                             });
-//RS                         } else if member == Syntax::METHOD_VIEW {
-//RS                             // D-DYNARRAY1: `.view(a..b)` — mirrors the identical
-//RS                             // carve-out in `expr_postfix` above; this is the
-//RS                             // separate fast-path `expr_primary` takes when the
-//RS                             // receiver is a bare leading identifier (`incidents.
-//RS                             // view(0..2)`), not a chained postfix expression.
-//RS                             let range = self.expr()?;
-//RS                             let Expr::Range { start, end, .. } = range else {
-//RS                                 return Err(Diagnostic::error(
-//RS                                     "E0003",
-//RS                                     "expected a `..` between the view's start and end".to_string(),
-//RS                                     "the structure here isn't what the compiler expected"
-//RS                                         .to_string(),
-//RS                                     "use `..` between the view's start and end".to_string(),
-//RS                                     Some(self.peek().span),
-//RS                                 ));
-//RS                             };
-//RS                             let start = *start;
-//RS                             let end = *end;
-//RS                             let start_span = start.span();
-//RS                             let end_span = end.span();
-//RS                             args.push(CallArg {
-//RS                                 convention: AccessConvention::Read,
-//RS                                 expr: start,
-//RS                                 span: start_span,
-//RS                                 flags: crate::AST::CallArgFlags::default(),
-//RS                                 label: None,
-//RS                                 spread: false,
-//RS                             });
-//RS                             args.push(CallArg {
-//RS                                 convention: AccessConvention::Read,
-//RS                                 expr: end,
-//RS                                 span: end_span,
-//RS                                 flags: crate::AST::CallArgFlags::default(),
-//RS                                 label: None,
-//RS                                 spread: false,
-//RS                             });
-//RS                         } else if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                             loop {
-//RS                                 args.push(self.call_arg()?);
-//RS                                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                     break;
-//RS                                 }
-//RS                                 self.expect_list_separator("between arguments", "call")?;
-//RS                                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                     break;
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
-//RS                         self.parse_generate_template_arg(&member, &mut args)?;
-//RS                         let receiver = Expr::Ident(type_name, span);
-//RS                         self.teach_retired_shared_new(&receiver, &member, member_span);
-//RS                         let result = Expr::MethodCall {
-//RS                             receiver: Box::new(receiver),
-//RS                             method: member,
-//RS                             method_span: member_span,
-//RS                             owner_type_args: type_args,
-//RS                             type_args: method_type_args,
-//RS                             args,
-//RS                             recv_type: None,
-//RS                             resolved_ret: None,
-//RS                             operator_rhs: None,
-//RS                             checked_widen: false,
-//RS                         };
-//RS                         self.allow_lowercase_leading_dot = previous_lowercase;
-//RS                         return Ok(result);
-//RS                     }
-//RS                     return Ok(Expr::Field(
-//RS                         Box::new(Expr::Ident(type_name, span)),
-//RS                         member,
-//RS                         member_span,
-//RS                     ));
-//RS                 }
-//RS                 let call_type_args = if self.at_turbofish() {
-//RS                     self.parse_turbofish()?
-//RS                 } else {
-//RS                     type_args
-//RS                 };
-//RS                 if matches!(self.peek().kind, TokKind::LParen) {
-//RS                     let call = self.call_after_name(type_name, span, call_type_args)?;
-//RS                     return Ok(Expr::Call(call));
-//RS                 }
-//RS                 Ok(Expr::Ident(type_name, span))
-//RS             }
-//RS             other => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("expected a value, found {}", describe(&other)),
-//RS                 "a value can be a name, a number, quoted text, `true`/`false`, or a call"
-//RS                     .to_string(),
-//RS                 "e.g. `x`, `42`, `3.5`, or `\"hello\"`".to_string(),
-//RS                 Some(self.peek().span),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     fn simple_primary(&mut self, allow_struct_lit: bool) -> Option<Result<Expr, Diagnostic>> {
-//RS         match self.peek().kind.clone() {
-//RS             TokKind::LBracket => Some(self.list_or_map_lit(allow_struct_lit)),
-//RS             TokKind::KwIt => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Ident(Syntax::KW_IT.to_string(), span)))
-//RS             }
-//RS             TokKind::KwNull => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::EnumLit {
-//RS                     type_name: String::new(),
-//RS                     variant: Syntax::LIT_NULL.to_string(),
-//RS                     variant_span: Some(span),
-//RS                     args: Vec::new(),
-//RS                     leading_dot: false,
-//RS                     span,
-//RS                 }))
-//RS             }
-//RS             TokKind::RawStr(text) => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Str(vec![StrPart::Lit(text)], span)))
-//RS             }
-//RS             TokKind::Str(parts) => {
-//RS                 let span = self.bump().span;
-//RS                 Some(self.str_expr_from_parts(parts, span))
-//RS             }
-//RS             TokKind::Int(n, raw) => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Int(n, span, None, Some(raw))))
-//RS             }
-//RS             TokKind::Float(v, raw) => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Float(v, span, false, Some(raw))))
-//RS             }
-//RS             TokKind::UnitNumber { .. } => {
-//RS                 let tok = self.bump();
-//RS                 let TokKind::UnitNumber {
-//RS                     raw,
-//RS                     int,
-//RS                     float,
-//RS                     suffix,
-//RS                 } = tok.kind
-//RS                 else {
-//RS                     unreachable!("guarded by the outer match above")
-//RS                 };
-//RS                 let span = tok.span;
-//RS                 let suffix_span = Span::new(span.end - suffix.len(), span.end);
-//RS                 Some(Ok(Expr::UnitLit {
-//RS                     raw,
-//RS                     int,
-//RS                     float,
-//RS                     suffix,
-//RS                     suffix_span,
-//RS                     span,
-//RS                 }))
-//RS             }
-//RS             TokKind::Char(ch) => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Char(ch, span)))
-//RS             }
-//RS             TokKind::KwTrue => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Bool(true, span)))
-//RS             }
-//RS             TokKind::KwFalse => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Bool(false, span)))
-//RS             }
-//RS             TokKind::KwSelf => {
-//RS                 let span = self.bump().span;
-//RS                 Some(Ok(Expr::Ident(Syntax::KW_SELF.to_string(), span)))
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn at_literal_head_path(&self) -> bool {
-//RS         let mut index = self.pos;
-//RS         while matches!(
-//RS             self.toks.get(index).map(|token| &token.kind),
-//RS             Some(TokKind::Dot)
-//RS         ) && matches!(
-//RS             self.toks.get(index + 1).map(|token| &token.kind),
-//RS             Some(TokKind::Ident(_))
-//RS         ) {
-//RS             index += 2;
-//RS         }
-//RS         matches!(
-//RS             self.toks.get(index).map(|token| &token.kind),
-//RS             Some(TokKind::LBrace)
-//RS         ) || (matches!(
-//RS             self.toks.get(index).map(|token| &token.kind),
-//RS             Some(TokKind::Dot)
-//RS         ) && matches!(
-//RS             self.toks.get(index + 1).map(|token| &token.kind),
-//RS             Some(TokKind::LBrace)
-//RS         ))
-//RS     }
-//RS 
-//RS     fn consume_literal_head_path(
-//RS         &mut self,
-//RS         mut type_name: String,
-//RS     ) -> Result<(String, bool), Diagnostic> {
-//RS         while matches!(self.peek().kind, TokKind::Dot)
-//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
-//RS         {
-//RS             self.bump();
-//RS             let (segment, _) = self.expect_ident("after `.` in a literal head")?;
-//RS             type_name.push('.');
-//RS             type_name.push_str(&segment);
-//RS         }
-//RS         let retired_dot = matches!(self.peek().kind, TokKind::Dot)
-//RS             && matches!(self.peek2().kind, TokKind::LBrace);
-//RS         if retired_dot {
-//RS             self.bump();
-//RS         }
-//RS         Ok((type_name, retired_dot))
-//RS     }
-//RS 
-//RS     /// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: one `task` word owns
-//RS     /// single-task spawn and the nested `all`/`race`/`any` combinators.
-//RS     /// Named `task.all` branches become the existing anonymous tuple carrier;
-//RS     /// every other combinator keeps its positional list form. Lower these
-//RS     /// forms into the existing method-call seam; sema and TIR keep one task
-//RS     /// mechanism.
-//RS     fn task_surface_expr(&mut self) -> Result<Expr, Diagnostic> {
-//RS         let task_span = self.bump().span;
-//RS         if matches!(self.peek().kind, TokKind::Dot) {
-//RS             self.bump();
-//RS             let (selector, selector_span) = self.expect_ident("after `task.`")?;
-//RS             if selector == "group" {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     "`task.group` is a statement, not a value".to_string(),
-//RS                     "a task group owns a block and its children until the closing brace"
-//RS                         .to_string(),
-//RS                     "write `task.group name { … }`".to_string(),
-//RS                     Some(selector_span),
-//RS                 ));
-//RS             }
-//RS             if selector == Syntax::TASK_TIMEOUT_SELECTOR {
-//RS                 self.expect(TokKind::LParen, "after `task.timeout`")?;
-//RS                 let arg = self.call_arg()?;
-//RS                 self.expect(TokKind::RParen, "to finish `task.timeout`")?;
-//RS                 return Ok(Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(
-//RS                         Syntax::INTERNAL_TASK_RECEIVER.to_string(),
-//RS                         task_span,
-//RS                     )),
-//RS                     method: Syntax::INTERNAL_TASK_TIMEOUT_METHOD.to_string(),
-//RS                     method_span: selector_span,
-//RS                     args: vec![arg],
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 });
-//RS             }
-//RS             if !matches!(selector.as_str(), "all" | "race" | "any") {
-//RS                 return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         format!("unknown task selector `{selector}`"),
-//RS                         "task selectors use `timeout`, `all`, `race`, or `any`".to_string(),
-//RS                         "write `task.timeout(duration)`, `task.all { … }`, `task.race { … }`, or `task.any { … }`"
-//RS                             .to_string(),
-//RS                         Some(selector_span),
-//RS                     ));
-//RS             }
-//RS             self.expect(TokKind::LBrace, "after the task selector")?;
-//RS             let open = self.toks[self.pos - 1].span;
-//RS             let mut branches = Vec::new();
-//RS             let mut saw_named = false;
-//RS             let mut saw_positional = false;
-//RS             let mut mixed_span = None;
-//RS             if !matches!(self.peek().kind, TokKind::RBrace) {
-//RS                 loop {
-//RS                     let (label, style_span) = if selector == "all"
-//RS                         && matches!(self.peek().kind, TokKind::Ident(_))
-//RS                         && matches!(self.peek2().kind, TokKind::Colon)
-//RS                     {
-//RS                         let (name, name_span) =
-//RS                             self.expect_ident("for a named `task.all` branch")?;
-//RS                         self.expect(TokKind::Colon, "after a named `task.all` branch")?;
-//RS                         saw_named = true;
-//RS                         (Some((name, name_span)), name_span)
-//RS                     } else {
-//RS                         saw_positional = true;
-//RS                         (None, self.peek().span)
-//RS                     };
-//RS                     if saw_named && saw_positional && mixed_span.is_none() {
-//RS                         mixed_span = Some(style_span);
-//RS                     }
-//RS                     let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
-//RS                         let open = self.bump().span;
-//RS                         let body = self.block_stmts();
-//RS                         let end = self.toks[self.pos - 1].span.end;
-//RS                         (LambdaBody::Block(body), Span::new(open.start, end))
-//RS                     } else {
-//RS                         let body = self.expr()?;
-//RS                         let body_span = body.span();
-//RS                         (LambdaBody::Expr(Box::new(body)), body_span)
-//RS                     };
-//RS                     branches.push((label, body, body_span));
-//RS                     while matches!(self.peek().kind, TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                         break;
-//RS                     }
-//RS                     self.expect(TokKind::Comma, "between task branches")?;
-//RS                     if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             self.expect(TokKind::RBrace, "to close the task combinator")?;
-//RS             let close = self.toks[self.pos - 1].span;
-//RS             let list_span = Span::new(open.start, close.end);
-//RS             if let Some(span) = mixed_span {
-//RS                 return Err(Diagnostic::from_row("E1117", &[], Some(span)));
-//RS             }
-//RS             let make_spawn = |body, body_span| {
-//RS                 let lambda = Lambda {
-//RS                     take_names: Vec::new(),
-//RS                     params: Vec::new(),
-//RS                     result_type: None,
-//RS                     error_type: None,
-//RS                     effects: None,
-//RS                     body,
-//RS                     span: body_span,
-//RS                     meta: LambdaMeta::default(),
-//RS                 };
-//RS                 Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(
-//RS                         Syntax::INTERNAL_TASK_RECEIVER.to_string(),
-//RS                         task_span,
-//RS                     )),
-//RS                     method: Syntax::INTERNAL_TASK_SPAWN_METHOD.to_string(),
-//RS                     method_span: task_span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![CallArg {
-//RS                         convention: AccessConvention::Read,
-//RS                         expr: Expr::Lambda(Box::new(lambda)),
-//RS                         span: body_span,
-//RS                         flags: crate::AST::CallArgFlags::default(),
-//RS                         label: None,
-//RS                         spread: false,
-//RS                     }],
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 }
-//RS             };
-//RS             let task_arg = if saw_named {
-//RS                 Expr::TupleLit(
-//RS                     branches
-//RS                         .into_iter()
-//RS                         .map(|(label, body, body_span)| {
-//RS                             let (name, _) =
-//RS                                 label.expect("validated all-named task.all branch");
-//RS                             (name, make_spawn(body, body_span))
-//RS                         })
-//RS                         .collect(),
-//RS                     list_span,
-//RS                     None,
-//RS                 )
-//RS             } else {
-//RS                 Expr::ListLit(
-//RS                     branches
-//RS                         .into_iter()
-//RS                         .map(|(_, body, body_span)| make_spawn(body, body_span))
-//RS                         .collect(),
-//RS                     list_span,
-//RS                 )
-//RS             };
-//RS             return Ok(Expr::MethodCall {
-//RS                 receiver: Box::new(Expr::Ident(
-//RS                     Syntax::INTERNAL_TASK_RECEIVER.to_string(),
-//RS                     task_span,
-//RS                 )),
-//RS                 method: match selector.as_str() {
-//RS                     "all" => Syntax::INTERNAL_TASK_ALL_METHOD.to_string(),
-//RS                     "race" => Syntax::INTERNAL_TASK_RACE_METHOD.to_string(),
-//RS                     "any" => Syntax::INTERNAL_TASK_ANY_METHOD.to_string(),
-//RS                     _ => unreachable!("validated task selector"),
-//RS                 },
-//RS                 method_span: selector_span,
-//RS                 owner_type_args: Vec::new(),
-//RS                 type_args: Vec::new(),
-//RS                 args: vec![CallArg {
-//RS                     convention: AccessConvention::Read,
-//RS                     expr: task_arg,
-//RS                     span: list_span,
-//RS                     flags: crate::AST::CallArgFlags::default(),
-//RS                     label: None,
-//RS                     spread: false,
-//RS                 }],
-//RS                 recv_type: None,
-//RS                 resolved_ret: None,
-//RS                 operator_rhs: None,
-//RS                 checked_widen: false,
-//RS             });
-//RS             }
-//RS 
-//RS         // D-CONC-FREEZE1=A: a task may consume one enclosing binding
-//RS         // explicitly with `task ^name { … }`. This is task-capture syntax,
-//RS         // not the ordinary call-argument capability convention.
-//RS         let take_names = if matches!(self.peek().kind, TokKind::Caret) {
-//RS             let caret = self.bump().span;
-//RS             let (name, name_span) = self.expect_ident("after the task capture `^`")?;
-//RS             vec![(name, Span::new(caret.start, name_span.end))]
-//RS         } else {
-//RS             Vec::new()
-//RS         };
-//RS         // A brace body whose whole content is one tail expression folds
-//RS         // into `LambdaBody::Expr` so every tier sees one task-value shape.
-//RS         // That fold erases the authored braces from the AST: `task { e }`
-//RS         // and `task e` become the same body. The formatter must not print
-//RS         // the folded body bare — it recovers the authored spelling from the
-//RS         // source token before the body (`value_was_braced` in
-//RS         // Formatter/Expressions.rs).
-//RS         let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             let open = self.bump().span;
-//RS             let body_start = self.pos;
-//RS             let diagnostic_start = self.diags.len();
-//RS             let tail = match self.expr() {
-//RS                 Ok(expr) => {
-//RS                     if matches!(self.peek().kind, TokKind::Semi)
-//RS                         && matches!(self.peek2().kind, TokKind::RBrace)
-//RS                     {
-//RS                         self.bump();
-//RS                     }
-//RS                     matches!(self.peek().kind, TokKind::RBrace).then_some(expr)
-//RS                 }
-//RS                 Err(_) => None,
-//RS             };
-//RS             if let Some(expr) = tail {
-//RS                 let close = self.bump().span;
-//RS                 (
-//RS                     LambdaBody::Expr(Box::new(expr)),
-//RS                     Span::new(open.start, close.end),
-//RS                 )
-//RS             } else {
-//RS                 self.pos = body_start;
-//RS                 self.diags.truncate(diagnostic_start);
-//RS                 let body = self.block_stmts();
-//RS                 let end = self.toks[self.pos - 1].span.end;
-//RS                 (LambdaBody::Block(body), Span::new(open.start, end))
-//RS             }
-//RS         } else {
-//RS             let body = self.expr()?;
-//RS             let body_span = body.span();
-//RS             (LambdaBody::Expr(Box::new(body)), body_span)
-//RS         };
-//RS         let lambda = Lambda {
-//RS             take_names,
-//RS             params: Vec::new(),
-//RS             result_type: None,
-//RS             error_type: None,
-//RS             effects: None,
-//RS             body,
-//RS             span: body_span,
-//RS             meta: LambdaMeta::default(),
-//RS         };
-//RS         Ok(Expr::MethodCall {
-//RS             receiver: Box::new(Expr::Ident(
-//RS                 Syntax::INTERNAL_TASK_RECEIVER.to_string(),
-//RS                 task_span,
-//RS             )),
-//RS             method: Syntax::INTERNAL_TASK_SPAWN_METHOD.to_string(),
-//RS             method_span: task_span,
-//RS             owner_type_args: Vec::new(),
-//RS             type_args: Vec::new(),
-//RS             args: vec![CallArg {
-//RS                 convention: AccessConvention::Read,
-//RS                 expr: Expr::Lambda(Box::new(lambda)),
-//RS                 span: body_span,
-//RS                 flags: crate::AST::CallArgFlags::default(),
-//RS                 label: None,
-//RS                 spread: false,
-//RS             }],
-//RS             recv_type: None,
-//RS             resolved_ret: None,
-//RS             operator_rhs: None,
-//RS             checked_widen: false,
-//RS         })
-//RS     }
-//RS 
-//RS     // Interpolation parsing owns a nested parser and selector diagnostics. Keep
-//RS     // those temporaries out of the recursive expression-parser frame so the
-//RS     // source nesting budget remains valid on small embedder stacks.
-//RS     #[inline(never)]
-//RS     pub(super) fn str_expr_from_parts(
-//RS         &mut self,
-//RS         parts: Vec<StrTokPart>,
-//RS         span: Span,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let mut out = Vec::new();
-//RS         for part in parts {
-//RS             match part {
-//RS                 StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
-//RS                 StrTokPart::Byte(byte) => out.push(StrPart::Lit(char::from(byte).to_string())),
-//RS                 StrTokPart::Interp(toks) => {
-//RS                     let mut sub = Parser {
-//RS                         toks: &toks,
-//RS                         source: None,
-//RS                         explicit_semicolon_reported: false,
-//RS                         retired_step: None,
-//RS                         pos: 0,
-//RS                         diags: Vec::new(),
-//RS                         pending_type_gt: false,
-//RS                         depth: self.depth,
-//RS                         result_handler_depth: self.result_handler_depth,
-//RS                         type_generic_depth: 0,
-//RS                         type_generic_chain: Vec::new(),
-//RS                         type_generic_truncated: false,
-//RS                         pub_file_default: false,
-//RS                         in_layout_body: self.in_layout_body,
-//RS                         adjacent_if_body_depth: 0,
-//RS                         block_depth: 0,
-//RS                         callable_tail_block_depth: None,
-//RS                         callable_tail_expects_value: false,
-//RS                         lambda_tail_block_depth: None,
-//RS                         module_arg_expr_depth: None,
-//RS                         allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
-//RS                         allow_environment_reads: self.allow_environment_reads,
-//RS                         migration_mode: self.migration_mode,
-//RS                         derive_template_depth: self.derive_template_depth,
-//RS                         policy_declarations: Vec::new(),
-//RS                         user_policy_declarations: Vec::new(),
-//RS                         applied_rules: Vec::new(),
-//RS                         rule_facts: Vec::new(),
-//RS                         block_spans: Vec::new(),
-//RS                         prep_value_block: None,
-//RS                         prep_value_escape: None,
-//RS                     };
-//RS                     // D-FMT-INTERP2=A: trailing `=` prints expression source, then " = ", then the value.
-//RS                     // Reject empty `{=}` before attempting to parse an expression.
-//RS                     if matches!(sub.peek().kind, TokKind::Eq) {
-//RS                         return Err(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "empty debug-label interpolation `{=}`".to_string(),
-//RS                             "`{expr=}` needs an expression before `=`".to_string(),
-//RS                             "write `{count=}` or `{x + 1=}`".to_string(),
-//RS                             Some(sub.peek().span),
-//RS                         ));
-//RS                     }
-//RS                     let e = sub.expr()?;
-//RS                     if !sub.diags.is_empty() {
-//RS                         let mut ds = std::mem::take(&mut sub.diags);
-//RS                         // Interpolation expressions use a nested parser.  A
-//RS                         // retired spelling such as `Type.{fields}` records
-//RS                         // its teaching diagnostic in that parser, but the
-//RS                         // recovered expression is still complete and must
-//RS                         // reach the formatter.  Returning the diagnostic
-//RS                         // here drops the whole containing statement during
-//RS                         // statement recovery, so `jet fmt` can silently
-//RS                         // delete user code.
-//RS                         if self.migration_mode
-//RS                             && ds.iter().all(|diag| {
-//RS                                 diag.severity == crate::Diagnostics::Severity::Lint
-//RS                                     || super::super::is_teaching_parse_diag(&diag.code)
-//RS                             })
-//RS                         {
-//RS                             self.diags.extend(ds);
-//RS                         } else {
-//RS                             let first = ds.remove(0);
-//RS                             self.diags.extend(ds);
-//RS                             return Err(first);
-//RS                         }
-//RS                     }
-//RS                     let mut debug_label: Option<String> = None;
-//RS                     if matches!(sub.peek().kind, TokKind::Eq) {
-//RS                         let label_end = sub.pos;
-//RS                         let mut label = String::new();
-//RS                         for tok in &toks[..label_end] {
-//RS                             match &tok.kind {
-//RS                                 TokKind::Ident(name) => label.push_str(name),
-//RS                                 TokKind::Int(n, _) => label.push_str(&n.to_string()),
-//RS                                 TokKind::Float(n, _) => label.push_str(&n.to_string()),
-//RS                                 TokKind::Dot => label.push('.'),
-//RS                                 TokKind::LParen => label.push('('),
-//RS                                 TokKind::RParen => label.push(')'),
-//RS                                 TokKind::LBracket => label.push('['),
-//RS                                 TokKind::RBracket => label.push(']'),
-//RS                                 TokKind::Plus => label.push_str(" + "),
-//RS                                 TokKind::Minus => label.push_str(" - "),
-//RS                                 TokKind::Star => label.push_str(" * "),
-//RS                                 TokKind::Slash => label.push_str(" / "),
-//RS                                 TokKind::Percent => label.push_str(" % "),
-//RS                                 other => {
-//RS                                     return Err(Diagnostic::error(
-//RS                                             "E0003",
-//RS                                             format!(
-//RS                                                 "`{{…=}}` debug labels need a simple expression, not {}",
-//RS                                                 describe(other)
-//RS                                             ),
-//RS                                             "the label reprints the expression text before `=`".to_string(),
-//RS                                             "use a name or a short expression such as `{count=}`".to_string(),
-//RS                                             Some(tok.span),
-//RS                                         ));
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         if label.is_empty() {
-//RS                             return Err(Diagnostic::error(
-//RS                                 "E0003",
-//RS                                 "empty debug-label interpolation".to_string(),
-//RS                                 "`{expr=}` needs an expression before `=`".to_string(),
-//RS                                 "write `{count=}`".to_string(),
-//RS                                 Some(sub.peek().span),
-//RS                             ));
-//RS                         }
-//RS                         sub.bump(); // consume `=`
-//RS                         debug_label = Some(label);
-//RS                     }
-//RS                     let mut format = crate::AST::StrFormat::Display;
-//RS                     let selector_rail = match sub.peek().kind {
-//RS                         TokKind::Colon => {
-//RS                             sub.bump();
-//RS                             Some(crate::Syntax::INTERPOLATION_SELECTOR_RAIL)
-//RS                         }
-//RS                         TokKind::Hash => {
-//RS                             // D-ONCE-RETIRE1=C: pure renames remain parseable
-//RS                             // only as input to the shared fmt/fix rewrite.
-//RS                             sub.bump();
-//RS                             Some(crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL)
-//RS                         }
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(_selector_rail) = selector_rail {
-//RS                         let (sel, sel_span) = sub.expect_ident("after `:` in interpolation")?;
-//RS                         if let Some(selector) = crate::Syntax::interpolation_selector(&sel) {
-//RS                             let selector_head = format!(
-//RS                                 "{}{}",
-//RS                                 crate::Syntax::INTERPOLATION_SELECTOR_RAIL,
-//RS                                 selector.name
-//RS                             );
-//RS                             match selector.kind {
-//RS                                 crate::Syntax::InterpolationSelectorKind::Debug => {
-//RS                                     format = crate::AST::StrFormat::Debug;
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Pretty => {
-//RS                                     format = crate::AST::StrFormat::Pretty;
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Fixed => {
-//RS                                     format = crate::AST::StrFormat::Fixed(
-//RS                                         Self::parse_precision_selector(&mut sub, &selector_head)?,
-//RS                                     );
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Grouped => {
-//RS                                     format = crate::AST::StrFormat::Grouped(
-//RS                                         Self::parse_precision_selector(&mut sub, &selector_head)?,
-//RS                                     );
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Hex => {
-//RS                                     format = Self::parse_hex_selector(&mut sub, &selector_head)?;
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Pad => {
-//RS                                     let (width, fill) =
-//RS                                         Self::parse_padding_selector(&mut sub, &selector_head)?;
-//RS                                     format = crate::AST::StrFormat::Pad { width, fill };
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::PadLeft => {
-//RS                                     let (width, fill) =
-//RS                                         Self::parse_padding_selector(&mut sub, &selector_head)?;
-//RS                                     format = crate::AST::StrFormat::PadLeft { width, fill };
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Sci => {
-//RS                                     format = crate::AST::StrFormat::Sci(
-//RS                                         Self::parse_precision_selector(&mut sub, &selector_head)?,
-//RS                                     );
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Percent => {
-//RS                                     format = crate::AST::StrFormat::Percent(
-//RS                                         Self::parse_precision_selector(&mut sub, &selector_head)?,
-//RS                                     );
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Bin => {
-//RS                                     format = crate::AST::StrFormat::Bin;
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Oct => {
-//RS                                     format = crate::AST::StrFormat::Oct;
-//RS                                 }
-//RS                                 crate::Syntax::InterpolationSelectorKind::Unit => {
-//RS                                     let after_selector =
-//RS                                         format!("after `{selector_head}` in interpolation");
-//RS                                     sub.expect(TokKind::LParen, &after_selector)?;
-//RS                                     let (style, style_span) =
-//RS                                         sub.expect_ident(&format!("inside `{selector_head}( )`"))?;
-//RS                                     let crate::Syntax::InterpolationSelectorArguments::UnitStyle(
-//RS                                         styles,
-//RS                                     ) = selector.arguments
-//RS                                     else {
-//RS                                         unreachable!("the Unit selector declares unit styles")
-//RS                                     };
-//RS                                     let style_index = styles
-//RS                                         .iter()
-//RS                                         .position(|candidate| *candidate == style.as_str());
-//RS                                     format = match style_index {
-//RS                                         Some(0) => crate::AST::StrFormat::Unit(
-//RS                                             crate::AST::UnitFormat::Name,
-//RS                                         ),
-//RS                                         Some(1) => crate::AST::StrFormat::Unit(
-//RS                                             crate::AST::UnitFormat::Bare,
-//RS                                         ),
-//RS                                         _ => {
-//RS                                             let accepted = styles
-//RS                                                 .iter()
-//RS                                                 .map(|style| format!("`{style}`"))
-//RS                                                 .collect::<Vec<_>>()
-//RS                                                 .join(" or ");
-//RS                                             return Err(Diagnostic::error(
-//RS                                                 "E0003",
-//RS                                                 format!("unknown unit style `{style}`"),
-//RS                                                 format!("`{selector_head}` accepts {accepted}"),
-//RS                                                 format!(
-//RS                                                     "write {}",
-//RS                                                     styles
-//RS                                                         .iter()
-//RS                                                         .map(|style| {
-//RS                                                             format!("`{selector_head}({style})`")
-//RS                                                         })
-//RS                                                         .collect::<Vec<_>>()
-//RS                                                         .join(" or ")
-//RS                                                 ),
-//RS                                                 Some(style_span),
-//RS                                             ));
-//RS                                         }
-//RS                                     };
-//RS                                     let after_style =
-//RS                                         format!("after the style in `{selector_head}( )`");
-//RS                                     sub.expect(TokKind::RParen, &after_style)?;
-//RS                                 }
-//RS                             }
-//RS                         } else {
-//RS                             self.diags.push(crate::Generics::e0914(&sel, sel_span));
-//RS                         }
-//RS                     }
-//RS                     if !matches!(sub.peek().kind, TokKind::Eof) {
-//RS                         let unit_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                             crate::Syntax::InterpolationSelectorKind::Unit,
-//RS                         )
-//RS                         .name;
-//RS                         return Err(Diagnostic::error(
-//RS                                 "E0003",
-//RS                                 format!(
-//RS                                     "unexpected {} inside this interpolated `{{ }}`",
-//RS                                     describe(&sub.peek().kind)
-//RS                                 ),
-//RS                                 "the braces hold exactly one value, optional trailing `=`, and one optional format selector"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "keep one value per `{{ }}`, for example \"{{a}}\", \"{{a=}}\", or \"{{a:{unit_selector}(bare)}}\""
-//RS                                 ),
-//RS                                 Some(sub.peek().span),
-//RS                             ));
-//RS                     }
-//RS                     if let Some(label) = debug_label {
-//RS                         out.push(StrPart::Lit(label));
-//RS                         out.push(StrPart::Lit(" = ".to_string()));
-//RS                     }
-//RS                     out.push(StrPart::Interp(Box::new(e), format));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(Expr::Str(out, span))
-//RS     }
-//RS 
-//RS     #[inline(never)]
-//RS     fn parse_hex_selector(
-//RS         sub: &mut Parser<'_>,
-//RS         selector_head: &str,
-//RS     ) -> Result<crate::AST::StrFormat, Diagnostic> {
-//RS         let after_selector = format!("after `{selector_head}` in interpolation");
-//RS         sub.expect(TokKind::LParen, &after_selector)?;
-//RS         let width = Self::parse_selector_integer(sub, selector_head, "width")?;
-//RS         let after_width = format!("after the width in `{selector_head}(n)`");
-//RS         sub.expect(TokKind::RParen, &after_width)?;
-//RS         Ok(crate::AST::StrFormat::Hex(width))
-//RS     }
-//RS 
-//RS     #[inline(never)]
-//RS     fn parse_precision_selector(
-//RS         sub: &mut Parser<'_>,
-//RS         selector_head: &str,
-//RS     ) -> Result<i64, Diagnostic> {
-//RS         let after_selector = format!("after `{selector_head}` in interpolation");
-//RS         sub.expect(TokKind::LParen, &after_selector)?;
-//RS         let precision = Self::parse_selector_integer(sub, selector_head, "decimal places")?;
-//RS         let after_precision = format!("after the decimal places in `{selector_head}(n)`");
-//RS         sub.expect(TokKind::RParen, &after_precision)?;
-//RS         Ok(precision)
-//RS     }
-//RS 
-//RS     #[inline(never)]
-//RS     fn parse_padding_selector(
-//RS         sub: &mut Parser<'_>,
-//RS         selector_head: &str,
-//RS     ) -> Result<(i64, String), Diagnostic> {
-//RS         let after_selector = format!("after `{selector_head}` in interpolation");
-//RS         sub.expect(TokKind::LParen, &after_selector)?;
-//RS         let width = Self::parse_selector_integer(sub, selector_head, "width")?;
-//RS         let fill = if matches!(&sub.peek().kind, TokKind::Comma) {
-//RS             sub.bump();
-//RS             let crate::Lexer::Token { kind, span } = sub.bump();
-//RS             let parts = match kind {
-//RS                 TokKind::Str(parts) => parts,
-//RS                 TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
-//RS                 _ => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         format!("expected a literal fill string inside `{selector_head}( )`"),
-//RS                         format!("`{selector_head}(n, fill)` takes a quoted fill string"),
-//RS                         format!("write a fill such as `{selector_head}(8, \"0\")`"),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS             };
-//RS             let mut fill = String::new();
-//RS             for part in parts {
-//RS                 match part {
-//RS                     StrTokPart::Lit(text) => fill.push_str(&text),
-//RS                     StrTokPart::Byte(byte) => fill.push(char::from(byte)),
-//RS                     StrTokPart::Interp(_) => {
-//RS                         return Err(Diagnostic::error(
-//RS                             "E0003",
-//RS                             format!("padding fill inside `{selector_head}( )` cannot interpolate"),
-//RS                             "a padding fill is fixed text, not a second interpolation"
-//RS                                 .to_string(),
-//RS                             format!("write a quoted fill such as `{selector_head}(8, \"0\")`"),
-//RS                             Some(span),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             fill
-//RS         } else {
-//RS             String::new()
-//RS         };
-//RS         let after_fill = format!("after the fill in `{selector_head}(n, fill)`");
-//RS         sub.expect(TokKind::RParen, &after_fill)?;
-//RS         Ok((width, fill))
-//RS     }
-//RS 
-//RS     #[inline(never)]
-//RS     fn parse_selector_integer(
-//RS         sub: &mut Parser<'_>,
-//RS         selector_head: &str,
-//RS         parameter: &str,
-//RS     ) -> Result<i64, Diagnostic> {
-//RS         match sub.bump() {
-//RS             crate::Lexer::Token {
-//RS                 kind: TokKind::Int(value, _),
-//RS                 ..
-//RS             } => Ok(value),
-//RS             token => {
-//RS                 let (example, noun) = if parameter == "width" {
-//RS                     ("16", "width")
-//RS                 } else {
-//RS                     ("2", "precision")
-//RS                 };
-//RS                 Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!("expected {parameter} inside `{selector_head}( )`"),
-//RS                     format!("`{selector_head}(n)` takes one nonnegative integer literal"),
-//RS                     format!("write a {noun} such as `{selector_head}({example})`"),
-//RS                     Some(token.span),
-//RS                 ))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0325 crates/jet-parser/src/Parser/Expressions/primary.rs:1-1445
+// Private continuation of Parser/Expressions.jet; no new parser state or AST.
+use jet_foundation.*
+use jet_lexer.*
+use jet_parser.Policy.[applied_rule, rule_allows, marker_wrong_site_error, marker_unknown_error, active_rule_names, RuleStatus, RuleSite]
+use jet_parser.Parser.[read_marker_head, invalid_environment_read, unknown_fact_root, meta_attr_wrong_place_diag]
+use jet_parser.Parser.Expressions.[call_arg, parse_bare_lambda]
 
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:7
+// Shared primary entry used by the provider fragment. Ordinary atoms and the
+// already-canonical qualified/generic call machinery keep their existing owner.
+fn parser_expr_primary(state: &JetParserState, allow_struct_lit: Bool, depth: Int) -> ParsedExpr {
+    timeout :: parser_parse_task_timeout(&state, depth)
+    if timeout == .Val(parsed) -> return parsed
+    contextual :: parser_parse_primary_contextual(&state, depth, allow_struct_lit, false)
+    if contextual == .Val(parsed) -> return parsed
+    ordinary :: parser_parse_prefix(&state, depth, allow_struct_lit, false)
+    parser_parse_postfix(&state, ordinary, depth, allow_struct_lit)
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:7
+// expr_primary's ordinary literal/name/call path is parser_parse_prefix plus
+// parser_parse_postfix in Expressions.jet. This hook runs after simple literals
+// and before generic names; it supplies the contextual branches absent there.
+fn parser_parse_primary_contextual(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr? {
+    token :: parser_current(&state)
+    kind :: token.kind
+    if allow_struct_lit && (kind == TOKEN_QUESTION || parser_typed_literal_head_ahead(&state)) {
+        optional :: parser_try_parse_typed_literal(&state, depth + 1)
+        if optional == .Val(parsed) -> return Val(parsed)
+    }
+    if kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
+        member :: parser_lookahead(&state, 1)
+        first :: member.payload.decoded.chars().next()
+        if first == .Val(ch) && ch.is_lowercase() {
+            parser_bump(&state)
+            parser_bump(&state)
+            // Rust Field retains the member span, not the entire dot-head span.
+            return Val(ParsedExpr{expr: .Field(.Ident("", token.span), member.payload.decoded, member.span), span: member.span})
+        }
+    }
+    if kind == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT {
+        head :: read_marker_head(&state)
+        if parser_aborting(&state) -> return Val(ParsedExpr{expr: .Unit(head.span), span: head.span})
+        rule :: applied_rule(head.name)
+        if rule == .Val(row) {
+            if row.status == .Active && !rule_allows(head.name, .Expression) {
+                parser_primary_fail(&state, marker_wrong_site_error(head.name, .Expression, head.span))
+                return Val(ParsedExpr{expr: .Unit(head.span), span: head.span})
+            }
+        } else {
+            next :: parser_current_kind(&state)
+            if next == TOKEN_SEMI || next == TOKEN_RBRACE || next == TOKEN_RPAREN || next == TOKEN_RBRACKET || next == TOKEN_COMMA || next == TOKEN_EOF {
+                parser_primary_fail(&state, marker_unknown_error(head.name, active_rule_names(), head.name_span))
+                return Val(ParsedExpr{expr: .Unit(head.span), span: head.span})
+            }
+        }
+        if head.name == Syntax.MARKER_META {
+            parser_primary_fail(&state, meta_attr_wrong_place_diag(head.span, "binding or function"))
+            return Val(ParsedExpr{expr: .Unit(head.span), span: head.span})
+        }
+        if head.name == Syntax.MARKER_OFF || head.name == Syntax.MARKER_DEBUG_ONLY {
+            parser_add_fatal_code(&state, "E0343", head.span, "`#{head.name}` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#{head.name} <statement>`")
+            return Val(ParsedExpr{expr: .Unit(head.span), span: head.span})
+        }
+        if head.name == Syntax.KW_TODO -> return Val(ParsedExpr{expr: .Todo(head.span, None), span: head.span})
+        if head.name == Syntax.KW_TAINTED {
+            tag := "Input"
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_IDENT -> tag = parser_bump(&state).payload.decoded
+                if parser_current_kind(&state) == TOKEN_RPAREN -> parser_bump(&state)
+                if tag.is_empty() -> tag = "Input"
+            }
+            parser_add_error_code(&state, "E0927", head.span, "`#Tainted` is retired", "taint kinds are ordinary declared fact tags", "write `#{tag} value`")
+            inner :: parser_expr_primary(&state, allow_struct_lit, depth + 1)
+            span :: Span{start: head.span.start, end: inner.span.end}
+            return Val(ParsedExpr{expr: .Tainted(inner.expr, Val(tag), span), span: span})
+        }
+        if head.name == "Add" || head.name == "Mul" || head.name == "Min" || head.name == "Max" -> return Val(ParsedExpr{expr: .ReduceMarker(head.name, head.span), span: head.span})
+        inner :: parser_expr_primary(&state, allow_struct_lit, depth + 1)
+        span :: Span{start: head.span.start, end: inner.span.end}
+        return Val(ParsedExpr{expr: .Tainted(inner.expr, Val(head.name), span), span: span})
+    }
+    if kind == TOKEN_DOLLAR {
+        mark :: parser_bump(&state)
+        diagnostic :: if state.allow_environment_reads -> invalid_environment_read(mark.span) else -> unknown_fact_root(Syntax.COMPTIME_MARK, mark.span)
+        parser_primary_fail(&state, diagnostic)
+        return Val(ParsedExpr{expr: .Unit(mark.span), span: mark.span})
+    }
+    if kind == TOKEN_AT {
+        mark :: parser_bump(&state)
+        parser_add_fatal_code(&state, "E0003", mark.span, "`@` needs a compile-time name or a package ref here", "prefix `@` marks compile-time names and fact reads; infix `@` joins a package target to its source (D-ONCE-AT1=D)", "write `@name`, `T.$layout`, or a complete `target@source` ref")
+        return Val(ParsedExpr{expr: .Unit(mark.span), span: mark.span})
+    }
+    if kind == TOKEN_KW_IN {
+        mark :: parser_bump(&state)
+        parser_add_fatal_code(&state, "E0003", mark.span, "`{Syntax.KW_IN}` is reserved as the source-loop keyword", "the `{Syntax.KW_IN}` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `{Syntax.KW_IN}` in a source loop; after `.` it is allowed as a member name")
+        return Val(ParsedExpr{expr: .Unit(mark.span), span: mark.span})
+    }
+    if kind == TOKEN_IDENT {
+        name :: token.payload.decoded
+        retired :: name.starts_with(Syntax.RETIRED_COMPTIME_MARK)
+        if state.derive_template_depth > 0 && retired && Syntax.retired_fact_spelling(name) == None {
+            parser_bump(&state)
+            suffix := name.slice(Syntax.RETIRED_COMPTIME_MARK.bytes().len()..<name.bytes().len()) // #4303
+            new :: "{Syntax.COMPTIME_MARK}{suffix}"
+            diagnostic :: Diagnostic.from_row("E0388", [("old", name), ("new", new)], Val(token.span)).with_edit(TextEdit{span: token.span, new_text: new})
+            &state.diagnostics.push(diagnostic)
+            return Val(ParsedExpr{expr: .ComptimeName(new, token.span, None), span: token.span})
+        }
+        if Syntax.is_comptime_name(name) && !(state.derive_template_depth > 0 && allow_struct_lit && parser_kind_at(&state, 1) == TOKEN_LT) {
+            parser_bump(&state)
+            if !state.allow_environment_reads && state.derive_template_depth == 0 && !Syntax.is_fact_root(name) {
+                parser_primary_fail(&state, unknown_fact_root(name, token.span))
+                return Val(ParsedExpr{expr: .Unit(token.span), span: token.span})
+            }
+            return Val(ParsedExpr{expr: .ComptimeName(name, token.span, None), span: token.span})
+        }
+        if allow_struct_lit && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW) {
+            return Val(parse_bare_lambda(&state, depth + 1))
+        }
+    }
+    // Rust's false-guarded foreign-word recovery arms are unreachable. Those
+    // words remain ordinary names; no duplicate retirement grammar is added.
+    None
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:7 — diagnostic Result adaptation.
+fn parser_primary_fail(state: &JetParserState, diagnostic: ^Diagnostic) {
+    if parser_aborting(&state) -> return
+    &state.diagnostics.push(^diagnostic)
+    state.abort_mark = state.diagnostics.len()
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:669
+// simple_primary -> Expressions.jet parser_parse_prefix:734-798 and
+// parser_parse_collection. Byte string behavior is replaced below.
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:745
+fn parser_at_literal_head_path(state: JetParserState) -> Bool Never! {
+    offset := 0
+    loop parser_kind_at(state, offset) == TOKEN_DOT && parser_kind_at(state, offset + 1) == TOKEN_IDENT -> offset += 2
+    parser_kind_at(state, offset) == TOKEN_LBRACE || (parser_kind_at(state, offset) == TOKEN_DOT && parser_kind_at(state, offset + 1) == TOKEN_LBRACE)
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:768
+fn parser_consume_literal_head_path(state: &JetParserState, type_name: String) -> (String, Bool) {
+    out := [U8]{}
+    loop byte in type_name.bytes() -> &out.push(byte)
+    loop parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
+        parser_bump(&state)
+        segment :: parser_expect_name(&state, "after `.` in a literal head")
+        &out.push(U8{46})
+        loop byte in segment.payload.decoded.bytes() -> &out.push(byte)
+    }
+    retired :: parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE
+    if retired -> parser_bump(&state)
+    (String.from_bytes(out) ?? panic("identifier path preserves UTF-8"), retired)
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:794
+// task_surface_expr -> Expressions.jet parser_parse_task_surface:1330;
+// parser_task_spawn:1321, parser_task_call supply the same internal receiver,
+// lambda metadata, take names, named tuple vs positional list, and tail rewind.
+// The only gap is timeout's full call-argument convention, provided here.
+fn parser_parse_task_timeout(state: &JetParserState, depth: Int) -> ParsedExpr? {
+    if parser_current_kind(&state) != TOKEN_IDENT || parser_current(&state).payload.decoded != Syntax.KW_CONC_TASK || parser_kind_at(&state, 1) != TOKEN_DOT || parser_kind_at(&state, 2) != TOKEN_IDENT || parser_lookahead(&state, 2).payload.decoded != Syntax.TASK_TIMEOUT_SELECTOR -> return None
+    head :: parser_bump(&state).span
+    parser_bump(&state)
+    selector :: parser_bump(&state)
+    parser_expect(&state, TOKEN_LPAREN, "after `task.timeout`")
+    argument :: call_arg(&state, depth + 1)
+    close :: parser_expect(&state, TOKEN_RPAREN, "to finish `task.timeout`")
+    span :: parser_cover(head, close.span)
+    Val(ParsedExpr{expr: .MethodCall(.Ident(Syntax.INTERNAL_TASK_RECEIVER, head), Syntax.INTERNAL_TASK_TIMEOUT_METHOD, selector.span, [], [], [argument], None, None, None, false), span: span})
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1065
+// Replacement of Expressions.jet's same-named string reader: ordinary Byte
+// tokens become Latin-1 text, while the separate typed byte-text reader keeps
+// its Byte carriers. No native capability is used in this Rust window.
+fn parser_parse_string(state: &JetParserState, depth: Int) -> ParsedExpr {
+    token :: parser_bump(&state)
+    parts := [StrPart]{}
+    if token.kind == TOKEN_RAW_STRING || token.payload.string_parts.is_empty() -> &parts.push(.Lit(token.payload.decoded))
+    else {
+        loop part in token.payload.string_parts {
+            if part.kind == {
+                STRING_PART_TEXT -> &parts.push(.Lit(part.text))
+                STRING_PART_BYTE -> &parts.push(.Lit(parser_primary_byte_text(part.byte)))
+                STRING_PART_INTERPOLATION -> {
+                    parser_parse_interpolation(&state, part, depth, &parts)
+                    if parser_aborting(&state) -> break
+                }
+                else -> panic("lexer string-part carrier is exhaustive")
+            }
+        }
+    }
+    ParsedExpr{expr: .Str(^parts, token.span), span: token.span}
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1074
+fn parser_primary_byte_text(byte: Int) -> String Never! {
+    bytes :: if byte < 128 -> [U8]{U8{byte}} else -> [U8]{U8{192 + byte /% 64}, U8{128 + byte % 64}}
+    String.from_bytes(bytes) ?? panic("one Latin-1 scalar is valid UTF-8")
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1065
+fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: Int, parts: &[StrPart]) {
+    nested := JetParserState{tokens: part.tokens, position: 0, diagnostics: [], source_end: part.span.end, block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: 0, end: 0}, result_handler_depth: state.result_handler_depth, statement_start: -1,
+        in_layout_body: state.in_layout_body, allow_lowercase_leading_dot: state.allow_lowercase_leading_dot, allow_environment_reads: state.allow_environment_reads, migration_mode: state.migration_mode, derive_template_depth: state.derive_template_depth}
+    if parser_current_kind(&nested) == TOKEN_EQ {
+        parser_add_fatal_code(&state, "E0003", parser_current(&nested).span, "empty debug-label interpolation `{{=}}`", "`{{expr=}}` needs an expression before `=`", "write `{{count=}}` or `{{x + 1=}}`")
+        return
+    }
+    value :: parser_parse_expression(&nested, 1, depth + 1)
+    if nested.abort_mark != 0 {
+        parser_take_nested_failure(&state, nested.diagnostics)
+        return
+    }
+    if !nested.diagnostics.is_empty() {
+        teaching :: state.migration_mode && nested.diagnostics.iter().all(fn(diag) { diag.severity == 2 || parser_is_teaching_parse_diag(diag.code) })
+        if !teaching {
+            // Rust retains the remaining nested diagnostics before its first
+            // error is returned; canonical abort state records that error last.
+            first :: nested.diagnostics[0]
+            loop index in 1..<nested.diagnostics.len() -> &state.diagnostics.push(nested.diagnostics[index])
+            parser_primary_fail(&state, ~first)
+            return
+        }
+        loop diagnostic in nested.diagnostics -> &state.diagnostics.push(diagnostic)
+    }
+    label := [U8]{}
+    has_label := false
+    if parser_current_kind(&nested) == TOKEN_EQ {
+        loop index in 0..<nested.position {
+            token :: nested.tokens[index]
+            piece :: parser_debug_label_piece(token)
+            if piece.is_empty() {
+                parser_add_fatal_code(&state, "E0003", token.span, "`{{…=}}` debug labels need a simple expression, not {parser_describe_token(token)}", "the label reprints the expression text before `=`", "use a name or a short expression such as `{{count=}}`")
+                return
+            }
+            loop byte in piece.bytes() -> &label.push(byte)
+        }
+        if label.is_empty() {
+            parser_add_fatal_code(&state, "E0003", parser_current(&nested).span, "empty debug-label interpolation", "`{{expr=}}` needs an expression before `=`", "write `{{count=}}`")
+            return
+        }
+        parser_bump(&nested)
+        has_label = true
+    }
+    // Old nested teaching diagnostics were already transferred; selector
+    // diagnostics are independently transferred exactly once.
+    &nested.diagnostics.clear()
+    format :: parser_parse_string_format(&nested)
+    if nested.abort_mark != 0 { parser_take_nested_failure(&state, nested.diagnostics); return }
+    loop diagnostic in nested.diagnostics -> &state.diagnostics.push(diagnostic)
+    if parser_current_kind(&nested) != TOKEN_EOF {
+        extra :: parser_current(&nested)
+        unit_selector :: Syntax.interpolation_selector_for_kind(.Unit).name
+        parser_add_fatal_code(&state, "E0003", extra.span, "unexpected {parser_describe_token(extra)} inside this interpolated `{{ }}`", "the braces hold exactly one value, optional trailing `=`, and one optional format selector", "keep one value per `{{ }}`, for example \"{{a}}\", \"{{a=}}\", or \"{{a:{unit_selector}(bare)}}\"")
+        return
+    }
+    if has_label {
+        &parts.push(.Lit(String.from_bytes(label) ?? panic("debug label preserves UTF-8")))
+        &parts.push(.Lit(" = "))
+    }
+    &parts.push(.Interp(value.expr, format))
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1190
+fn parser_parse_string_format(state: &JetParserState) -> StrFormat {
+    if parser_current_kind(&state) != TOKEN_COLON && parser_current_kind(&state) != TOKEN_HASH -> return .Display
+    parser_bump(&state)
+    selector :: parser_expect_name(&state, "after `:` in interpolation")
+    if parser_aborting(&state) -> return .Display
+    descriptor :: Syntax.interpolation_selector(selector.payload.decoded)
+    registered :: descriptor ?? {
+        &state.diagnostics.push(jet_foundation.Generics.e0914(selector.payload.decoded, selector.span))
+        return .Display
+    }
+    head :: "{Syntax.INTERPOLATION_SELECTOR_RAIL}{registered.name}"
+    if registered.kind == {
+        .Debug -> .Debug
+        .Pretty -> .Pretty
+        .Fixed -> .Fixed(parser_parse_precision_selector(&state, head))
+        .Grouped -> .Grouped(parser_parse_precision_selector(&state, head))
+        .Hex -> parser_parse_hex_selector(&state, head)
+        .Pad -> { (width, fill) :: parser_parse_padding_selector(&state, head); .Pad(width, fill) }
+        .PadLeft -> { (width, fill) :: parser_parse_padding_selector(&state, head); .PadLeft(width, fill) }
+        .Sci -> .Sci(parser_parse_precision_selector(&state, head))
+        .Percent -> .Percent(parser_parse_precision_selector(&state, head))
+        .Bin -> .Bin
+        .Oct -> .Oct
+        .Unit -> {
+            parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+            style :: parser_expect_name(&state, "inside `{head}( )`")
+            styles :: if registered.arguments == .UnitStyle(values) -> values else -> panic("the Unit selector declares unit styles")
+            style_index := Int?{None}
+            loop index in 0..<styles.len() { if styles[index] == style.payload.decoded { style_index = Val(index); break } }
+            format :: if style_index == {
+                .Val(0) -> StrFormat.Unit(.Name)
+                .Val(1) -> StrFormat.Unit(.Bare)
+                else -> {
+                    accepted :: styles.iter().map(fn(s) { "`{s}`" }).collect().join(" or ")
+                    examples :: styles.iter().map(fn(s) { "`{head}({s})`" }).collect().join(" or ")
+                    parser_add_fatal_code(&state, "E0003", style.span, "unknown unit style `{style.payload.decoded}`", "`{head}` accepts {accepted}", "write {examples}")
+                    return .Display
+                }
+            }
+            parser_expect(&state, TOKEN_RPAREN, "after the style in `{head}( )`")
+            format
+        }
+    }
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1343
+fn parser_parse_hex_selector(state: &JetParserState, head: String) -> StrFormat {
+    parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+    width :: parser_parse_selector_integer(&state, head, "width")
+    parser_expect(&state, TOKEN_RPAREN, "after the width in `{head}(n)`")
+    .Hex(width)
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1356
+fn parser_parse_precision_selector(state: &JetParserState, head: String) -> Int {
+    parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+    precision :: parser_parse_selector_integer(&state, head, "decimal places")
+    parser_expect(&state, TOKEN_RPAREN, "after the decimal places in `{head}(n)`")
+    precision
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1369
+fn parser_parse_padding_selector(state: &JetParserState, head: String) -> (Int, String) {
+    parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+    width :: parser_parse_selector_integer(&state, head, "width")
+    fill := [U8]{}
+    if parser_current_kind(&state) == TOKEN_COMMA {
+        parser_bump(&state)
+        token :: parser_bump(&state)
+        if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING {
+            parser_add_fatal_code(&state, "E0003", token.span, "expected a literal fill string inside `{head}( )`", "`{head}(n, fill)` takes a quoted fill string", "write a fill such as `{head}(8, \"0\")`")
+            return (width, "")
+        }
+        if token.kind == TOKEN_RAW_STRING || token.payload.string_parts.is_empty() {
+            loop byte in token.payload.decoded.bytes() -> &fill.push(byte)
+        } else {
+            loop part in token.payload.string_parts {
+                if part.kind == STRING_PART_INTERPOLATION {
+                    parser_add_fatal_code(&state, "E0003", token.span, "padding fill inside `{head}( )` cannot interpolate", "a padding fill is fixed text, not a second interpolation", "write a quoted fill such as `{head}(8, \"0\")`")
+                    return (width, "")
+                }
+                text :: if part.kind == STRING_PART_BYTE -> parser_primary_byte_text(part.byte) else -> part.text
+                loop byte in text.bytes() -> &fill.push(byte)
+            }
+        }
+    }
+    parser_expect(&state, TOKEN_RPAREN, "after the fill in `{head}(n, fill)`")
+    (width, String.from_bytes(fill) ?? panic("padding text preserves UTF-8"))
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1419
+fn parser_parse_selector_integer(state: &JetParserState, head: String, parameter: String) -> Int {
+    token :: parser_bump(&state)
+    if token.kind == TOKEN_INT -> return token.payload.integer ?? panic("integer token has its checked payload")
+    example :: if parameter == "width" -> "16" else -> "2"
+    noun :: if parameter == "width" -> "width" else -> "precision"
+    parser_add_fatal_code(&state, "E0003", token.span, "expected {parameter} inside `{head}( )`", "`{head}(n)` takes one nonnegative integer literal", "write a {noun} such as `{head}({example})`")
+    0
+}

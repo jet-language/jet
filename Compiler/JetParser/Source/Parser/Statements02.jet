@@ -1,1182 +1,346 @@
-// PORT-PENDING 0336 crates-jet-parser-src-parser-statements-bindings: crates/jet-parser/src/Parser/Statements/bindings.rs:1-1178
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::*;
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// D-CHOOSE-TEST1=A: a pattern test with a diverging fallback is a
-//RS     /// statement binding. Keep the source subject in `Binding::init`; the
-//RS     /// refutable pattern and fallback stay together in the binding target so
-//RS     /// sema and every execution tier consume one canonical operation.
-//RS     pub(crate) fn try_refutable_test_binding(&self, expr: Expr) -> Result<Binding, Expr> {
-//RS         let names = match &expr {
-//RS             Expr::OrFallback { value, .. } => match value.as_ref() {
-//RS                 Expr::PatternTest { pattern, .. } => pattern.binding_names(),
-//RS                 _ => Vec::new(),
-//RS             },
-//RS             _ => Vec::new(),
-//RS         };
-//RS         if names.is_empty() {
-//RS             return Err(expr);
-//RS         }
-//RS         let Expr::OrFallback {
-//RS             value,
-//RS             fallback,
-//RS             span,
-//RS             ..
-//RS         } = expr
-//RS         else {
-//RS             unreachable!("a refutable test binding must have a fallback")
-//RS         };
-//RS         let Expr::PatternTest {
-//RS             subject,
-//RS             pattern,
-//RS             span: pattern_span,
-//RS         } = *value
-//RS         else {
-//RS             unreachable!("a refutable test binding must test a pattern")
-//RS         };
-//RS         Ok(Binding {
-//RS             mutable: false,
-//RS             markers: Vec::new(),
-//RS             reactive_upgrade: false,
-//RS             meta: None,
-//RS             name: String::new(),
-//RS             name_span: pattern_span,
-//RS             sigil_span: None,
-//RS             pattern: Some(BindPattern::Refutable {
-//RS                 pattern,
-//RS                 fallback,
-//RS                 names,
-//RS                 span,
-//RS                 synthesized: false,
-//RS             }),
-//RS             ty: None,
-//RS             ty_span: None,
-//RS             init: *subject,
-//RS             is_comptime: false,
-//RS             ct: None,
-//RS             uninit: false,
-//RS             arena_view: false,
-//RS             string_view: false,
-//RS             gc_promotion: None,
-//RS             gc_transferred: false,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-BIND-BARE1: a binding starting with the target (no keyword), written
-//RS     /// `name (:: | :=) expr`. The sigil chooses mutability.
-//RS     /// The retired typed form `name: Type :: expr` / `name: Type := expr`
-//RS     /// teaches E0393 (D-BIND-TYPE2=A); `name@ Type` stays a plain parse error.
-//RS     pub(in crate::Parser) fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
-//RS         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
-//RS         // struct — instead of a plain `name`.
-//RS         if let Some(pattern) = self.try_bind_pattern()? {
-//RS             let (mutable, sigil_span) = self.expect_bind_sigil()?;
-//RS             let init = self.expr()?;
-//RS             return Ok(Binding {
-//RS                 mutable,
-//RS                 markers: Vec::new(),
-//RS                 reactive_upgrade: false,
-//RS                 meta: None,
-//RS                 name: String::new(),
-//RS                 name_span: pattern.span(),
-//RS                 sigil_span: Some(sigil_span),
-//RS                 pattern: Some(pattern),
-//RS                 ty: None,
-//RS                 ty_span: None,
-//RS                 init,
-//RS                 is_comptime: false,
-//RS                 ct: None,
-//RS                 uninit: false,
-//RS                 arena_view: false,
-//RS                 string_view: false,
-//RS                 gc_promotion: None,
-//RS                 gc_transferred: false,
-//RS             });
-//RS         }
-//RS         let (name, name_span) = self.expect_ident("for the binding name")?;
-//RS         let retired = self.retired_const_decl_name(&name);
-//RS         let (name, retired) = match retired {
-//RS             Some(new) => (new, Some(name)),
-//RS             None => (name, None),
-//RS         };
-//RS         // D-COMPILER-NS1=A: the fact mark names compiler facts only; a
-//RS         // program's own build-time value is `NAME :: prep { value }`.
-//RS         if Syntax::is_comptime_name(&name) {
-//RS             let plain = Syntax::canonical_name_case(
-//RS                 name.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_'),
-//RS                 Syntax::NameCase::Screaming,
-//RS             );
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("`{name}` is a compiler fact, not a binding name"),
-//RS                 "a marked name reads a fact the compiler supplies; a program's own build-time value is an ordinary name bound with `prep { … }`".to_string(),
-//RS                 format!("declare `{plain} :: {} {{ value }}`", Syntax::KW_PREP),
-//RS                 Some(name_span),
-//RS             ));
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::Colon) {
-//RS             if let Some(binding) = self.retired_typed_binding(name.clone(), name_span)? {
-//RS                 return Ok(binding);
-//RS             }
-//RS         }
-//RS         // Retired D-BINDEXPLICIT1 / D-BIND4 typed forms — ordinary parse error.
-//RS         // `name@ Type` and a `name:` that is not `name: Type ::` never open a
-//RS         // binding under D-BIND-BARE1.
-//RS         if matches!(self.peek().kind, TokKind::At | TokKind::Colon) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected `{}` or `{}` in a binding, found {}",
-//RS                     Syntax::SIGIL_BIND_IMMUT,
-//RS                     Syntax::SIGIL_BIND_MUT,
-//RS                     describe(&self.peek().kind)
-//RS                 ),
-//RS                 format!(
-//RS                     "a binding is `name {} value` (immutable) or `name {} value` (mutable); types ride the value",
-//RS                     Syntax::SIGIL_BIND_IMMUT,
-//RS                     Syntax::SIGIL_BIND_MUT
-//RS                 ),
-//RS                 format!(
-//RS                     "write `name {} value` or put the type on the value (e.g. `Type{{ … }}`)",
-//RS                     Syntax::SIGIL_BIND_IMMUT
-//RS                 ),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         let (mutable, sigil_span) = self.expect_bind_sigil()?;
-//RS         // Bare `name := uninit` — an explicit type must precede the literal body.
-//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
-//RS             && matches!(
-//RS                 self.peek2().kind,
-//RS                 TokKind::Semi | TokKind::RBrace | TokKind::Eof
-//RS             )
-//RS         {
-//RS             let uninit_span = self.peek().span;
-//RS             return Err(Diagnostic::error(
-//RS                 "E0421",
-//RS                 "`uninit` needs an explicit type".to_string(),
-//RS                 "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body".to_string(),
-//RS                 format!(
-//RS                     "write `{name} {} <Type>{{ {} }}`, e.g. `buffer := [U8#4096]{{ {} }}`",
-//RS                     Syntax::SIGIL_BIND_MUT,
-//RS                     Syntax::KW_UNINIT,
-//RS                     Syntax::KW_UNINIT
-//RS                 ),
-//RS                 Some(uninit_span),
-//RS             ));
-//RS         }
-//RS         let (init, prepared) = self.binding_value(mutable)?;
-//RS         if let Some(old) = &retired {
-//RS             self.retire_const_decl(old, &name, name_span, &init, prepared, mutable);
-//RS         }
-//RS         // D-UNINIT-SENTINEL2: `name := Type{ uninit }` — uninit only as a
-//RS         // whole typed-literal body. Mutable bindings only (`:=`).
-//RS         if mutable {
-//RS             if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
-//RS                 return Ok(Binding {
-//RS                     mutable: true,
-//RS                     markers: Vec::new(),
-//RS                     reactive_upgrade: false,
-//RS                     meta: None,
-//RS                     name,
-//RS                     name_span,
-//RS                     sigil_span: Some(sigil_span),
-//RS                     pattern: None,
-//RS                     ty: Some(ty),
-//RS                     ty_span: Some(ty_span),
-//RS                     init: Expr::Int(0, marker_span, None, None),
-//RS                     is_comptime: false,
-//RS                     ct: None,
-//RS                     uninit: true,
-//RS                     arena_view: false,
-//RS                     string_view: false,
-//RS                     gc_promotion: None,
-//RS                     gc_transferred: false,
-//RS                 });
-//RS             }
-//RS         }
-//RS         Ok(Binding {
-//RS             mutable,
-//RS             markers: Vec::new(),
-//RS             reactive_upgrade: false,
-//RS             meta: None,
-//RS             // D-PREP-SURFACE2=A (owner ruling, 2026-09-30): compile time is
-//RS             // always explicit. Only `name :: prep { value }` is evaluated
-//RS             // while building; an ALL_CAPS name is an ordinary runtime value.
-//RS             // A retired `@name :: value` recovers with its old meaning.
-//RS             is_comptime: prepared || (retired.is_some() && !mutable),
-//RS             name,
-//RS             name_span,
-//RS             sigil_span: Some(sigil_span),
-//RS             pattern: None,
-//RS             ty: None,
-//RS             ty_span: None,
-//RS             init,
-//RS             ct: None,
-//RS             uninit: false,
-//RS             arena_view: false,
-//RS             string_view: false,
-//RS             gc_promotion: None,
-//RS             gc_transferred: false,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-BIND-TYPE2=A: `name: Type :: value` (or `:=`) teaches E0393 with a
-//RS     /// behavior-preserving edit to `name :: Type{value}`, then parses on as the
-//RS     /// untyped binding so one mistake reports once. Returns `None` with the
-//RS     /// cursor restored when the tokens after `:` are not `Type` and a sigil.
-//RS     fn retired_typed_binding(
-//RS         &mut self,
-//RS         name: String,
-//RS         name_span: Span,
-//RS     ) -> Result<Option<Binding>, Diagnostic> {
-//RS         let save = self.pos;
-//RS         let save_diags = self.diags.len();
-//RS         let colon_span = self.bump().span;
-//RS         let parsed = self.type_();
-//RS         let Ok((ty, ty_span)) = parsed else {
-//RS             self.pos = save;
-//RS             self.diags.truncate(save_diags);
-//RS             return Ok(None);
-//RS         };
-//RS         if self.diags.len() != save_diags
-//RS             || !matches!(self.peek().kind, TokKind::ColonColon | TokKind::ColonEq)
-//RS         {
-//RS             self.pos = save;
-//RS             self.diags.truncate(save_diags);
-//RS             return Ok(None);
-//RS         }
-//RS         let (mutable, sigil_span) = self.expect_bind_sigil()?;
-//RS         // The value's source text runs from its first token to the last one
-//RS         // parsed; `init.span()` is only the head of some forms (a method
-//RS         // call's span is its method name), which truncated the fix text.
-//RS         let value_start = self.peek().span.start;
-//RS         let init = self.expr()?;
-//RS         let value_span = Span::new(value_start, self.toks[self.pos - 1].span.end);
-//RS         let sigil = if mutable {
-//RS             Syntax::SIGIL_BIND_MUT
-//RS         } else {
-//RS             Syntax::SIGIL_BIND_IMMUT
-//RS         };
-//RS         let type_text = self.source_fragment(ty_span).unwrap_or_else(|| ty.name());
-//RS         let diagnostic = |replacement: &str| {
-//RS             Diagnostic::from_row(
-//RS                 "E0393",
-//RS                 &[
-//RS                     ("name", name.as_str()),
-//RS                     ("type", type_text.as_str()),
-//RS                     ("replacement", replacement),
-//RS                 ],
-//RS                 Some(Span::new(colon_span.start, ty_span.end)),
-//RS             )
-//RS         };
-//RS         let report = match self.source_fragment(value_span) {
-//RS             Some(value_text) => {
-//RS                 let replacement = format!("{name} {sigil} {type_text}{{{value_text}}}");
-//RS                 diagnostic(&replacement).with_edit(crate::Diagnostics::TextEdit {
-//RS                     span: Span::new(name_span.start, value_span.end),
-//RS                     new_text: replacement,
-//RS                 })
-//RS             }
-//RS             None => diagnostic(&format!("{name} {sigil} {type_text}{{ … }}")),
-//RS         };
-//RS         self.diags.push(report);
-//RS         Ok(Some(Binding {
-//RS             mutable,
-//RS             markers: Vec::new(),
-//RS             reactive_upgrade: false,
-//RS             meta: None,
-//RS             is_comptime: false,
-//RS             name,
-//RS             name_span,
-//RS             sigil_span: Some(sigil_span),
-//RS             pattern: None,
-//RS             ty: None,
-//RS             ty_span: None,
-//RS             init,
-//RS             ct: None,
-//RS             uninit: false,
-//RS             arena_view: false,
-//RS             string_view: false,
-//RS             gc_promotion: None,
-//RS             gc_transferred: false,
-//RS         }))
-//RS     }
-//RS 
-//RS     /// D-BIND-BARE1: consume `::` (immutable) or `:=` (mutable), returning the
-//RS     /// mutability and exact source span for the consumed sigil.
-//RS     pub(super) fn expect_bind_sigil(&mut self) -> Result<(bool, Span), Diagnostic> {
-//RS         match self.peek().kind {
-//RS             TokKind::ColonColon => {
-//RS                 let span = self.bump().span;
-//RS                 Ok((false, span))
-//RS             }
-//RS             TokKind::ColonEq => {
-//RS                 let span = self.bump().span;
-//RS                 Ok((true, span))
-//RS             }
-//RS             _ => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected `{}` or `{}` in a binding, found {}",
-//RS                     Syntax::SIGIL_BIND_IMMUT,
-//RS                     Syntax::SIGIL_BIND_MUT,
-//RS                     describe(&self.peek().kind)
-//RS                 ),
-//RS                 format!(
-//RS                     "a binding is `name {} value` (immutable) or `name {} value` (mutable)",
-//RS                     Syntax::SIGIL_BIND_IMMUT,
-//RS                     Syntax::SIGIL_BIND_MUT
-//RS                 ),
-//RS                 format!("write `name {} value`", Syntax::SIGIL_BIND_IMMUT),
-//RS                 Some(self.peek().span),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-BIND-BARE1: true when the tokens at the cursor begin a sigil binding —
-//RS     /// `name ::`, `name :=`, or a destructuring pattern target.
-//RS     /// Also matches retired `name : …` so sigil_binding can teach E0393
-//RS     /// (D-BIND-TYPE2=A) or report the ordinary parse error.
-//RS     /// Used by the statement dispatcher to tell a binding apart from an
-//RS     /// expression/assignment that also starts with a name.
-//RS     pub(in crate::Parser) fn looks_like_sigil_binding(&self) -> bool {
-//RS         match &self.peek().kind {
-//RS             // `name :: e` / `name := e`
-//RS             TokKind::Ident(_) | TokKind::KwSelf
-//RS                 if matches!(self.peek2().kind, TokKind::ColonColon | TokKind::ColonEq) =>
-//RS             {
-//RS                 true
-//RS             }
-//RS             // Retired typed form `name : Type ::/:= …` — still recognized so
-//RS             // sigil_binding can teach it with E0393 (D-BIND-TYPE2=A).
-//RS             TokKind::Ident(_) | TokKind::KwSelf if matches!(self.peek2().kind, TokKind::Colon) => {
-//RS                 true
-//RS             }
-//RS             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
-//RS             // close. Cheap bounded lookahead. `[ … ] ::`, `( … ) ::`,
-//RS             // and `Type{ … } ::` (plus the retired dotted migration form).
-//RS             TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
-//RS             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
-//RS                 self.pattern_target_is_binding()
-//RS             }
-//RS             // D-LIT-DOT1 migration arm: retired `Type.{ … } ::`.
-//RS             TokKind::Ident(_)
-//RS                 if matches!(self.peek2().kind, TokKind::Dot)
-//RS                     && matches!(self.peek3().kind, TokKind::LBrace) =>
-//RS             {
-//RS                 self.pattern_target_is_binding_dot()
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Scan a `[ … ]` / `( … )` / `Ident { … }` destructuring target and check
-//RS     /// whether a binding sigil follows its close. Bounded by the bracket depth.
-//RS     pub(super) fn pattern_target_is_binding(&self) -> bool {
-//RS         let mut i = self.pos;
-//RS         let n = self.toks.len();
-//RS         // skip a leading `Ident` for the struct-pattern form.
-//RS         if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_))) {
-//RS             i += 1;
-//RS         }
-//RS         let (open, close) = match self.toks.get(i).map(|t| &t.kind) {
-//RS             Some(TokKind::LBracket) => (TokKind::LBracket, TokKind::RBracket),
-//RS             Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
-//RS             Some(TokKind::LParen) => (TokKind::LParen, TokKind::RParen),
-//RS             _ => return false,
-//RS         };
-//RS         let mut depth = 0usize;
-//RS         while i < n {
-//RS             let k = &self.toks[i].kind;
-//RS             if std::mem::discriminant(k) == std::mem::discriminant(&open) {
-//RS                 depth += 1;
-//RS             } else if std::mem::discriminant(k) == std::mem::discriminant(&close) {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return matches!(
-//RS                         self.toks.get(i + 1).map(|t| &t.kind),
-//RS                         Some(TokKind::ColonColon | TokKind::ColonEq)
-//RS                     );
-//RS                 }
-//RS             }
-//RS             i += 1;
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// D-LIT-DOT1: like `pattern_target_is_binding` but skips `Ident Dot` before
-//RS     /// the opening `{`, for the retired `Type.{ … } :: expr` migration form.
-//RS     pub(super) fn pattern_target_is_binding_dot(&self) -> bool {
-//RS         let mut i = self.pos;
-//RS         let n = self.toks.len();
-//RS         // Skip the type name (Ident).
-//RS         if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_))) {
-//RS             i += 1;
-//RS         }
-//RS         // Skip the dot.
-//RS         if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
-//RS             i += 1;
-//RS         }
-//RS         // Now expect `{` to open the struct pattern body.
-//RS         let (open, close) = match self.toks.get(i).map(|t| &t.kind) {
-//RS             Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
-//RS             _ => return false,
-//RS         };
-//RS         let mut depth = 0usize;
-//RS         while i < n {
-//RS             let k = &self.toks[i].kind;
-//RS             if std::mem::discriminant(k) == std::mem::discriminant(&open) {
-//RS                 depth += 1;
-//RS             } else if std::mem::discriminant(k) == std::mem::discriminant(&close) {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return matches!(
-//RS                         self.toks.get(i + 1).map(|t| &t.kind),
-//RS                         Some(TokKind::ColonColon | TokKind::ColonEq)
-//RS                     );
-//RS                 }
-//RS             }
-//RS             i += 1;
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// S74: parse a destructuring binding target if one starts here.
-//RS     /// `[ a, b ]` is a list pattern; `Ident { x, y }` is a struct pattern.
-//RS     /// A bare `name` (followed by `=` or `:`) is not a pattern.
-//RS     pub(super) fn try_bind_pattern(&mut self) -> Result<Option<BindPattern>, Diagnostic> {
-//RS         match &self.peek().kind {
-//RS             TokKind::LBracket => {
-//RS                 let start = self.bump().span;
-//RS                 let mut elems = Vec::new();
-//RS                 if !matches!(self.peek().kind, TokKind::RBracket) {
-//RS                     loop {
-//RS                         let (name, span) = self.expect_ident("for a list-pattern binding")?;
-//RS                         elems.push(BindName {
-//RS                             name,
-//RS                             span,
-//RS                             rename: None,
-//RS                         });
-//RS                         if matches!(self.peek().kind, TokKind::Comma) {
-//RS                             self.bump();
-//RS                             continue;
-//RS                         }
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 let end = self.peek().span;
-//RS                 self.expect(TokKind::RBracket, "to close the list pattern")?;
-//RS                 Ok(Some(BindPattern::List {
-//RS                     elems,
-//RS                     span: Span::new(start.start, end.end),
-//RS                 }))
-//RS             }
-//RS             // Retired `Type.{ x, y }`. Fmt rewrites; compile rejects.
-//RS             TokKind::Ident(_)
-//RS                 if matches!(self.peek2().kind, TokKind::Dot)
-//RS                     && matches!(self.peek3().kind, TokKind::LBrace) =>
-//RS             {
-//RS                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
-//RS                 let dot_span = self.peek().span;
-//RS                 self.expect(TokKind::Dot, "in a struct pattern")?;
-//RS                 let diagnostic = Diagnostic::error(
-//RS                     "E0320",
-//RS                     format!(
-//RS                         "struct pattern uses `{}{{…}}`, not `{}.{{…}}`",
-//RS                         type_name, type_name
-//RS                     ),
-//RS                     "literal heads place no dot before their brace (D-LIT-DOT1)".to_string(),
-//RS                     format!("write `{}{{…}}`", type_name),
-//RS                     Some(dot_span),
-//RS                 );
-//RS                 if !self.migration_mode {
-//RS                     return Err(diagnostic);
-//RS                 }
-//RS                 self.diags.push(diagnostic);
-//RS                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
-//RS                 let (fields, rest) = self.struct_pattern_fields()?;
-//RS                 let end = self.peek().span;
-//RS                 self.expect(TokKind::RBrace, "to close the struct pattern")?;
-//RS                 let close_span = Span::new(type_span.start, end.end);
-//RS                 Ok(Some(BindPattern::Struct {
-//RS                     type_name,
-//RS                     type_span,
-//RS                     fields,
-//RS                     rest,
-//RS                     span: close_span,
-//RS                 }))
-//RS             }
-//RS             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
-//RS                 // D-LIT-DOT1: canonical `Type{ x, y }` struct pattern.
-//RS                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
-//RS                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
-//RS                 let (fields, rest) = self.struct_pattern_fields()?;
-//RS                 let end = self.peek().span;
-//RS                 self.expect(TokKind::RBrace, "to close the struct pattern")?;
-//RS                 let close_span = Span::new(type_span.start, end.end);
-//RS                 Ok(Some(BindPattern::Struct {
-//RS                     type_name,
-//RS                     type_span,
-//RS                     fields,
-//RS                     rest,
-//RS                     span: close_span,
-//RS                 }))
-//RS             }
-//RS             TokKind::LParen if !self.looks_like_named_tuple(false) => {
-//RS                 let start = self.bump().span;
-//RS                 let mut elems = Vec::new();
-//RS                 if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                     loop {
-//RS                         let (name, span) = self.expect_ident("for a tuple-pattern binding")?;
-//RS                         elems.push(BindName {
-//RS                             name,
-//RS                             span,
-//RS                             rename: None,
-//RS                         });
-//RS                         if matches!(self.peek().kind, TokKind::Comma) {
-//RS                             self.bump();
-//RS                             continue;
-//RS                         }
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 let end = self.peek().span;
-//RS                 self.expect(TokKind::RParen, "to close the tuple pattern")?;
-//RS                 Ok(Some(BindPattern::Tuple {
-//RS                     elems,
-//RS                     span: Span::new(start.start, end.end),
-//RS                 }))
-//RS             }
-//RS             _ => Ok(None),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-DESTRUCT1: the field list inside a struct destructure's `{ … }` —
-//RS     /// `field` (bind same name), `field: name` (rename), and an optional
-//RS     /// trailing `..` (rest marker, `OP_RANGE`). Shared by the binding-position
-//RS     /// `Type{ … }` pattern and its E0320-recovery dotted spelling.
-//RS     pub(super) fn struct_pattern_fields(
-//RS         &mut self,
-//RS     ) -> Result<(Vec<BindName>, Option<Span>), Diagnostic> {
-//RS         let mut fields = Vec::new();
-//RS         let mut rest = None;
-//RS         if !matches!(self.peek().kind, TokKind::RBrace) {
-//RS             loop {
-//RS                 if matches!(self.peek().kind, TokKind::DotDot) {
-//RS                     rest = Some(self.bump().span);
-//RS                     break;
-//RS                 }
-//RS                 let (name, span) = self.expect_ident("for a struct-pattern field")?;
-//RS                 let rename = if matches!(self.peek().kind, TokKind::Colon) {
-//RS                     self.bump();
-//RS                     let (rn, rs) = self.expect_ident("as the renamed binding")?;
-//RS                     Some((rn, rs))
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 fields.push(BindName { name, span, rename });
-//RS                 if matches!(self.peek().kind, TokKind::Comma) {
-//RS                     self.bump();
-//RS                     if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                         break;
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 break;
-//RS             }
-//RS         }
-//RS         Ok((fields, rest))
-//RS     }
-//RS 
-//RS     /// D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't name every
-//RS     /// field of `type_name` (E0326), and redundant when it does (E0327). The
-//RS     /// parser doesn't know the struct's full field list (that's sema's job),
-//RS     /// so this only catches the REDUNDANT case structurally — cases genuinely
-//RS     /// requiring the struct's field count are re-checked in sema, which has
-//RS     /// the registry. A `..` present with zero named fields is never redundant.
-//RS     /// D-PREP-SURFACE2=A: parse the explicit shared-preparation block
-//RS     /// `prep { … }`. The retired `@ { … }` and `comptime { … }` heads recover
-//RS     /// through `take_mark`, which teaches their replacement. Erases at codegen
-//RS     /// (build-time only).
-//RS     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let start = self.take_mark()?;
-//RS         self.expect(TokKind::LBrace, "to open the `prep` block body")?;
-//RS         let body = self.block_stmts();
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(Stmt::ComptimeBlock {
-//RS             body,
-//RS             is_template_loop: false,
-//RS             span: Span::new(start.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-PREP-BRANCH1=A (respelling D-META-STAGE1=B / D-ONCE-AT1=D): `prep loop …`
-//RS     /// is the ratified `loop` verb at compile time, not a second iteration
-//RS     /// form. It is one compile-time block holding one loop, so it folds
-//RS     /// through the same path as `prep { … }` and emits no runtime code.
-//RS     pub(super) fn comptime_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let start = self.take_mark()?;
-//RS         let body = self.loop_stmt(None)?;
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(Stmt::ComptimeBlock {
-//RS             body: vec![body],
-//RS             is_template_loop: self.derive_template_depth > 0,
-//RS             span: Span::new(start.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-PREP-BRANCH1=A (respelling D-VERDICT-1308-2): parse
-//RS     /// `prep if <cond> { … } else { … }`.
-//RS     /// Both arms require `{ }` (braceless bodies are not allowed for `prep if`).
-//RS     /// `else` is optional in statement position. Sema selects the arm; codegen
-//RS     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
-//RS     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let start = self.take_mark()?;
-//RS         self.bump(); // `if`
-//RS 
-//RS         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-//RS         // `prep if $build.os == { .Linux -> … .MacOS -> … }`. Detected the
-//RS         // same way `if_or_dispatch` does — parse the subject below comparison
-//RS         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
-//RS         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
-//RS         // `Stmt::ComptimeSwitch` (sema folds it to the active-OS arm).
-//RS         let probe = self.pos;
-//RS         let probe_diags = self.diags.len();
-//RS         if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
-//RS             if matches!(self.peek().kind, TokKind::EqEq)
-//RS                 && matches!(self.peek2().kind, TokKind::LBrace)
-//RS             {
-//RS                 self.bump(); // `==`
-//RS                 self.expect(TokKind::LBrace, "to open the `prep if` dispatch body")?;
-//RS                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
-//RS                 let Stmt::Switch {
-//RS                     subject,
-//RS                     arms,
-//RS                     else_body,
-//RS                     ..
-//RS                 } = switch
-//RS                 else {
-//RS                     unreachable!("if_arms always returns Stmt::Switch");
-//RS                 };
-//RS                 let end = self.toks[self.pos - 1].span.end;
-//RS                 return Ok(Stmt::ComptimeSwitch {
-//RS                     subject,
-//RS                     arms,
-//RS                     else_body,
-//RS                     span: Span::new(start.start, end),
-//RS                 });
-//RS             }
-//RS         }
-//RS         // Not the dispatch form — rewind and parse the boolean `prep if`.
-//RS         self.pos = probe;
-//RS         self.diags.truncate(probe_diags);
-//RS 
-//RS         let cond_start = self.peek().span;
-//RS         let cond = self.expr_no_struct_lit()?;
-//RS         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-//RS         self.expect(TokKind::LBrace, "to open the `prep if` body")?;
-//RS         let then_body = self.block_stmts();
-//RS         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
-//RS             self.bump();
-//RS             // Allow `else prep if` chained with another compile-time branch;
-//RS             // the retired `@if` / `comptime if` / `#Known if` heads recover
-//RS             // through `take_mark` and teach their replacement.
-//RS             if self.at_prep_verb(&TokKind::KwIf)
-//RS                 || (matches!(self.peek().kind, TokKind::At | TokKind::KwComptime)
-//RS                     && matches!(self.peek2().kind, TokKind::KwIf))
-//RS                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
-//RS             {
-//RS                 let chain = self.comptime_if_stmt()?;
-//RS                 Some(vec![chain])
-//RS             } else {
-//RS                 self.expect(TokKind::LBrace, "to open the `prep if` else body")?;
-//RS                 Some(self.block_stmts())
-//RS             }
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(Stmt::ComptimeIf {
-//RS             cond,
-//RS             cond_span,
-//RS             then_body,
-//RS             else_body,
-//RS             span: Span::new(start.start, end),
-//RS             selected_then: None,
-//RS         })
-//RS     }
-//RS 
-//RS     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
-//RS         let retired = matches!(self.peek().kind, TokKind::KwComptime);
-//RS         // D-META-STAGE1=B: the mark rides the name, so nothing is consumed
-//RS         // before the name. A retired spelling is taken here only to teach.
-//RS         if retired || self.at_known_lead() {
-//RS             self.take_mark()?;
-//RS         }
-//RS         let (name, name_span) = self.expect_ident("for the compile-time binding")?;
-//RS         let sigil_span = if retired {
-//RS             self.expect(TokKind::Eq, "in the retired comptime binding")?;
-//RS             None
-//RS         } else {
-//RS             let span = self.peek().span;
-//RS             self.expect(TokKind::ColonColon, "after a compile-time binding name")?;
-//RS             Some(span)
-//RS         };
-//RS         let init = self.expr()?;
-//RS         Ok(Binding {
-//RS             mutable: false,
-//RS             markers: Vec::new(),
-//RS             reactive_upgrade: false,
-//RS             meta: None,
-//RS             name,
-//RS             name_span,
-//RS             sigil_span,
-//RS             pattern: None,
-//RS             ty: None,
-//RS             ty_span: None,
-//RS             init,
-//RS             is_comptime: true,
-//RS             ct: None,
-//RS             uninit: false,
-//RS             arena_view: false,
-//RS             string_view: false,
-//RS             gc_promotion: None,
-//RS             gc_transferred: false,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-META-STAGE1=B: true when the retired `#Known` spelling is at the
-//RS     /// cursor. It parses only far enough to teach the `@` form.
-//RS     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Hash)
-//RS             && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
-//RS     }
-//RS 
-//RS     /// D-META-STAGE1=B: `#Known` is retired. One teaching error covers all
-//RS     /// three of its forms: a constant is `NAME :: prep { value }`, and a
-//RS     /// build-time branch or block carries `prep` (D-PREP-SURFACE2=A).
-//RS     pub(in crate::Parser) fn retired_known_error(&self, span: Span, fix: String) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0377",
-//RS             format!("`#{}` is retired", Syntax::RETIRED_MARKER_KNOWN),
-//RS             "compile-time work carries the word `prep`, and a compile-time constant is `NAME :: prep { value }`"
-//RS                 .to_string(),
-//RS             fix,
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     /// D-PREP-BRANCH1=A / D-PREP-FN1=A: `prep` leads a build-time verb only
-//RS     /// when the verb keyword follows it on the same line. The lexer never
-//RS     /// reserves `prep`, so it stays an ordinary name everywhere else.
-//RS     pub(in crate::Parser) fn at_prep_verb(&self, verb: &TokKind) -> bool {
-//RS         matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_PREP)
-//RS             && self.peek2().kind == *verb
-//RS     }
-//RS 
-//RS     /// D-PREP-SURFACE2=A (owner ruling, 2026-09-30): the value after a
-//RS     /// binding sigil, and whether it is prepared. Compile time is always
-//RS     /// explicit: `name :: prep { value }` — a block holding one final
-//RS     /// expression — is evaluated while building, at module and block scope
-//RS     /// alike; any other value is an ordinary runtime value, whatever the
-//RS     /// name's case. Any other `prep` block keeps E0391.
-//RS     pub(in crate::Parser) fn binding_value(&mut self, mutable: bool) -> Result<(Expr, bool), Diagnostic> {
-//RS         if mutable || !self.at_prep_verb(&TokKind::LBrace) {
-//RS             return Ok((self.expr()?, false));
-//RS         }
-//RS         // A binding statement directly inside another prepared value block
-//RS         // means that block was never closed (a value block holds a single
-//RS         // expression, never a binding). Hand the binding back to the enclosing
-//RS         // binding's parse, which reports the unclosed block; nesting every
-//RS         // later `name :: prep { … }` inside the first one recursed without
-//RS         // bound and overflowed the stack.
-//RS         if let Some((_, statements_depth)) = self.prep_value_block {
-//RS             let binding_start = self.pos.checked_sub(2).filter(|name| {
-//RS                 matches!(self.toks[*name].kind, TokKind::Ident(_))
-//RS                     && matches!(self.toks[name + 1].kind, TokKind::ColonColon)
-//RS             });
-//RS             if let Some(binding_start) = binding_start.filter(|_| statements_depth == self.block_depth) {
-//RS                 self.prep_value_escape = Some(binding_start);
-//RS                 return Err(Diagnostic::from_row("E0391", &[], Some(self.peek().span)));
-//RS             }
-//RS         }
-//RS         let start = self.bump().span.start;
-//RS         let open_span = self.bump().span; // `{`
-//RS         // The block's final expression is its value, as in a callable body,
-//RS         // so a bare literal tail is accepted here.
-//RS         let saved_tail = (self.callable_tail_block_depth, self.callable_tail_expects_value);
-//RS         self.callable_tail_block_depth = Some(self.block_depth + 1);
-//RS         self.callable_tail_expects_value = true;
-//RS         let saved_block = self.prep_value_block.replace((open_span, self.block_depth + 1));
-//RS         let diags_before = self.diags.len();
-//RS         let mut body = self.block_stmts();
-//RS         self.prep_value_block = saved_block;
-//RS         (self.callable_tail_block_depth, self.callable_tail_expects_value) = saved_tail;
-//RS         if let Some(binding_start) = self.prep_value_escape.take() {
-//RS             // The block's contents were read against the wrong end, so their
-//RS             // own reports are noise; the unclosed `{` is the one finding.
-//RS             self.diags.truncate(diags_before);
-//RS             return Ok((self.unclosed_prep_value(open_span, binding_start), true));
-//RS         }
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         match (body.pop(), body.is_empty()) {
-//RS             (Some(Stmt::Expr(value)), true) => Ok((value, true)),
-//RS             _ => Err(Diagnostic::from_row("E0391", &[], Some(Span::new(start, end)))),
-//RS         }
-//RS     }
-//RS 
-//RS     /// E0083 at the `{` of a prepared value block that a later binding showed
-//RS     /// was never closed. The parse resumes at the end of the line before that
-//RS     /// binding, so it is read again as the next statement or declaration.
-//RS     fn unclosed_prep_value(&mut self, open_span: Span, binding_start: usize) -> Expr {
-//RS         self.pos = binding_start;
-//RS         if binding_start > 0 && matches!(self.toks[binding_start - 1].kind, TokKind::Semi) {
-//RS             self.pos = binding_start - 1;
-//RS         }
-//RS         let name = match &self.toks[binding_start].kind {
-//RS             TokKind::Ident(name) => name.clone(),
-//RS             _ => String::new(),
-//RS         };
-//RS         let cutoff = format!("the binding `{name}`");
-//RS         let diagnostic = self
-//RS             .unclosed_report(open_span, "{", "}", &cutoff, "prepared value")
-//RS             .unwrap_or_else(|| {
-//RS                 Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!("expected `}}` to close this block, found {cutoff}"),
-//RS                     "every `{` needs a matching `}`".to_string(),
-//RS                     "add a closing `}`".to_string(),
-//RS                     Some(open_span),
-//RS                 )
-//RS             });
-//RS         self.diags.push(diagnostic);
-//RS         Expr::Unit(open_span)
-//RS     }
-//RS 
-//RS     /// D-PREP-BRANCH1=A / D-PREP-FN1=A: the retired `@if`, `@loop` and `@fn`
-//RS     /// heads. The caller has seen `@` followed by `verb`; this consumes the
-//RS     /// `@`, teaches E0388 with the machine-applicable respelling, and leaves
-//RS     /// the verb for the caller to parse.
-//RS     pub(in crate::Parser) fn retired_at_verb(&mut self, verb: &str) -> Span {
-//RS         let at = self.bump().span;
-//RS         let head = Span::new(at.start, self.peek().span.end);
-//RS         let old = format!("@{verb}");
-//RS         let new = format!("{} {verb}", Syntax::KW_PREP);
-//RS         self.diags.push(
-//RS             Diagnostic::from_row("E0388", &[("old", old.as_str()), ("new", new.as_str())], Some(head)).with_edit(
-//RS                 crate::Diagnostics::TextEdit {
-//RS                     span: at,
-//RS                     new_text: format!("{} ", Syntax::KW_PREP),
-//RS                 },
-//RS             ),
-//RS         );
-//RS         at
-//RS     }
-//RS 
-//RS     /// D-PREP-SURFACE2=A: the retired `@ { … }` block head. The caller has
-//RS     /// seen `@` followed by `{`; this consumes the `@` and teaches E0388 with
-//RS     /// the machine-applicable respelling `prep { … }`.
-//RS     fn retired_at_block(&mut self) -> Span {
-//RS         let at = self.bump().span;
-//RS         let head = Span::new(at.start, self.peek().span.end);
-//RS         let new = format!("{} {{ … }}", Syntax::KW_PREP);
-//RS         self.diags.push(
-//RS             Diagnostic::from_row("E0388", &[("old", "@ { … }"), ("new", new.as_str())], Some(head)).with_edit(
-//RS                 crate::Diagnostics::TextEdit {
-//RS                     span: at,
-//RS                     new_text: Syntax::KW_PREP.to_string(),
-//RS                 },
-//RS             ),
-//RS         );
-//RS         at
-//RS     }
-//RS 
-//RS     /// D-PREP-SURFACE2=A (owner ruling, 2026-09-30): a module constant is an
-//RS     /// ALL_CAPS name and a block-scope binding a snake_case local
-//RS     /// (D-SHAPE-CASE1); compile time is always the explicit
-//RS     /// `name :: prep { value }`. The respelling of a retired `@name`, or
-//RS     /// `None` when the name carries no retired mark. A read of an ALL_CAPS
-//RS     /// name keeps it, since it names a module constant.
-//RS     fn retired_const_name(&self, name: &str, read: bool) -> Option<String> {
-//RS         let new = Syntax::retired_constant_respelling(name)?;
-//RS         let rest = &name[Syntax::RETIRED_COMPTIME_MARK.len()..];
-//RS         if self.block_depth == 0 || (read && Syntax::is_constant_name(rest)) {
-//RS             return Some(new);
-//RS         }
-//RS         Some(Syntax::canonical_name_case(&new, Syntax::NameCase::Snake))
-//RS     }
-//RS 
-//RS     /// A retired `@name` read teaches E0388 with the behavior-preserving
-//RS     /// respelling and the parse continues under the plain name, so each
-//RS     /// mention reports once and nothing cascades.
-//RS     pub(in crate::Parser) fn retire_const_mark(&mut self, name: String, span: Span) -> String {
-//RS         let Some(new) = self.retired_const_name(&name, true) else {
-//RS             return name;
-//RS         };
-//RS         self.diags.push(
-//RS             Diagnostic::from_row("E0388", &[("old", name.as_str()), ("new", new.as_str())], Some(span))
-//RS                 .with_edit(crate::Diagnostics::TextEdit {
-//RS                     span,
-//RS                     new_text: new.clone(),
-//RS                 }),
-//RS         );
-//RS         new
-//RS     }
-//RS 
-//RS     /// The respelled name of a retired `@name` declaration, or `None`.
-//RS     pub(in crate::Parser) fn retired_const_decl_name(&self, name: &str) -> Option<String> {
-//RS         self.retired_const_name(name, false)
-//RS     }
-//RS 
-//RS     /// A retired `@name :: value` declaration teaches E0388. The mark always
-//RS     /// meant compile time, so the behavior-preserving edit is
-//RS     /// `name :: prep { value }`; a value already written `prep { … }` (or a
-//RS     /// mutable binding, which `prep` cannot bind) only loses the mark.
-//RS     pub(in crate::Parser) fn retire_const_decl(
-//RS         &mut self,
-//RS         old: &str,
-//RS         new: &str,
-//RS         name_span: Span,
-//RS         value: &Expr,
-//RS         prepared: bool,
-//RS         mutable: bool,
-//RS     ) {
-//RS         let diagnostic = |replacement: &str| {
-//RS             Diagnostic::from_row("E0388", &[("old", old), ("new", replacement)], Some(name_span))
-//RS         };
-//RS         let report = if prepared || mutable {
-//RS             diagnostic(new).with_edit(crate::Diagnostics::TextEdit {
-//RS                 span: name_span,
-//RS                 new_text: new.to_string(),
-//RS             })
-//RS         } else {
-//RS             let value_span = value.span();
-//RS             match self.source_fragment(value_span) {
-//RS                 Some(text) => {
-//RS                     let replacement = format!(
-//RS                         "{new} {} {} {{ {text} }}",
-//RS                         Syntax::SIGIL_BIND_IMMUT,
-//RS                         Syntax::KW_PREP
-//RS                     );
-//RS                     diagnostic(&replacement).with_edit(crate::Diagnostics::TextEdit {
-//RS                         span: Span::new(name_span.start, value_span.end),
-//RS                         new_text: replacement.clone(),
-//RS                     })
-//RS                 }
-//RS                 None => diagnostic(&format!(
-//RS                     "{new} {} {} {{ … }}",
-//RS                     Syntax::SIGIL_BIND_IMMUT,
-//RS                     Syntax::KW_PREP
-//RS                 )),
-//RS             }
-//RS         };
-//RS         self.diags.push(report);
-//RS     }
-//RS 
-//RS     /// True when a `@name` read names a retired constant: an ALL_CAPS name
-//RS     /// under the mark, or a name this file declares as `@name :: …`. Other
-//RS     /// `@` words are compiler facts and keep their own path.
-//RS     pub(in crate::Parser) fn reads_retired_constant(&self, name: &str) -> bool {
-//RS         let Some(rest) = name.strip_prefix(Syntax::RETIRED_COMPTIME_MARK) else {
-//RS             return false;
-//RS         };
-//RS         Syntax::is_constant_name(rest)
-//RS             || self.toks.windows(2).any(|pair| {
-//RS                 matches!(&pair[0].kind, TokKind::Ident(declared) if declared == name)
-//RS                     && matches!(pair[1].kind, TokKind::ColonColon)
-//RS             })
-//RS     }
-//RS 
-//RS     /// D-META-STAGE1=B / D-PREP-BRANCH1=A / D-PREP-SURFACE2=A: consume
-//RS     /// whatever opened a compile-time construct. The ratified heads are `prep`
-//RS     /// before `if`/`loop` or a `{` block; the retired `@if`, `@loop`, `@ { … }`,
-//RS     /// `#Known` and `comptime` spellings are recovered here so each teaches
-//RS     /// its replacement once.
-//RS     fn take_mark(&mut self) -> Result<Span, Diagnostic> {
-//RS         if self.at_prep_verb(&TokKind::KwIf)
-//RS             || self.at_prep_verb(&TokKind::KwLoop)
-//RS             || self.at_prep_verb(&TokKind::LBrace)
-//RS         {
-//RS             return Ok(self.bump().span);
-//RS         }
-//RS         if self.at_known_lead() {
-//RS             let head = self.read_marker_head()?;
-//RS             let fix = if matches!(self.peek().kind, TokKind::KwIf) {
-//RS                 format!("write `{} if <condition> {{ … }}`", Syntax::KW_PREP)
-//RS             } else if matches!(self.peek().kind, TokKind::LBrace) {
-//RS                 format!("write `{} {{ … }}`", Syntax::KW_PREP)
-//RS             } else if let TokKind::Ident(name) = &self.peek().kind {
-//RS                 format!(
-//RS                     "write `{} :: {} {{ … }}`",
-//RS                     Syntax::canonical_name_case(name, Syntax::NameCase::Snake),
-//RS                     Syntax::KW_PREP
-//RS                 )
-//RS             } else {
-//RS                 format!("write a prepared value: `name :: {} {{ … }}`", Syntax::KW_PREP)
-//RS             };
-//RS             self.diags.push(self.retired_known_error(head.span, fix));
-//RS             return Ok(head.span);
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwComptime) {
-//RS             let span = self.bump().span;
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0374",
-//RS                 "`comptime` is retired".to_string(),
-//RS                 "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
-//RS                     .to_string(),
-//RS                 "remove the keyword; a build-time value is written `name :: prep { … }`, and `prep { … }` runs other work while building"
-//RS                     .to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return Ok(span);
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::At) {
-//RS             return Ok(match self.peek2().kind {
-//RS                 TokKind::KwIf => self.retired_at_verb(Syntax::KW_IF),
-//RS                 TokKind::KwLoop => self.retired_at_verb(Syntax::KW_LOOP),
-//RS                 TokKind::LBrace => self.retired_at_block(),
-//RS                 _ => self.bump().span,
-//RS             });
-//RS         }
-//RS         // The control keyword still reads its `#Known` head through the one
-//RS         // shared marker reader; the name it accepts is not a registry question.
-//RS         Ok(self.read_marker_head()?.span)
-//RS     }
-//RS 
-//RS     // --- expressions -----------------------------------------------------
-//RS }
-//RS 
-//RS /// D-UNINIT-SENTINEL2: `Type{ uninit }` as a whole typed-literal body.
-//RS /// Returns `(head_type, ty_span, uninit_span)`. Non-whole bodies are ordinary
-//RS /// typed literals (not this trigger).
-//RS fn typed_lit_uninit_head(init: &Expr) -> Option<(Type, Span, Span)> {
-//RS     let Expr::TypedLit { head, body, span } = init else {
-//RS         return None;
-//RS     };
-//RS     let head = head.as_ref()?;
-//RS     let marker_span = match body {
-//RS         TypedLitBody::Value(inner) => match inner.as_ref() {
-//RS             Expr::Ident(n, sp) if n == Syntax::KW_UNINIT => *sp,
-//RS             _ => return None,
-//RS         },
-//RS         TypedLitBody::Elements(elems) if elems.len() == 1 => match &elems[0] {
-//RS             Expr::Ident(n, sp) if n == Syntax::KW_UNINIT => *sp,
-//RS             _ => return None,
-//RS         },
-//RS         // Named heads parse a bare `uninit` as a one-field shorthand.
-//RS         TypedLitBody::Fields(fields) if fields.len() == 1 => {
-//RS             let (fname, fspan, val) = &fields[0];
-//RS             match val {
-//RS                 Expr::Ident(n, _) if fname == Syntax::KW_UNINIT && n == Syntax::KW_UNINIT => *fspan,
-//RS                 _ => return None,
-//RS             }
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     Some((head.clone(), *span, marker_span))
-//RS }
-//RS 
-//RS /// D-LAYOUT1 / D-LAYOUT-CTOR1: is `field` one of the recognized box-anchor
-//RS /// names? `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/
-//RS /// `height` are vertical (`VVar`). Returns the `Layout` accessor method name
-//RS /// (`h`/`v`) or `None` if `field` isn't an anchor (an ordinary field access,
-//RS /// left untouched).
-//RS fn layout_anchor_method(field: &str) -> Option<&'static str> {
-//RS     match field {
-//RS         "left" | "right" | "width" => Some("h"),
-//RS         "top" | "bottom" | "height" => Some("v"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1 / D-LAYOUT-CTOR1: purely structural, parse-time rewrite. Inside
-//RS /// `name :: Layout.{ … }`, a bare `box.anchor` read
-//RS /// (`Expr::Field(Expr::Ident(box), anchor, _)`, where `anchor` is a recognized
-//RS /// anchor name) becomes `name.h(box, anchor)` / `name.v(box, anchor)` — an
-//RS /// ordinary `MethodCall` on the layout handle. `self.anchor` vivifies the
-//RS /// container box named after the binding (same box id as `name`). Any other
-//RS /// field access (unrecognized anchor name, non-`Ident` base) is left alone
-//RS /// and falls through to normal resolution (and normal errors) in sema. No
-//RS /// type information is used here (I3: all checking still lives in sema —
-//RS /// this only changes which AST shape sema sees, it decides nothing).
-//RS pub(super) fn desugar_layout_anchors(layout_name: &str, stmt: &mut Stmt) {
-//RS     match stmt {
-//RS         Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } => desugar_layout_expr(layout_name, e),
-//RS         Stmt::Val(b) => desugar_layout_expr(layout_name, &mut b.init),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
-//RS     // Rewrite this node in place if it's a `box.anchor` / `self.anchor` read.
-//RS     if let Expr::Field(base, field, field_span) = e {
-//RS         if let Expr::Ident(box_name, ident_span) = base.as_ref() {
-//RS             if let Some(method) = layout_anchor_method(field) {
-//RS                 let box_name = if box_name == Syntax::KW_SELF {
-//RS                     layout_name.to_string()
-//RS                 } else {
-//RS                     box_name.clone()
-//RS                 };
-//RS                 let anchor = field.clone();
-//RS                 let span = *field_span;
-//RS                 let ident_span = *ident_span;
-//RS                 *e = Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(layout_name.to_string(), ident_span)),
-//RS                     method: method.to_string(),
-//RS                     method_span: span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![
-//RS                         CallArg {
-//RS                             convention: AccessConvention::Read,
-//RS                             expr: Expr::Str(vec![StrPart::Lit(box_name)], ident_span),
-//RS                             span: ident_span,
-//RS                             flags: crate::AST::CallArgFlags::default(),
-//RS                             label: None,
-//RS                             spread: false,
-//RS                         },
-//RS                         CallArg {
-//RS                             convention: AccessConvention::Read,
-//RS                             expr: Expr::Str(vec![StrPart::Lit(anchor)], span),
-//RS                             span,
-//RS                             flags: crate::AST::CallArgFlags::default(),
-//RS                             label: None,
-//RS                             spread: false,
-//RS                         },
-//RS                     ],
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 };
-//RS                 return;
-//RS             }
-//RS         }
-//RS     }
-//RS     // Recurse structurally so anchors nested in arithmetic/comparisons are
-//RS     // still found: `label.right + 16.0 == input.left`, `.priority()` chains, …
-//RS     match e {
-//RS         Expr::Binary(_, l, r, _) => {
-//RS             desugar_layout_expr(layout_name, l);
-//RS             desugar_layout_expr(layout_name, r);
-//RS         }
-//RS         Expr::Unary(_, x, _) => desugar_layout_expr(layout_name, x),
-//RS         Expr::Field(base, _, _) => desugar_layout_expr(layout_name, base),
-//RS         Expr::MethodCall { receiver, args, .. } => {
-//RS             desugar_layout_expr(layout_name, receiver);
-//RS             for a in args {
-//RS                 desugar_layout_expr(layout_name, &mut a.expr);
-//RS             }
-//RS         }
-//RS         Expr::Call(call) => {
-//RS             for a in &mut call.args {
-//RS                 desugar_layout_expr(layout_name, &mut a.expr);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-// END-PORT-PENDING 0336 crates/jet-parser/src/Parser/Statements/bindings.rs:1-1178
+// bindings.rs extends the canonical Parser/Statements grammar and AST.
+use jet_foundation.[AccessConvention, BindName, BindNameRename, BindPattern, Binding, CallArg, Expr, Span, Stmt, StrPart, TextEdit, Type, TypedLitBody, ast_binding, ast_empty_call_arg_flags, bind_pattern_span, diagnostic_from_registry, diagnostic_with_edit, expr_span]
+use jet_foundation.Syntax.[NameCase, canonical_name_case, retired_constant_respelling]
+use jet_lexer.[Token, TOKEN_AT, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_DOT_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_COMPTIME, TOKEN_KW_IF, TOKEN_KW_LOOP, TOKEN_KW_SELF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI]
 
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:8
+// Canonical owner: Statements.jet::parser_refutable_test_binding. It moves the
+// tested subject into Binding.init and keeps pattern/fallback/names together.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:68
+// Canonical owner: Statements.jet::parser_parse_binding_statement; ast_binding
+// owns Binding defaults, and parser_binding_value below supplies its value.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:227
+// Canonical owner: Statements.jet::parser_parse_retired_typed_binding, including
+// speculative cursor/diagnostic rollback and E0393's full last-token value span.
+
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:307
+fn parser_expect_bind_sigil(state: &JetParserState) -> (mutable: Bool, span: Span)? {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_COLON_COLON || token.kind == TOKEN_COLON_EQ {
+        parser_bump(&state)
+        return Val((token.kind == TOKEN_COLON_EQ, token.span))
+    }
+    parser_add_fatal_code(&state, "E0003", token.span,
+        "expected `::` or `:=` in a binding, found {parser_describe_token(token)}",
+        "a binding is `name :: value` (immutable) or `name := value` (mutable)",
+        "write `name :: value`")
+    None
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:342
+fn parser_looks_like_sigil_binding(state: &JetParserState) -> Bool Never! {
+    kind :: parser_current_kind(&state)
+    second :: parser_kind_at(&state, 1)
+    if (kind == TOKEN_IDENT || kind == TOKEN_KW_SELF) && (second == TOKEN_COLON_COLON || second == TOKEN_COLON_EQ || second == TOKEN_COLON) -> return true
+    if kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN -> return parser_pattern_target_is_binding(&state)
+    if kind == TOKEN_IDENT && second == TOKEN_LBRACE -> return parser_pattern_target_is_binding(&state)
+    if kind == TOKEN_IDENT && second == TOKEN_DOT && parser_kind_at(&state, 2) == TOKEN_LBRACE -> return parser_pattern_target_is_binding_dot(&state)
+    false
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:375
+fn parser_pattern_target_is_binding(state: &JetParserState) -> Bool Never! {
+    i := state.position
+    if i < state.tokens.len() && state.tokens[i].kind == TOKEN_IDENT -> i += 1
+    if i >= state.tokens.len() -> return false
+    open :: state.tokens[i].kind
+    close :: if open == { TOKEN_LBRACKET -> TOKEN_RBRACKET, TOKEN_LBRACE -> TOKEN_RBRACE, TOKEN_LPAREN -> TOKEN_RPAREN, else -> return false }
+    depth := 0
+    loop i < state.tokens.len() {
+        kind :: state.tokens[i].kind
+        if kind == open -> depth += 1
+        else if kind == close {
+            depth -= 1
+            if depth == 0 -> return i + 1 < state.tokens.len() && (state.tokens[i + 1].kind == TOKEN_COLON_COLON || state.tokens[i + 1].kind == TOKEN_COLON_EQ)
+        }
+        i += 1
+    }
+    false
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:409
+fn parser_pattern_target_is_binding_dot(state: &JetParserState) -> Bool Never! {
+    i := state.position
+    if i < state.tokens.len() && state.tokens[i].kind == TOKEN_IDENT -> i += 1
+    if i < state.tokens.len() && state.tokens[i].kind == TOKEN_DOT -> i += 1
+    if i >= state.tokens.len() || state.tokens[i].kind != TOKEN_LBRACE -> return false
+    depth := 0
+    loop i < state.tokens.len() {
+        kind :: state.tokens[i].kind
+        if kind == TOKEN_LBRACE -> depth += 1
+        else if kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 -> return i + 1 < state.tokens.len() && (state.tokens[i + 1].kind == TOKEN_COLON_COLON || state.tokens[i + 1].kind == TOKEN_COLON_EQ)
+        }
+        i += 1
+    }
+    false
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:447
+fn parser_try_bind_pattern(state: &JetParserState) -> BindPattern? {
+    kind :: parser_current_kind(&state)
+    if kind == TOKEN_LBRACKET || (kind == TOKEN_LPAREN && !parser_looks_like_named_tuple(&state, false)) {
+        start :: parser_bump(&state).span
+        close :: if kind == TOKEN_LBRACKET -> TOKEN_RBRACKET else -> TOKEN_RPAREN
+        context :: if kind == TOKEN_LBRACKET -> "for a list-pattern binding" else -> "for a tuple-pattern binding"
+        elems := [BindName]{}
+        if parser_current_kind(&state) != close {
+            loop {
+                name :: parser_expect_name(&state, context)
+                if parser_aborting(&state) -> return None
+                &elems.push(BindName{name: name.payload.decoded, span: name.span, rename: None})
+                if parser_current_kind(&state) == TOKEN_COMMA { parser_bump(&state); next }
+                break
+            }
+        }
+        end :: parser_current(&state).span
+        parser_expect(&state, close, if kind == TOKEN_LBRACKET -> "to close the list pattern" else -> "to close the tuple pattern")
+        if parser_aborting(&state) -> return None
+        span :: parser_cover(start, end)
+        if kind == TOKEN_LBRACKET -> Val(BindPattern.List{elems: ^elems, span: span}) else -> Val(BindPattern.Tuple{elems: ^elems, span: span})
+    } else if kind == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_LBRACE || (parser_kind_at(&state, 1) == TOKEN_DOT && parser_kind_at(&state, 2) == TOKEN_LBRACE)) {
+        type_name :: parser_expect_name(&state, "for a struct pattern")
+        if parser_current_kind(&state) == TOKEN_DOT {
+            dot :: parser_bump(&state)
+            name :: type_name.payload.decoded
+            // migration_mode is the canonical retained parser option.
+            if !state.migration_mode {
+                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{name}{{…}}`")
+                return None
+            }
+            parser_add_error_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{name}{{…}}`")
+        }
+        parser_expect(&state, TOKEN_LBRACE, "to open the struct pattern")
+        (fields, rest) :: parser_struct_pattern_fields(&state)
+        end :: parser_current(&state).span
+        parser_expect(&state, TOKEN_RBRACE, "to close the struct pattern")
+        if parser_aborting(&state) -> return None
+        Val(BindPattern.Struct{type_name: type_name.payload.decoded, type_span: type_name.span, fields: ^fields, rest: rest, span: parser_cover(type_name.span, end)})
+    } else -> None
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:558
+fn parser_struct_pattern_fields(state: &JetParserState) -> (fields: [BindName], rest: Span?) {
+    fields := [BindName]{}
+    rest := Span?{None}
+    if parser_current_kind(&state) != TOKEN_RBRACE {
+        loop {
+            if parser_current_kind(&state) == TOKEN_DOT_DOT { rest = Val(parser_bump(&state).span); break }
+            name :: parser_expect_name(&state, "for a struct-pattern field")
+            if parser_aborting(&state) -> break
+            rename := BindNameRename?{None}
+            if parser_current_kind(&state) == TOKEN_COLON {
+                parser_bump(&state)
+                target :: parser_expect_name(&state, "as the renamed binding")
+                if parser_aborting(&state) -> break
+                rename = Val(BindNameRename{name: target.payload.decoded, span: target.span})
+            }
+            &fields.push(BindName{name: name.payload.decoded, span: name.span, rename: rename})
+            if parser_current_kind(&state) == TOKEN_COMMA {
+                parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                next
+            }
+            break
+        }
+    }
+    (^fields, rest)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:601
+// Canonical owner: Statements.jet::parser_parse_prep_block.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:617
+// Canonical owner: Statements.jet::parser_parse_prep_loop, retaining template depth.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:633
+// Canonical owner: Statements.jet::parser_parse_prep_if, including speculative
+// dispatch rollback and canonical ComptimeSwitch/ComptimeIf AST projections.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:709
+// Canonical owner: Statements.jet::parser_parse_comptime_binding and
+// parser_parse_retired_comptime_statement; the old keyword expects `=`.
+
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:750
+fn parser_at_known_lead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "Known"
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:758
+fn parser_retired_known_error(state: &JetParserState, span: Span, fix: String) {
+    parser_add_error_code(&state, "E0377", span, "`#Known` is retired", "compile-time work carries the word `prep`, and a compile-time constant is `NAME :: prep {{ value }}`", fix)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:772
+// Canonical owner: Statements.jet::parser_prep_verb_ahead. The verb must be the
+// immediate next token, so `prep` remains an ordinary name on other lines.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:783
+fn parser_binding_value(state: &JetParserState, mutable: Bool) -> (value: Expr, prepared: Bool)? {
+    if mutable || !parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
+        value :: parser_parse_expression(&state, 1, 0)
+        if parser_aborting(&state) -> return None
+        return Val((value.expr, false))
+    }
+    if state.prep_value_block == Val((_, statements_depth)) && statements_depth == state.block_depth && state.position >= 2 {
+        binding_start :: state.position - 2
+        if state.tokens[binding_start].kind == TOKEN_IDENT && state.tokens[binding_start + 1].kind == TOKEN_COLON_COLON {
+            state.prep_value_escape = Val(binding_start)
+            parser_add_fatal_code(&state, "E0391", parser_current(&state).span,
+                "`prep {{ … }}` is used as a value, which this compiler does not support yet",
+                "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today",
+                "write `name :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+            return None
+        }
+    }
+    start :: parser_bump(&state).span.start
+    open_span :: parser_current(&state).span
+    saved_block :: state.prep_value_block
+    state.prep_value_block = Val((open_span, state.block_depth + 1))
+    diags_before :: state.diagnostics.len()
+    block :: parser_parse_value_block(&state, 0, true)
+    state.prep_value_block = saved_block
+    if binding_start := state.prep_value_escape {
+        state.prep_value_escape = None
+        loop state.diagnostics.len() > diags_before -> _ :: &state.diagnostics.pop()
+        return Val((parser_unclosed_prep_value(&state, open_span, binding_start), true))
+    }
+    if parser_aborting(&state) -> return None
+    if block.statements.is_empty() && block.tail == Val(value) -> return Val((^value, true))
+    parser_add_fatal_code(&state, "E0391", Span{start: start, end: parser_previous_end(state)},
+        "`prep {{ … }}` is used as a value, which this compiler does not support yet",
+        "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today",
+        "write `name :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+    None
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:831
+fn parser_unclosed_prep_value(state: &JetParserState, open_span: Span, binding_start: Int) -> Expr {
+    state.position = binding_start
+    if binding_start > 0 && state.tokens[binding_start - 1].kind == TOKEN_SEMI -> state.position = binding_start - 1
+    token :: state.tokens[binding_start]
+    name :: if token.kind == TOKEN_IDENT -> token.payload.decoded else -> ""
+    opener :: parser_synthetic_token(TOKEN_LBRACE, open_span)
+    // Canonical unclosed reporting owns E0083 and its optional source-line detail.
+    parser_report_unclosed(&state, opener, "the binding `{name}`", "prepared value")
+    Expr.Unit{span: open_span}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:860
+fn parser_retired_at_verb(state: &JetParserState, verb: String) -> Span {
+    at :: parser_bump(&state).span
+    head :: parser_cover(at, parser_current(&state).span)
+    old :: "@{verb}"
+    new :: "prep {verb}"
+    diagnostic :: diagnostic_from_registry("E0388", Val(head), "`{old}` is retired; write `{new}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `{old}` with `{new}`")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "prep "}))
+    at
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:879
+fn parser_retired_at_block(state: &JetParserState) -> Span {
+    at :: parser_bump(&state).span
+    head :: parser_cover(at, parser_current(&state).span)
+    diagnostic :: diagnostic_from_registry("E0388", Val(head), "`@ {{ … }}` is retired; write `prep {{ … }}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `@ {{ … }}` with `prep {{ … }}`")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "prep"}))
+    at
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:900
+fn parser_retired_const_name(state: &JetParserState, name: String, read: Bool) -> String? Never! {
+    new :: retired_constant_respelling(name) ?? return None
+    bytes :: name.bytes()
+    rest := name.slice(1, bytes.len()) // #4303
+    if state.block_depth == 0 || (read && parser_constant_name(rest)) -> return Val(^new)
+    Val(canonical_name_case(new, NameCase.Snake))
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:912
+// Canonical Entry.jet::parser_retire_const_mark owns the token read and edit;
+// its spelling should come from parser_retired_const_name above, not slicing.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:927
+fn parser_retired_const_decl_name(state: &JetParserState, name: String) -> String? Never! {
+    parser_retired_const_name(&state, name, false)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:935
+fn parser_report_retired_const_declaration(state: &JetParserState, old: String, new: String, name_span: Span, value: Expr, prepared: Bool, mutable: Bool) {
+    value_span :: expr_span(value)
+    if prepared || mutable {
+        diagnostic :: diagnostic_from_registry("E0388", Val(name_span), "`{old}` is retired; write `{new}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{old}` with `{new}`")
+        &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: name_span, new_text: ~new}))
+        return
+    }
+    if !state.source.is_empty() && value_span.start >= 0 && value_span.end <= state.source.len() {
+        text :: String.from_bytes(state.source.slice(value_span.start, value_span.end)) ?? ""
+        replacement :: "{new} :: prep {{ {text} }}"
+        diagnostic :: diagnostic_from_registry("E0388", Val(name_span), "`{old}` is retired; write `{replacement}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{old}` with `{replacement}`")
+        &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: name_span.start, end: value_span.end}, new_text: replacement}))
+    } else {
+        parser_add_error_code(&state, "E0388", name_span, "`{old}` is retired; write `{new} :: prep {{ … }}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{old}` with `{new} :: prep {{ … }}`")
+    }
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:979
+// Canonical Entry.jet::parser_reads_retired_constant owns the source window
+// scan and ALL_CAPS predicate; the call-site LPAREN guard is not in Rust.
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:995
+fn parser_take_mark(state: &JetParserState) -> Span {
+    if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) -> return parser_bump(&state).span
+    if parser_at_known_lead(&state) {
+        marker :: parser_read_marker_head(&state)
+        token :: parser_current(&state)
+        fix :: if token.kind == TOKEN_KW_IF -> "write `prep if <condition> {{ … }}`"
+            else if token.kind == TOKEN_LBRACE -> "write `prep {{ … }}`"
+            else if token.kind == TOKEN_IDENT {
+                name :: canonical_name_case(token.payload.decoded, NameCase.Snake)
+                "write `{name} :: prep {{ … }}`"
+            } else -> "write a prepared value: `name :: prep {{ … }}`"
+        parser_retired_known_error(&state, marker.span, fix)
+        return marker.span
+    }
+    if parser_current_kind(&state) == TOKEN_KW_COMPTIME {
+        span :: parser_bump(&state).span
+        parser_add_error_code(&state, "E0374", span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword; a build-time value is written `name :: prep {{ … }}`, and `prep {{ … }}` runs other work while building")
+        return span
+    }
+    if parser_current_kind(&state) == TOKEN_AT {
+        if parser_kind_at(&state, 1) == TOKEN_KW_IF -> return parser_retired_at_verb(&state, "if")
+        if parser_kind_at(&state, 1) == TOKEN_KW_LOOP -> return parser_retired_at_verb(&state, "loop")
+        if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_retired_at_block(&state)
+        return parser_bump(&state).span
+    }
+    parser_read_marker_head(&state).span
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:1052
+// Canonical owner: Statements.jet::parser_typed_literal_uninit_marker; the
+// caller retains the TypedLit head and literal span and substitutes Int(0).
+
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:1084
+fn layout_anchor_method(field: String) -> String? Never! {
+    if field == {
+        "left" | "right" | "width" -> Val("h")
+        "top" | "bottom" | "height" -> Val("v")
+        else -> None
+    }
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:1102
+fn desugar_layout_anchors(layout_name: String, stmt: &Stmt) -> Unit Never! {
+    if stmt == {
+        .Expr(e) | .DeferClose(e, _) -> desugar_layout_expr(layout_name, &e)
+        .Val(binding) -> desugar_layout_expr(layout_name, &binding.init)
+        else -> {}
+    }
+}
+// Rust: crates/jet-parser/src/Parser/Statements/bindings.rs:1110
+fn desugar_layout_expr(layout_name: String, e: &Expr) -> Unit Never! {
+    if e == .Field(base, field, field_span) && base == .Ident(box_name, ident_span) {
+        if method := layout_anchor_method(field) {
+            box :: if box_name == "self" -> ~layout_name else -> ~box_name
+            anchor :: ~field
+            span :: field_span
+            name_span :: ident_span
+            e = Expr.MethodCall{
+                receiver: Expr.Ident{name: ~layout_name, span: name_span}, method: ^method, method_span: span,
+                owner_type_args: [], type_args: [], args: [
+                    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart.Lit{text: ^box}], span: name_span}, span: name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
+                    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart.Lit{text: ^anchor}], span: span}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+                ], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false
+            }
+            return
+        }
+    }
+    if e == {
+        .Binary(_, l, r, _) -> { desugar_layout_expr(layout_name, &l); desugar_layout_expr(layout_name, &r) }
+        .Unary(_, x, _) -> desugar_layout_expr(layout_name, &x)
+        .Field(base, _, _) -> desugar_layout_expr(layout_name, &base)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            desugar_layout_expr(layout_name, &receiver)
+            loop arg in &args -> desugar_layout_expr(layout_name, &arg.expr)
+        }
+        .Call(call) -> { loop arg in &call.args -> desugar_layout_expr(layout_name, &arg.expr) }
+        else -> {}
+    }
+}

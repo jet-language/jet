@@ -1,0 +1,46 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, foundation_embedded_core, jet_target_machine_hosted]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_test_prepare_graph]
+use core.files.host.retained_descriptor as native
+use core.files.runtime.kernel_path_components as paths
+
+// Actual parser/registration/body-check producer; no alternate checker implementation.
+fn statements06_diagnostics(source: String) -> [Diagnostic] Never! {
+    parsed :: parse_source(source.bytes())
+    assert(parsed.diagnostics.is_empty())
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.is_empty())
+    inputs :: [
+        SemaRegistrationModuleInput{package_identity: "statements06", module_identity: "main", module_name: "main", module_path: "statements06.jet", source_file: "statements06.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^parsed.program, foreign_handles: []},
+        SemaRegistrationModuleInput{package_identity: "jet:canonical-prelude", module_identity: "effects", module_name: "effects", module_path: "Prelude/Effects.jet", source_file: "Prelude/Effects.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^effects.program, foreign_handles: []}
+    ]
+    build :: SemaBuildFacts{package_name: "statements06", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "statements06-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_test_prepare_graph(inputs, [], "statements06", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    // GATE #4494: real native path canonicalization, as in existing producer fixtures.
+    project_root :: native.canonicalize(paths.from_text(".", paths.PathPlatform.Unix)) ?? panic("cannot resolve statement fixture root")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)
+    assert(checked.complete || !checked.diagnostics.is_empty())
+    checked.diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3715-3733 (behavioral control; no inline Rust tests)
+#Test("context_allocator_rejects_a_non_handle_value") {
+    diagnostics :: statements06_diagnostics("fn run() {{ #Context(allocator: 1) {{}} }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0762" && d.what.contains("`allocator` needs an allocator") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3740-3757 (behavioral control)
+#Test("context_deadline_rejects_a_boolean") {
+    diagnostics :: statements06_diagnostics("fn run() {{ #Context(deadline: true) {{}} }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0762" && d.what.contains("`deadline` needs an Int epoch-millis instant") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3740-3757 (behavioral control)
+#Test("context_deadline_accepts_an_integer_budget") {
+    diagnostics :: statements06_diagnostics("fn run() {{ #Context(deadline: 200) {{}} }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2972-3042 (behavioral control)
+#Test("infinite_loop_break_keeps_the_enclosing_checker_balanced") {
+    diagnostics :: statements06_diagnostics("fn run() {{ loop {{ break }} }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }))
+}

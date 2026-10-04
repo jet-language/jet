@@ -1,0 +1,36 @@
+use jet_foundation.[Type, ParamZone]
+use jet_sema.[fn_types_compatible]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:925
+fn callable(contract: [(String, ParamZone)]?) -> Type {
+    Type.Fn{params: [Type.Bool], ret: Val(Type.Int), effect_bound: None, param_contract: contract, call_metadata: None, return_view_provenance: None}
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:942
+#Test("function_contract_metadata_does_not_affect_assignability") {
+    bare :: callable(None)
+    labelled :: callable(Val([("force", ParamZone.LabelOnly)]))
+    either :: callable(Val([("force", ParamZone.Either)]))
+    assert(fn_types_compatible(&bare, &labelled))
+    assert(fn_types_compatible(&labelled, &bare))
+    assert(fn_types_compatible(&labelled, &either))
+    assert(fn_types_compatible(&either, &labelled))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:954
+#Test("composite_callable_assignability_walks_nested_carriers") {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:955
+    fn nested(zone: ParamZone) -> Type {
+        Type.Fn{params: [Type.Bool], ret: Val(Type.Int), effect_bound: None, param_contract: Val([("force", zone)]), call_metadata: None, return_view_provenance: None}
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:965
+    fn outer(name: String, inner: Type) -> Type {
+        Type.Fn{
+            params: [Type.Apply{name: name, args: [Type.List(^inner), Type.Option(Type.Result{ok: Type.Int, err: Type.String})]}],
+            ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None,
+        }
+    }
+    assert(fn_types_compatible(&outer("SyntheticCarrier", nested(ParamZone.PositionalOnly)), &outer("SyntheticCarrier", nested(ParamZone.Either))))
+    assert(fn_types_compatible(&outer("SyntheticCarrier", nested(ParamZone.LabelOnly)), &outer("SyntheticCarrier", nested(ParamZone.PositionalOnly))))
+    assert(!fn_types_compatible(&outer("SyntheticCarrier", nested(ParamZone.PositionalOnly)), &outer("OtherCarrier", nested(ParamZone.PositionalOnly))))
+}

@@ -1,1033 +1,774 @@
-// PORT-PENDING 0351 crates-jet-sema-src-sema-bundle-bodydelta: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1-1029
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #2517 stage S3R: the checked-body delta of one function.
-//RS //!
-//RS //! Body checking rewrites a function in place: it elaborates value-block
-//RS //! tails, fills receiver, binding and literal types, and inserts `Ok`,
-//RS //! `Place` and `Copy` wrappers. Item reuse therefore stores the parts of a
-//RS //! function the checker rewrites (parameters, return type, body statements,
-//RS //! reactive upgrade lines) as they were after the check, and installs them on
-//RS //! a reused function instead of checking it again.
-//RS //!
-//RS //! The encoding is lossless for the node kinds it lists and refuses every
-//RS //! other kind; a sema-filled field it does not carry must be empty. A delta is
-//RS //! recorded only when applying it to the parsed function rebuilds the checked
-//RS //! function exactly (`Debug` equality, see `ItemReuse::record`), so a missing
-//RS //! node kind costs reuse and never changes a result.
-//RS //!
-//RS //! Spans are stored relative to the function's start, so they move with the
-//RS //! item. Only spans the parser gave this function may be stored: a span sema
-//RS //! copied from another declaration (a callee's default argument, a type from
-//RS //! its signature) belongs to another item or file and would not move with
-//RS //! this one, so a delta holding one is refused. The synthesized empty span at
-//RS //! offset 0 is position independent and stored as it is.
-//RS //!
-//RS //! The same codec carries compile-time values (`encode_value`), which
-//RS //! `ComptimeReuse` stores for evaluated constants.
-//RS 
-//RS use crate::Diagnostics::Span;
-//RS use crate::Numeric::CtBigInt;
-//RS use crate::AST::{
-//RS     AccessConvention, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp, BindName,
-//RS     BindPattern, Binding, ByteTextPart, Call, CallArg, CallArgFlags, CtFloat, CtKey, CtReport,
-//RS     CtValue, EnumLitArg, Expr, ForKind, Func, IndexKind, InternalTag, LValue, OrFallback, Param,
-//RS     ParamZone, PatSlot, Pattern, PlaceAccess, Stmt, StrFormat, StrPart, StructPatField, SwitchArm,
-//RS     TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
-//RS };
-//RS use std::collections::{BTreeMap, HashSet};
-//RS 
-//RS /// Why a checked function cannot be stored as a delta.
-//RS pub(super) type Refusal = &'static str;
-//RS 
-//RS /// The rewritable parts of `checked`, relative to its start. `pristine` is
-//RS /// the function as parsed; it names the spans the delta may hold.
-//RS pub(super) fn encode(pristine: &Func, checked: &Func) -> Result<Vec<u8>, Refusal> {
-//RS     // Publishing a view provenance also writes the shared signature table,
-//RS     // which a reused body would skip.
-//RS     if checked.return_view_provenance.is_some() {
-//RS         return Err("view provenance");
-//RS     }
-//RS     let mut authored = Writer {
-//RS         bytes: Vec::new(),
-//RS         start: pristine.span.start,
-//RS         end: pristine.span.end,
-//RS         spans: Spans::Collect(HashSet::new()),
-//RS     };
-//RS     pristine.params.put(&mut authored)?;
-//RS     pristine.return_type.put(&mut authored)?;
-//RS     pristine.body.put(&mut authored)?;
-//RS     let authored = match authored.spans {
-//RS         Spans::Collect(spans) | Spans::Require(spans) => spans,
-//RS     };
-//RS     let mut writer = Writer {
-//RS         bytes: Vec::new(),
-//RS         start: checked.span.start,
-//RS         end: checked.span.end,
-//RS         spans: Spans::Require(authored),
-//RS     };
-//RS     checked.params.put(&mut writer)?;
-//RS     checked.return_type.put(&mut writer)?;
-//RS     checked.body.put(&mut writer)?;
-//RS     checked.reactive_upgrades.put(&mut writer)?;
-//RS     Ok(writer.bytes)
-//RS }
-//RS 
-//RS /// Install a stored delta on `function`. `None`, with `function` untouched,
-//RS /// when the bytes do not decode completely.
-//RS pub(super) fn apply(function: &mut Func, bytes: &[u8]) -> Option<()> {
-//RS     let mut reader = Reader {
-//RS         bytes,
-//RS         at: 0,
-//RS         start: function.span.start,
-//RS     };
-//RS     let params = Vec::<Param>::get(&mut reader)?;
-//RS     let return_type = Option::<Type>::get(&mut reader)?;
-//RS     let body = Vec::<Stmt>::get(&mut reader)?;
-//RS     let reactive_upgrades = Vec::<String>::get(&mut reader)?;
-//RS     if reader.at != bytes.len() {
-//RS         return None;
-//RS     }
-//RS     function.params = params;
-//RS     function.return_type = return_type;
-//RS     function.body = body;
-//RS     function.reactive_upgrades = reactive_upgrades;
-//RS     Some(())
-//RS }
-//RS 
-//RS /// A compile-time value, or why it cannot be stored. A value holding a
-//RS /// source span (a map type's key span) is refused: spans are positions the
-//RS /// value's reuse key does not cover. Closures and told reports are refused.
-//RS pub(super) fn encode_value(value: &CtValue) -> Result<Vec<u8>, Refusal> {
-//RS     // No span passes the bounds `1..=1` but the empty `(1, 1)`, and no
-//RS     // span is authored, so only the position-free empty span is stored.
-//RS     let mut writer = Writer {
-//RS         bytes: Vec::new(),
-//RS         start: 1,
-//RS         end: 1,
-//RS         spans: Spans::Require(HashSet::new()),
-//RS     };
-//RS     value.put(&mut writer)?;
-//RS     Ok(writer.bytes)
-//RS }
-//RS 
-//RS /// The value `encode_value` stored, or `None` when the bytes do not decode
-//RS /// completely.
-//RS pub(super) fn decode_value(bytes: &[u8]) -> Option<CtValue> {
-//RS     let mut reader = Reader {
-//RS         bytes,
-//RS         at: 0,
-//RS         start: 1,
-//RS     };
-//RS     let value = CtValue::get(&mut reader)?;
-//RS     (reader.at == bytes.len()).then_some(value)
-//RS }
-//RS 
-//RS struct Writer {
-//RS     bytes: Vec<u8>,
-//RS     /// The function's span: stored spans are relative to `start`.
-//RS     start: usize,
-//RS     end: usize,
-//RS     spans: Spans,
-//RS }
-//RS 
-//RS /// Item spans the parser authored, as `(start, end)`.
-//RS enum Spans {
-//RS     /// Encoding the parsed function: collect its spans.
-//RS     Collect(HashSet<(usize, usize)>),
-//RS     /// Encoding the checked function: every span must be one of these.
-//RS     Require(HashSet<(usize, usize)>),
-//RS }
-//RS 
-//RS impl Writer {
-//RS     fn byte(&mut self, value: u8) {
-//RS         self.bytes.push(value);
-//RS     }
-//RS 
-//RS     fn uint(&mut self, mut value: u64) {
-//RS         loop {
-//RS             let low = (value & 0x7f) as u8;
-//RS             value >>= 7;
-//RS             if value == 0 {
-//RS                 self.bytes.push(low);
-//RS                 return;
-//RS             }
-//RS             self.bytes.push(low | 0x80);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS struct Reader<'a> {
-//RS     bytes: &'a [u8],
-//RS     at: usize,
-//RS     /// Start of the function the spans are installed on.
-//RS     start: usize,
-//RS }
-//RS 
-//RS impl Reader<'_> {
-//RS     fn byte(&mut self) -> Option<u8> {
-//RS         let value = *self.bytes.get(self.at)?;
-//RS         self.at += 1;
-//RS         Some(value)
-//RS     }
-//RS 
-//RS     fn take(&mut self, count: usize) -> Option<&[u8]> {
-//RS         let end = self.at.checked_add(count)?;
-//RS         let slice = self.bytes.get(self.at..end)?;
-//RS         self.at = end;
-//RS         Some(slice)
-//RS     }
-//RS 
-//RS     fn uint(&mut self) -> Option<u64> {
-//RS         let mut value = 0u64;
-//RS         let mut shift = 0u32;
-//RS         loop {
-//RS             let byte = self.byte()?;
-//RS             if shift >= 64 {
-//RS                 return None;
-//RS             }
-//RS             value |= u64::from(byte & 0x7f) << shift;
-//RS             if byte & 0x80 == 0 {
-//RS                 return Some(value);
-//RS             }
-//RS             shift += 7;
-//RS         }
-//RS     }
-//RS 
-//RS     fn size(&mut self) -> Option<usize> {
-//RS         usize::try_from(self.uint()?).ok()
-//RS     }
-//RS 
-//RS     /// An element count. Every element takes at least one byte, so a count
-//RS     /// beyond the remaining bytes is corrupt, never a huge allocation.
-//RS     fn count(&mut self) -> Option<usize> {
-//RS         let count = self.size()?;
-//RS         (count <= self.bytes.len() - self.at).then_some(count)
-//RS     }
-//RS }
-//RS 
-//RS trait Codec: Sized {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal>;
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self>;
-//RS }
-//RS 
-//RS /// A sema-filled field the delta does not carry: it must be empty in the
-//RS /// checked body and is empty after decoding.
-//RS trait Absent {
-//RS     fn is_absent(&self) -> bool;
-//RS     fn absent() -> Self;
-//RS }
-//RS 
-//RS impl<T> Absent for Option<T> {
-//RS     fn is_absent(&self) -> bool {
-//RS         self.is_none()
-//RS     }
-//RS 
-//RS     fn absent() -> Self {
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Absent for Vec<T> {
-//RS     fn is_absent(&self) -> bool {
-//RS         self.is_empty()
-//RS     }
-//RS 
-//RS     fn absent() -> Self {
-//RS         Vec::new()
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for bool {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.byte(u8::from(*self));
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         match reader.byte()? {
-//RS             0 => Some(false),
-//RS             1 => Some(true),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for u8 {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.byte(*self);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         reader.byte()
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for u32 {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(u64::from(*self));
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         u32::try_from(reader.uint()?).ok()
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for usize {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(*self as u64);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         reader.size()
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for i64 {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(((*self << 1) ^ (*self >> 63)) as u64);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let value = reader.uint()?;
-//RS         Some(((value >> 1) as i64) ^ -((value & 1) as i64))
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for f64 {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.bytes.extend_from_slice(&self.to_bits().to_le_bytes());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let bytes: [u8; 8] = reader.take(8)?.try_into().ok()?;
-//RS         Some(f64::from_bits(u64::from_le_bytes(bytes)))
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for char {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(u64::from(u32::from(*self)));
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         char::from_u32(u32::try_from(reader.uint()?).ok()?)
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for String {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(self.len() as u64);
-//RS         writer.bytes.extend_from_slice(self.as_bytes());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let len = reader.size()?;
-//RS         String::from_utf8(reader.take(len)?.to_vec()).ok()
-//RS     }
-//RS }
-//RS 
-//RS impl Codec for Span {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         if self.start == 0 && self.end == 0 {
-//RS             // At offset 0 a synthesized empty span and an empty span at the
-//RS             // item's start cannot be told apart.
-//RS             if writer.start == 0 {
-//RS                 return Err("ambiguous empty span");
-//RS             }
-//RS             writer.byte(0);
-//RS             return Ok(());
-//RS         }
-//RS         if self.start < writer.start || self.end < self.start || self.end > writer.end {
-//RS             return Err("span outside the item");
-//RS         }
-//RS         match &mut writer.spans {
-//RS             Spans::Collect(spans) => {
-//RS                 spans.insert((self.start, self.end));
-//RS             }
-//RS             Spans::Require(spans) => {
-//RS                 if !spans.contains(&(self.start, self.end)) {
-//RS                     return Err("span not authored by the item");
-//RS                 }
-//RS             }
-//RS         }
-//RS         writer.byte(1);
-//RS         writer.uint((self.start - writer.start) as u64);
-//RS         writer.uint((self.end - self.start) as u64);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         match reader.byte()? {
-//RS             0 => Some(Span::new(0, 0)),
-//RS             1 => {
-//RS                 let start = reader.start.checked_add(reader.size()?)?;
-//RS                 let end = start.checked_add(reader.size()?)?;
-//RS                 Some(Span::new(start, end))
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Codec> Codec for Box<T> {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         (**self).put(writer)
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         T::get(reader).map(Box::new)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Codec> Codec for Option<T> {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         match self {
-//RS             None => {
-//RS                 writer.byte(0);
-//RS                 Ok(())
-//RS             }
-//RS             Some(value) => {
-//RS                 writer.byte(1);
-//RS                 value.put(writer)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         match reader.byte()? {
-//RS             0 => Some(None),
-//RS             1 => T::get(reader).map(Some),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Codec> Codec for Vec<T> {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(self.len() as u64);
-//RS         for item in self {
-//RS             item.put(writer)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let count = reader.count()?;
-//RS         let mut items = Vec::with_capacity(count);
-//RS         for _ in 0..count {
-//RS             items.push(T::get(reader)?);
-//RS         }
-//RS         Some(items)
-//RS     }
-//RS }
-//RS 
-//RS impl<A: Codec, B: Codec> Codec for (A, B) {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         self.0.put(writer)?;
-//RS         self.1.put(writer)
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let first = A::get(reader)?;
-//RS         Some((first, B::get(reader)?))
-//RS     }
-//RS }
-//RS 
-//RS impl<A: Codec, B: Codec, C: Codec> Codec for (A, B, C) {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         self.0.put(writer)?;
-//RS         self.1.put(writer)?;
-//RS         self.2.put(writer)
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let first = A::get(reader)?;
-//RS         let second = B::get(reader)?;
-//RS         Some((first, second, C::get(reader)?))
-//RS     }
-//RS }
-//RS 
-//RS impl<K: Codec + Ord, V: Codec> Codec for BTreeMap<K, V> {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         writer.uint(self.len() as u64);
-//RS         for (key, value) in self {
-//RS             key.put(writer)?;
-//RS             value.put(writer)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         let count = reader.count()?;
-//RS         let mut map = BTreeMap::new();
-//RS         for _ in 0..count {
-//RS             let key = K::get(reader)?;
-//RS             if map.insert(key, V::get(reader)?).is_some() {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         Some(map)
-//RS     }
-//RS }
-//RS 
-//RS /// Encode one field, or require an uncarried (`= absent`) field to be empty.
-//RS macro_rules! put_field {
-//RS     ($writer:ident, $value:ident) => {
-//RS         Codec::put($value, $writer)?
-//RS     };
-//RS     ($writer:ident, $value:ident, absent) => {
-//RS         if !Absent::is_absent($value) {
-//RS             return Err(concat!("sema-filled `", stringify!($value), "`"));
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS macro_rules! get_field {
-//RS     ($reader:ident, $value:ident) => {
-//RS         Codec::get($reader)?
-//RS     };
-//RS     ($reader:ident, $value:ident, absent) => {
-//RS         Absent::absent()
-//RS     };
-//RS }
-//RS 
-//RS /// A struct codec. Destructuring names every field, so a field added to
-//RS /// the AST fails to compile here until it is carried or marked `= absent`.
-//RS macro_rules! codec_struct {
-//RS     ($ty:ident { $($field:ident $(= $mark:ident)?),* $(,)? }) => {
-//RS         impl Codec for $ty {
-//RS             fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS                 let $ty { $($field),* } = self;
-//RS                 $( put_field!(writer, $field $(, $mark)?); )*
-//RS                 Ok(())
-//RS             }
-//RS 
-//RS             fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS                 Some($ty { $( $field: get_field!(reader, $field $(, $mark)?) ),* })
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS /// An enum codec over the listed variants; any other variant is refused.
-//RS /// A listed variant names every field, as `codec_struct` does.
-//RS macro_rules! codec_enum {
-//RS     ($ty:ident {
-//RS         $( $tag:literal => $variant:ident
-//RS             $( ( $($item:ident),* ) )?
-//RS             $( { $($field:ident $(= $mark:ident)?),* } )?
-//RS         ),* $(,)?
-//RS     }) => {
-//RS         impl Codec for $ty {
-//RS             #[allow(unreachable_patterns)]
-//RS             fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS                 match self {
-//RS                     $(
-//RS                         $ty::$variant $( ( $($item),* ) )? $( { $($field),* } )? => {
-//RS                             writer.byte($tag);
-//RS                             $( $( put_field!(writer, $item); )* )?
-//RS                             $( $( put_field!(writer, $field $(, $mark)?); )* )?
-//RS                         }
-//RS                     )*
-//RS                     _ => return Err(concat!("unsupported ", stringify!($ty), " node")),
-//RS                 }
-//RS                 Ok(())
-//RS             }
-//RS 
-//RS             fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS                 Some(match reader.byte()? {
-//RS                     $(
-//RS                         $tag => $ty::$variant
-//RS                             $( ( $( get_field!(reader, $item) ),* ) )?
-//RS                             $( { $( $field: get_field!(reader, $field $(, $mark)?) ),* } )?,
-//RS                     )*
-//RS                     _ => return None,
-//RS                 })
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS codec_struct!(Param {
-//RS     convention,
-//RS     root,
-//RS     name,
-//RS     name_span,
-//RS     public_label,
-//RS     zone,
-//RS     ty,
-//RS     ty_span,
-//RS     default,
-//RS     variadic,
-//RS     variadic_bound_list,
-//RS     declared_view_from_names,
-//RS });
-//RS 
-//RS codec_enum!(ParamZone {
-//RS     0 => PositionalOnly,
-//RS     1 => Either,
-//RS     2 => LabelOnly,
-//RS });
-//RS 
-//RS codec_enum!(AccessConvention {
-//RS     0 => Read,
-//RS     1 => Write,
-//RS     2 => Move,
-//RS });
-//RS 
-//RS codec_enum!(PlaceAccess {
-//RS     0 => Read,
-//RS     1 => Write,
-//RS     2 => Take,
-//RS });
-//RS 
-//RS codec_enum!(Type {
-//RS     0 => Int,
-//RS     1 => Float,
-//RS     2 => Bool,
-//RS     3 => String,
-//RS     4 => Char,
-//RS     5 => List(elem),
-//RS     6 => Map { key, key_span, value },
-//RS     7 => Shared(inner),
-//RS     8 => Option(inner),
-//RS     9 => Result { ok, err },
-//RS     10 => Fn {
-//RS         params,
-//RS         ret,
-//RS         effect_bound,
-//RS         param_contract,
-//RS         call_metadata = absent,
-//RS         return_view_provenance = absent
-//RS     },
-//RS     11 => Named(name),
-//RS     12 => Apply { name, args },
-//RS     13 => TraitObject(names),
-//RS     14 => Tuple(fields),
-//RS     15 => IntN { signed, bits },
-//RS     16 => InlineRange { base, lo, hi },
-//RS     17 => Float32,
-//RS     18 => Tagged { marker, inner },
-//RS     19 => Union(members),
-//RS });
-//RS 
-//RS codec_enum!(TagMarker {
-//RS     0 => User(name),
-//RS     1 => Internal(tag),
-//RS });
-//RS 
-//RS codec_enum!(InternalTag {
-//RS     0 => CoreCryptoNominal,
-//RS     1 => DeterministicClock,
-//RS     2 => SystemClock,
-//RS     3 => ExpiringSecretLoan,
-//RS     4 => SharedGuardRead,
-//RS     5 => SharedGuardEdit,
-//RS     6 => TerminalFactSet,
-//RS     7 => CppCallbackAbi,
-//RS     8 => AllocatorView,
-//RS });
-//RS 
-//RS codec_enum!(Stmt {
-//RS     0 => Expr(value),
-//RS     1 => Val(binding),
-//RS     2 => Assign { target, op, op_span, value },
-//RS     3 => Return(value, span),
-//RS     4 => While { cond, body, span, arrow_body, label },
-//RS     5 => For {
-//RS         var,
-//RS         var_span,
-//RS         var2,
-//RS         kind,
-//RS         body,
-//RS         span,
-//RS         arrow_body,
-//RS         label,
-//RS         auto_vectorization = absent
-//RS     },
-//RS     6 => Switch { subject, arms, else_body, span },
-//RS     7 => Break(span),
-//RS     8 => BreakValue(value, span),
-//RS     9 => Continue(span),
-//RS     10 => BreakLabel(label, span),
-//RS     11 => BreakLabelValue(label, label_span, value, span),
-//RS     12 => ContinueLabel(label, span),
-//RS     13 => Loop { body, span, arrow_body, label },
-//RS     14 => CountedLoop { init, cond, step, body, span, arrow_body, label },
-//RS     15 => Unsafe { audit, audit_expr, body, span },
-//RS     16 => Impure { reason, reason_expr, body, span },
-//RS     17 => Reactive { body, span },
-//RS     18 => Shield { body, span },
-//RS     19 => Region { name, name_span, body, span },
-//RS     20 => TaskGroup { name, name_span, limit, body, span },
-//RS     21 => Layout { name, name_span, body, span },
-//RS     22 => AuthorityScope { caps, caps_span, binding, binding_span, body, span },
-//RS     23 => ComptimeIf { cond, cond_span, then_body, else_body, span, selected_then },
-//RS     24 => ComptimeSwitch { subject, arms, else_body, span },
-//RS     25 => ComptimeBlock { body, is_template_loop, span },
-//RS     26 => ContextBlock { fields, body, span },
-//RS     27 => Live { body, span },
-//RS     28 => AssumeDet { reason, reason_expr, body, span },
-//RS     29 => Transact { name, name_span, body, implicit, span },
-//RS     30 => Yield(value, span),
-//RS     31 => ScopeMember { name, name_span, args, args_span, body, dsl, dot_span, span },
-//RS     32 => DeferClose { close, span },
-//RS });
-//RS 
-//RS codec_struct!(SwitchArm { cond, body, span });
-//RS 
-//RS codec_struct!(Binding {
-//RS     mutable,
-//RS     markers = absent,
-//RS     reactive_upgrade,
-//RS     meta = absent,
-//RS     name,
-//RS     name_span,
-//RS     sigil_span,
-//RS     pattern,
-//RS     ty,
-//RS     ty_span,
-//RS     init,
-//RS     is_comptime,
-//RS     ct = absent,
-//RS     uninit,
-//RS     arena_view,
-//RS     string_view,
-//RS     gc_promotion = absent,
-//RS     gc_transferred,
-//RS });
-//RS 
-//RS codec_enum!(LValue {
-//RS     0 => Local { name, name_span },
-//RS     1 => Index { base, index, span, kind },
-//RS     2 => Field { base, field, span },
-//RS });
-//RS 
-//RS codec_enum!(IndexKind {
-//RS     0 => Unknown,
-//RS     1 => List,
-//RS     2 => Range,
-//RS     3 => FixedListProof,
-//RS     4 => Map,
-//RS     5 => Lane(name),
-//RS     6 => User(name),
-//RS     7 => LayoutField(name),
-//RS     8 => Pool,
-//RS });
-//RS 
-//RS codec_enum!(ForKind {
-//RS     0 => Range { start, end, step, exclusive },
-//RS     1 => In { collection, step },
-//RS });
-//RS 
-//RS codec_enum!(BindPattern {
-//RS     0 => Struct { type_name, type_span, fields, rest, span },
-//RS     1 => List { elems, span },
-//RS     2 => Tuple { elems, span },
-//RS     3 => Refutable { pattern, fallback, names, span, synthesized },
-//RS });
-//RS 
-//RS codec_struct!(BindName { name, span, rename });
-//RS 
-//RS codec_enum!(BinOp {
-//RS     0 => Add,
-//RS     1 => Sub,
-//RS     2 => Mul,
-//RS     3 => Div,
-//RS     4 => FloorDiv,
-//RS     5 => Mod,
-//RS     6 => Rem,
-//RS     7 => Pow,
-//RS     8 => BitAnd,
-//RS     9 => BitOr,
-//RS     10 => BitXor,
-//RS     11 => Shl,
-//RS     12 => Shr,
-//RS     13 => Eq,
-//RS     14 => Ne,
-//RS     15 => Lt,
-//RS     16 => Gt,
-//RS     17 => Le,
-//RS     18 => Ge,
-//RS     19 => Compare,
-//RS     20 => And,
-//RS     21 => Or,
-//RS });
-//RS 
-//RS codec_enum!(UnOp {
-//RS     0 => Neg,
-//RS     1 => Not,
-//RS });
-//RS 
-//RS codec_enum!(Expr {
-//RS     0 => Str(parts, span),
-//RS     1 => Int(value, span, width, suffix),
-//RS     2 => Float(value, span, narrow, suffix),
-//RS     3 => Bool(value, span),
-//RS     4 => Unit(span),
-//RS     5 => Char(value, span),
-//RS     6 => ListLit(items, span),
-//RS     7 => MemberSpread { base, members, span },
-//RS     8 => Spread(value, span),
-//RS     9 => MapLit(entries, span),
-//RS     10 => Index { base, index, span, kind },
-//RS     11 => Slice { base, start, end, range, span },
-//RS     12 => Range { start, end, exclusive, span },
-//RS     13 => Ident(name, span),
-//RS     14 => Call(call),
-//RS     15 => Unary(op, value, span),
-//RS     16 => Binary(op, left, right, span),
-//RS     17 => CompareChain { operands, ops, hooks, span },
-//RS     18 => UnitLit { raw, int, float, suffix, suffix_span, span },
-//RS     19 => Deref(value, span),
-//RS     20 => RawOf(value, span),
-//RS     21 => Copy(value, span),
-//RS     22 => Place(value, access, span),
-//RS     23 => Field(base, name, span),
-//RS     24 => OptField { base, member, member_span, flatten, span },
-//RS     25 => MethodCall {
-//RS         receiver,
-//RS         method,
-//RS         method_span,
-//RS         owner_type_args,
-//RS         type_args,
-//RS         args,
-//RS         recv_type,
-//RS         resolved_ret,
-//RS         operator_rhs,
-//RS         checked_widen
-//RS     },
-//RS     26 => StructLit { type_name, type_args, import_ns, as_trait, fields, inferred, span },
-//RS     27 => TypedLit { head, body, span },
-//RS     28 => EnumLit { type_name, variant, variant_span, args, leading_dot, span },
-//RS     29 => Tainted(value, tag, span),
-//RS     30 => Present(value, span),
-//RS     31 => Absent(span),
-//RS     32 => Todo { span, expected_type },
-//RS     33 => NoElse(span),
-//RS     34 => ReduceMarker(name, span),
-//RS     35 => PatternTest { subject, pattern, span },
-//RS     36 => Ok(value, span),
-//RS     37 => Err(value, span),
-//RS     38 => Try(value, span, convert, context),
-//RS     39 => OrFallback { value, fallback, is_option, span },
-//RS     40 => If { cond, then_body, then_value, else_body, else_value, span },
-//RS     41 => TupleLit(fields, span, ty),
-//RS     42 => CallValue { callee, args, span },
-//RS     43 => PtrFromAddr { alias, alias_span, elem, addr, span },
-//RS     44 => Paren(value, span),
-//RS });
-//RS 
-//RS codec_enum!(StrPart {
-//RS     0 => Lit(text),
-//RS     1 => Interp(value, format),
-//RS });
-//RS 
-//RS codec_enum!(StrFormat {
-//RS     0 => Display,
-//RS     1 => Debug,
-//RS     2 => Pretty,
-//RS     3 => Fixed(digits),
-//RS     4 => Grouped(digits),
-//RS     5 => Hex(digits),
-//RS     6 => Pad { width, fill },
-//RS     7 => PadLeft { width, fill },
-//RS     8 => Sci(digits),
-//RS     9 => Percent(digits),
-//RS     10 => Bin,
-//RS     11 => Oct,
-//RS     12 => Unit(unit),
-//RS });
-//RS 
-//RS codec_enum!(UnitFormat {
-//RS     0 => Symbol,
-//RS     1 => Name,
-//RS     2 => Bare,
-//RS });
-//RS 
-//RS codec_enum!(TypedLitBody {
-//RS     0 => Fields(fields),
-//RS     1 => Elements(items),
-//RS     2 => Entries(entries),
-//RS     3 => Value(value),
-//RS     4 => ByteText(parts),
-//RS     5 => Empty,
-//RS });
-//RS 
-//RS codec_enum!(ByteTextPart {
-//RS     0 => Lit(text),
-//RS     1 => Byte(value),
-//RS });
-//RS 
-//RS codec_struct!(Call {
-//RS     name,
-//RS     name_span,
-//RS     type_args,
-//RS     args,
-//RS     resolved_ret,
-//RS     range_checked,
-//RS     widen_approx,
-//RS });
-//RS 
-//RS codec_struct!(CallArg { convention, expr, span, flags, label, spread });
-//RS 
-//RS codec_struct!(CallArgFlags {
-//RS     implicit_clone,
-//RS     shared_auto_clone,
-//RS     owned_last_use,
-//RS     shared_access_desugar,
-//RS     is_trailing_block,
-//RS     template_items = absent,
-//RS     c_callback_symbol,
-//RS     c_callback_function_key,
-//RS     c_callback_managed,
-//RS     c_callback_plan_digest,
-//RS     c_callback_identity,
-//RS     trusted_html,
-//RS     source_index,
-//RS     binder_slot,
-//RS     binder_label,
-//RS     binder_refs,
-//RS     binder_site,
-//RS     callable_policy = absent,
-//RS     authority_boundary,
-//RS     arithmetic_policy,
-//RS });
-//RS 
-//RS codec_struct!(ArithmeticPolicyFact { mode, scope_span, operation_span, operation });
-//RS 
-//RS codec_enum!(ArithmeticMode {
-//RS     0 => Checked,
-//RS     1 => Wrapping,
-//RS     2 => Saturating,
-//RS });
-//RS 
-//RS codec_enum!(ArithmeticOperation {
-//RS     0 => Add,
-//RS     1 => Sub,
-//RS     2 => Mul,
-//RS     3 => Neg,
-//RS     4 => Pow,
-//RS });
-//RS 
-//RS codec_enum!(EnumLitArg {
-//RS     0 => Positional(expr),
-//RS     1 => Named { label, expr },
-//RS });
-//RS 
-//RS codec_enum!(Pattern {
-//RS     0 => Variant { variant, bindings, leading_dot, span },
-//RS     1 => Present { binding, binding_span, inner, span },
-//RS     2 => Absent(span),
-//RS     3 => Ok { binding, binding_span, inner, span },
-//RS     4 => Err { binding, binding_span, inner, span },
-//RS     5 => Range { lo, hi, span },
-//RS     6 => Or(alternatives, span),
-//RS     7 => Struct { fields, rest, span },
-//RS });
-//RS 
-//RS codec_enum!(PatSlot {
-//RS     0 => Wildcard,
-//RS     1 => Bind { name, span },
-//RS     2 => Range { lo, hi },
-//RS     3 => Nested(pattern),
-//RS     4 => Named { field, field_span, slot },
-//RS     5 => Rest(span),
-//RS });
-//RS 
-//RS codec_enum!(StructPatField {
-//RS     0 => Bind { field, field_span, local, local_span },
-//RS     1 => Value { field, field_span, value },
-//RS });
-//RS 
-//RS codec_enum!(OrFallback {
-//RS     0 => Value(value),
-//RS     1 => Block { body, value, span },
-//RS     2 => Return(value, span),
-//RS     3 => Panic { name_span, args },
-//RS     4 => Break(span),
-//RS     5 => Continue(span),
-//RS     6 => BreakLabel(label, span),
-//RS     7 => ContinueLabel(label, span),
-//RS });
-//RS 
-//RS codec_enum!(TryConvert {
-//RS     0 => None,
-//RS     1 => Never,
-//RS     2 => DefaultErr,
-//RS     3 => Typed { fn_name, source, target },
-//RS     4 => WidenUnion { enum_name, tag },
-//RS });
-//RS 
-//RS // Compile-time values (`encode_value`).
-//RS 
-//RS impl Codec for CtFloat {
-//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
-//RS         match self {
-//RS             CtFloat::F32(value) => {
-//RS                 writer.byte(0);
-//RS                 writer.bytes.extend_from_slice(&value.to_bits().to_le_bytes());
-//RS             }
-//RS             CtFloat::F64(value) => {
-//RS                 writer.byte(1);
-//RS                 value.put(writer)?;
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
-//RS         match reader.byte()? {
-//RS             0 => {
-//RS                 let bytes: [u8; 4] = reader.take(4)?.try_into().ok()?;
-//RS                 Some(CtFloat::F32(f32::from_bits(u32::from_le_bytes(bytes))))
-//RS             }
-//RS             1 => Some(CtFloat::F64(f64::get(reader)?)),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS codec_struct!(CtBigInt { negative, limbs });
-//RS 
-//RS codec_enum!(CtKey {
-//RS     0 => Int(value),
-//RS     1 => Str(value),
-//RS     2 => Bool(value),
-//RS     3 => Char(value),
-//RS     4 => Tuple(fields),
-//RS     5 => Struct { type_name, fields },
-//RS     6 => Enum { type_name, variant },
-//RS });
-//RS 
-//RS // A told report is refused: an error value can carry the source line of
-//RS // its context frames.
-//RS codec_enum!(CtReport {
-//RS     0 => Clean(ty),
-//RS });
-//RS 
-//RS codec_enum!(CtValue {
-//RS     0 => Int(value),
-//RS     1 => Float(value),
-//RS     2 => Bool(value),
-//RS     3 => Char(value),
-//RS     4 => Str(value),
-//RS     5 => BigInt(value),
-//RS     6 => Bytes(value),
-//RS     7 => List(values),
-//RS     8 => Map(entries),
-//RS     9 => Struct { type_name, fields },
-//RS     10 => Enum { type_name, variant, args },
-//RS     11 => Present(value),
-//RS     12 => Failed(report),
-//RS     13 => Unit,
-//RS });
-// END-PORT-PENDING 0351 crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1-1029
+// #2517 S3R: lossless checked-body deltas with item-relative, parser-authored spans.
+// Every unlisted AST variant and nonempty uncarried sema field is refused.
+use jet_foundation.[AccessConvention, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp, BindName, BindPattern, Binding, BinderRef, ByteTextPart, Call, CallArg, CallArgFlags, CallContractRow, CallLabel, ContextField, CtBigInt, CtFloat, CtKey, CtReport, CtValue, EffectRowEntry, EnumLitArg, Expr, ExprField, ExprMember, ExprPair, ForKind, Func, IndexKind, IntegerWidth, InternalTag, LValue, NamedSpan, OrFallback, Param, ParamZone, PatSlot, Pattern, PlaceAccess, Span, Stmt, StrFormat, StrPart, StructPatField, SwitchArm, TagMarker, TryConvert, TupleField, Type, TypeTupleField, TypedLitBody, UnOp, UnitFormat]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:38
+// Refusal is the String Err! rail, retaining each exact static refusal text.
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:42
+pub fn encode(pristine: Func, checked: Func) -> [U8] Err! {
+    if checked.return_view_provenance != None -> return Err("view provenance")
+    authored := Writer{bytes: [], start: pristine.span.start, end: pristine.span.end, spans: Spans.Collect{spans: [:]}}
+    pristine.params.put(&authored)?
+    pristine.return_type.put(&authored)?
+    pristine.body.put(&authored)?
+    spans :: if authored.spans == { .Collect(spans) | .Require(spans) -> ^spans }
+    writer := Writer{bytes: [], start: checked.span.start, end: checked.span.end, spans: Spans.Require{spans: ^spans}}
+    checked.params.put(&writer)?
+    checked.return_type.put(&writer)?
+    checked.body.put(&writer)?
+    checked.reactive_upgrades.put(&writer)?
+    Ok(^writer.bytes)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:75
+pub fn apply(function: &Func, bytes: [U8]) -> Unit? {
+    reader := Reader{bytes: bytes.view(), at: 0, start: function.span.start}
+    params :: [Param].get(&reader) ?? return None
+    return_type :: Type?.get(&reader) ?? return None
+    body :: [Stmt].get(&reader) ?? return None
+    reactive_upgrades :: [String].get(&reader) ?? return None
+    if reader.at != bytes.len() -> return None
+    function.params = ^params
+    function.return_type = ^return_type
+    function.body = ^body
+    function.reactive_upgrades = ^reactive_upgrades
+    Val(())
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:98
+pub fn encode_value(value: CtValue) -> [U8] Err! {
+    writer := Writer{bytes: [], start: 1, end: 1, spans: Spans.Require{spans: [:]}}
+    value.put(&writer)?
+    Ok(^writer.bytes)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:113
+pub fn decode_value(bytes: [U8]) -> CtValue? {
+    reader := Reader{bytes: bytes.view(), at: 0, start: 1}
+    value :: CtValue.get(&reader) ?? return None
+    if reader.at != bytes.len() -> return None
+    Val(^value)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:123
+struct Writer { bytes: [U8], start: Int, end: Int, spans: Spans }
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:132
+// GATE #4499: exact tuple equality/hash; no textual span keys or linear scans.
+enum Spans { Collect(spans: [(Int, Int):Bool]) Require(spans: [(Int, Int):Bool]) }
+impl Writer {
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:140
+    fn byte(self: &Writer, value: U8) Never! {
+        // The collection pass needs only span provenance, not discarded bytes.
+        if self.spans == .Require(_) -> &self.bytes.push(value)
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:144
+    fn uint(self: &Writer, value: U64) Never! {
+        if self.spans == .Collect(_) -> return
+        rest := value
+        loop {
+            low :: U8{rest & U64{0x7f}}
+            rest >>= 7
+            if rest == U64{0} { self.byte(low); return }
+            self.byte(low | U8{0x80})
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:157
+struct Reader { bytes: [U8].View, at: Int, start: Int }
+impl Reader {
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:165
+    fn byte(self: &Reader) -> U8? Never! {
+        if self.at >= self.bytes.len() -> return None
+        value :: self.bytes[self.at]
+        self.at += 1
+        Val(value)
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:171
+    fn take(self: &Reader, count: Int) -> [U8].View? Never! {
+        end :: checked_usize_add(self.at, count) ?? return None
+        if end > self.bytes.len() -> return None
+        bytes :: self.bytes[self.at..<end]
+        self.at = end
+        Val(bytes)
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:178
+    fn uint(self: &Reader) -> U64? Never! {
+        value := U64{0}
+        shift := U32{0}
+        loop {
+            byte :: self.byte() ?? return None
+            if shift >= U32{64} -> return None
+            value |= U64{byte & U8{0x7f}} << shift
+            if byte & U8{0x80} == U8{0} -> return Val(value)
+            shift += U32{7}
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:194
+    fn size(self: &Reader) -> Int? Never! {
+        value :: self.uint() ?? return None
+        // GATE #4483: usize admission uses the selected target, never the host.
+        if value > core.sys.target.usize_max() -> return None
+        Int.try_from(value)
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:200
+    fn count(self: &Reader) -> Int? Never! {
+        count :: self.size() ?? return None
+        if count > self.bytes.len() - self.at -> return None
+        Val(count)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:206-208
+trait Codec {
+    fn put(self, writer: &Writer) Err!
+    fn get(reader: &Reader) -> Self? Never!
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:213-215
+trait Absent { fn is_absent(self) -> Bool Never!; fn absent() -> Self Never! }
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:218-225
+impl<T> Absent for T? {
+    fn is_absent(self) -> Bool Never! { self == None }
+    fn absent() -> Self Never! { None }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:228-235
+impl<T> Absent for [T] {
+    fn is_absent(self) -> Bool Never! { self.is_empty() }
+    fn absent() -> Self Never! { [] }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:239-251
+impl Codec for Bool {
+    fn put(self, writer: &Writer) Err! { writer.byte(if self -> U8{1} else -> U8{0}); Ok(()) }
+    fn get(reader: &Reader) -> Bool? Never! { if reader.byte() ?? return None == { U8{0} -> Val(false); U8{1} -> Val(true); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:254-263
+impl Codec for U8 {
+    fn put(self, writer: &Writer) Err! { writer.byte(self); Ok(()) }
+    fn get(reader: &Reader) -> U8? Never! { reader.byte() }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:265-274
+impl Codec for U32 {
+    fn put(self, writer: &Writer) Err! { writer.uint(U64{self}); Ok(()) }
+    fn get(reader: &Reader) -> U32? Never! { U32.try_from(reader.uint() ?? return None) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:276-285
+// Canonical AST uses Int for usize fields; call these explicitly, not signed Int.put.
+fn put_size(value: Int, writer: &Writer) Err! { writer.uint(U64{value}); Ok(()) }
+fn get_size(reader: &Reader) -> Int? Never! { reader.size() }
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:287-297
+impl Codec for Int {
+    fn put(self, writer: &Writer) Err! {
+        bits :: I64{self}
+        writer.uint(U64.from_bits((bits << 1) ^ (bits >> 63)))
+        Ok(())
+    }
+    fn get(reader: &Reader) -> Int? Never! {
+        value :: reader.uint() ?? return None
+        Val(Int{I64.from_bits(value >> 1) ^ -I64{value & U64{1}}})
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:299-309
+// GATE #4494: native IEEE bit reinterpretation, not numeric conversion.
+impl Codec for Float {
+    fn put(self, writer: &Writer) Err! { loop byte in self.to_bits().to_le_bytes() -> writer.byte(byte); Ok(()) }
+    fn get(reader: &Reader) -> Float? Never! { Val(Float.from_bits(U64.from_le_bytes(reader.take(8) ?? return None))) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:311-320
+impl Codec for Char {
+    fn put(self, writer: &Writer) Err! { writer.uint(U64{self.to_u32()}); Ok(()) }
+    fn get(reader: &Reader) -> Char? Never! { Char.from_u32(U32.try_from(reader.uint() ?? return None) ?? return None) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:322-333
+impl Codec for String {
+    fn put(self, writer: &Writer) Err! { writer.uint(U64{self.len()}); loop byte in self.bytes() -> writer.byte(byte); Ok(()) }
+    fn get(reader: &Reader) -> String? Never! { size :: reader.size() ?? return None; String.from_bytes((reader.take(size) ?? return None).to_array()) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:335-376
+impl Codec for Span {
+    fn put(self, writer: &Writer) Err! {
+        if self.start == 0 && self.end == 0 {
+            if writer.start == 0 -> return Err("ambiguous empty span")
+            writer.byte(U8{0})
+            return Ok(())
+        }
+        if self.start < writer.start || self.end < self.start || self.end > writer.end -> return Err("span outside the item")
+        if writer.spans == {
+            .Collect(spans) -> spans[(self.start, self.end)] = true
+            .Require(spans) -> if !spans.contains_key((self.start, self.end)) -> return Err("span not authored by the item")
+        }
+        writer.byte(U8{1})
+        writer.uint(U64{self.start - writer.start})
+        writer.uint(U64{self.end - self.start})
+        Ok(())
+    }
+    fn get(reader: &Reader) -> Span? Never! {
+        if reader.byte() ?? return None == {
+            U8{0} -> Val(Span{start: 0, end: 0})
+            U8{1} -> {
+                start :: checked_usize_add(reader.start, reader.size() ?? return None) ?? return None
+                end :: checked_usize_add(start, reader.size() ?? return None) ?? return None
+                Val(Span{start: start, end: end})
+            }
+            else -> None
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:378-386
+// Box<T> is erased by canonical recursive Jet carriers; its codec is T's codec,
+// without an extra wire byte or allocation solely for a Rust Box.
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:388-409
+impl<T: Codec> Codec for T? {
+    fn put(self, writer: &Writer) Err! {
+        if self == { .None -> writer.byte(U8{0}); .Val(value) -> { writer.byte(U8{1}); value.put(&writer)? } }
+        Ok(())
+    }
+    fn get(reader: &Reader) -> Self? Never! { if reader.byte() ?? return None == { U8{0} -> Val(None); U8{1} -> Val(Val(T.get(&reader) ?? return None)); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:411-428
+impl<T: Codec> Codec for [T] {
+    fn put(self, writer: &Writer) Err! { writer.uint(U64{self.len()}); loop item in self -> item.put(&writer)?; Ok(()) }
+    fn get(reader: &Reader) -> Self? Never! {
+        count :: reader.count() ?? return None
+        items := [T].with_capacity(count)
+        loop _ in 0..<count -> &items.push(T.get(&reader) ?? return None)
+        Val(^items)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:430-440
+impl<A: Codec, B: Codec> Codec for (A, B) {
+    fn put(self, writer: &Writer) Err! { self.0.put(&writer)?; self.1.put(&writer)?; Ok(()) }
+    fn get(reader: &Reader) -> Self? Never! { first :: A.get(&reader) ?? return None; Val((^first, B.get(&reader) ?? return None)) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:442-454
+impl<A: Codec, B: Codec, C: Codec> Codec for (A, B, C) {
+    fn put(self, writer: &Writer) Err! { self.0.put(&writer)?; self.1.put(&writer)?; self.2.put(&writer)?; Ok(()) }
+    fn get(reader: &Reader) -> Self? Never! { first :: A.get(&reader) ?? return None; second :: B.get(&reader) ?? return None; Val((^first, ^second, C.get(&reader) ?? return None)) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:456-477
+// GATE #4499: composite CtKey ordering/equality for ordered map encoding.
+impl<K: Codec + Ord, V: Codec> Codec for [K:V] {
+    fn put(self, writer: &Writer) Err! {
+        writer.uint(U64{self.len()})
+        keys := self.keys().to_array()
+        &keys.sort()
+        loop key in keys { key.put(&writer)?; self[key].put(&writer)? }
+        Ok(())
+    }
+    fn get(reader: &Reader) -> Self? Never! {
+        count :: reader.count() ?? return None
+        map := [K:V]{}
+        loop _ in 0..<count {
+            key :: K.get(&reader) ?? return None
+            value :: V.get(&reader) ?? return None
+            if map.contains_key(key) -> return None
+            map[^key] = ^value
+        }
+        Val(^map)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:479-497
+// put_field/get_field expanded below: absent fields are checked on encode,
+// reconstructed empty on decode, and never get an encoded tag.
+fn put_absent<T: Absent>(value: T, field: String) Err! {
+    if !value.is_absent() -> return Err("sema-filled `{field}`")
+    Ok(())
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:501-515,519-554
+// codec_struct/codec_enum are expanded into typed Codec implementations below;
+// field order and explicit discriminants are wire ABI, not declaration order.
+
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:556-569
+impl Codec for Param {
+    fn put(self, w: &Writer) Err! {
+        self.convention.put(&w)?; self.root.put(&w)?; self.name.put(&w)?; self.name_span.put(&w)?; self.public_label.put(&w)?; self.zone.put(&w)?; self.ty.put(&w)?; self.ty_span.put(&w)?; self.default.put(&w)?; self.variadic.put(&w)?; self.variadic_bound_list.put(&w)?; self.declared_view_from_names.put(&w)?; Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! { Val(Param{convention: AccessConvention.get(&r) ?? return None, root: Bool.get(&r) ?? return None, name: String.get(&r) ?? return None, name_span: Span.get(&r) ?? return None, public_label: CallLabel?.get(&r) ?? return None, zone: ParamZone.get(&r) ?? return None, ty: Type.get(&r) ?? return None, ty_span: Span.get(&r) ?? return None, default: Expr?.get(&r) ?? return None, variadic: Bool.get(&r) ?? return None, variadic_bound_list: [String]?.get(&r) ?? return None, declared_view_from_names: [String]?.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:571-575
+impl Codec for ParamZone {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .PositionalOnly -> U8{0}; .Either -> U8{1}; .LabelOnly -> U8{2} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == { U8{0} -> Val(Self.PositionalOnly); U8{1} -> Val(Self.Either); U8{2} -> Val(Self.LabelOnly); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:577-581
+impl Codec for AccessConvention {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Read -> U8{0}; .Write -> U8{1}; .Move -> U8{2} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == { U8{0} -> Val(Self.Read); U8{1} -> Val(Self.Write); U8{2} -> Val(Self.Move); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:583-587
+impl Codec for PlaceAccess {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Read -> U8{0}; .Write -> U8{1}; .Take -> U8{2} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == { U8{0} -> Val(Self.Read); U8{1} -> Val(Self.Write); U8{2} -> Val(Self.Take); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:589-617
+impl Codec for Type {
+    fn put(self, w: &Writer) Err! {
+        if self == {
+            .Int -> w.byte(U8{0})
+            .Float -> w.byte(U8{1})
+            .Bool -> w.byte(U8{2})
+            .String -> w.byte(U8{3})
+            .Char -> w.byte(U8{4})
+            .List(elem) -> { w.byte(U8{5}); elem.put(&w)? }
+            .Map(key, key_span, value) -> { w.byte(U8{6}); key.put(&w)?; key_span.put(&w)?; value.put(&w)? }
+            .Shared(inner) -> { w.byte(U8{7}); inner.put(&w)? }
+            .Option(inner) -> { w.byte(U8{8}); inner.put(&w)? }
+            .Result(ok, err) -> { w.byte(U8{9}); ok.put(&w)?; err.put(&w)? }
+            .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> { w.byte(U8{10}); params.put(&w)?; ret.put(&w)?; effect_bound.put(&w)?; param_contract.put(&w)?; put_absent(call_metadata, "call_metadata")?; put_absent(return_view_provenance, "return_view_provenance")? }
+            .Named(name) -> { w.byte(U8{11}); name.put(&w)? }
+            .Apply(name, args) -> { w.byte(U8{12}); name.put(&w)?; args.put(&w)? }
+            .TraitObject(names) -> { w.byte(U8{13}); names.put(&w)? }
+            .Tuple(fields) -> { w.byte(U8{14}); fields.put(&w)? }
+            .IntN(signed, bits) -> { w.byte(U8{15}); signed.put(&w)?; U8{bits}.put(&w)? }
+            .InlineRange(base, lo, hi) -> { w.byte(U8{16}); base.put(&w)?; lo.put(&w)?; hi.put(&w)? }
+            .Float32 -> w.byte(U8{17})
+            .Tagged(marker, inner) -> { w.byte(U8{18}); marker.put(&w)?; inner.put(&w)? }
+            .Union(members) -> { w.byte(U8{19}); members.put(&w)? }
+            else -> return Err("unsupported Type node")
+        }
+        Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! {
+        Val(if r.byte() ?? return None == {
+            U8{0} -> Self.Int
+            U8{1} -> Self.Float
+            U8{2} -> Self.Bool
+            U8{3} -> Self.String
+            U8{4} -> Self.Char
+            U8{5} -> Self.List(Type.get(&r) ?? return None)
+            U8{6} -> Self.Map(Type.get(&r) ?? return None, Span?.get(&r) ?? return None, Type.get(&r) ?? return None)
+            U8{7} -> Self.Shared(Type.get(&r) ?? return None)
+            U8{8} -> Self.Option(Type.get(&r) ?? return None)
+            U8{9} -> Self.Result(Type.get(&r) ?? return None, Type.get(&r) ?? return None)
+            U8{10} -> Self.Fn([Type].get(&r) ?? return None, Type?.get(&r) ?? return None, [EffectRowEntry]?.get(&r) ?? return None, [CallContractRow]?.get(&r) ?? return None, None, None)
+            U8{11} -> Self.Named(String.get(&r) ?? return None)
+            U8{12} -> Self.Apply(String.get(&r) ?? return None, [Type].get(&r) ?? return None)
+            U8{13} -> Self.TraitObject([String].get(&r) ?? return None)
+            U8{14} -> Self.Tuple([TypeTupleField].get(&r) ?? return None)
+            U8{15} -> Self.IntN(Bool.get(&r) ?? return None, Int{U8.get(&r) ?? return None})
+            U8{16} -> Self.InlineRange(Type.get(&r) ?? return None, Int.get(&r) ?? return None, Int.get(&r) ?? return None)
+            U8{17} -> Self.Float32
+            U8{18} -> Self.Tagged(TagMarker.get(&r) ?? return None, Type.get(&r) ?? return None)
+            U8{19} -> Self.Union([Type].get(&r) ?? return None)
+            else -> return None
+        })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:619-622
+impl Codec for TagMarker {
+    fn put(self, w: &Writer) Err! { if self == { .User(name) -> { w.byte(U8{0}); name.put(&w)? }; .Internal(tag) -> { w.byte(U8{1}); tag.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == { U8{0} -> Val(Self.User(String.get(&r) ?? return None)); U8{1} -> Val(Self.Internal(InternalTag.get(&r) ?? return None)); else -> None } }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:624-634
+impl Codec for InternalTag {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .CoreCryptoNominal -> U8{0}; .DeterministicClock -> U8{1}; .SystemClock -> U8{2}; .ExpiringSecretLoan -> U8{3}; .SharedGuardRead -> U8{4}; .SharedGuardEdit -> U8{5}; .TerminalFactSet -> U8{6}; .CppCallbackABI -> U8{7}; .AllocatorView -> U8{8}; else -> return Err("unsupported InternalTag node") }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.CoreCryptoNominal; U8{1} -> Self.DeterministicClock; U8{2} -> Self.SystemClock; U8{3} -> Self.ExpiringSecretLoan; U8{4} -> Self.SharedGuardRead; U8{5} -> Self.SharedGuardEdit; U8{6} -> Self.TerminalFactSet; U8{7} -> Self.CppCallbackABI; U8{8} -> Self.AllocatorView; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:636-680
+impl Codec for Stmt {
+    fn put(self, w: &Writer) Err! {
+        if self == {
+            .Expr(value) -> { w.byte(U8{0}); value.put(&w)? }
+            .Val(binding) -> { w.byte(U8{1}); binding.put(&w)? }
+            .Assign(target, op, op_span, value) -> { w.byte(U8{2}); target.put(&w)?; op.put(&w)?; op_span.put(&w)?; value.put(&w)? }
+            .Return(value, span) -> { w.byte(U8{3}); value.put(&w)?; span.put(&w)? }
+            .While(cond, body, span, arrow_body, label) -> { w.byte(U8{4}); cond.put(&w)?; body.put(&w)?; span.put(&w)?; arrow_body.put(&w)?; label.put(&w)? }
+            .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> { w.byte(U8{5}); var.put(&w)?; var_span.put(&w)?; var2.put(&w)?; kind.put(&w)?; body.put(&w)?; span.put(&w)?; arrow_body.put(&w)?; label.put(&w)?; put_absent(auto_vectorization, "auto_vectorization")? }
+            .Switch(subject, arms, else_body, span) -> { w.byte(U8{6}); subject.put(&w)?; arms.put(&w)?; else_body.put(&w)?; span.put(&w)? }
+            .Break(span) -> { w.byte(U8{7}); span.put(&w)? }
+            .BreakValue(value, span) -> { w.byte(U8{8}); value.put(&w)?; span.put(&w)? }
+            .Continue(span) -> { w.byte(U8{9}); span.put(&w)? }
+            .BreakLabel(label, span) -> { w.byte(U8{10}); label.put(&w)?; span.put(&w)? }
+            .BreakLabelValue(label, label_span, value, span) -> { w.byte(U8{11}); label.put(&w)?; label_span.put(&w)?; value.put(&w)?; span.put(&w)? }
+            .ContinueLabel(label, span) -> { w.byte(U8{12}); label.put(&w)?; span.put(&w)? }
+            .Loop(body, span, arrow_body, label) -> { w.byte(U8{13}); body.put(&w)?; span.put(&w)?; arrow_body.put(&w)?; label.put(&w)? }
+            .CountedLoop(init, cond, step, body, span, arrow_body, label) -> { w.byte(U8{14}); init.put(&w)?; cond.put(&w)?; step.put(&w)?; body.put(&w)?; span.put(&w)?; arrow_body.put(&w)?; label.put(&w)? }
+            .Unsafe(audit, audit_expr, body, span) -> { w.byte(U8{15}); audit.put(&w)?; audit_expr.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .Impure(reason, reason_expr, body, span) -> { w.byte(U8{16}); reason.put(&w)?; reason_expr.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .Reactive(body, span) -> { w.byte(U8{17}); body.put(&w)?; span.put(&w)? }
+            .Shield(body, span) -> { w.byte(U8{18}); body.put(&w)?; span.put(&w)? }
+            .Region(name, name_span, body, span) -> { w.byte(U8{19}); name.put(&w)?; name_span.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .TaskGroup(name, name_span, limit, body, span) -> { w.byte(U8{20}); name.put(&w)?; name_span.put(&w)?; limit.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .Layout(name, name_span, body, span) -> { w.byte(U8{21}); name.put(&w)?; name_span.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .AuthorityScope(caps, caps_span, binding, binding_span, body, span) -> { w.byte(U8{22}); caps.put(&w)?; caps_span.put(&w)?; binding.put(&w)?; binding_span.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> { w.byte(U8{23}); cond.put(&w)?; cond_span.put(&w)?; then_body.put(&w)?; else_body.put(&w)?; span.put(&w)?; selected_then.put(&w)? }
+            .ComptimeSwitch(subject, arms, else_body, span) -> { w.byte(U8{24}); subject.put(&w)?; arms.put(&w)?; else_body.put(&w)?; span.put(&w)? }
+            .ComptimeBlock(body, is_template_loop, span) -> { w.byte(U8{25}); body.put(&w)?; is_template_loop.put(&w)?; span.put(&w)? }
+            .ContextBlock(fields, span) -> { w.byte(U8{26}); fields.put(&w)?; span.put(&w)? }
+            .Live(body, span) -> { w.byte(U8{27}); body.put(&w)?; span.put(&w)? }
+            .AssumeDet(reason, reason_expr, body, span) -> { w.byte(U8{28}); reason.put(&w)?; reason_expr.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .Transact(name, name_span, body, implicit, span) -> { w.byte(U8{29}); name.put(&w)?; name_span.put(&w)?; body.put(&w)?; implicit.put(&w)?; span.put(&w)? }
+            .Yield(value, span) -> { w.byte(U8{30}); value.put(&w)?; span.put(&w)? }
+            .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> { w.byte(U8{31}); name.put(&w)?; name_span.put(&w)?; args.put(&w)?; args_span.put(&w)?; body.put(&w)?; dsl.put(&w)?; dot_span.put(&w)?; span.put(&w)? }
+            .DeferClose(close, span) -> { w.byte(U8{32}); close.put(&w)?; span.put(&w)? }
+            else -> return Err("unsupported Stmt node")
+        }
+        Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! {
+        Val(if r.byte() ?? return None == {
+            U8{0} -> Self.Expr(Expr.get(&r) ?? return None)
+            U8{1} -> Self.Val(Binding.get(&r) ?? return None)
+            U8{2} -> Self.Assign(LValue.get(&r) ?? return None, BinOp?.get(&r) ?? return None, Span.get(&r) ?? return None, Expr.get(&r) ?? return None)
+            U8{3} -> Self.Return(Expr?.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{4} -> Self.While(Expr.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, NamedSpan?.get(&r) ?? return None)
+            U8{5} -> Self.For(String.get(&r) ?? return None, Span.get(&r) ?? return None, NamedSpan?.get(&r) ?? return None, ForKind.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, NamedSpan?.get(&r) ?? return None, None)
+            U8{6} -> Self.Switch(Expr.get(&r) ?? return None, [SwitchArm].get(&r) ?? return None, [Stmt]?.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{7} -> Self.Break(Span.get(&r) ?? return None)
+            U8{8} -> Self.BreakValue(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{9} -> Self.Continue(Span.get(&r) ?? return None)
+            U8{10} -> Self.BreakLabel(String.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{11} -> Self.BreakLabelValue(String.get(&r) ?? return None, Span.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{12} -> Self.ContinueLabel(String.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{13} -> Self.Loop([Stmt].get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, NamedSpan?.get(&r) ?? return None)
+            U8{14} -> Self.CountedLoop(Binding.get(&r) ?? return None, Expr.get(&r) ?? return None, Stmt?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, NamedSpan?.get(&r) ?? return None)
+            U8{15} -> Self.Unsafe(String?.get(&r) ?? return None, Expr?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{16} -> Self.Impure(String?.get(&r) ?? return None, Expr?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{17} -> Self.Reactive([Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{18} -> Self.Shield([Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{19} -> Self.Region(String.get(&r) ?? return None, Span.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{20} -> Self.TaskGroup(String.get(&r) ?? return None, Span.get(&r) ?? return None, Expr?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{21} -> Self.Layout(String.get(&r) ?? return None, Span.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{22} -> Self.AuthorityScope([NamedSpan].get(&r) ?? return None, Span.get(&r) ?? return None, String?.get(&r) ?? return None, Span?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{23} -> Self.ComptimeIf(Expr.get(&r) ?? return None, Span.get(&r) ?? return None, [Stmt].get(&r) ?? return None, [Stmt]?.get(&r) ?? return None, Span.get(&r) ?? return None, Bool?.get(&r) ?? return None)
+            U8{24} -> Self.ComptimeSwitch(Expr.get(&r) ?? return None, [SwitchArm].get(&r) ?? return None, [Stmt]?.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{25} -> Self.ComptimeBlock([Stmt].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{26} -> Self.ContextBlock([ContextField].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{27} -> Self.Live([Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{28} -> Self.AssumeDet(String.get(&r) ?? return None, Expr.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{29} -> Self.Transact(String?.get(&r) ?? return None, Span?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{30} -> Self.Yield(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{31} -> Self.ScopeMember(String.get(&r) ?? return None, Span.get(&r) ?? return None, [Expr].get(&r) ?? return None, Span?.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{32} -> Self.DeferClose(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            else -> return None
+        })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:682
+impl Codec for SwitchArm {
+    fn put(self, w: &Writer) Err! { self.cond.put(&w)?; self.body.put(&w)?; self.span.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{cond: Expr.get(&r) ?? return None, body: [Stmt].get(&r) ?? return None, span: Span.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:684-703
+impl Codec for Binding {
+    fn put(self, w: &Writer) Err! {
+        self.mutable.put(&w)?; put_absent(self.markers, "markers")?; self.reactive_upgrade.put(&w)?; put_absent(self.meta, "meta")?; self.name.put(&w)?; self.name_span.put(&w)?; self.sigil_span.put(&w)?; self.pattern.put(&w)?; self.ty.put(&w)?; self.ty_span.put(&w)?; self.init.put(&w)?; self.is_comptime.put(&w)?; put_absent(self.ct, "ct")?; self.uninit.put(&w)?; self.arena_view.put(&w)?; self.string_view.put(&w)?; put_absent(self.gc_promotion, "gc_promotion")?; self.gc_transferred.put(&w)?; Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{mutable: Bool.get(&r) ?? return None, markers: [], reactive_upgrade: Bool.get(&r) ?? return None, meta: None, name: String.get(&r) ?? return None, name_span: Span.get(&r) ?? return None, sigil_span: Span?.get(&r) ?? return None, pattern: BindPattern?.get(&r) ?? return None, ty: Type?.get(&r) ?? return None, ty_span: Span?.get(&r) ?? return None, init: Expr.get(&r) ?? return None, is_comptime: Bool.get(&r) ?? return None, ct: None, uninit: Bool.get(&r) ?? return None, arena_view: Bool.get(&r) ?? return None, string_view: Bool.get(&r) ?? return None, gc_promotion: None, gc_transferred: Bool.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:705-709
+impl Codec for LValue {
+    fn put(self, w: &Writer) Err! { if self == { .Local(name, span) -> { w.byte(U8{0}); name.put(&w)?; span.put(&w)? }; .Index(base, index, span, kind) -> { w.byte(U8{1}); base.put(&w)?; index.put(&w)?; span.put(&w)?; kind.put(&w)? }; .Field(base, field, span) -> { w.byte(U8{2}); base.put(&w)?; field.put(&w)?; span.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Local(String.get(&r) ?? return None, Span.get(&r) ?? return None); U8{1} -> Self.Index(Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None, IndexKind.get(&r) ?? return None); U8{2} -> Self.Field(Expr.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:711-721
+impl Codec for IndexKind {
+    fn put(self, w: &Writer) Err! { if self == { .Unknown -> w.byte(U8{0}); .List -> w.byte(U8{1}); .Range -> w.byte(U8{2}); .FixedListProof -> w.byte(U8{3}); .Map -> w.byte(U8{4}); .Lane(name) -> { w.byte(U8{5}); name.put(&w)? }; .User(name) -> { w.byte(U8{6}); name.put(&w)? }; .LayoutField(name) -> { w.byte(U8{7}); name.put(&w)? }; .Pool -> w.byte(U8{8}); else -> return Err("unsupported IndexKind node") }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Unknown; U8{1} -> Self.List; U8{2} -> Self.Range; U8{3} -> Self.FixedListProof; U8{4} -> Self.Map; U8{5} -> Self.Lane(String.get(&r) ?? return None); U8{6} -> Self.User(String.get(&r) ?? return None); U8{7} -> Self.LayoutField(String.get(&r) ?? return None); U8{8} -> Self.Pool; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:723-727
+impl Codec for ForKind {
+    fn put(self, w: &Writer) Err! { if self == { .Range(start, end, step, exclusive) -> { w.byte(U8{0}); start.put(&w)?; end.put(&w)?; step.put(&w)?; exclusive.put(&w)? }; .In(collection, step) -> { w.byte(U8{1}); collection.put(&w)?; step.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Range(Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Expr?.get(&r) ?? return None, Bool.get(&r) ?? return None); U8{1} -> Self.In(Expr.get(&r) ?? return None, Expr?.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:728-733
+impl Codec for BindPattern {
+    fn put(self, w: &Writer) Err! { if self == { .Struct(type_name, type_span, fields, rest, span) -> { w.byte(U8{0}); type_name.put(&w)?; type_span.put(&w)?; fields.put(&w)?; rest.put(&w)?; span.put(&w)? }; .List(elems, span) -> { w.byte(U8{1}); elems.put(&w)?; span.put(&w)? }; .Tuple(elems, span) -> { w.byte(U8{2}); elems.put(&w)?; span.put(&w)? }; .Refutable(pattern, fallback, names, span, synthesized) -> { w.byte(U8{3}); pattern.put(&w)?; fallback.put(&w)?; names.put(&w)?; span.put(&w)?; synthesized.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Struct(String.get(&r) ?? return None, Span.get(&r) ?? return None, [BindName].get(&r) ?? return None, Span?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{1} -> Self.List([BindName].get(&r) ?? return None, Span.get(&r) ?? return None); U8{2} -> Self.Tuple([BindName].get(&r) ?? return None, Span.get(&r) ?? return None); U8{3} -> Self.Refutable(Pattern.get(&r) ?? return None, OrFallback.get(&r) ?? return None, [BindName].get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:735
+impl Codec for BindName {
+    fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; self.rename.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None, rename: jet_foundation.BindNameRename?.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:737-760
+impl Codec for BinOp {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Add -> U8{0}; .Sub -> U8{1}; .Mul -> U8{2}; .Div -> U8{3}; .FloorDiv -> U8{4}; .Mod -> U8{5}; .Rem -> U8{6}; .Pow -> U8{7}; .BitAnd -> U8{8}; .BitOr -> U8{9}; .BitXor -> U8{10}; .Shl -> U8{11}; .Shr -> U8{12}; .Eq -> U8{13}; .Ne -> U8{14}; .Lt -> U8{15}; .Gt -> U8{16}; .Le -> U8{17}; .Ge -> U8{18}; .Compare -> U8{19}; .And -> U8{20}; .Or -> U8{21} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Add; U8{1} -> Self.Sub; U8{2} -> Self.Mul; U8{3} -> Self.Div; U8{4} -> Self.FloorDiv; U8{5} -> Self.Mod; U8{6} -> Self.Rem; U8{7} -> Self.Pow; U8{8} -> Self.BitAnd; U8{9} -> Self.BitOr; U8{10} -> Self.BitXor; U8{11} -> Self.Shl; U8{12} -> Self.Shr; U8{13} -> Self.Eq; U8{14} -> Self.Ne; U8{15} -> Self.Lt; U8{16} -> Self.Gt; U8{17} -> Self.Le; U8{18} -> Self.Ge; U8{19} -> Self.Compare; U8{20} -> Self.And; U8{21} -> Self.Or; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:762-765
+impl Codec for UnOp {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Neg -> U8{0}; .Not -> U8{1} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == { U8{0} -> Val(Self.Neg); U8{1} -> Val(Self.Not); else -> None } }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:767-824
+impl Codec for Expr {
+    fn put(self, w: &Writer) Err! {
+        if self == {
+            .Str(parts, span) -> { w.byte(U8{0}); parts.put(&w)?; span.put(&w)? }
+            .Int(value, span, width, suffix) -> { w.byte(U8{1}); value.put(&w)?; span.put(&w)?; width.put(&w)?; suffix.put(&w)? }
+            .Float(value, span, narrow, suffix) -> { w.byte(U8{2}); value.put(&w)?; span.put(&w)?; narrow.put(&w)?; suffix.put(&w)? }
+            .Bool(value, span) -> { w.byte(U8{3}); value.put(&w)?; span.put(&w)? }
+            .Unit(span) -> { w.byte(U8{4}); span.put(&w)? }
+            .Char(value, span) -> { w.byte(U8{5}); put_char_text(value, &w)?; span.put(&w)? }
+            .ListLit(items, span) -> { w.byte(U8{6}); items.put(&w)?; span.put(&w)? }
+            .MemberSpread(base, members, span) -> { w.byte(U8{7}); base.put(&w)?; members.put(&w)?; span.put(&w)? }
+            .Spread(value, span) -> { w.byte(U8{8}); value.put(&w)?; span.put(&w)? }
+            .MapLit(entries, span) -> { w.byte(U8{9}); entries.put(&w)?; span.put(&w)? }
+            .Index(base, index, span, kind) -> { w.byte(U8{10}); base.put(&w)?; index.put(&w)?; span.put(&w)?; kind.put(&w)? }
+            .Slice(base, start, end, range, span) -> { w.byte(U8{11}); base.put(&w)?; start.put(&w)?; end.put(&w)?; range.put(&w)?; span.put(&w)? }
+            .Range(start, end, exclusive, span) -> { w.byte(U8{12}); start.put(&w)?; end.put(&w)?; exclusive.put(&w)?; span.put(&w)? }
+            .Ident(name, span) -> { w.byte(U8{13}); name.put(&w)?; span.put(&w)? }
+            .Call(call) -> { w.byte(U8{14}); call.put(&w)? }
+            .Unary(op, value, span) -> { w.byte(U8{15}); op.put(&w)?; value.put(&w)?; span.put(&w)? }
+            .Binary(op, left, right, span) -> { w.byte(U8{16}); op.put(&w)?; left.put(&w)?; right.put(&w)?; span.put(&w)? }
+            .CompareChain(operands, ops, hooks, span) -> { w.byte(U8{17}); operands.put(&w)?; ops.put(&w)?; hooks.put(&w)?; span.put(&w)? }
+            .UnitLit(raw, int, float, suffix, suffix_span, span) -> { w.byte(U8{18}); raw.put(&w)?; int.put(&w)?; float.put(&w)?; suffix.put(&w)?; suffix_span.put(&w)?; span.put(&w)? }
+            .Deref(value, span) -> { w.byte(U8{19}); value.put(&w)?; span.put(&w)? }
+            .RawOf(value, span) -> { w.byte(U8{20}); value.put(&w)?; span.put(&w)? }
+            .Copy(value, span) -> { w.byte(U8{21}); value.put(&w)?; span.put(&w)? }
+            .Place(value, access, span) -> { w.byte(U8{22}); value.put(&w)?; access.put(&w)?; span.put(&w)? }
+            .Field(base, name, span) -> { w.byte(U8{23}); base.put(&w)?; name.put(&w)?; span.put(&w)? }
+            .OptField(base, member, member_span, flatten, span) -> { w.byte(U8{24}); base.put(&w)?; member.put(&w)?; member_span.put(&w)?; flatten.put(&w)?; span.put(&w)? }
+            .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen) -> { w.byte(U8{25}); receiver.put(&w)?; method.put(&w)?; method_span.put(&w)?; owner_type_args.put(&w)?; type_args.put(&w)?; args.put(&w)?; recv_type.put(&w)?; resolved_ret.put(&w)?; operator_rhs.put(&w)?; checked_widen.put(&w)? }
+            .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> { w.byte(U8{26}); type_name.put(&w)?; type_args.put(&w)?; import_ns.put(&w)?; as_trait.put(&w)?; fields.put(&w)?; inferred.put(&w)?; span.put(&w)? }
+            .TypedLit(head, body, span) -> { w.byte(U8{27}); head.put(&w)?; body.put(&w)?; span.put(&w)? }
+            .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> { w.byte(U8{28}); type_name.put(&w)?; variant.put(&w)?; variant_span.put(&w)?; args.put(&w)?; leading_dot.put(&w)?; span.put(&w)? }
+            .Tainted(value, tag, span) -> { w.byte(U8{29}); value.put(&w)?; tag.put(&w)?; span.put(&w)? }
+            .Present(value, span) -> { w.byte(U8{30}); value.put(&w)?; span.put(&w)? }
+            .Absent(span) -> { w.byte(U8{31}); span.put(&w)? }
+            .Todo(span, expected_type) -> { w.byte(U8{32}); span.put(&w)?; expected_type.put(&w)? }
+            .NoElse(span) -> { w.byte(U8{33}); span.put(&w)? }
+            .ReduceMarker(name, span) -> { w.byte(U8{34}); name.put(&w)?; span.put(&w)? }
+            .PatternTest(subject, pattern, span) -> { w.byte(U8{35}); subject.put(&w)?; pattern.put(&w)?; span.put(&w)? }
+            .Ok(value, span) -> { w.byte(U8{36}); value.put(&w)?; span.put(&w)? }
+            .Err(value, span) -> { w.byte(U8{37}); value.put(&w)?; span.put(&w)? }
+            .Try(value, span, convert, context) -> { w.byte(U8{38}); value.put(&w)?; span.put(&w)?; convert.put(&w)?; context.put(&w)? }
+            .OrFallback(value, fallback, is_option, span) -> { w.byte(U8{39}); value.put(&w)?; fallback.put(&w)?; is_option.put(&w)?; span.put(&w)? }
+            .If(cond, then_body, then_value, else_body, else_value, span) -> { w.byte(U8{40}); cond.put(&w)?; then_body.put(&w)?; then_value.put(&w)?; else_body.put(&w)?; else_value.put(&w)?; span.put(&w)? }
+            .TupleLit(fields, span, ty) -> { w.byte(U8{41}); fields.put(&w)?; span.put(&w)?; ty.put(&w)? }
+            .CallValue(callee, args, span) -> { w.byte(U8{42}); callee.put(&w)?; args.put(&w)?; span.put(&w)? }
+            .PtrFromAddr(alias, alias_span, elem, addr, span) -> { w.byte(U8{43}); alias.put(&w)?; alias_span.put(&w)?; elem.put(&w)?; addr.put(&w)?; span.put(&w)? }
+            .Paren(value, span) -> { w.byte(U8{44}); value.put(&w)?; span.put(&w)? }
+            else -> return Err("unsupported Expr node")
+        }
+        Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! {
+        Val(if r.byte() ?? return None == {
+            U8{0} -> Self.Str([StrPart].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{1} -> Self.Int(Int.get(&r) ?? return None, Span.get(&r) ?? return None, IntegerWidth?.get(&r) ?? return None, String?.get(&r) ?? return None)
+            U8{2} -> Self.Float(Float.get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, String?.get(&r) ?? return None)
+            U8{3} -> Self.Bool(Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{4} -> Self.Unit(Span.get(&r) ?? return None)
+            U8{5} -> Self.Char((Char.get(&r) ?? return None).to_string(), Span.get(&r) ?? return None)
+            U8{6} -> Self.ListLit([Expr].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{7} -> Self.MemberSpread(Expr.get(&r) ?? return None, [ExprMember].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{8} -> Self.Spread(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{9} -> Self.MapLit([ExprPair].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{10} -> Self.Index(Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None, IndexKind.get(&r) ?? return None)
+            U8{11} -> Self.Slice(Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Expr?.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{12} -> Self.Range(Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{13} -> Self.Ident(String.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{14} -> Self.Call(Call.get(&r) ?? return None)
+            U8{15} -> Self.Unary(UnOp.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{16} -> Self.Binary(BinOp.get(&r) ?? return None, Expr.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{17} -> Self.CompareChain([Expr].get(&r) ?? return None, [BinOp].get(&r) ?? return None, [Bool].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{18} -> Self.UnitLit(String.get(&r) ?? return None, Int?.get(&r) ?? return None, Float?.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{19} -> Self.Deref(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{20} -> Self.RawOf(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{21} -> Self.Copy(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{22} -> Self.Place(Expr.get(&r) ?? return None, PlaceAccess.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{23} -> Self.Field(Expr.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{24} -> Self.OptField(Expr.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{25} -> Self.MethodCall(Expr.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None, [Type].get(&r) ?? return None, [Type].get(&r) ?? return None, [CallArg].get(&r) ?? return None, String?.get(&r) ?? return None, Type?.get(&r) ?? return None, Type?.get(&r) ?? return None, Bool.get(&r) ?? return None)
+            U8{26} -> Self.StructLit(String.get(&r) ?? return None, [Type].get(&r) ?? return None, String?.get(&r) ?? return None, String?.get(&r) ?? return None, [ExprField].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{27} -> Self.TypedLit(Type?.get(&r) ?? return None, TypedLitBody.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{28} -> Self.EnumLit(String.get(&r) ?? return None, String.get(&r) ?? return None, Span?.get(&r) ?? return None, [EnumLitArg].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{29} -> Self.Tainted(Expr.get(&r) ?? return None, String?.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{30} -> Self.Present(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{31} -> Self.Absent(Span.get(&r) ?? return None)
+            U8{32} -> Self.Todo(Span.get(&r) ?? return None, String?.get(&r) ?? return None)
+            U8{33} -> Self.NoElse(Span.get(&r) ?? return None)
+            U8{34} -> Self.ReduceMarker(String.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{35} -> Self.PatternTest(Expr.get(&r) ?? return None, Pattern.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{36} -> Self.Ok(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{37} -> Self.Err(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{38} -> Self.Try(Expr.get(&r) ?? return None, Span.get(&r) ?? return None, TryConvert.get(&r) ?? return None, Expr?.get(&r) ?? return None)
+            U8{39} -> Self.OrFallback(Expr.get(&r) ?? return None, OrFallback.get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{40} -> Self.If(Expr.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Expr.get(&r) ?? return None, [Stmt].get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{41} -> Self.TupleLit([TupleField].get(&r) ?? return None, Span.get(&r) ?? return None, Type?.get(&r) ?? return None)
+            U8{42} -> Self.CallValue(Expr.get(&r) ?? return None, [CallArg].get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{43} -> Self.PtrFromAddr(String.get(&r) ?? return None, Span.get(&r) ?? return None, Type.get(&r) ?? return None, Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            U8{44} -> Self.Paren(Expr.get(&r) ?? return None, Span.get(&r) ?? return None)
+            else -> return None
+        })
+    }
+}
+// Canonical AST spells Expr.Char with one-scalar text, not a second wire string.
+fn put_char_text(value: String, w: &Writer) Err! { chars := value.chars(); char :: chars.next() ?? return Err("unsupported Expr node"); if chars.next() != None -> return Err("unsupported Expr node"); char.put(&w) }
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:826-829
+impl Codec for StrPart {
+    fn put(self, w: &Writer) Err! { if self == { .Lit(text) -> { w.byte(U8{0}); text.put(&w)? }; .Interp(value, format) -> { w.byte(U8{1}); value.put(&w)?; format.put(&w)? }; else -> return Err("unsupported StrPart node") }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Lit(String.get(&r) ?? return None); U8{1} -> Self.Interp(Expr.get(&r) ?? return None, StrFormat.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:831-845
+impl Codec for StrFormat {
+    fn put(self, w: &Writer) Err! { if self == { .Display -> w.byte(U8{0}); .Debug -> w.byte(U8{1}); .Pretty -> w.byte(U8{2}); .Fixed(digits) -> { w.byte(U8{3}); digits.put(&w)? }; .Grouped(digits) -> { w.byte(U8{4}); digits.put(&w)? }; .Hex(digits) -> { w.byte(U8{5}); digits.put(&w)? }; .Pad(width, fill) -> { w.byte(U8{6}); width.put(&w)?; fill.put(&w)? }; .PadLeft(width, fill) -> { w.byte(U8{7}); width.put(&w)?; fill.put(&w)? }; .Sci(digits) -> { w.byte(U8{8}); digits.put(&w)? }; .Percent(digits) -> { w.byte(U8{9}); digits.put(&w)? }; .Bin -> w.byte(U8{10}); .Oct -> w.byte(U8{11}); .Unit(unit) -> { w.byte(U8{12}); unit.put(&w)? }; else -> return Err("unsupported StrFormat node") }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Display; U8{1} -> Self.Debug; U8{2} -> Self.Pretty; U8{3} -> Self.Fixed(Int.get(&r) ?? return None); U8{4} -> Self.Grouped(Int.get(&r) ?? return None); U8{5} -> Self.Hex(Int.get(&r) ?? return None); U8{6} -> Self.Pad(Int.get(&r) ?? return None, String.get(&r) ?? return None); U8{7} -> Self.PadLeft(Int.get(&r) ?? return None, String.get(&r) ?? return None); U8{8} -> Self.Sci(Int.get(&r) ?? return None); U8{9} -> Self.Percent(Int.get(&r) ?? return None); U8{10} -> Self.Bin; U8{11} -> Self.Oct; U8{12} -> Self.Unit(UnitFormat.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:847-851
+impl Codec for UnitFormat {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Symbol -> U8{0}; .Name -> U8{1}; .Bare -> U8{2} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Symbol; U8{1} -> Self.Name; U8{2} -> Self.Bare; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:853-860
+impl Codec for TypedLitBody {
+    fn put(self, w: &Writer) Err! { if self == { .Fields(fields) -> { w.byte(U8{0}); fields.put(&w)? }; .Elements(items) -> { w.byte(U8{1}); items.put(&w)? }; .Entries(entries) -> { w.byte(U8{2}); entries.put(&w)? }; .Value(value) -> { w.byte(U8{3}); value.put(&w)? }; .ByteText(parts) -> { w.byte(U8{4}); parts.put(&w)? }; .Empty -> w.byte(U8{5}) }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Fields([ExprField].get(&r) ?? return None); U8{1} -> Self.Elements([Expr].get(&r) ?? return None); U8{2} -> Self.Entries([ExprPair].get(&r) ?? return None); U8{3} -> Self.Value(Expr.get(&r) ?? return None); U8{4} -> Self.ByteText([ByteTextPart].get(&r) ?? return None); U8{5} -> Self.Empty; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:862-866
+impl Codec for ByteTextPart {
+    fn put(self, w: &Writer) Err! { if self == { .Lit(text) -> { w.byte(U8{0}); text.put(&w)? }; .Byte(value) -> { w.byte(U8{1}); value.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Lit(String.get(&r) ?? return None); U8{1} -> Self.Byte(U8.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:867-875
+impl Codec for Call {
+    fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.name_span.put(&w)?; self.type_args.put(&w)?; self.args.put(&w)?; self.resolved_ret.put(&w)?; self.range_checked.put(&w)?; self.widen_approx.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, name_span: Span.get(&r) ?? return None, type_args: [Type].get(&r) ?? return None, args: [CallArg].get(&r) ?? return None, resolved_ret: Type?.get(&r) ?? return None, range_checked: Bool.get(&r) ?? return None, widen_approx: Bool.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:877
+impl Codec for CallArg {
+    fn put(self, w: &Writer) Err! { self.convention.put(&w)?; self.expr.put(&w)?; self.span.put(&w)?; self.flags.put(&w)?; self.label.put(&w)?; self.spread.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{convention: AccessConvention.get(&r) ?? return None, expr: Expr.get(&r) ?? return None, span: Span.get(&r) ?? return None, flags: CallArgFlags.get(&r) ?? return None, label: CallLabel?.get(&r) ?? return None, spread: Bool.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:879-900
+impl Codec for CallArgFlags {
+    fn put(self, w: &Writer) Err! { self.implicit_clone.put(&w)?; self.shared_auto_clone.put(&w)?; self.owned_last_use.put(&w)?; self.shared_access_desugar.put(&w)?; self.is_trailing_block.put(&w)?; put_absent(self.template_items, "template_items")?; self.c_callback_symbol.put(&w)?; self.c_callback_function_key.put(&w)?; self.c_callback_managed.put(&w)?; self.c_callback_plan_digest.put(&w)?; self.c_callback_identity.put(&w)?; self.trusted_html.put(&w)?; put_optional_size(self.source_index, &w)?; put_optional_size(self.binder_slot, &w)?; self.binder_label.put(&w)?; self.binder_refs.put(&w)?; put_optional_u32(self.binder_site, &w)?; put_absent(self.callable_policy, "callable_policy")?; self.authority_boundary.put(&w)?; self.arithmetic_policy.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{implicit_clone: Bool.get(&r) ?? return None, shared_auto_clone: Bool.get(&r) ?? return None, owned_last_use: Bool.get(&r) ?? return None, shared_access_desugar: Bool.get(&r) ?? return None, is_trailing_block: Bool.get(&r) ?? return None, template_items: None, c_callback_symbol: Bool.get(&r) ?? return None, c_callback_function_key: String?.get(&r) ?? return None, c_callback_managed: Bool.get(&r) ?? return None, c_callback_plan_digest: String?.get(&r) ?? return None, c_callback_identity: String?.get(&r) ?? return None, trusted_html: Bool.get(&r) ?? return None, source_index: get_optional_size(&r) ?? return None, binder_slot: get_optional_size(&r) ?? return None, binder_label: String?.get(&r) ?? return None, binder_refs: [BinderRef].get(&r) ?? return None, binder_site: get_optional_u32(&r) ?? return None, callable_policy: None, authority_boundary: Bool.get(&r) ?? return None, arithmetic_policy: ArithmeticPolicyFact?.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:902
+impl Codec for ArithmeticPolicyFact {
+    fn put(self, w: &Writer) Err! { self.mode.put(&w)?; self.scope_span.put(&w)?; self.operation_span.put(&w)?; self.operation.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{mode: ArithmeticMode.get(&r) ?? return None, scope_span: Span.get(&r) ?? return None, operation_span: Span.get(&r) ?? return None, operation: ArithmeticOperation.get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:904-908
+impl Codec for ArithmeticMode {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Checked -> U8{0}; .Wrapping -> U8{1}; .Saturating -> U8{2} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Checked; U8{1} -> Self.Wrapping; U8{2} -> Self.Saturating; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:910-916
+impl Codec for ArithmeticOperation {
+    fn put(self, w: &Writer) Err! { w.byte(if self == { .Add -> U8{0}; .Sub -> U8{1}; .Mul -> U8{2}; .Neg -> U8{3}; .Pow -> U8{4} }); Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Add; U8{1} -> Self.Sub; U8{2} -> Self.Mul; U8{3} -> Self.Neg; U8{4} -> Self.Pow; else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:918-922
+impl Codec for EnumLitArg {
+    fn put(self, w: &Writer) Err! { if self == { .Positional(expr) -> { w.byte(U8{0}); expr.put(&w)? }; .Named(label, expr) -> { w.byte(U8{1}); label.put(&w)?; expr.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Positional(Expr.get(&r) ?? return None); U8{1} -> Self.Named(String.get(&r) ?? return None, Expr.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:923-932
+impl Codec for Pattern {
+    fn put(self, w: &Writer) Err! { if self == { .Variant(variant, bindings, leading_dot, span) -> { w.byte(U8{0}); variant.put(&w)?; bindings.put(&w)?; leading_dot.put(&w)?; span.put(&w)? }; .Present(binding, binding_span, inner, span) -> { w.byte(U8{1}); binding.put(&w)?; binding_span.put(&w)?; inner.put(&w)?; span.put(&w)? }; .Absent(span) -> { w.byte(U8{2}); span.put(&w)? }; .Ok(binding, binding_span, inner, span) -> { w.byte(U8{3}); binding.put(&w)?; binding_span.put(&w)?; inner.put(&w)?; span.put(&w)? }; .Err(binding, binding_span, inner, span) -> { w.byte(U8{4}); binding.put(&w)?; binding_span.put(&w)?; inner.put(&w)?; span.put(&w)? }; .Range(lo, hi, span) -> { w.byte(U8{5}); lo.put(&w)?; hi.put(&w)?; span.put(&w)? }; .Or(alternatives, span) -> { w.byte(U8{6}); alternatives.put(&w)?; span.put(&w)? }; .Struct(fields, rest, span) -> { w.byte(U8{7}); fields.put(&w)?; rest.put(&w)?; span.put(&w)? }; else -> return Err("unsupported Pattern node") }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Variant(String.get(&r) ?? return None, [PatSlot].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None); U8{1} -> Self.Present(String.get(&r) ?? return None, Span.get(&r) ?? return None, Pattern?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{2} -> Self.Absent(Span.get(&r) ?? return None); U8{3} -> Self.Ok(String.get(&r) ?? return None, Span.get(&r) ?? return None, Pattern?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{4} -> Self.Err(String.get(&r) ?? return None, Span.get(&r) ?? return None, Pattern?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{5} -> Self.Range(Int.get(&r) ?? return None, Int.get(&r) ?? return None, Span.get(&r) ?? return None); U8{6} -> Self.Or([Pattern].get(&r) ?? return None, Span.get(&r) ?? return None); U8{7} -> Self.Struct([StructPatField].get(&r) ?? return None, Bool.get(&r) ?? return None, Span.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:934-941
+impl Codec for PatSlot {
+    fn put(self, w: &Writer) Err! { if self == { .Wildcard -> w.byte(U8{0}); .Bind(name, span) -> { w.byte(U8{1}); name.put(&w)?; span.put(&w)? }; .Range(lo, hi) -> { w.byte(U8{2}); lo.put(&w)?; hi.put(&w)? }; .Nested(pattern) -> { w.byte(U8{3}); pattern.put(&w)? }; .Named(field, field_span, slot) -> { w.byte(U8{4}); field.put(&w)?; field_span.put(&w)?; slot.put(&w)? }; .Rest(span) -> { w.byte(U8{5}); span.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Wildcard; U8{1} -> Self.Bind(String.get(&r) ?? return None, Span.get(&r) ?? return None); U8{2} -> Self.Range(Int.get(&r) ?? return None, Int.get(&r) ?? return None); U8{3} -> Self.Nested(Pattern.get(&r) ?? return None); U8{4} -> Self.Named(String.get(&r) ?? return None, Span.get(&r) ?? return None, PatSlot.get(&r) ?? return None); U8{5} -> Self.Rest(Span.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:943-947
+impl Codec for StructPatField {
+    fn put(self, w: &Writer) Err! { if self == { .Bind(field, field_span, local, local_span) -> { w.byte(U8{0}); field.put(&w)?; field_span.put(&w)?; local.put(&w)?; local_span.put(&w)? }; .Value(field, field_span, value) -> { w.byte(U8{1}); field.put(&w)?; field_span.put(&w)?; value.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Bind(String.get(&r) ?? return None, Span.get(&r) ?? return None, String.get(&r) ?? return None, Span.get(&r) ?? return None); U8{1} -> Self.Value(String.get(&r) ?? return None, Span.get(&r) ?? return None, Expr.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:948-957
+impl Codec for OrFallback {
+    fn put(self, w: &Writer) Err! { if self == { .Value(value) -> { w.byte(U8{0}); value.put(&w)? }; .Block(body, value, span) -> { w.byte(U8{1}); body.put(&w)?; value.put(&w)?; span.put(&w)? }; .Return(value, span) -> { w.byte(U8{2}); value.put(&w)?; span.put(&w)? }; .Panic(name_span, args) -> { w.byte(U8{3}); name_span.put(&w)?; args.put(&w)? }; .Break(span) -> { w.byte(U8{4}); span.put(&w)? }; .Continue(span) -> { w.byte(U8{5}); span.put(&w)? }; .BreakLabel(label, span) -> { w.byte(U8{6}); label.put(&w)?; span.put(&w)? }; .ContinueLabel(label, span) -> { w.byte(U8{7}); label.put(&w)?; span.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Value(Expr.get(&r) ?? return None); U8{1} -> Self.Block([Stmt].get(&r) ?? return None, Expr?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{2} -> Self.Return(Expr?.get(&r) ?? return None, Span.get(&r) ?? return None); U8{3} -> Self.Panic(Span.get(&r) ?? return None, [CallArg].get(&r) ?? return None); U8{4} -> Self.Break(Span.get(&r) ?? return None); U8{5} -> Self.Continue(Span.get(&r) ?? return None); U8{6} -> Self.BreakLabel(String.get(&r) ?? return None, Span.get(&r) ?? return None); U8{7} -> Self.ContinueLabel(String.get(&r) ?? return None, Span.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:959-965
+impl Codec for TryConvert {
+    fn put(self, w: &Writer) Err! { if self == { .NoConversion -> w.byte(U8{0}); .Never -> w.byte(U8{1}); .DefaultErr -> w.byte(U8{2}); .Typed(fn_name, source, target) -> { w.byte(U8{3}); fn_name.put(&w)?; source.put(&w)?; target.put(&w)? }; .WidenUnion(enum_name, tag) -> { w.byte(U8{4}); enum_name.put(&w)?; tag.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.NoConversion; U8{1} -> Self.Never; U8{2} -> Self.DefaultErr; U8{3} -> Self.Typed(String.get(&r) ?? return None, Type.get(&r) ?? return None, Type.get(&r) ?? return None); U8{4} -> Self.WidenUnion(String.get(&r) ?? return None, String.get(&r) ?? return None); else -> return None }) }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:970-994
+impl Codec for CtFloat {
+    fn put(self, w: &Writer) Err! {
+        if self == { .F32(value) -> { w.byte(U8{0}); loop byte in F32{value}.to_bits().to_le_bytes() -> w.byte(byte) }; .F64(value) -> { w.byte(U8{1}); value.put(&w)? } }
+        Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.F32(Float{F32.from_bits(U32.from_le_bytes(r.take(4) ?? return None))}); U8{1} -> Self.F64(Float.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:996
+impl Codec for CtBigInt {
+    fn put(self, w: &Writer) Err! { self.negative.put(&w)?; self.limbs.put(&w)?; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(Self{negative: Bool.get(&r) ?? return None, limbs: [U32].get(&r) ?? return None}) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:998-1006
+impl Codec for CtKey {
+    fn put(self, w: &Writer) Err! { if self == { .Int(value) -> { w.byte(U8{0}); value.put(&w)? }; .Str(value) -> { w.byte(U8{1}); value.put(&w)? }; .Bool(value) -> { w.byte(U8{2}); value.put(&w)? }; .Char(value) -> { w.byte(U8{3}); value.put(&w)? }; .Tuple(fields) -> { w.byte(U8{4}); fields.put(&w)? }; .Struct(type_name, fields) -> { w.byte(U8{5}); type_name.put(&w)?; fields.put(&w)? }; .Enum(type_name, variant) -> { w.byte(U8{6}); type_name.put(&w)?; variant.put(&w)? } }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == { U8{0} -> Self.Int(Int.get(&r) ?? return None); U8{1} -> Self.Str(String.get(&r) ?? return None); U8{2} -> Self.Bool(Bool.get(&r) ?? return None); U8{3} -> Self.Char(Char.get(&r) ?? return None); U8{4} -> Self.Tuple([jet_foundation.NamedCtKey].get(&r) ?? return None); U8{5} -> Self.Struct(String.get(&r) ?? return None, [jet_foundation.NamedCtKey].get(&r) ?? return None); U8{6} -> Self.Enum(String.get(&r) ?? return None, String.get(&r) ?? return None); else -> return None }) }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1010-1012
+impl Codec for CtReport {
+    fn put(self, w: &Writer) Err! { if self == { .Clean(ty) -> { w.byte(U8{0}); ty.put(&w)? }; else -> return Err("unsupported CtReport node") }; Ok(()) }
+    fn get(r: &Reader) -> Self? Never! { if r.byte() ?? return None == U8{0} -> Val(Self.Clean(Type.get(&r) ?? return None)) else -> None }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1014-1029
+impl Codec for CtValue {
+    fn put(self, w: &Writer) Err! {
+        if self == {
+            .Int(value) -> { w.byte(U8{0}); value.put(&w)? }
+            .Float(value) -> { w.byte(U8{1}); value.put(&w)? }
+            .Bool(value) -> { w.byte(U8{2}); value.put(&w)? }
+            .Char(value) -> { w.byte(U8{3}); value.put(&w)? }
+            .Str(value) -> { w.byte(U8{4}); value.put(&w)? }
+            .BigInt(value) -> { w.byte(U8{5}); CtBigInt.put(value, &w)? }
+            .Bytes(value) -> { w.byte(U8{6}); value.put(&w)? }
+            .List(values) -> { w.byte(U8{7}); values.put(&w)? }
+            .Map(entries) -> { w.byte(U8{8}); [CtKey:CtValue].put(entries, &w)? }
+            .Struct(type_name, fields) -> { w.byte(U8{9}); type_name.put(&w)?; fields.put(&w)? }
+            .Enum(type_name, variant, args) -> { w.byte(U8{10}); type_name.put(&w)?; variant.put(&w)?; args.put(&w)? }
+            .Present(value) -> { w.byte(U8{11}); value.put(&w)? }
+            .Failed(report) -> { w.byte(U8{12}); report.put(&w)? }
+            .Unit -> w.byte(U8{13})
+            else -> return Err("unsupported CtValue node")
+        }
+        Ok(())
+    }
+    fn get(r: &Reader) -> Self? Never! { Val(if r.byte() ?? return None == {
+        U8{0} -> Self.Int(Int.get(&r) ?? return None)
+        U8{1} -> Self.Float(CtFloat.get(&r) ?? return None)
+        U8{2} -> Self.Bool(Bool.get(&r) ?? return None)
+        U8{3} -> Self.Char(Char.get(&r) ?? return None)
+        U8{4} -> Self.Str(String.get(&r) ?? return None)
+        U8{5} -> Self.BigInt(CtBigInt.get(&r) ?? return None)
+        U8{6} -> Self.Bytes([U8].get(&r) ?? return None)
+        U8{7} -> Self.List([CtValue].get(&r) ?? return None)
+        U8{8} -> Self.Map([CtKey:CtValue].get(&r) ?? return None)
+        U8{9} -> Self.Struct(String.get(&r) ?? return None, [jet_foundation.NamedCtValue].get(&r) ?? return None)
+        U8{10} -> Self.Enum(String.get(&r) ?? return None, String.get(&r) ?? return None, [jet_foundation.CtEnumArg].get(&r) ?? return None)
+        U8{11} -> Self.Present(CtValue.get(&r) ?? return None)
+        U8{12} -> Self.Failed(CtReport.get(&r) ?? return None)
+        U8{13} -> Self.Unit
+        else -> return None
+    }) }
+}
+
+// Tuple-shaped canonical AST records have exactly Rust's tuple wire order.
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:430-454,556,589,767
+impl Codec for NamedSpan { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+impl Codec for CallLabel { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+impl Codec for EffectRowEntry { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+impl Codec for CallContractRow { fn put(self, w: &Writer) Err! { self.label.put(&w)?; self.zone.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{label: String.get(&r) ?? return None, zone: ParamZone.get(&r) ?? return None}) } }
+impl Codec for TypeTupleField { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.ty.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, ty: Type.get(&r) ?? return None}) } }
+impl Codec for IntegerWidth { fn put(self, w: &Writer) Err! { self.signed.put(&w)?; U8{self.bits}.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{signed: Bool.get(&r) ?? return None, bits: Int{U8.get(&r) ?? return None}}) } }
+impl Codec for ExprField { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.name_span.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, name_span: Span.get(&r) ?? return None, value: Expr.get(&r) ?? return None}) } }
+impl Codec for ExprMember { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+impl Codec for ExprPair { fn put(self, w: &Writer) Err! { self.key.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{key: Expr.get(&r) ?? return None, value: Expr.get(&r) ?? return None}) } }
+impl Codec for TupleField { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, value: Expr.get(&r) ?? return None}) } }
+impl Codec for ContextField { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.value.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, value: Expr.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+impl Codec for BinderRef { fn put(self, w: &Writer) Err! { self.name.put(&w)?; put_size(self.slot, &w)?; self.ty.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, slot: get_size(&r) ?? return None, ty: Type.get(&r) ?? return None}) } }
+impl Codec for jet_foundation.NamedCtKey { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, value: CtKey.get(&r) ?? return None}) } }
+impl Codec for jet_foundation.NamedCtValue { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, value: CtValue.get(&r) ?? return None}) } }
+impl Codec for jet_foundation.CtEnumArg { fn put(self, w: &Writer) Err! { self.label.put(&w)?; self.value.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{label: String?.get(&r) ?? return None, value: CtValue.get(&r) ?? return None}) } }
+fn put_optional_size(value: Int?, w: &Writer) Err! { if value == { .None -> w.byte(U8{0}); .Val(n) -> { w.byte(U8{1}); put_size(n, &w)? } }; Ok(()) }
+fn get_optional_size(r: &Reader) -> Int?? Never! { if r.byte() ?? return None == { U8{0} -> Val(None); U8{1} -> Val(Val(get_size(&r) ?? return None)); else -> None } }
+fn put_optional_u32(value: Int?, w: &Writer) Err! { if value == { .None -> w.byte(U8{0}); .Val(n) -> { w.byte(U8{1}); U32{n}.put(&w)? } }; Ok(()) }
+fn get_optional_u32(r: &Reader) -> Int?? Never! { if r.byte() ?? return None == { U8{0} -> Val(None); U8{1} -> Val(Val(Int{U32.get(&r) ?? return None})); else -> None } }
+// #4409 does not apply: this codec has no IO. No inline Rust tests in this range.
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:430-440,735
+impl Codec for jet_foundation.BindNameRename { fn put(self, w: &Writer) Err! { self.name.put(&w)?; self.span.put(&w)?; Ok(()) }; fn get(r: &Reader) -> Self? Never! { Val(Self{name: String.get(&r) ?? return None, span: Span.get(&r) ?? return None}) } }
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:172,368-369
+fn checked_usize_add(left: Int, right: Int) -> Int? Never! {
+    value :: U64{left}.checked_add(U64{right}) ?? return None
+    // GATE #4483: the encoded offset must fit selected-target usize.
+    if value > core.sys.target.usize_max() -> return None
+    Int.try_from(value)
+}

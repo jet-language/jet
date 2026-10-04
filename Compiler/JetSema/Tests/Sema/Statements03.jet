@@ -1,0 +1,39 @@
+use JetSema.Sema.Statements03.[find_authored_semicolon, find_switch_close, source_has_comment, end_of_lines, find_source_char, find_source_sequence]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1649 (behavioral control)
+#Test("authored_semicolon_skips_whitespace_and_comments") {
+    source :: "value /* note */ // line\n ; next"
+    assert(find_authored_semicolon(source, 5) == source.find(';'))
+    assert(find_authored_semicolon("value next", 5) == None)
+    assert(find_authored_semicolon("value /* unterminated", 5) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1582 (behavioral control)
+#Test("switch_close_skips_literals_and_comments") {
+    source :: "{ \"}\" /* } */ { '}' } } tail"
+    assert(find_switch_close(source, 0) == source.rfind('}'))
+    assert(find_switch_close("{ { }", 0) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1421 (behavioral control)
+#Test("comment_probe_ignores_literal_delimiters") {
+    quoted :: "\"//\" '\'' \"/*\""
+    assert(!source_has_comment(quoted, 0, quoted.len()))
+    assert(source_has_comment("x /* real */", 0, 12))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1326 (behavioral control)
+#Test("end_of_lines_preserves_byte_offsets") {
+    assert(end_of_lines("a\nb\nc", 0, 1) == Val(2))
+    assert(end_of_lines("a\nb\nc", 2, 1) == Val(4))
+    assert(end_of_lines("a\nb\nc", 2, 2) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/blocks.rs:1481-1539 (behavioral control)
+#Test("source_search_skips_comments_and_quoted_text") {
+    source :: "\"{\" /* { */ {"
+    assert(find_source_char(source, 0, 123) == source.rfind('{'))
+    arrows :: "\"->\" /* -> */ ->"
+    assert(find_source_sequence(arrows, 0, "->".bytes()) == arrows.rfind("->"))
+    assert(find_source_sequence(arrows, 0, "".bytes()) == None)
+}

@@ -1,0 +1,29 @@
+use JetFoundation.Registry.CoreCalls.[core_call, CoreCapabilityKind, Effect, core_call_capability_is_well_formed]
+
+// Rust: crates/jet-foundation/src/Syntax/core_calls.rs:3911
+#Test("filesystem_reads_and_walks_use_fs_read_leaf") {
+    loop method in ["read", "read_bytes", "walk", "walk_parallel"] {
+        row :: core_call("core.files", method) ?? panic("missing core.files.{method} row")
+        leaf :: row.effect_leaf
+        assert(leaf == Val("FS.Read"), "core.files.{method}")
+        assert(leaf != Val("Time.Wait"), "core.files.{method}")
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/core_calls.rs:3922
+#Test("http_client_requests_require_network_and_wait") {
+    loop method in ["get", "post", "request"] {
+        row :: core_call("core.http.client", method) ?? panic("missing core.http.client.{method} row")
+        assert(row.effect_kind == Val(Effect.Net), "core.http.client.{method}")
+        assert(row.effect_leaf == Val("Time.Wait"), "core.http.client.{method}")
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/core_calls.rs:3935
+#Test("capability_contract_follows_effect_authority") {
+    pure :: core_call("core.math", "pi") ?? panic("core.math.pi capability row")
+    assert(pure.capability.kind == CoreCapabilityKind.Pure)
+    assert(core_call_capability_is_well_formed(pure.capability))
+    native :: core_call("core.files", "read") ?? panic("core.files.read capability row")
+    assert(native.capability.kind == CoreCapabilityKind.NativeRequired)
+    assert(native.capability.provider == Val("core.files"))
+    assert(core_call_capability_is_well_formed(native.capability))
+}

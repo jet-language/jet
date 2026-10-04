@@ -1,2017 +1,1051 @@
-// PORT-PENDING 0361 crates-jet-sema-src-sema-bundle-validation-bodycheck: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1-2013
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS pub(super) fn merge_view_provenance(
-//RS     into: &mut crate::AST::ViewProvenanceMap,
-//RS     from: &crate::AST::ViewProvenanceMap,
-//RS ) -> bool {
-//RS     if into.len() != from.len() || !into.keys().all(|path| from.contains_key(path)) {
-//RS         return false;
-//RS     }
-//RS     for (path, candidate) in from {
-//RS         let existing = into.get_mut(path).expect("view paths were checked above");
-//RS         if existing.mutable != candidate.mutable {
-//RS             return false;
-//RS         }
-//RS         existing.sources.extend(candidate.sources.iter().cloned());
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS pub(crate) fn checker_for_module<'a>(
-//RS     module_idx: usize,
-//RS     states: &'a [ModuleState],
-//RS     plugin_interfaces: &'a PluginInterfaceRegistry,
-//RS     devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
-//RS     effect_facts: &'a jet_foundation::Facts::FactRegistry,
-//RS     ct_funcs: &'a HashMap<String, Func>,
-//RS     ct_checked_funcs: &'a HashMap<String, Func>,
-//RS     ct_items: &'a [crate::AST::Item],
-//RS     ct_externs: &'a HashSet<String>,
-//RS     ct_base_dir: &'a std::path::Path,
-//RS     ct_globals: &'a HashMap<String, crate::Comptime::CtValue>,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     no_prelude: bool,
-//RS     name_ledger: &'a mut jet_foundation::Names::NameLedger,
-//RS     function: Option<&Func>,
-//RS     raw_protocol_return: bool,
-//RS     defer_ct_evaluation: bool,
-//RS ) -> Checker<'a> {
-//RS     let st = &states[module_idx];
-//RS     let current_function_span = function.map_or_else(|| Span::new(0, 0), |f| f.span);
-//RS     let in_unsafe = function.is_some_and(|f| f.is_unsafe);
-//RS     let in_pure = function.is_some_and(|f| f.is_pure || f.is_comptime);
-//RS     let in_comptime = function.is_some_and(|f| f.is_comptime);
-//RS     let compiler_api_allowed =
-//RS         function.is_some_and(|f| st.allow_compiler_api && super::is_build_entry(f));
-//RS     let ret = function.and_then(|f| crate::Sema::checked_body_return_type(f, raw_protocol_return));
-//RS     let fn_name = function.map_or_else(String::new, |f| f.name.clone());
-//RS     let compiler_generated = function.is_some_and(|f| f.compiler_generated);
-//RS     let declared_return_type = function.and_then(|f| f.return_type.clone());
-//RS     let current_return_type_span = function.and_then(|f| f.return_type_span);
-//RS     let current_param_names: Vec<String> = function
-//RS         .map(|f| {
-//RS             f.params
-//RS                 .iter()
-//RS                 .filter(|param| param.name != crate::Syntax::KW_SELF)
-//RS                 .map(|param| param.name.clone())
-//RS                 .collect()
-//RS         })
-//RS         .unwrap_or_default();
-//RS     let type_param_scope = function
-//RS         .map(|f| f.type_params.clone())
-//RS         .unwrap_or_default();
-//RS 
-//RS     Checker {
-//RS         funcs: &st.funcs,
-//RS         diverging_functions: &st.diverging_functions,
-//RS         fixed_length_write_params: &st.fixed_length_write_params,
-//RS         plugin_interfaces,
-//RS         registry: &st.registry,
-//RS         devtools_registry,
-//RS         effect_facts,
-//RS         consts: &st.consts,
-//RS         modules: Some(states),
-//RS         nominal_owner_cache: std::cell::RefCell::new(HashMap::new()),
-//RS         items: &st.items,
-//RS         module_idx,
-//RS         imports: &st.imports,
-//RS         core_imports: &st.core_imports,
-//RS         code_modules: &st.code_modules,
-//RS         code_module_identities: &st.code_module_identities,
-//RS         unqualified: &st.unqualified,
-//RS         unqualified_file: &st.unqualified_file,
-//RS         core_item_imports: &st.core_item_imports,
-//RS         inline_unqualified: &st.inline_unqualified,
-//RS         inline_unqualified_file: &st.inline_unqualified_file,
-//RS         inline_module: None,
-//RS         inline_reexport_inline: &st.inline_reexport_inline,
-//RS         inline_reexport_file: &st.inline_reexport_file,
-//RS         inline_reexport_core: &st.inline_reexport_core,
-//RS         inline_reexport_foreign: &st.inline_reexport_foreign,
-//RS         module_path: &st.module_path,
-//RS         source: &st.source,
-//RS         package_scope: &st.package_scope,
-//RS         policy_declarations: &st.policy_declarations,
-//RS         callable_policy_declarations: &st.callable_policy_declarations,
-//RS         rule_facts: st.rule_facts.clone(),
-//RS         frame_schedule_systems: Vec::new(),
-//RS         current_function_span,
-//RS         name_ledger,
-//RS         diags: Vec::new(),
-//RS         statement_lint_allows: Vec::new(),
-//RS         stdlib_lint_candidates: HashMap::new(),
-//RS         unused_bindings: Vec::new(),
-//RS         unused_binding_refs: HashSet::new(),
-//RS         flow: crate::Sema::FlowFacts::FlowFacts {
-//RS             depth: 1,
-//RS             ..Default::default()
-//RS         },
-//RS         concrete_unit_values: vec![HashMap::new()],
-//RS         suppress_partial_move_root_read: false,
-//RS         loop_depth: 0,
-//RS         loop_exit_depth: None,
-//RS         share_sites: Vec::new(),
-//RS         implicit_loop_subject_depth: 0,
-//RS         subject_shorthand_depth: 0,
-//RS         source_nesting: 0,
-//RS         statement_expr_root_depth: None,
-//RS         loop_labels: Vec::new(),
-//RS         collect_item_types: Vec::new(),
-//RS         loop_value_frames: Vec::new(),
-//RS         loop_break_flows: Vec::new(),
-//RS         pending_loop_value: None,
-//RS         arrow_loop_body: false,
-//RS         last_loop_result_type: None,
-//RS         fx_direct: std::collections::BTreeSet::new(),
-//RS         fx_direct_spans: HashMap::new(),
-//RS         lambda_effect_stack: Vec::new(),
-//RS         fx_edges: std::collections::BTreeSet::new(),
-//RS         fx_maximal: false,
-//RS         fx_maximal_span: None,
-//RS         region_stack: Vec::new(),
-//RS         fx_regions: Vec::new(),
-//RS         fx_authority_delegations: Vec::new(),
-//RS         fx_callback_obligations: Vec::new(),
-//RS         fx_autodiff_obligations: Vec::new(),
-//RS         fx_compute_calls: Vec::new(),
-//RS         fx_autodiff_safe_panic: false,
-//RS         fx_autodiff_unsafe_panic: false,
-//RS         autodiff_safe_panic_context: false,
-//RS         fx_pending_diagnostics: Vec::new(),
-//RS         fx_memory_events: Vec::new(),
-//RS         fx_memory_open: Vec::new(),
-//RS         memory_policy_stack: Vec::new(),
-//RS         arithmetic_policy_stack: Vec::new(),
-//RS         fx_memory_regions: Vec::new(),
-//RS         fx_memory_unbounded_control: Vec::new(),
-//RS         fx_memory_calls: Vec::new(),
-//RS         fx_discarded_results: Vec::new(),
-//RS         lost_tail_span: None,
-//RS         memory_control_multiplier: Some(1),
-//RS         txn_depth: 0,
-//RS         txn_wall_depth: 0,
-//RS         deterministic_world_depth: 0,
-//RS         det_suppress: 0,
-//RS         context_depth: 0,
-//RS         context_allocator_active: false,
-//RS         in_unsafe,
-//RS         suppress_must_use: false,
-//RS         in_pure,
-//RS         no_prelude,
-//RS         in_pre_clause: false,
-//RS         fallback_has_err: None,
-//RS         failure_auto_root_suppression: 0,
-//RS         failure_auto_depth: 0,
-//RS         fallback_is_shape_miss: false,
-//RS         inferred_call_type_args: None,
-//RS         invalid_binding_reads: 0,
-//RS         in_comptime,
-//RS         compiler_api_allowed,
-//RS         ret,
-//RS         fn_name,
-//RS         compiler_generated,
-//RS         raw_protocol_return,
-//RS         declared_return_type,
-//RS         current_return_type_span,
-//RS         current_param_names,
-//RS         binder_ref_types: HashMap::new(),
-//RS         expected_type: None,
-//RS         uses_exact_int: false,
-//RS         knowledge_gate: None,
-//RS         iter_borrowed: HashSet::new(),
-//RS         noelse_chains_checked: HashSet::new(),
-//RS         result_handler_subject_types: HashMap::new(),
-//RS         carrier_chain_subjects: HashSet::new(),
-//RS         lending_view_loop_vars: HashSet::new(),
-//RS         return_view_provenance: None,
-//RS         views_used_in_stmt: Default::default(),
-//RS         scoped_loan_read_reported: false,
-//RS         call_access_frames: Vec::new(),
-//RS         borrow_ctx: false,
-//RS         owning_if_value_depth: 0,
-//RS         allow_fixed_constructor: false,
-//RS         allow_string_view_read: false,
-//RS         lambda_escapes: true,
-//RS         in_lambda_body: false,
-//RS         inferred_lambda_mut_captures: HashSet::new(),
-//RS         lambda_params_are_lending_views: false,
-//RS         receiver_marks: HashMap::new(),
-//RS         receiver_mark_frames: Vec::new(),
-//RS         is_task_spawn: false,
-//RS         task_body_propagates: false,
-//RS         failure_direct_source: false,
-//RS         failure_union_probe: None,
-//RS         failure_carrier_inference: false,
-//RS         failure_carrier: None,
-//RS         statement_expr_inference: false,
-//RS         http_handler_depth: 0,
-//RS         interrupt_callback_depth: 0,
-//RS         lambda_param_mutable: false,
-//RS         lambda_param_is_secret_loan: false,
-//RS         view_capture_tasks: HashSet::new(),
-//RS         reactive_upgrades: Vec::new(),
-//RS         reactive_upgrade_names: HashSet::new(),
-//RS         view_borrow_escape_tasks: HashSet::new(),
-//RS         current_binding_name: None,
-//RS         task_spawn_binding_name: None,
-//RS         lambda_binding: None,
-//RS         lambda_mut_borrow_stack: vec![HashSet::new()],
-//RS         trait_reg: &st.trait_reg,
-//RS         ct_funcs,
-//RS         ct_checked_funcs,
-//RS         ct_items,
-//RS         ct_externs,
-//RS         ct_base_dir,
-//RS         ct_globals,
-//RS         ct_scopes: vec![HashMap::new()],
-//RS         defer_ct_evaluation,
-//RS         type_param_scope,
-//RS         no_os,
-//RS         gates,
-//RS         ct_impure_depth: 0,
-//RS         ct_embed_inputs: Vec::new(),
-//RS         in_dropped_comptime_arm: false,
-//RS         stmt_tail_ptr: std::ptr::null(),
-//RS         stmt_tail_len: 0,
-//RS         liveness_frames: Vec::new(),
-//RS         taskgroup_stack: Vec::new(),
-//RS         in_taskgroup_spawn: false,
-//RS         inline_addr_taken: HashSet::new(),
-//RS         devtools_publications: Vec::new(),
-//RS         ct_evaluator_ran: std::cell::Cell::new(false),
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     /// The checked compile-time functions, handed to one evaluation. Every
-//RS     /// evaluator entry reads them through here, so the body records that its
-//RS     /// result depends on which bodies were checked before it.
-//RS     pub(crate) fn ct_checked_funcs_for_evaluation(&self) -> &'a HashMap<String, Func> {
-//RS         self.ct_evaluator_ran.set(true);
-//RS         self.ct_checked_funcs
-//RS     }
-//RS }
-//RS 
-//RS /// The read-only surroundings every body check of one module shares: final
-//RS /// registration tables and the module's compile-time context. It holds only
-//RS /// shared references, so parallel body checkers each hold a copy.
-//RS #[derive(Clone, Copy)]
-//RS pub(super) struct BodyContext<'a> {
-//RS     pub(super) module_idx: usize,
-//RS     pub(super) states: &'a [ModuleState],
-//RS     pub(super) plugin_interfaces: &'a PluginInterfaceRegistry,
-//RS     pub(super) devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
-//RS     pub(super) effect_facts: &'a jet_foundation::Facts::FactRegistry,
-//RS     pub(super) ct_funcs: &'a HashMap<String, Func>,
-//RS     pub(super) ct_externs: &'a HashSet<String>,
-//RS     pub(super) ct_base_dir: &'a std::path::Path,
-//RS     pub(super) ct_globals: &'a HashMap<String, crate::Comptime::CtValue>,
-//RS     pub(super) no_os: bool,
-//RS     pub(super) gates: crate::Policy::GateSet,
-//RS     pub(super) no_prelude: bool,
-//RS }
-//RS 
-//RS /// Everything one body check produces besides the checked function and its
-//RS /// diagnostics. Each body fills its own products; `check_module_bodies`
-//RS /// merges them in source order, so the merged result does not depend on
-//RS /// which worker checked which body.
-//RS #[derive(Default)]
-//RS pub(crate) struct BodyProducts {
-//RS     pub(crate) summaries: HashMap<String, EffectSummary>,
-//RS     pub(crate) embed_inputs: Vec<crate::AST::ComptimeInput>,
-//RS     pub(crate) addr_taken: HashSet<String>,
-//RS     pub(crate) pending_diagnostics: Vec<PendingFunctionDiagnostic>,
-//RS     pub(crate) devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
-//RS     /// D-INTBIG1: the body reaches the exact `Int` runtime.
-//RS     pub(crate) uses_exact_int: bool,
-//RS     /// The body ran the compile-time evaluator (`ct_evaluator_ran`).
-//RS     pub(crate) ran_ct_evaluator: bool,
-//RS }
-//RS 
-//RS impl BodyProducts {
-//RS     /// Append `other` after this body's products, exactly as if `other`'s
-//RS     /// body had written into the same sinks after this one.
-//RS     pub(super) fn absorb(&mut self, other: BodyProducts) {
-//RS         self.summaries.extend(other.summaries);
-//RS         self.embed_inputs.extend(other.embed_inputs);
-//RS         self.addr_taken.extend(other.addr_taken);
-//RS         self.pending_diagnostics.extend(other.pending_diagnostics);
-//RS         self.devtools_publications.extend(other.devtools_publications);
-//RS         self.uses_exact_int |= other.uses_exact_int;
-//RS         self.ran_ct_evaluator |= other.ran_ct_evaluator;
-//RS     }
-//RS }
-//RS 
-//RS /// Check one function body. `ct_checked_funcs` is the table compile-time
-//RS /// evaluation may run; `None` checks without running any compile-time
-//RS /// expression (the staged comptime pass). `inline_module` overlays that
-//RS /// inline module's imports on the file's maps.
-//RS #[allow(clippy::too_many_arguments)]
-//RS pub(super) fn check_func_body(
-//RS     cx: &BodyContext<'_>,
-//RS     f: &mut Func,
-//RS     owner_type: Option<&str>,
-//RS     raw_protocol_return: bool,
-//RS     inline_module: Option<&str>,
-//RS     ct_checked_funcs: Option<&HashMap<String, Func>>,
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     products: &mut BodyProducts,
-//RS ) -> Vec<Diagnostic> {
-//RS     let deferred_table = HashMap::new();
-//RS     let defer_ct_evaluation = ct_checked_funcs.is_none();
-//RS     let ct_checked_funcs = ct_checked_funcs.unwrap_or(&deferred_table);
-//RS     let module_idx = cx.module_idx;
-//RS     let states = cx.states;
-//RS     let st = &states[module_idx];
-//RS     // D-NAME-WALK1=A: an inline-module body overlays its own imports on the
-//RS     // file's maps. A top-level body reads the file's maps directly; copying
-//RS     // them per body made body checking quadratic in the file's import count.
-//RS     let scoped = inline_module.map(|inline_module| {
-//RS         let mut imports = st.imports.clone();
-//RS         let mut core_imports = st.core_imports.clone();
-//RS         let mut unqualified = st.unqualified.clone();
-//RS         let mut unqualified_file = st.unqualified_file.clone();
-//RS         let mut core_item_imports = st.core_item_imports.clone();
-//RS         for ((scope, name), target) in &st.inline_foreign_imports {
-//RS             if scope == inline_module {
-//RS                 imports.insert(name.clone(), *target);
-//RS             }
-//RS         }
-//RS         for ((scope, name), module) in &st.inline_core_imports {
-//RS             if scope == inline_module {
-//RS                 core_imports.insert(name.clone(), module.clone());
-//RS             }
-//RS         }
-//RS         for ((scope, name), item) in &st.inline_core_items {
-//RS             if scope == inline_module {
-//RS                 core_item_imports.insert(name.clone(), item.clone());
-//RS             }
-//RS         }
-//RS         for ((scope, name), mangled) in &st.inline_unqualified {
-//RS             if scope == inline_module {
-//RS                 unqualified.insert(name.clone(), mangled.clone());
-//RS             }
-//RS         }
-//RS         for ((scope, name), target) in &st.inline_unqualified_file {
-//RS             if scope == inline_module {
-//RS                 unqualified_file.insert(name.clone(), target.clone());
-//RS             }
-//RS         }
-//RS         (imports, core_imports, unqualified, unqualified_file, core_item_imports)
-//RS     });
-//RS     let mut ck = checker_for_module(
-//RS         module_idx,
-//RS         states,
-//RS         cx.plugin_interfaces,
-//RS         cx.devtools_registry,
-//RS         cx.effect_facts,
-//RS         cx.ct_funcs,
-//RS         ct_checked_funcs,
-//RS         st.items.as_slice(),
-//RS         cx.ct_externs,
-//RS         cx.ct_base_dir,
-//RS         cx.ct_globals,
-//RS         cx.no_os,
-//RS         cx.gates,
-//RS         cx.no_prelude,
-//RS         name_ledger,
-//RS         Some(f),
-//RS         raw_protocol_return,
-//RS         defer_ct_evaluation,
-//RS     );
-//RS     let (scoped_imports, scoped_core_imports, scoped_unqualified, scoped_unqualified_file, scoped_core_item_imports) =
-//RS         match &scoped {
-//RS             Some((imports, core_imports, unqualified, unqualified_file, core_item_imports)) => {
-//RS                 (imports, core_imports, unqualified, unqualified_file, core_item_imports)
-//RS             }
-//RS             None => (
-//RS                 &st.imports,
-//RS                 &st.core_imports,
-//RS                 &st.unqualified,
-//RS                 &st.unqualified_file,
-//RS                 &st.core_item_imports,
-//RS             ),
-//RS         };
-//RS     ck.imports = scoped_imports;
-//RS     ck.core_imports = scoped_core_imports;
-//RS     ck.unqualified = scoped_unqualified;
-//RS     ck.unqualified_file = scoped_unqualified_file;
-//RS     ck.core_item_imports = scoped_core_item_imports;
-//RS     ck.inline_module = inline_module.map(str::to_owned);
-//RS     // Canonicalize the declaration before the shared body checker projects
-//RS     // the implicit failure carrier. This keeps alias-backed returns from
-//RS     // becoming nested `Result<Result<...>, Err>` values in later seams.
-//RS     ck.canonicalize_function_return_type(f);
-//RS     ck.ret = crate::Sema::checked_body_return_type(f, raw_protocol_return);
-//RS     for (active, name, span) in [
-//RS         (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
-//RS         (f.is_sanitizer, crate::Syntax::KW_SANITIZER, f.name_span),
-//RS         (
-//RS             f.is_unsafe,
-//RS             crate::Syntax::KW_UNSAFE,
-//RS             f.unsafe_span.unwrap_or(f.name_span),
-//RS         ),
-//RS         (
-//RS             f.is_replayable,
-//RS             crate::Syntax::MARKER_REPLAYABLE,
-//RS             f.replayable_span.unwrap_or(f.name_span),
-//RS         ),
-//RS         (
-//RS             f.is_must_use,
-//RS             crate::Syntax::MARKER_MUST_USE,
-//RS             f.must_use_span.unwrap_or(f.name_span),
-//RS         ),
-//RS         (
-//RS             f.is_inline,
-//RS             crate::Syntax::MARKER_INLINE,
-//RS             f.inline_span.unwrap_or(f.name_span),
-//RS         ),
-//RS         (
-//RS             f.is_inline_always,
-//RS             crate::Syntax::MARKER_INLINE,
-//RS             f.inline_span.unwrap_or(f.name_span),
-//RS         ),
-//RS         (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
-//RS     ] {
-//RS         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
-//RS             ck.diags.push(Diagnostic::error("E0355", format!("`#{name}` cannot attach to a function"), "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain".to_string(), "move the rule to one of its registered sites".to_string(), Some(span)));
-//RS         }
-//RS     }
-//RS     ck.check_params_and_body(f, owner_type);
-//RS     // D-NEVER2=B: the declared bottom contract must have no normal exit.
-//RS     // The shared flow proof already understands loops, panic, and known
-//RS     // diverging calls, so report the actual fallthrough boundary here.
-//RS     if f.return_type
-//RS         .as_ref()
-//RS         .is_some_and(Type::has_never_success)
-//RS         && body_flow(&f.body, &st.diverging_functions, st).normal
-//RS     {
-//RS         let span = f
-//RS             .body
-//RS             .last()
-//RS             .map(|stmt| stmt.span())
-//RS             .unwrap_or(f.return_type_span.unwrap_or(f.name_span));
-//RS         ck.diags.push(Diagnostic::from_row(
-//RS             "E2423",
-//RS             &[("function", f.name.as_str())],
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS     // D-NEVER2=B: preserve the inferred D-NEVER1 fact for internal callers,
-//RS     // while making an always-diverging public API explicit for downstream
-//RS     // users and API snapshots.
-//RS     if f.is_pub && f.return_type.is_none() && f.diverges {
-//RS         ck.diags.push(Diagnostic::from_row(
-//RS             "L2421",
-//RS             &[("function", f.name.as_str())],
-//RS             Some(f.name_span),
-//RS         ));
-//RS     }
-//RS     apply_reactive_upgrade_flags(&mut f.body, &ck.reactive_upgrade_names);
-//RS     // D-DATARACE1=C: drain upgrade-report lines onto the function for codegen/`jet report`.
-//RS     f.reactive_upgrades = std::mem::take(&mut ck.reactive_upgrades);
-//RS     f.return_view_provenance = ck.return_view_provenance.clone();
-//RS     if let Some(declared) = f.declared_return_view_provenance.clone() {
-//RS         // D-MEMPROVENANCE3=A: inferred sources must be ⊆ declaration; callers
-//RS         // see the declared (possibly wider) contract. A bare `from packet`
-//RS         // covers every field/index/range projection of that owner.
-//RS         //
-//RS         // Card #1360: the `from` clause carries access too. Declared maps are
-//RS         // parsed with `mutable: false`; keep the inferred write/read capability
-//RS         // (Pin / ViewMut vs View) so a returned aggregate can store an exclusive
-//RS         // window and the caller may edit through it.
-//RS         if let Some(inferred) = f.return_view_provenance.as_ref() {
-//RS             for (slot, inferred_prov) in inferred {
-//RS                 let Some(declared_prov) = declared.get(slot).or_else(|| declared.get(&Vec::new()))
-//RS                 else {
-//RS                     ck.diags.push(Diagnostic::error(
-//RS                         "E2305",
-//RS                         "returned view escapes its declared `from` clause".to_string(),
-//RS                         "every return path's owners must stay inside the sources named after `from`".to_string(),
-//RS                         "widen the `from` clause, or stop returning a view from that owner".to_string(),
-//RS                         f.return_type_span.or(Some(f.name_span)),
-//RS                     ));
-//RS                     continue;
-//RS                 };
-//RS                 let allowed = inferred_prov.sources.iter().all(|inferred_path| {
-//RS                     declared_prov.sources.iter().any(|declared_path| {
-//RS                         declared_path.source == inferred_path.source
-//RS                             && inferred_path
-//RS                                 .projections
-//RS                                 .starts_with(declared_path.projections.as_slice())
-//RS                     })
-//RS                 });
-//RS                 if !allowed {
-//RS                     ck.diags.push(Diagnostic::error(
-//RS                         "E2305",
-//RS                         "returned view escapes its declared `from` clause".to_string(),
-//RS                         "every return path's owners must stay inside the sources named after `from`".to_string(),
-//RS                         "widen the `from` clause, or stop returning a view from that owner".to_string(),
-//RS                         f.return_type_span.or(Some(f.name_span)),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let mut merged = declared.clone();
-//RS         if let Some(inferred) = f.return_view_provenance.as_ref() {
-//RS             // Publish inferred output slots (field paths) so an aggregate that
-//RS             // mixes owned data with a stored window does not treat every field
-//RS             // as a view into the owner. Sources come from the declared contract
-//RS             // (possibly wider); access comes from inference.
-//RS             let mut published = crate::AST::ViewProvenanceMap::new();
-//RS             for (slot, inferred_prov) in inferred {
-//RS                 let sources = declared
-//RS                     .get(slot)
-//RS                     .or_else(|| declared.get(&Vec::new()))
-//RS                     .map(|prov| prov.sources.clone())
-//RS                     .unwrap_or_else(|| inferred_prov.sources.clone());
-//RS                 published.insert(
-//RS                     slot.clone(),
-//RS                     crate::AST::ViewProvenance {
-//RS                         sources,
-//RS                         mutable: inferred_prov.mutable,
-//RS                     },
-//RS                 );
-//RS             }
-//RS             for (slot, declared_prov) in &declared {
-//RS                 if slot.is_empty() || published.contains_key(slot) {
-//RS                     continue;
-//RS                 }
-//RS                 published.insert(slot.clone(), declared_prov.clone());
-//RS             }
-//RS             // Bare `from owner` with no inferred field slots still publishes
-//RS             // the root contract, with write access if the return type needs it.
-//RS             if published.is_empty() {
-//RS                 for (slot, declared_prov) in merged.iter_mut() {
-//RS                     if slot.is_empty() {
-//RS                         declared_prov.mutable = inferred.values().any(|prov| prov.mutable);
-//RS                     }
-//RS                 }
-//RS                 f.return_view_provenance = Some(merged);
-//RS             } else {
-//RS                 f.return_view_provenance = Some(published);
-//RS             }
-//RS         } else if let Some(ret) = f.return_type.as_ref() {
-//RS             // No inferred body facts (e.g. abstract signature): derive access
-//RS             // from the return type's view leaves.
-//RS             let leaves = ck.view_leaf_paths(ret);
-//RS             for (slot, declared_prov) in merged.iter_mut() {
-//RS                 if slot.is_empty() {
-//RS                     declared_prov.mutable = leaves
-//RS                         .iter()
-//RS                         .any(|(_, access)| *access == ViewAccess::Write);
-//RS                 } else {
-//RS                     declared_prov.mutable = leaves
-//RS                         .iter()
-//RS                         .any(|(path, access)| path == slot && *access == ViewAccess::Write);
-//RS                 }
-//RS             }
-//RS             f.return_view_provenance = Some(merged);
-//RS         } else {
-//RS             f.return_view_provenance = Some(merged);
-//RS         }
-//RS     }
-//RS     if let Some(owner) = owner_type {
-//RS         if let (Some(signature), Some(provenance)) = (
-//RS             st.registry.method(owner, &f.name),
-//RS             f.return_view_provenance.clone(),
-//RS         ) {
-//RS             let _ = signature.return_view_provenance.set(provenance);
-//RS         }
-//RS     } else {
-//RS         if let (Some(signature), Some(provenance)) =
-//RS             (st.funcs.get(&f.name), f.return_view_provenance.clone())
-//RS         {
-//RS             let _ = signature.return_view_provenance.set(provenance);
-//RS         }
-//RS     }
-//RS     // Direct ambient/foreign operations keep their precise body diagnostic.
-//RS     // User callees are checked after the shared reachability projection so an
-//RS     // inferred-pure callee need not repeat `-[]>`.
-//RS     if f.is_pure {
-//RS         ck.diags.extend(check_pure_fn(f, &st.funcs));
-//RS     }
-//RS     // D-METHODMACRO1=A: the local half of the `#Inline(Always)` check (self-
-//RS     // recursion E0917 + size ceiling E0919); roll this function's
-//RS     // address-taken names into the whole-program accumulator so the E0918
-//RS     // pass after the full bundle check can see them.
-//RS     if f.is_inline_always {
-//RS         ck.diags.extend(check_inline_always_fn(f));
-//RS     }
-//RS     // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
-//RS     ck.diags.extend(check_every_marker(f, &st.registry));
-//RS     products
-//RS         .addr_taken
-//RS         .extend(std::mem::take(&mut ck.inline_addr_taken));
-//RS     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
-//RS     // into the whole-bundle accumulator for `jet inspect expand --facts refs`.
-//RS     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
-//RS     products
-//RS         .embed_inputs
-//RS         .extend(std::mem::take(&mut ck.ct_embed_inputs));
-//RS     // D-EFFECT-OMIT1/D-EFF3: an explicit row is an upper bound, not an effect
-//RS     // declaration. Static calls propagate the implementation's inferred body
-//RS     // row; dynamic trait calls use the trait method bound separately.
-//RS     let mut direct = std::mem::take(&mut ck.fx_direct);
-//RS     let mut direct_spans = std::mem::take(&mut ck.fx_direct_spans);
-//RS     let memory_events = std::mem::take(&mut ck.fx_memory_events);
-//RS     // D-AUTHORITY-MEM1: memory operations publish the same rights-tree names
-//RS     // as manifest `authority.holds.deny`. The detailed event stream remains the
-//RS     // source for bounded proofs and diagnostics.
-//RS     for event in &memory_events {
-//RS         let right = match event.kind {
-//RS             super::super::MemoryEventKind::Allocation
-//RS             | super::super::MemoryEventKind::ArenaBytes(_) => "Mem.Alloc",
-//RS             super::super::MemoryEventKind::RetainRelease => "Mem.Rc",
-//RS         };
-//RS         direct.insert(right.to_string());
-//RS         direct_spans.entry(right.to_string()).or_insert(event.span);
-//RS     }
-//RS     let mut memory_events = memory_events;
-//RS     for event in &mut memory_events {
-//RS         event.source = st.module_path.clone();
-//RS         event.provenance = format!("{} in {}", effect_key(owner_type, &f.name), st.module_path);
-//RS     }
-//RS     for region in &mut ck.fx_memory_regions {
-//RS         for event in &mut region.events {
-//RS             event.source = st.module_path.clone();
-//RS             event.provenance = format!(
-//RS                 "{} block policy in {}",
-//RS                 effect_key(owner_type, &f.name),
-//RS                 st.module_path
-//RS             );
-//RS         }
-//RS     }
-//RS     if !ck
-//RS         .diags
-//RS         .iter()
-//RS         .any(|diagnostic| matches!(diagnostic.severity, crate::Diagnostics::Severity::Error))
-//RS     {
-//RS         products.pending_diagnostics.extend(
-//RS             std::mem::take(&mut ck.fx_pending_diagnostics)
-//RS                 .into_iter()
-//RS                 .map(|diagnostic| PendingFunctionDiagnostic {
-//RS                     function_key: effect_key(owner_type, &f.name),
-//RS                     function_span: f.span,
-//RS                     diagnostic,
-//RS                 }),
-//RS         );
-//RS     }
-//RS     products.summaries.insert(
-//RS         effect_key(owner_type, &f.name),
-//RS         EffectSummary {
-//RS             direct,
-//RS             direct_spans,
-//RS             edges: std::mem::take(&mut ck.fx_edges),
-//RS             maximal: ck.fx_maximal,
-//RS             maximal_span: ck.fx_maximal_span,
-//RS             unbounded_trait_dispatch: false,
-//RS             regions: std::mem::take(&mut ck.fx_regions),
-//RS             authority_delegations: std::mem::take(&mut ck.fx_authority_delegations),
-//RS             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
-//RS             autodiff_obligations: std::mem::take(&mut ck.fx_autodiff_obligations),
-//RS             compute_calls: std::mem::take(&mut ck.fx_compute_calls),
-//RS             autodiff_safe_panic: ck.fx_autodiff_safe_panic,
-//RS             autodiff_unsafe_panic: ck.fx_autodiff_unsafe_panic,
-//RS             memory: super::MemoryFacts::MemorySummary {
-//RS                 events: memory_events,
-//RS                 open_dispatches: std::mem::take(&mut ck.fx_memory_open),
-//RS                 regions: std::mem::take(&mut ck.fx_memory_regions),
-//RS                 unbounded_control: std::mem::take(&mut ck.fx_memory_unbounded_control),
-//RS                 calls: std::mem::take(&mut ck.fx_memory_calls),
-//RS             },
-//RS             discarded_results: std::mem::take(&mut ck.fx_discarded_results),
-//RS             failure_direct: ck.failure_direct_source,
-//RS         },
-//RS     );
-//RS     products.uses_exact_int |= ck.uses_exact_int;
-//RS     products.ran_ct_evaluator |= ck.ct_evaluator_ran.get();
-//RS     products
-//RS         .devtools_publications
-//RS         .extend(std::mem::take(&mut ck.devtools_publications));
-//RS     ck.diags
-//RS }
-//RS 
-//RS /// D-DATARACE1=C: mark reactive bindings that crossed a concurrency boundary so
-//RS /// codegen can emit the upgrade report comments.
-//RS pub(super) fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::HashSet<String>) {
-//RS     fn walk(stmts: &mut [Stmt], names: &std::collections::HashSet<String>) {
-//RS         for stmt in stmts {
-//RS             match stmt {
-//RS                 Stmt::Val(b) => {
-//RS                     if names.contains(&b.name) || b.reactive_shared() {
-//RS                         b.reactive_upgrade = true;
-//RS                     }
-//RS                 }
-//RS                 Stmt::While { body, .. }
-//RS                 | Stmt::For { body, .. }
-//RS                 | Stmt::Loop { body, .. }
-//RS                 | Stmt::CountedLoop { body, .. }
-//RS                 | Stmt::Unsafe { body, .. }
-//RS                 | Stmt::Impure { body, .. }
-//RS                 | Stmt::Reactive { body, .. }
-//RS                 | Stmt::Shield { body, .. }
-//RS                 | Stmt::Region { body, .. }
-//RS                 | Stmt::Policy { body, .. }
-//RS                 | Stmt::TaskGroup { body, .. }
-//RS                 | Stmt::AuthorityScope { body, .. }
-//RS                 | Stmt::ComptimeBlock { body, .. }
-//RS                 | Stmt::ContextBlock { body, .. }
-//RS                 | Stmt::Live { body, .. }
-//RS                 | Stmt::AssumeDet { body, .. }
-//RS                 | Stmt::Transact { body, .. }
-//RS                 | Stmt::Switched { body, .. } => walk(body, names),
-//RS                 Stmt::Switch {
-//RS                     arms, else_body, ..
-//RS                 }
-//RS                 | Stmt::ComptimeSwitch {
-//RS                     arms, else_body, ..
-//RS                 } => {
-//RS                     for arm in arms.iter_mut() {
-//RS                         walk(&mut arm.body, names);
-//RS                     }
-//RS                     if let Some(else_body) = else_body {
-//RS                         walk(else_body, names);
-//RS                     }
-//RS                 }
-//RS                 Stmt::ComptimeIf {
-//RS                     then_body,
-//RS                     else_body,
-//RS                     ..
-//RS                 } => {
-//RS                     walk(then_body, names);
-//RS                     if let Some(else_body) = else_body {
-//RS                         walk(else_body, names);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     walk(stmts, names);
-//RS }
-//RS  
-//RS 
-//RS /// Project the callable contract into a function value's type without
-//RS /// promoting declaration-local names to public labels. Keep an entry for
-//RS /// every parameter so positional-only and label-only zones remain visible;
-//RS /// `call_metadata` retains the local names for diagnostics and calls.
-//RS pub(super) fn function_value_param_contract(sig: &FuncSig) -> Option<Vec<(String, crate::AST::ParamZone)>> {
-//RS     let mut contract = Vec::with_capacity(sig.param_call.len());
-//RS     for (index, (label, zone)) in sig.param_call.iter().enumerate() {
-//RS         let implicit_local_label = *zone == crate::AST::ParamZone::Either
-//RS             && sig
-//RS                 .param_info
-//RS                 .get(index)
-//RS                 .is_some_and(|(name, _)| name == label);
-//RS         let label = match zone {
-//RS             crate::AST::ParamZone::PositionalOnly => String::new(),
-//RS             crate::AST::ParamZone::Either if implicit_local_label => String::new(),
-//RS             _ => label.clone(),
-//RS         };
-//RS         contract.push((label, *zone));
-//RS     }
-//RS     contract
-//RS         .iter()
-//RS         .any(|(label, zone)| !label.is_empty() || *zone != crate::AST::ParamZone::Either)
-//RS         .then_some(contract)
-//RS }
-//RS 
-//RS pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
-//RS     Type::Fn {
-//RS         params: sig
-//RS             .params
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, (_, ty))| {
-//RS                 if sig.param_variadic.get(index).copied().unwrap_or(false) {
-//RS                     Type::List(Box::new(ty.clone()))
-//RS                 } else {
-//RS                     ty.clone()
-//RS                 }
-//RS             })
-//RS             .collect(),
-//RS         ret: Some(Box::new(sig.effective_return_type())),
-//RS         // D-CABI-CALLBACK1 / D-EFF2: a function sema proved effect-free
-//RS         // (`pure fn`, or an allocation-free panic-free scalar body) publishes
-//RS         // the empty effect bound, so its value satisfies `-[]>` callable
-//RS         // positions without a second policing mechanism.
-//RS         effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
-//RS         param_contract: function_value_param_contract(sig),
-//RS         call_metadata: Some(crate::AST::FunctionCallMetadata {
-//RS             names: sig
-//RS                 .param_info
-//RS                 .iter()
-//RS                 .map(|(name, _)| name.clone())
-//RS                 .collect(),
-//RS             defaults: sig.defaults.clone(),
-//RS             variadic: sig.param_variadic.clone(),
-//RS             conventions: sig
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|(convention, _)| *convention)
-//RS                 .collect(),
-//RS             policies: sig.callable_policies.clone(),
-//RS         }),
-//RS         return_view_provenance: sig.return_view_provenance.get(),
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     /// A function read as a value publishes the same resolved nominals a
-//RS     /// direct call checks against: its parameters and its declared return.
-//RS     pub(crate) fn checked_func_sig_to_fn_type(&mut self, sig: &FuncSig) -> Type {
-//RS         let mut function_type = func_sig_to_fn_type(sig);
-//RS         if let Type::Fn { params, ret, .. } = &mut function_type {
-//RS             for param in params.iter_mut() {
-//RS                 *param = self.resolve_type(param.clone());
-//RS             }
-//RS             if let Some(ret) = ret {
-//RS                 let (_, effective) =
-//RS                     self.checked_return_types(sig.return_type.clone(), sig.is_extern);
-//RS                 **ret = effective;
-//RS             }
-//RS         }
-//RS         function_type
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
-//RS     let want = want.with_effective_fn_returns();
-//RS     let got = got.with_effective_fn_returns();
-//RS 
-//RS     fn carrier_compatible(want: &Type, got: &Type) -> bool {
-//RS         let mut compatible = true;
-//RS         let shape = Type::for_each_composite_pair(want, got, &mut |want, got| {
-//RS             if compatible {
-//RS                 compatible = match (want, got) {
-//RS                     (Type::List(_), Type::List(_))
-//RS                     | (Type::Option(_), Type::Option(_))
-//RS                     | (Type::Result { .. }, Type::Result { .. }) => true,
-//RS                     (
-//RS                         Type::Apply {
-//RS                             name: want_name, ..
-//RS                         },
-//RS                         Type::Apply { name: got_name, .. },
-//RS                     ) => want_name == got_name,
-//RS                     (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
-//RS                     _ => want == got,
-//RS                 };
-//RS             }
-//RS         });
-//RS         shape.is_ok() && compatible
-//RS     }
-//RS     fn effect_bound_compatible(
-//RS         want: Option<&Vec<(String, Span)>>,
-//RS         got: Option<&Vec<(String, Span)>>,
-//RS     ) -> bool {
-//RS         match want {
-//RS             None => true,
-//RS             Some(want) => got.is_some_and(|got| {
-//RS                 got.iter()
-//RS                     .all(|(effect, _)| want.iter().any(|(required, _)| required == effect))
-//RS             }),
-//RS         }
-//RS     }
-//RS     let (
-//RS         Type::Fn {
-//RS             params: wp,
-//RS             ret: wr,
-//RS             effect_bound: we,
-//RS             ..
-//RS         },
-//RS         Type::Fn {
-//RS             params: gp,
-//RS             ret: gr,
-//RS             effect_bound: ge,
-//RS             ..
-//RS         },
-//RS     ) = (&want, &got)
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     if wp.len() != gp.len() {
-//RS         return false;
-//RS     }
-//RS     for (a, b) in wp.iter().zip(gp.iter()) {
-//RS         if !carrier_compatible(a, b) {
-//RS             return false;
-//RS         }
-//RS     }
-//RS     let return_compatible = match (wr, gr) {
-//RS         (None, None) => true,
-//RS         // A callable that cannot fail (`Never!`) fits any failure slot of the
-//RS         // same success type; the fn-value adapter supplies the slot's carrier.
-//RS         (Some(a), Some(b)) => {
-//RS             carrier_compatible(a, b)
-//RS                 || matches!(
-//RS                     (a.as_ref(), b.as_ref()),
-//RS                     (Type::Result { ok: want_ok, .. }, Type::Result { ok: got_ok, err: got_err })
-//RS                         if got_err.is_never() && carrier_compatible(want_ok, got_ok)
-//RS                 )
-//RS         }
-//RS         (None, Some(b)) | (Some(b), None) => crate::AST::is_unit_callable_return(b),
-//RS     };
-//RS     return_compatible && effect_bound_compatible(we.as_ref(), ge.as_ref())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod callable_contract_tests {
-//RS     use super::fn_types_compatible;
-//RS     use crate::AST::{ParamZone, Type};
-//RS 
-//RS     fn callable(contract: Option<Vec<(&str, ParamZone)>>) -> Type {
-//RS         Type::Fn {
-//RS             params: vec![Type::Bool],
-//RS             ret: Some(Box::new(Type::Int)),
-//RS             effect_bound: None,
-//RS             param_contract: contract.map(|entries| {
-//RS                 entries
-//RS                     .into_iter()
-//RS                     .map(|(label, zone)| (label.to_string(), zone))
-//RS                     .collect()
-//RS             }),
-//RS             call_metadata: None,
-//RS             return_view_provenance: None,
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn function_contract_metadata_does_not_affect_assignability() {
-//RS         let bare = callable(None);
-//RS         let labelled = callable(Some(vec![("force", ParamZone::LabelOnly)]));
-//RS         let either = callable(Some(vec![("force", ParamZone::Either)]));
-//RS 
-//RS         assert!(fn_types_compatible(&bare, &labelled));
-//RS         assert!(fn_types_compatible(&labelled, &bare));
-//RS         assert!(fn_types_compatible(&labelled, &either));
-//RS         assert!(fn_types_compatible(&either, &labelled));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn composite_callable_assignability_walks_nested_carriers() {
-//RS         fn nested(zone: ParamZone) -> Type {
-//RS             Type::Fn {
-//RS                 params: vec![Type::Bool],
-//RS                 ret: Some(Box::new(Type::Int)),
-//RS                 effect_bound: None,
-//RS                 param_contract: Some(vec![("force".to_string(), zone)]),
-//RS                 call_metadata: None,
-//RS                 return_view_provenance: None,
-//RS             }
-//RS         }
-//RS         fn outer(name: &str, inner: Type) -> Type {
-//RS             Type::Fn {
-//RS                 params: vec![Type::Apply {
-//RS                     name: name.to_string(),
-//RS                     args: vec![
-//RS                         Type::List(Box::new(inner)),
-//RS                         Type::Option(Box::new(Type::Result {
-//RS                             ok: Box::new(Type::Int),
-//RS                             err: Box::new(Type::String),
-//RS                         })),
-//RS                     ],
-//RS                 }],
-//RS                 ret: None,
-//RS                 effect_bound: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS                 return_view_provenance: None,
-//RS             }
-//RS         }
-//RS 
-//RS         assert!(fn_types_compatible(
-//RS             &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
-//RS             &outer("SyntheticCarrier", nested(ParamZone::Either)),
-//RS         ));
-//RS         assert!(fn_types_compatible(
-//RS             &outer("SyntheticCarrier", nested(ParamZone::LabelOnly)),
-//RS             &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
-//RS         ));
-//RS         assert!(!fn_types_compatible(
-//RS             &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
-//RS             &outer("OtherCarrier", nested(ParamZone::PositionalOnly)),
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS /// D-TEST1: which parameter types the property-test runner can synthesize inputs
-//RS /// for. The generator (codegen) covers the scalar value types plus `[T]` and
-//RS /// `T?` of a generatable element. Anything else (user structs/enums, `Map`,
-//RS /// functions, trait objects) has no automatic generator yet, so reject it with a
-//RS /// clear error rather than miscompile (I3 — checking lives in sema).
-//RS pub(super) fn property_param_generatable(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Int
-//RS         | Type::Float
-//RS         | Type::Bool
-//RS         | Type::String
-//RS         | Type::Char
-//RS         | Type::Float32
-//RS         | Type::IntN { .. }
-//RS         | Type::InlineRange { .. } => true,
-//RS         Type::List(inner) | Type::Option(inner) => property_param_generatable(inner),
-//RS         Type::FixedList { elem, .. } => property_param_generatable(elem),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// E0613: a property-test parameter type with no automatic value generator.
-//RS pub(super) fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagnostic> {
-//RS     if property_param_generatable(ty) {
-//RS         return None;
-//RS     }
-//RS     Some(Diagnostic::error(
-//RS         "E0613",
-//RS         format!(
-//RS             "a property test can't generate values of type `{}`",
-//RS             ty.name()
-//RS         ),
-//RS         format!(
-//RS             "a parameterized `#{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
-//RS             Syntax::KW_TEST,
-//RS             Syntax::LANG_NAME
-//RS         ),
-//RS         "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
-//RS         Some(span),
-//RS     ))
-//RS }
-//RS /// D-NEVER1=C: compute one bundle-wide fixed point of user functions whose
-//RS /// execution has no returning path. The result is a sema fact only; it is
-//RS /// copied into each module state before body checking and never becomes a type.
-//RS pub(crate) fn collect_diverging_functions(
-//RS     states: &[ModuleState],
-//RS ) -> std::collections::HashSet<String> {
-//RS     let mut diverging = std::collections::HashSet::new();
-//RS     // D-NEVER2=B: declared `Never` success contracts are bottom facts before
-//RS     // the fixed point starts. Their `Err` route remains a real fallible exit,
-//RS     // but a direct call has no successful continuation.
-//RS     for state in states {
-//RS         for item in &state.items {
-//RS             match item {
-//RS                 Item::Func(function)
-//RS                     if function
-//RS                         .return_type
-//RS                         .as_ref()
-//RS                         .is_some_and(Type::has_never_success) =>
-//RS                 {
-//RS                     diverging.insert(function.name.clone());
-//RS                 }
-//RS                 Item::CodeModule(module) => {
-//RS                     let Some(body) = &module.body else {
-//RS                         continue;
-//RS                     };
-//RS                     for inner in body {
-//RS                         let Item::Func(function) = inner else {
-//RS                             continue;
-//RS                         };
-//RS                         if function
-//RS                             .return_type
-//RS                             .as_ref()
-//RS                             .is_some_and(Type::has_never_success)
-//RS                         {
-//RS                             diverging.insert(jet_foundation::Names::member_name(
-//RS                                 &module.name,
-//RS                                 &function.name,
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     loop {
-//RS         let mut changed = false;
-//RS         for state in states {
-//RS             for item in &state.items {
-//RS                 match item {
-//RS                     Item::Func(function) => {
-//RS                         if body_definitely_diverges(&function.body, &diverging, state)
-//RS                             && diverging.insert(function.name.clone())
-//RS                         {
-//RS                             changed = true;
-//RS                         }
-//RS                     }
-//RS                     Item::CodeModule(module) => {
-//RS                         let Some(body) = &module.body else {
-//RS                             continue;
-//RS                         };
-//RS                         for inner in body {
-//RS                             let Item::Func(function) = inner else {
-//RS                                 continue;
-//RS                             };
-//RS                             if body_definitely_diverges(&function.body, &diverging, state) {
-//RS                                 let name = jet_foundation::Names::member_name(
-//RS                                     &module.name,
-//RS                                     &function.name,
-//RS                                 );
-//RS                                 if diverging.insert(name) {
-//RS                                     changed = true;
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !changed {
-//RS             return diverging;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHAPE-PLACE1=A: a range write window has a fixed length, so it may fill a
-//RS /// list write parameter only when the callee keeps that list's length. This
-//RS /// bundle-wide greatest fixed point returns every `(function, parameter index)`
-//RS /// whose list write parameter is proven length-preserving: the body never
-//RS /// resizes or reassigns it and passes it onward only to parameters that are
-//RS /// proven themselves. Unknown, extern, method, and function-value callees count
-//RS /// as resizing, so recursion that never resizes stays proven.
-//RS pub(crate) fn collect_fixed_length_write_params(
-//RS     states: &[ModuleState],
-//RS ) -> std::collections::HashSet<(String, usize)> {
-//RS     let mut functions: Vec<(String, &Func)> = Vec::new();
-//RS     for state in states {
-//RS         for item in &state.items {
-//RS             match item {
-//RS                 Item::Func(function) => functions.push((function.name.clone(), function)),
-//RS                 Item::CodeModule(module) => {
-//RS                     for inner in module.body.iter().flatten() {
-//RS                         if let Item::Func(function) = inner {
-//RS                             functions.push((
-//RS                                 jet_foundation::Names::member_name(&module.name, &function.name),
-//RS                                 function,
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     // Calls name functions by their plain name, so a plain name declared more
-//RS     // than once in the bundle (in any module) is ambiguous: never prove it.
-//RS     let mut declared = std::collections::HashMap::<&str, usize>::new();
-//RS     for (_, function) in &functions {
-//RS         *declared.entry(function.name.as_str()).or_default() += 1;
-//RS     }
-//RS     let mut proven = std::collections::HashSet::new();
-//RS     let mut onward_uses = Vec::new();
-//RS     for (name, function) in &functions {
-//RS         if declared.get(function.name.as_str()).copied().unwrap_or_default() > 1 {
-//RS             continue;
-//RS         }
-//RS         for (index, param) in function.params.iter().enumerate() {
-//RS             if param.convention != crate::AST::AccessConvention::Write
-//RS                 || !matches!(param.ty, Type::List(_))
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             if let Some(onward) = write_list_param_onward_uses(&function.body, &param.name) {
-//RS                 let key = (name.clone(), index);
-//RS                 proven.insert(key.clone());
-//RS                 onward_uses.push((key, onward));
-//RS             }
-//RS         }
-//RS     }
-//RS     loop {
-//RS         let before = proven.len();
-//RS         onward_uses.retain(|(key, onward)| {
-//RS             if onward.iter().all(|target| proven.contains(target)) {
-//RS                 true
-//RS             } else {
-//RS                 proven.remove(key);
-//RS                 false
-//RS             }
-//RS         });
-//RS         if proven.len() == before {
-//RS             return proven;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Length-preserving list methods: a `&param.method()` call with one of these
-//RS /// names edits elements in place and never changes the list's length.
-//RS const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
-//RS     "sort",
-//RS     "sort_desc",
-//RS     "sort_by",
-//RS     "sort_by_key",
-//RS     "reverse",
-//RS     "swap",
-//RS     "fill",
-//RS     "shuffle",
-//RS     "rotate_left",
-//RS     "rotate_right",
-//RS ];
-//RS 
-//RS /// The onward `(callee, parameter index)` uses of list write parameter `param`
-//RS /// in `body`, or `None` when the body may resize it: a write-marked method
-//RS /// that is not length-preserving, a reassignment of the whole list, a write
-//RS /// pass to a method or function value, or any other whole-list write mark
-//RS /// (such as binding `w := &param`) whose later use the fact cannot follow.
-//RS fn write_list_param_onward_uses(body: &[Stmt], param: &str) -> Option<Vec<(String, usize)>> {
-//RS     fn is_param(expr: &Expr, param: &str) -> bool {
-//RS         match expr {
-//RS             Expr::Paren(inner, _) => is_param(inner, param),
-//RS             Expr::Ident(name, _) => name == param,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS     let mut resizes = assigns_whole_local(body, param);
-//RS     let mut marks = 0usize;
-//RS     let mut accounted = 0usize;
-//RS     let mut onward = Vec::new();
-//RS     for stmt in body {
-//RS         stmt.for_each_expr(|expr| match expr {
-//RS             Expr::Place(inner, crate::AST::PlaceAccess::Write, _) if is_param(inner, param) => {
-//RS                 marks += 1;
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } => {
-//RS                 if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = receiver.as_ref() {
-//RS                     if is_param(inner, param) {
-//RS                         accounted += 1;
-//RS                         if !LENGTH_PRESERVING_LIST_METHODS.contains(&method.as_str()) {
-//RS                             resizes = true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 if args.iter().any(|arg| {
-//RS                     arg.convention == crate::AST::AccessConvention::Write
-//RS                         && is_param(&arg.expr, param)
-//RS                 }) {
-//RS                     resizes = true;
-//RS                 }
-//RS             }
-//RS             Expr::Call(call) => {
-//RS                 for (index, arg) in call.args.iter().enumerate() {
-//RS                     if arg.convention == crate::AST::AccessConvention::Write
-//RS                         && is_param(&arg.expr, param)
-//RS                     {
-//RS                         onward.push((call.name.clone(), index));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::CallValue { args, .. } => {
-//RS                 if args.iter().any(|arg| {
-//RS                     arg.convention == crate::AST::AccessConvention::Write
-//RS                         && is_param(&arg.expr, param)
-//RS                 }) {
-//RS                     resizes = true;
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         });
-//RS     }
-//RS     (!resizes && marks == accounted).then_some(onward)
-//RS }
-//RS 
-//RS /// True when `body` assigns a whole new value to local `name` (`name = ...`)
-//RS /// at any depth, including statement bodies nested in `if` and block lambdas.
-//RS fn assigns_whole_local(body: &[Stmt], name: &str) -> bool {
-//RS     body.iter().any(|stmt| {
-//RS         let nested = match stmt {
-//RS             Stmt::Assign {
-//RS                 target: crate::AST::LValue::Local { name: target, .. },
-//RS                 ..
-//RS             } if target == name => return true,
-//RS             Stmt::While { body, .. }
-//RS             | Stmt::For { body, .. }
-//RS             | Stmt::CountedLoop { body, .. }
-//RS             | Stmt::Loop { body, .. }
-//RS             | Stmt::Reactive { body, .. }
-//RS             | Stmt::Shield { body, .. }
-//RS             | Stmt::Switched { body, .. }
-//RS             | Stmt::Region { body, .. }
-//RS             | Stmt::Policy { body, .. }
-//RS             | Stmt::AuthorityScope { body, .. }
-//RS             | Stmt::ComptimeBlock { body, .. }
-//RS             | Stmt::Live { body, .. }
-//RS             | Stmt::Transact { body, .. }
-//RS             | Stmt::Layout { body, .. }
-//RS             | Stmt::Unsafe { body, .. }
-//RS             | Stmt::Impure { body, .. }
-//RS             | Stmt::TaskGroup { body, .. }
-//RS             | Stmt::ContextBlock { body, .. }
-//RS             | Stmt::AssumeDet { body, .. }
-//RS             | Stmt::ScopeMember { body, .. } => assigns_whole_local(body, name),
-//RS             Stmt::Switch {
-//RS                 arms, else_body, ..
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 arms, else_body, ..
-//RS             } => {
-//RS                 arms.iter().any(|arm| assigns_whole_local(&arm.body, name))
-//RS                     || else_body
-//RS                         .as_ref()
-//RS                         .is_some_and(|body| assigns_whole_local(body, name))
-//RS             }
-//RS             Stmt::ComptimeIf {
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 assigns_whole_local(then_body, name)
-//RS                     || else_body
-//RS                         .as_ref()
-//RS                         .is_some_and(|body| assigns_whole_local(body, name))
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS         let mut in_expr = false;
-//RS         stmt.for_each_expr(|expr| match expr {
-//RS             Expr::If {
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 in_expr |= assigns_whole_local(then_body, name)
-//RS                     || assigns_whole_local(else_body, name);
-//RS             }
-//RS             Expr::Lambda(lambda) => {
-//RS                 if let crate::AST::LambdaBody::Block(body) = &lambda.body {
-//RS                     in_expr |= assigns_whole_local(body, name);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         });
-//RS         nested || in_expr
-//RS     })
-//RS }
-//RS /// Publish the fixed-point result on bundle functions for downstream lowering.
-//RS ///
-//RS /// A function is projected as diverging only when its body has no reachable
-//RS /// normal, returning, or loop-control path; an E0307 `NoElse` marker is an
-//RS /// absent fallthrough, not a diverging result, and every arm/fallback/loop
-//RS /// path must independently diverge.
-//RS ///
-//RS /// This is the sole semantic writer of `Func::diverges`; parser and synthetic
-//RS /// constructors only initialize the compiler-metadata bit to `false`.
-//RS pub(crate) fn project_divergence_facts(
-//RS     bundle: &mut crate::AST::ProgramBundle,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS ) {
-//RS     for module in &mut bundle.modules {
-//RS         for item in &mut module.items {
-//RS             match item {
-//RS                 Item::Func(function) => {
-//RS                     function.diverges = diverging.contains(&function.name);
-//RS                 }
-//RS                 Item::CodeModule(code_module) => {
-//RS                     let Some(body) = &mut code_module.body else {
-//RS                         continue;
-//RS                     };
-//RS                     for inner in body {
-//RS                         let Item::Func(function) = inner else {
-//RS                             continue;
-//RS                         };
-//RS                         let name =
-//RS                             jet_foundation::Names::member_name(&code_module.name, &function.name);
-//RS                         function.diverges = diverging.contains(&name);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Default)]
-//RS pub(super) struct DivergenceFlow {
-//RS     normal: bool,
-//RS     returned: bool,
-//RS     diverged: bool,
-//RS     broke: bool,
-//RS     continued: bool,
-//RS }
-//RS 
-//RS impl DivergenceFlow {
-//RS     fn normal() -> Self {
-//RS         Self {
-//RS             normal: true,
-//RS             ..Self::default()
-//RS         }
-//RS     }
-//RS 
-//RS     fn none() -> Self {
-//RS         Self::default()
-//RS     }
-//RS 
-//RS     fn union(self, other: Self) -> Self {
-//RS         Self {
-//RS             normal: self.normal || other.normal,
-//RS             returned: self.returned || other.returned,
-//RS             diverged: self.diverged || other.diverged,
-//RS             broke: self.broke || other.broke,
-//RS             continued: self.continued || other.continued,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Sequence `next` after every path in `self` that still reaches a
-//RS     /// statement. Terminal paths remain terminal and never reach `next`.
-//RS     fn then(self, next: Self) -> Self {
-//RS         if !self.normal {
-//RS             return self;
-//RS         }
-//RS         Self {
-//RS             normal: false,
-//RS             returned: self.returned,
-//RS             diverged: self.diverged,
-//RS             broke: self.broke,
-//RS             continued: self.continued,
-//RS         }
-//RS         .union(next)
-//RS     }
-//RS 
-//RS     fn return_to_caller(self) -> Self {
-//RS         Self {
-//RS             normal: false,
-//RS             returned: self.returned || self.normal,
-//RS             diverged: self.diverged,
-//RS             broke: self.broke,
-//RS             continued: self.continued,
-//RS         }
-//RS     }
-//RS 
-//RS     fn break_to_loop(self) -> Self {
-//RS         Self {
-//RS             normal: false,
-//RS             returned: self.returned,
-//RS             diverged: self.diverged,
-//RS             broke: self.broke || self.normal,
-//RS             continued: self.continued,
-//RS         }
-//RS     }
-//RS 
-//RS     fn definitely_diverges(self) -> bool {
-//RS         self.diverged && !self.normal && !self.returned && !self.broke && !self.continued
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn body_flow(
-//RS     body: &[Stmt],
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     let mut flow = DivergenceFlow::normal();
-//RS     for stmt in body {
-//RS         flow = flow.then(stmt_flow(stmt, diverging, state));
-//RS     }
-//RS     flow
-//RS }
-//RS 
-//RS pub(super) fn body_definitely_diverges(
-//RS     body: &[Stmt],
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> bool {
-//RS     body_flow(body, diverging, state).definitely_diverges()
-//RS }
-//RS 
-//RS pub(super) fn expr_list_flow<'a, I>(
-//RS     expressions: I,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow
-//RS where
-//RS     I: IntoIterator<Item = &'a Expr>,
-//RS {
-//RS     let mut flow = DivergenceFlow::normal();
-//RS     for expression in expressions {
-//RS         flow = flow.then(expr_flow(expression, diverging, state));
-//RS     }
-//RS     flow
-//RS }
-//RS 
-//RS pub(super) fn call_args_flow(
-//RS     args: &[crate::AST::CallArg],
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     expr_list_flow(args.iter().map(|arg| &arg.expr), diverging, state)
-//RS }
-//RS 
-//RS pub(super) fn lvalue_flow(
-//RS     target: &LValue,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match target {
-//RS         LValue::Local { .. } => DivergenceFlow::normal(),
-//RS         LValue::Index { base, index, .. } => {
-//RS             expr_flow(base, diverging, state).then(expr_flow(index, diverging, state))
-//RS         }
-//RS         LValue::Field { base, .. } => expr_flow(base, diverging, state),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn for_kind_flow(
-//RS     kind: &ForKind,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match kind {
-//RS         ForKind::Range {
-//RS             start, end, step, ..
-//RS         } => expr_flow(start, diverging, state)
-//RS             .then(expr_flow(end, diverging, state))
-//RS             .then(
-//RS                 step.as_ref()
-//RS                     .map(|step| expr_flow(step, diverging, state))
-//RS                     .unwrap_or_else(DivergenceFlow::normal),
-//RS             ),
-//RS         ForKind::In { collection, step } => expr_flow(collection, diverging, state).then(
-//RS             step.as_ref()
-//RS                 .map(|step| expr_flow(step, diverging, state))
-//RS                 .unwrap_or_else(DivergenceFlow::normal),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn finite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
-//RS     // A finite or conditionally entered loop can always exhaust without an
-//RS     // iteration. Return and divergence paths from an iteration still matter.
-//RS     DivergenceFlow {
-//RS         normal: true,
-//RS         returned: body.returned,
-//RS         diverged: body.diverged,
-//RS         broke: false,
-//RS         continued: false,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn infinite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
-//RS     // Normal/continue paths start another iteration. A break is the loop's
-//RS     // normal exit; return/divergence escape the enclosing function.
-//RS     DivergenceFlow {
-//RS         normal: body.broke,
-//RS         returned: body.returned,
-//RS         diverged: body.diverged || body.normal || body.continued,
-//RS         broke: false,
-//RS         continued: false,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn branch_flow(
-//RS     body: &[Stmt],
-//RS     value: &Expr,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     body_flow(body, diverging, state).then(expr_flow(value, diverging, state))
-//RS }
-//RS 
-//RS pub(super) fn switch_flow(
-//RS     subject: &Expr,
-//RS     arms: &[SwitchArm],
-//RS     else_body: Option<&[Stmt]>,
-//RS     span: Span,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     if arms.is_empty() {
-//RS         return expr_flow(subject, diverging, state).then(
-//RS             else_body
-//RS                 .map(|body| body_flow(body, diverging, state))
-//RS                 .unwrap_or_else(DivergenceFlow::normal),
-//RS         );
-//RS     }
-//RS     let mut branches = DivergenceFlow::none();
-//RS     for arm in arms {
-//RS         branches = branches.union(
-//RS             expr_flow(&arm.cond, diverging, state).then(body_flow(&arm.body, diverging, state)),
-//RS         );
-//RS     }
-//RS     let fallback = match else_body {
-//RS         Some(body) => body_flow(body, diverging, state),
-//RS         None if crate::AST::is_subjectless_guard(subject, span) => DivergenceFlow::normal(),
-//RS         // A checked exhaustive dispatch has no runtime miss path. Its
-//RS         // synthesized Expr::NoElse is represented by `none`, not Diverged.
-//RS         None => DivergenceFlow::none(),
-//RS     };
-//RS     expr_flow(subject, diverging, state).then(branches.union(fallback))
-//RS }
-//RS 
-//RS pub(super) fn stmt_flow(
-//RS     stmt: &Stmt,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match stmt {
-//RS         Stmt::Expr(expr) => expr_flow(expr, diverging, state),
-//RS         Stmt::Val(binding) => expr_flow(&binding.init, diverging, state),
-//RS         Stmt::Assign { target, value, .. } => {
-//RS             lvalue_flow(target, diverging, state).then(expr_flow(value, diverging, state))
-//RS         }
-//RS         Stmt::Return(value, ..) => value
-//RS             .as_ref()
-//RS             .map(|value| expr_flow(value, diverging, state))
-//RS             .unwrap_or_else(DivergenceFlow::normal)
-//RS             .return_to_caller(),
-//RS         Stmt::Break(_) | Stmt::BreakLabel(_, _) => DivergenceFlow {
-//RS             broke: true,
-//RS             ..DivergenceFlow::none()
-//RS         },
-//RS         Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-//RS             expr_flow(value, diverging, state).break_to_loop()
-//RS         }
-//RS         Stmt::Continue(_) | Stmt::ContinueLabel(_, _) => DivergenceFlow {
-//RS             continued: true,
-//RS             ..DivergenceFlow::none()
-//RS         },
-//RS         Stmt::Loop { body, .. } => infinite_loop_flow(body_flow(body, diverging, state)),
-//RS         Stmt::While { cond, body, .. } => {
-//RS             let loop_body = body_flow(body, diverging, state);
-//RS             let loop_flow = if matches!(cond.without_parens(), Expr::Bool(true, _)) {
-//RS                 infinite_loop_flow(loop_body)
-//RS             } else {
-//RS                 finite_loop_flow(loop_body)
-//RS             };
-//RS             expr_flow(cond, diverging, state).then(loop_flow)
-//RS         }
-//RS         Stmt::For { kind, body, .. } => for_kind_flow(kind, diverging, state)
-//RS             .then(finite_loop_flow(body_flow(body, diverging, state))),
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             let iteration = body_flow(body, diverging, state).then(
-//RS                 step.as_deref()
-//RS                     .map(|step| stmt_flow(step, diverging, state))
-//RS                     .unwrap_or_else(DivergenceFlow::normal),
-//RS             );
-//RS             let loop_flow = if matches!(cond.without_parens(), Expr::Bool(true, _)) {
-//RS                 infinite_loop_flow(iteration)
-//RS             } else {
-//RS                 finite_loop_flow(iteration)
-//RS             };
-//RS             expr_flow(&init.init, diverging, state)
-//RS                 .then(expr_flow(cond, diverging, state))
-//RS                 .then(loop_flow)
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         } => switch_flow(subject, arms, else_body.as_deref(), *span, diverging, state),
-//RS         Stmt::Unsafe {
-//RS             audit_expr, body, ..
-//RS         }
-//RS         | Stmt::Impure {
-//RS             reason_expr: audit_expr,
-//RS             body,
-//RS             ..
-//RS         } => audit_expr
-//RS             .as_ref()
-//RS             .map(|expr| expr_flow(expr, diverging, state))
-//RS             .unwrap_or_else(DivergenceFlow::normal)
-//RS             .then(body_flow(body, diverging, state)),
-//RS         Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::Transact { body, .. } => body_flow(body, diverging, state),
-//RS         Stmt::TaskGroup { limit, body, .. } => limit
-//RS             .as_ref()
-//RS             .map(|expr| expr_flow(expr, diverging, state))
-//RS             .unwrap_or_else(DivergenceFlow::normal)
-//RS             .then(body_flow(body, diverging, state)),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             selected_then,
-//RS             ..
-//RS         } => match selected_then {
-//RS             Some(true) => body_flow(then_body, diverging, state),
-//RS             Some(false) => else_body
-//RS                 .as_deref()
-//RS                 .map(|body| body_flow(body, diverging, state))
-//RS                 .unwrap_or_else(DivergenceFlow::normal),
-//RS             None => body_flow(then_body, diverging, state).union(
-//RS                 else_body
-//RS                     .as_deref()
-//RS                     .map(|body| body_flow(body, diverging, state))
-//RS                     .unwrap_or_else(DivergenceFlow::normal),
-//RS             ),
-//RS         },
-//RS         Stmt::ContextBlock { fields, body, .. } => {
-//RS             let fields = expr_list_flow(fields.iter().map(|(_, value, _)| value), diverging, state);
-//RS             fields.then(body_flow(body, diverging, state))
-//RS         }
-//RS         Stmt::AssumeDet {
-//RS             reason_expr, body, ..
-//RS         } => expr_flow(reason_expr, diverging, state).then(body_flow(body, diverging, state)),
-//RS         Stmt::Yield(value, _) => expr_flow(value, diverging, state),
-//RS         Stmt::ScopeMember { args, body, .. } => {
-//RS             expr_list_flow(args.iter(), diverging, state).then(body_flow(body, diverging, state))
-//RS         }
-//RS         Stmt::DeferClose { close, .. } => expr_flow(close, diverging, state),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn typed_lit_flow(
-//RS     body: &crate::AST::TypedLitBody,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match body {
-//RS         crate::AST::TypedLitBody::Fields(fields) => {
-//RS             expr_list_flow(fields.iter().map(|(_, _, value)| value), diverging, state)
-//RS         }
-//RS         crate::AST::TypedLitBody::Elements(elements) => {
-//RS             expr_list_flow(elements.iter(), diverging, state)
-//RS         }
-//RS         crate::AST::TypedLitBody::Entries(entries) => expr_list_flow(
-//RS             entries.iter().flat_map(|(key, value)| [key, value]),
-//RS             diverging,
-//RS             state,
-//RS         ),
-//RS         crate::AST::TypedLitBody::Value(value) => expr_flow(value, diverging, state),
-//RS         crate::AST::TypedLitBody::ByteText(_) | crate::AST::TypedLitBody::Empty => {
-//RS             DivergenceFlow::normal()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn expr_flow(
-//RS     expr: &Expr,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match expr.without_parens() {
-//RS         Expr::Str(parts, _) => {
-//RS             let mut flow = DivergenceFlow::normal();
-//RS             for part in parts {
-//RS                 if let StrPart::Interp(value, _) = part {
-//RS                     flow = flow.then(expr_flow(value, diverging, state));
-//RS                 }
-//RS             }
-//RS             flow
-//RS         }
-//RS         Expr::StrMatchLit(_, _)
-//RS         | Expr::BinMatchLit(_, _)
-//RS         | Expr::Int(_, _, _, _)
-//RS         | Expr::Float(_, _, _, _)
-//RS         | Expr::Bool(_, _)
-//RS         | Expr::Unit(_)
-//RS         | Expr::Char(_, _)
-//RS         | Expr::Ident(_, _)
-//RS         | Expr::Absent(_)
-//RS         | Expr::ReduceMarker(_, _)
-//RS         | Expr::ComptimeName { .. }
-//RS         | Expr::Lambda(_) => DivergenceFlow::normal(),
-//RS         Expr::ListLit(items, _) => expr_list_flow(items.iter(), diverging, state),
-//RS         Expr::MemberSpread { base, .. } | Expr::Spread(base, _) => {
-//RS             expr_flow(base, diverging, state)
-//RS         }
-//RS         Expr::MapLit(items, _) => expr_list_flow(
-//RS             items.iter().flat_map(|(key, value)| [key, value]),
-//RS             diverging,
-//RS             state,
-//RS         ),
-//RS         Expr::Index { base, index, .. }
-//RS         | Expr::Range {
-//RS             start: base,
-//RS             end: index,
-//RS             ..
-//RS         } => expr_flow(base, diverging, state).then(expr_flow(index, diverging, state)),
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             let mut flow = expr_flow(base, diverging, state)
-//RS                 .then(expr_flow(start, diverging, state))
-//RS                 .then(expr_flow(end, diverging, state));
-//RS             if let Some(range) = range {
-//RS                 flow = flow.then(expr_flow(range, diverging, state));
-//RS             }
-//RS             flow
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } => {
-//RS             let flow =
-//RS                 expr_flow(receiver, diverging, state).then(call_args_flow(args, diverging, state));
-//RS             if flow.normal && core_call_diverges(state, receiver, method) {
-//RS                 DivergenceFlow {
-//RS                     normal: false,
-//RS                     diverged: true,
-//RS                     ..flow
-//RS                 }
-//RS             } else {
-//RS                 flow
-//RS             }
-//RS         }
-//RS         Expr::UnitLit { .. } => DivergenceFlow::normal(),
-//RS         Expr::Call(call) => {
-//RS             let args = call_args_flow(&call.args, diverging, state);
-//RS             let call_diverges =
-//RS                 call.name == Syntax::BUILTIN_PANIC || diverging.contains(&call.name);
-//RS             if !call_diverges {
-//RS                 args
-//RS             } else if args.normal {
-//RS                 DivergenceFlow {
-//RS                     normal: false,
-//RS                     returned: args.returned,
-//RS                     diverged: true,
-//RS                     broke: args.broke,
-//RS                     continued: args.continued,
-//RS                 }
-//RS             } else {
-//RS                 args
-//RS             }
-//RS         }
-//RS         Expr::Unary(_, inner, _) => {
-//RS             expr_flow(inner, diverging, state)
-//RS         }
-//RS         Expr::Binary(op, left, right, _) => {
-//RS             let left = expr_flow(left, diverging, state);
-//RS             let right = expr_flow(right, diverging, state);
-//RS             if matches!(op, crate::AST::BinOp::And | crate::AST::BinOp::Or) {
-//RS                 if !left.normal {
-//RS                     left
-//RS                 } else {
-//RS                     DivergenceFlow {
-//RS                         normal: true,
-//RS                         returned: left.returned || right.returned,
-//RS                         diverged: left.diverged || right.diverged,
-//RS                         broke: left.broke || right.broke,
-//RS                         continued: left.continued || right.continued,
-//RS                     }
-//RS                 }
-//RS             } else {
-//RS                 left.then(right)
-//RS             }
-//RS         }
-//RS         Expr::CompareChain { operands, .. } => {
-//RS             let mut flow = DivergenceFlow::normal();
-//RS             for (index, operand) in operands.iter().enumerate() {
-//RS                 let prior = flow;
-//RS                 flow = flow.then(expr_flow(operand, diverging, state));
-//RS                 // A comparison can stop the chain before a later operand.
-//RS                 if index > 0 && prior.normal {
-//RS                     flow.normal = true;
-//RS                 }
-//RS             }
-//RS             flow
-//RS         }
-//RS         Expr::Deref(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::Place(inner, _, _)
-//RS         | Expr::Field(inner, _, _)
-//RS         | Expr::OptField { base: inner, .. }
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _)
-//RS         | Expr::Paren(inner, _) => expr_flow(inner, diverging, state),
-//RS         Expr::StructLit { fields, .. } => {
-//RS             expr_list_flow(fields.iter().map(|(_, _, value)| value), diverging, state)
-//RS         }
-//RS         Expr::TypedLit { body, .. } => typed_lit_flow(body, diverging, state),
-//RS         Expr::EnumLit { args, .. } => expr_list_flow(
-//RS             args.iter().filter_map(|arg| match arg {
-//RS                 EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
-//RS                     Some(value)
-//RS                 }
-//RS             }),
-//RS             diverging,
-//RS             state,
-//RS         ),
-//RS         Expr::Tainted(inner, ..) => expr_flow(inner, diverging, state),
-//RS         Expr::Todo { .. } => DivergenceFlow {
-//RS             diverged: true,
-//RS             ..DivergenceFlow::none()
-//RS         },
-//RS         // This is the parser's omitted exhaustive fallthrough. It has no
-//RS         // runtime outcome; treating it as Diverged makes every value dispatch
-//RS         // appear to be a Never-producing call.
-//RS         Expr::NoElse(_) => DivergenceFlow::none(),
-//RS         Expr::PatternTest { subject, .. } => expr_flow(subject, diverging, state),
-//RS         Expr::Try(inner, _, _, note) => {
-//RS             let mut flow = expr_flow(inner, diverging, state);
-//RS             if let Some(note) = note {
-//RS                 flow = flow.union(expr_flow(note, diverging, state));
-//RS             }
-//RS             flow
-//RS         }
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => {
-//RS             let value_flow = expr_flow(value, diverging, state);
-//RS             if value_flow.normal {
-//RS                 value_flow.union(or_fallback_flow(fallback, diverging, state))
-//RS             } else {
-//RS                 value_flow
-//RS             }
-//RS         }
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             let branches = branch_flow(then_body, then_value, diverging, state)
-//RS                 .union(branch_flow(else_body, else_value, diverging, state));
-//RS             expr_flow(cond, diverging, state).then(branches)
-//RS         }
-//RS         Expr::TupleLit(fields, _, _) => {
-//RS             expr_list_flow(fields.iter().map(|(_, value)| value), diverging, state)
-//RS         }
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             expr_flow(callee, diverging, state).then(call_args_flow(args, diverging, state))
-//RS         }
-//RS         Expr::PtrFromAddr { addr, .. } => expr_flow(addr, diverging, state),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn or_fallback_flow(
-//RS     fallback: &OrFallback,
-//RS     diverging: &std::collections::HashSet<String>,
-//RS     state: &ModuleState,
-//RS ) -> DivergenceFlow {
-//RS     match fallback {
-//RS         OrFallback::Value(value) => expr_flow(value, diverging, state),
-//RS         OrFallback::Block { body, value, .. } => body_flow(body, diverging, state).then(
-//RS             value
-//RS                 .as_deref()
-//RS                 .map(|value| expr_flow(value, diverging, state))
-//RS                 .unwrap_or_else(DivergenceFlow::normal),
-//RS         ),
-//RS         OrFallback::Return(value, _) => value
-//RS             .as_deref()
-//RS             .map(|value| expr_flow(value, diverging, state))
-//RS             .unwrap_or_else(DivergenceFlow::normal)
-//RS             .return_to_caller(),
-//RS         OrFallback::Panic { args, .. } => {
-//RS             let args = call_args_flow(args, diverging, state);
-//RS             if args.normal {
-//RS                 DivergenceFlow {
-//RS                     normal: false,
-//RS                     returned: args.returned,
-//RS                     diverged: true,
-//RS                     broke: args.broke,
-//RS                     continued: args.continued,
-//RS                 }
-//RS             } else {
-//RS                 args
-//RS             }
-//RS         }
-//RS         OrFallback::Break(_) | OrFallback::BreakLabel(_, _) => DivergenceFlow {
-//RS             broke: true,
-//RS             ..DivergenceFlow::none()
-//RS         },
-//RS         OrFallback::Continue(_) | OrFallback::ContinueLabel(_, _) => DivergenceFlow {
-//RS             continued: true,
-//RS             ..DivergenceFlow::none()
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn core_call_diverges(state: &ModuleState, receiver: &Expr, method: &str) -> bool {
-//RS     let Expr::Ident(alias, _) = receiver.without_parens() else {
-//RS         return false;
-//RS     };
-//RS     let Some(module) = state.core_imports.get(alias) else {
-//RS         return false;
-//RS     };
-//RS     crate::Sema::CheckerCoreLib::core_call_signature(module, method)
-//RS         .and_then(|(_, ret)| ret)
-//RS         .is_some_and(|ret| matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER))
-//RS }
-// END-PORT-PENDING 0361 crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1-2013
+use jet_foundation.[Func, Item, Stmt, Expr, Type, Span, Diagnostic, ParamZone, AccessConvention, LValue, ForKind, SwitchArm, CallArg, TypedLitBody, OrFallback, ProgramBundle, FunctionCallMetadata, ViewProvenanceMap, ViewProvenance, ViewAccess, ComptimeInput, DevtoolsRegistry, DevtoolsFactPublication, FactRegistry, NameLedger]
+use jet_sema.[ModuleState, PluginInterfaceRegistry, Checker, FuncSig, CtValue, GateSet, FlowFacts, EffectSummary, PendingFunctionDiagnostic, MemorySummary, MemoryEventKind, Severity, RuleSite, checked_body_return_type, is_build_entry, rule_allows, check_pure_fn, check_inline_always_fn, check_every_marker, effect_key, is_unit_callable_return]
+use jet_syntax as Syntax
+use std.[HashSet, BTreeSet, RefCell, Cell]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:3
+pub fn merge_view_provenance(into: &ViewProvenanceMap, from: &ViewProvenanceMap) -> Bool {
+    if into.len() != from.len() || !into.keys().all(fn(path) { from.contains_key(path) }) -> return false
+    for (path, candidate) in from {
+        existing := into.get_mut(path).expect("view paths were checked above")
+        if existing.mutable != candidate.mutable -> return false
+        existing.sources.extend(candidate.sources.iter().cloned())
+    }
+    true
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:21
+pub fn checker_for_module(
+    module_idx: USize, states: &[ModuleState], plugin_interfaces: &PluginInterfaceRegistry,
+    devtools_registry: &DevtoolsRegistry, effect_facts: &FactRegistry,
+    ct_funcs: &[String: Func], ct_checked_funcs: &[String: Func], ct_items: &[Item],
+    ct_externs: &HashSet<String>, ct_base_dir: &OSPath, ct_globals: &[String: CtValue],
+    no_os: Bool, gates: GateSet, no_prelude: Bool, name_ledger: &NameLedger,
+    function: &Func?, raw_protocol_return: Bool, defer_ct_evaluation: Bool
+) -> Checker {
+    st :: &states[module_idx]
+    current_function_span :: function.map_or_else(fn() { Span.new(0, 0) }, fn(f) { f.span })
+    in_unsafe :: function.is_some_and(fn(f) { f.is_unsafe })
+    in_pure :: function.is_some_and(fn(f) { f.is_pure || f.is_comptime })
+    in_comptime :: function.is_some_and(fn(f) { f.is_comptime })
+    compiler_api_allowed :: function.is_some_and(fn(f) { st.allow_compiler_api && is_build_entry(f) })
+    ret :: function.and_then(fn(f) { checked_body_return_type(f, raw_protocol_return) })
+    fn_name :: function.map_or_else(fn() { "" }, fn(f) { f.name.clone() })
+    compiler_generated :: function.is_some_and(fn(f) { f.compiler_generated })
+    declared_return_type :: function.and_then(fn(f) { f.return_type.clone() })
+    current_return_type_span :: function.and_then(fn(f) { f.return_type_span })
+    current_param_names :: function.map(fn(f) { f.params.iter().filter(fn(p) { p.name != Syntax.KW_SELF }).map(fn(p) { p.name.clone() }).collect() }).unwrap_or_default()
+    type_param_scope :: function.map(fn(f) { f.type_params.clone() }).unwrap_or_default()
+    Checker{
+        funcs: &st.funcs,
+        diverging_functions: &st.diverging_functions,
+        fixed_length_write_params: &st.fixed_length_write_params,
+        plugin_interfaces: plugin_interfaces,
+        registry: &st.registry,
+        devtools_registry: devtools_registry,
+        effect_facts: effect_facts,
+        consts: &st.consts,
+        modules: Val(states),
+        nominal_owner_cache: RefCell.new([:]),
+        items: &st.items,
+        module_idx: module_idx,
+        imports: &st.imports,
+        core_imports: &st.core_imports,
+        code_modules: &st.code_modules,
+        code_module_identities: &st.code_module_identities,
+        unqualified: &st.unqualified,
+        unqualified_file: &st.unqualified_file,
+        core_item_imports: &st.core_item_imports,
+        inline_unqualified: &st.inline_unqualified,
+        inline_unqualified_file: &st.inline_unqualified_file,
+        inline_module: None,
+        inline_reexport_inline: &st.inline_reexport_inline,
+        inline_reexport_file: &st.inline_reexport_file,
+        inline_reexport_core: &st.inline_reexport_core,
+        inline_reexport_foreign: &st.inline_reexport_foreign,
+        module_path: &st.module_path,
+        source: &st.source,
+        package_scope: &st.package_scope,
+        policy_declarations: &st.policy_declarations,
+        callable_policy_declarations: &st.callable_policy_declarations,
+        rule_facts: st.rule_facts.clone(),
+        frame_schedule_systems: [],
+        current_function_span: current_function_span,
+        name_ledger: name_ledger,
+        diags: [],
+        statement_lint_allows: [],
+        stdlib_lint_candidates: [:],
+        unused_bindings: [],
+        unused_binding_refs: HashSet.new(),
+        flow: FlowFacts{depth: 1, ..FlowFacts.default()},
+        concrete_unit_values: [[:]],
+        suppress_partial_move_root_read: false,
+        loop_depth: 0,
+        loop_exit_depth: None,
+        share_sites: [],
+        implicit_loop_subject_depth: 0,
+        subject_shorthand_depth: 0,
+        source_nesting: 0,
+        statement_expr_root_depth: None,
+        loop_labels: [],
+        collect_item_types: [],
+        loop_value_frames: [],
+        loop_break_flows: [],
+        pending_loop_value: None,
+        arrow_loop_body: false,
+        last_loop_result_type: None,
+        fx_direct: BTreeSet.new(),
+        fx_direct_spans: [:],
+        lambda_effect_stack: [],
+        fx_edges: BTreeSet.new(),
+        fx_maximal: false,
+        fx_maximal_span: None,
+        region_stack: [],
+        fx_regions: [],
+        fx_authority_delegations: [],
+        fx_callback_obligations: [],
+        fx_autodiff_obligations: [],
+        fx_compute_calls: [],
+        fx_autodiff_safe_panic: false,
+        fx_autodiff_unsafe_panic: false,
+        autodiff_safe_panic_context: false,
+        fx_pending_diagnostics: [],
+        fx_memory_events: [],
+        fx_memory_open: [],
+        memory_policy_stack: [],
+        arithmetic_policy_stack: [],
+        fx_memory_regions: [],
+        fx_memory_unbounded_control: [],
+        fx_memory_calls: [],
+        fx_discarded_results: [],
+        lost_tail_span: None,
+        memory_control_multiplier: Val(1),
+        txn_depth: 0,
+        txn_wall_depth: 0,
+        deterministic_world_depth: 0,
+        det_suppress: 0,
+        context_depth: 0,
+        context_allocator_active: false,
+        in_unsafe: in_unsafe,
+        suppress_must_use: false,
+        in_pure: in_pure,
+        no_prelude: no_prelude,
+        in_pre_clause: false,
+        fallback_has_err: None,
+        failure_auto_root_suppression: 0,
+        failure_auto_depth: 0,
+        fallback_is_shape_miss: false,
+        inferred_call_type_args: None,
+        invalid_binding_reads: 0,
+        in_comptime: in_comptime,
+        compiler_api_allowed: compiler_api_allowed,
+        ret: ret,
+        fn_name: fn_name,
+        compiler_generated: compiler_generated,
+        raw_protocol_return: raw_protocol_return,
+        declared_return_type: declared_return_type,
+        current_return_type_span: current_return_type_span,
+        current_param_names: current_param_names,
+        binder_ref_types: [:],
+        expected_type: None,
+        uses_exact_int: false,
+        knowledge_gate: None,
+        iter_borrowed: HashSet.new(),
+        noelse_chains_checked: HashSet.new(),
+        result_handler_subject_types: [:],
+        carrier_chain_subjects: HashSet.new(),
+        lending_view_loop_vars: HashSet.new(),
+        return_view_provenance: None,
+        views_used_in_stmt: HashSet.new(),
+        scoped_loan_read_reported: false,
+        call_access_frames: [],
+        borrow_ctx: false,
+        owning_if_value_depth: 0,
+        allow_fixed_constructor: false,
+        allow_string_view_read: false,
+        lambda_escapes: true,
+        in_lambda_body: false,
+        inferred_lambda_mut_captures: HashSet.new(),
+        lambda_params_are_lending_views: false,
+        receiver_marks: [:],
+        receiver_mark_frames: [],
+        is_task_spawn: false,
+        task_body_propagates: false,
+        failure_direct_source: false,
+        failure_union_probe: None,
+        failure_carrier_inference: false,
+        failure_carrier: None,
+        statement_expr_inference: false,
+        http_handler_depth: 0,
+        interrupt_callback_depth: 0,
+        lambda_param_mutable: false,
+        lambda_param_is_secret_loan: false,
+        view_capture_tasks: HashSet.new(),
+        reactive_upgrades: [],
+        reactive_upgrade_names: HashSet.new(),
+        view_borrow_escape_tasks: HashSet.new(),
+        current_binding_name: None,
+        task_spawn_binding_name: None,
+        lambda_binding: None,
+        lambda_mut_borrow_stack: [HashSet.new()],
+        trait_reg: &st.trait_reg,
+        ct_funcs: ct_funcs,
+        ct_checked_funcs: ct_checked_funcs,
+        ct_items: ct_items,
+        ct_externs: ct_externs,
+        ct_base_dir: ct_base_dir,
+        ct_globals: ct_globals,
+        ct_scopes: [[:]],
+        defer_ct_evaluation: defer_ct_evaluation,
+        type_param_scope: type_param_scope,
+        no_os: no_os,
+        gates: gates,
+        ct_impure_depth: 0,
+        ct_embed_inputs: [],
+        in_dropped_comptime_arm: false,
+        stmt_tail_ptr: std.ptr.null(), // GATE #4494: retained statement-tail pointer.
+        stmt_tail_len: 0,
+        liveness_frames: [],
+        taskgroup_stack: [],
+        in_taskgroup_spawn: false,
+        inline_addr_taken: HashSet.new(),
+        devtools_publications: [],
+        ct_evaluator_ran: Cell.new(false),
+    }
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:251
+    pub fn ct_checked_funcs_for_evaluation(self: &Self) -> &[String: Func] {
+        self.ct_evaluator_ran.set(true)
+        self.ct_checked_funcs
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:261
+pub struct BodyContext {
+    pub module_idx: USize
+    pub states: &[ModuleState]
+    pub plugin_interfaces: &PluginInterfaceRegistry
+    pub devtools_registry: &DevtoolsRegistry
+    pub effect_facts: &FactRegistry
+    pub ct_funcs: &[String: Func]
+    pub ct_externs: &HashSet<String>
+    pub ct_base_dir: &OSPath
+    pub ct_globals: &[String: CtValue]
+    pub no_os: Bool
+    pub gates: GateSet
+    pub no_prelude: Bool
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:281
+pub struct BodyProducts {
+    pub summaries: [String: EffectSummary] = [:]
+    pub embed_inputs: [ComptimeInput] = []
+    pub addr_taken: HashSet<String> = HashSet.new()
+    pub pending_diagnostics: [PendingFunctionDiagnostic] = []
+    pub devtools_publications: [DevtoolsFactPublication] = []
+    pub uses_exact_int: Bool = false
+    pub ran_ct_evaluator: Bool = false
+}
+impl BodyProducts {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:296
+    pub fn absorb(self: &Self, other: BodyProducts) {
+        self.summaries.extend(^other.summaries)
+        self.embed_inputs.extend(^other.embed_inputs)
+        self.addr_taken.extend(^other.addr_taken)
+        self.pending_diagnostics.extend(^other.pending_diagnostics)
+        self.devtools_publications.extend(^other.devtools_publications)
+        self.uses_exact_int |= other.uses_exact_int
+        self.ran_ct_evaluator |= other.ran_ct_evaluator
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:312
+pub fn check_func_body(cx: &BodyContext, f: &Func, owner_type: String?, raw_protocol_return: Bool, inline_module: String?, ct_checked_funcs: [String: Func]?, name_ledger: &NameLedger, products: &BodyProducts) -> [Diagnostic] {
+    deferred_table :: [String: Func] = [:]
+    defer_ct_evaluation :: ct_checked_funcs.is_none()
+    checked_table :: ct_checked_funcs.as_ref().unwrap_or(&deferred_table)
+    module_idx :: cx.module_idx
+    states :: cx.states
+    st :: &states[module_idx]
+    // Only inline-module bodies copy the import tables.
+    scoped := inline_module.map(fn(scope) {
+        imports := st.imports.clone()
+        core_imports := st.core_imports.clone()
+        unqualified := st.unqualified.clone()
+        unqualified_file := st.unqualified_file.clone()
+        core_item_imports := st.core_item_imports.clone()
+        for ((owner, name), target) in &st.inline_foreign_imports {
+            if owner == scope -> imports.insert(name.clone(), target)
+        }
+        for ((owner, name), module) in &st.inline_core_imports {
+            if owner == scope -> core_imports.insert(name.clone(), module.clone())
+        }
+        for ((owner, name), item) in &st.inline_core_items {
+            if owner == scope -> core_item_imports.insert(name.clone(), item.clone())
+        }
+        for ((owner, name), mangled) in &st.inline_unqualified {
+            if owner == scope -> unqualified.insert(name.clone(), mangled.clone())
+        }
+        for ((owner, name), target) in &st.inline_unqualified_file {
+            if owner == scope -> unqualified_file.insert(name.clone(), target.clone())
+        }
+        (imports, core_imports, unqualified, unqualified_file, core_item_imports)
+    })
+    ck := checker_for_module(module_idx, states, cx.plugin_interfaces, cx.devtools_registry,
+        cx.effect_facts, cx.ct_funcs, checked_table, &st.items, cx.ct_externs, cx.ct_base_dir,
+        cx.ct_globals, cx.no_os, cx.gates, cx.no_prelude, name_ledger, Val(f),
+        raw_protocol_return, defer_ct_evaluation)
+    if scoped.as_ref() == .Val((imports, core_imports, unqualified, unqualified_file, core_item_imports)) {
+        ck.imports = &imports
+        ck.core_imports = &core_imports
+        ck.unqualified = &unqualified
+        ck.unqualified_file = &unqualified_file
+        ck.core_item_imports = &core_item_imports
+    }
+    ck.inline_module = inline_module.clone()
+    ck.canonicalize_function_return_type(f)
+    ck.ret = checked_body_return_type(f, raw_protocol_return)
+    for (active, name, span) in [
+        (f.is_pure, Syntax.KW_PURE, f.name_span),
+        (f.is_sanitizer, Syntax.KW_SANITIZER, f.name_span),
+        (f.is_unsafe, Syntax.KW_UNSAFE, f.unsafe_span.unwrap_or(f.name_span)),
+        (f.is_replayable, Syntax.MARKER_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
+        (f.is_must_use, Syntax.MARKER_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
+        (f.is_inline, Syntax.MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_inline_always, Syntax.MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_reactive, Syntax.KW_REACTIVE, f.name_span),
+    ] {
+        if active && !rule_allows(name, RuleSite.Function) {
+            ck.diags.push(Diagnostic.error("E0355", "`#{name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites", Val(span)))
+        }
+    }
+    ck.check_params_and_body(f, owner_type)
+    if f.return_type.as_ref().is_some_and(fn(t) { t.has_never_success() }) && body_flow(&f.body, &st.diverging_functions, st).normal {
+        span :: f.body.last().map(fn(stmt) { stmt.span() }).unwrap_or(f.return_type_span.unwrap_or(f.name_span))
+        ck.diags.push(Diagnostic.from_row("E2423", [("function", f.name)], Val(span)))
+    }
+    if f.is_pub && f.return_type.is_none() && f.diverges {
+        ck.diags.push(Diagnostic.from_row("L2421", [("function", f.name)], Val(f.name_span)))
+    }
+    apply_reactive_upgrade_flags(&f.body, &ck.reactive_upgrade_names)
+    f.reactive_upgrades = ^ck.reactive_upgrades
+    f.return_view_provenance = ck.return_view_provenance.clone()
+    if f.declared_return_view_provenance.clone() == .Val(declared) {
+        if f.return_view_provenance.as_ref() == .Val(inferred) {
+            for (slot, inferred_prov) in inferred {
+                declared_prov := declared.get(slot).or_else(fn() { declared.get([]) })
+                if declared_prov == .None {
+                    ck.diags.push(Diagnostic.error("E2305", "returned view escapes its declared `from` clause", "every return path's owners must stay inside the sources named after `from`", "widen the `from` clause, or stop returning a view from that owner", f.return_type_span.or(Val(f.name_span))))
+                    continue
+                }
+                allowed :: inferred_prov.sources.iter().all(fn(inferred_path) {
+                    declared_prov.unwrap().sources.iter().any(fn(declared_path) {
+                        declared_path.source == inferred_path.source && inferred_path.projections.starts_with(&declared_path.projections)
+                    })
+                })
+                if !allowed {
+                    ck.diags.push(Diagnostic.error("E2305", "returned view escapes its declared `from` clause", "every return path's owners must stay inside the sources named after `from`", "widen the `from` clause, or stop returning a view from that owner", f.return_type_span.or(Val(f.name_span))))
+                }
+            }
+        }
+        merged := declared.clone()
+        if f.return_view_provenance.as_ref() == .Val(inferred) {
+            published := ViewProvenanceMap.new()
+            for (slot, inferred_prov) in inferred {
+                sources :: declared.get(slot).or_else(fn() { declared.get([]) }).map(fn(prov) { prov.sources.clone() }).unwrap_or_else(fn() { inferred_prov.sources.clone() })
+                published.insert(slot.clone(), ViewProvenance{sources: sources, mutable: inferred_prov.mutable})
+            }
+            for (slot, declared_prov) in &declared {
+                if slot.is_empty() || published.contains_key(slot) -> continue
+                published.insert(slot.clone(), declared_prov.clone())
+            }
+            if published.is_empty() {
+                for (slot, declared_prov) in &merged {
+                    if slot.is_empty() -> declared_prov.mutable = inferred.values().any(fn(prov) { prov.mutable })
+                }
+                f.return_view_provenance = Val(^merged)
+            } else {
+                f.return_view_provenance = Val(^published)
+            }
+        } else if f.return_type.as_ref() == .Val(ret) {
+            leaves :: ck.view_leaf_paths(ret)
+            for (slot, declared_prov) in &merged {
+                declared_prov.mutable = leaves.iter().any(fn((path, access)) {
+                    (slot.is_empty() || path == slot) && access == ViewAccess.Write
+                })
+            }
+            f.return_view_provenance = Val(^merged)
+        } else {
+            f.return_view_provenance = Val(^merged)
+        }
+    }
+    if owner_type == .Val(owner) {
+        if (st.registry.method(owner, f.name), f.return_view_provenance.clone()) == (.Val(signature), .Val(provenance)) {
+            _ :: signature.return_view_provenance.set(^provenance)
+        }
+    } else {
+        if (st.funcs.get(f.name), f.return_view_provenance.clone()) == (.Val(signature), .Val(provenance)) {
+            _ :: signature.return_view_provenance.set(^provenance)
+        }
+    }
+    if f.is_pure -> ck.diags.extend(check_pure_fn(f, &st.funcs))
+    if f.is_inline_always -> ck.diags.extend(check_inline_always_fn(f))
+    ck.diags.extend(check_every_marker(f, &st.registry))
+    products.addr_taken.extend(^ck.inline_addr_taken)
+    products.embed_inputs.extend(^ck.ct_embed_inputs)
+    direct := ^ck.fx_direct
+    direct_spans := ^ck.fx_direct_spans
+    memory_events := ^ck.fx_memory_events
+    for event in &memory_events {
+        right :: if event.kind == {
+            .Allocation | .ArenaBytes(_) -> "Mem.Alloc"
+            .RetainRelease -> "Mem.Rc"
+        }
+        direct.insert(right)
+        direct_spans.entry(right).or_insert(event.span)
+    }
+    for event in &memory_events {
+        event.source = st.module_path.clone()
+        event.provenance = "{effect_key(owner_type, f.name)} in {st.module_path}"
+    }
+    for region in &ck.fx_memory_regions {
+        for event in &region.events {
+            event.source = st.module_path.clone()
+            event.provenance = "{effect_key(owner_type, f.name)} block policy in {st.module_path}"
+        }
+    }
+    if !ck.diags.iter().any(fn(diagnostic) { diagnostic.severity == Severity.Error }) {
+        for diagnostic in ^ck.fx_pending_diagnostics {
+            products.pending_diagnostics.push(PendingFunctionDiagnostic{function_key: effect_key(owner_type, f.name), function_span: f.span, diagnostic: ^diagnostic})
+        }
+    }
+    products.summaries.insert(effect_key(owner_type, f.name), EffectSummary{
+        direct: ^direct,
+        direct_spans: ^direct_spans,
+        edges: ^ck.fx_edges,
+        maximal: ck.fx_maximal,
+        maximal_span: ck.fx_maximal_span,
+        unbounded_trait_dispatch: false,
+        regions: ^ck.fx_regions,
+        authority_delegations: ^ck.fx_authority_delegations,
+        callback_obligations: ^ck.fx_callback_obligations,
+        autodiff_obligations: ^ck.fx_autodiff_obligations,
+        compute_calls: ^ck.fx_compute_calls,
+        autodiff_safe_panic: ck.fx_autodiff_safe_panic,
+        autodiff_unsafe_panic: ck.fx_autodiff_unsafe_panic,
+        memory: MemorySummary{
+            events: ^memory_events, open_dispatches: ^ck.fx_memory_open,
+            regions: ^ck.fx_memory_regions, unbounded_control: ^ck.fx_memory_unbounded_control,
+            calls: ^ck.fx_memory_calls,
+        },
+        discarded_results: ^ck.fx_discarded_results,
+        failure_direct: ck.failure_direct_source,
+    })
+    products.uses_exact_int |= ck.uses_exact_int
+    products.ran_ct_evaluator |= ck.ct_evaluator_ran.get()
+    products.devtools_publications.extend(^ck.devtools_publications)
+    ^ck.diags
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:699
+pub fn apply_reactive_upgrade_flags(stmts: &[Stmt], names: &HashSet<String>) {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:700
+    fn walk(stmts: &[Stmt], names: &HashSet<String>) {
+        for stmt in stmts {
+            if stmt == {
+                .Val(b) -> {
+                    if names.contains(b.name) || b.reactive_shared() -> b.reactive_upgrade = true
+                }
+                .While{body, ..} | .For{body, ..} | .Loop{body, ..} |
+                .CountedLoop{body, ..} | .Unsafe{body, ..} | .Impure{body, ..} |
+                .Reactive{body, ..} | .Shield{body, ..} | .Region{body, ..} |
+                .Policy{body, ..} | .TaskGroup{body, ..} | .AuthorityScope{body, ..} |
+                .ComptimeBlock{body, ..} | .ContextBlock{body, ..} | .Live{body, ..} |
+                .AssumeDet{body, ..} | .Transact{body, ..} | .Switched{body, ..} -> walk(&body, names)
+                .Switch{arms, else_body, ..} | .ComptimeSwitch{arms, else_body, ..} -> {
+                    for arm in &arms -> walk(&arm.body, names)
+                    if else_body == .Val(body) -> walk(&body, names)
+                }
+                .ComptimeIf{then_body, else_body, ..} -> {
+                    walk(&then_body, names)
+                    if else_body == .Val(body) -> walk(&body, names)
+                }
+                _ -> {}
+            }
+        }
+    }
+    walk(stmts, names)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:761
+pub fn function_value_param_contract(sig: &FuncSig) -> [(String, ParamZone)]? {
+    contract := [(String, ParamZone)].with_capacity(sig.param_call.len())
+    for (index, (label, zone)) in sig.param_call.iter().enumerate() {
+        implicit_local_label :: zone == ParamZone.Either && sig.param_info.get(index).is_some_and(fn((name, _)) { name == label })
+        public_label :: if zone == ParamZone.PositionalOnly || implicit_local_label -> "" else -> label.clone()
+        contract.push((public_label, zone))
+    }
+    if contract.iter().any(fn((label, zone)) { !label.is_empty() || zone != ParamZone.Either }) -> Val(^contract) else -> None
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:782
+pub fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
+    Type.Fn{
+        params: sig.params.iter().enumerate().map(fn((index, (_, ty))) {
+            if sig.param_variadic.get(index).copied().unwrap_or(false) -> Type.List(ty.clone()) else -> ty.clone()
+        }).collect(),
+        ret: Val(sig.effective_return_type()),
+        effect_bound: if sig.is_pure || sig.is_foreign_thread_safe -> Val([]) else -> None,
+        param_contract: function_value_param_contract(sig),
+        call_metadata: Val(FunctionCallMetadata{
+            names: sig.param_info.iter().map(fn((name, _)) { name.clone() }).collect(),
+            defaults: sig.defaults.clone(),
+            variadic: sig.param_variadic.clone(),
+            conventions: sig.params.iter().map(fn((convention, _)) { convention }).collect(),
+            policies: sig.callable_policies.clone(),
+        }),
+        return_view_provenance: sig.return_view_provenance.get(),
+    }
+}
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:825
+    pub fn checked_func_sig_to_fn_type(self: &Self, sig: &FuncSig) -> Type {
+        function_type := func_sig_to_fn_type(sig)
+        if function_type == .Fn{params, ret, ..} {
+            for param in &params -> param = self.resolve_type(param.clone())
+            if ret == .Val(value) {
+                (_, effective) :: self.checked_return_types(sig.return_type.clone(), sig.is_extern)
+                value = ^effective
+            }
+        }
+        ^function_type
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:841
+pub fn fn_types_compatible(want: &Type, got: &Type) -> Bool {
+    want :: want.with_effective_fn_returns()
+    got :: got.with_effective_fn_returns()
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:845
+    fn carrier_compatible(want: &Type, got: &Type) -> Bool {
+        compatible := true
+        shape :: Type.for_each_composite_pair(want, got, fn(want, got) {
+            if compatible {
+                compatible = if (want, got) == {
+                    (.List(_), .List(_)) | (.Option(_), .Option(_)) | (.Result{..}, .Result{..}) -> true
+                    (.Apply{name: want_name, ..}, .Apply{name: got_name, ..}) -> want_name == got_name
+                    (.Fn{..}, .Fn{..}) -> fn_types_compatible(want, got)
+                    _ -> want == got
+                }
+            }
+        })
+        shape.is_ok() && compatible
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:866
+    fn effect_bound_compatible(want: [(String, Span)]?, got: [(String, Span)]?) -> Bool {
+        if want == {
+            .None -> true
+            .Val(required) -> got.is_some_and(fn(actual) {
+                actual.iter().all(fn((effect, _)) { required.iter().any(fn((name, _)) { name == effect }) })
+            })
+        }
+    }
+    if (want, got) == (.Fn{params: wp, ret: wr, effect_bound: we, ..}, .Fn{params: gp, ret: gr, effect_bound: ge, ..}) {
+        if wp.len() != gp.len() -> return false
+        for (a, b) in wp.iter().zip(gp.iter()) {
+            if !carrier_compatible(a, b) -> return false
+        }
+        return_compatible :: if (wr, gr) == {
+            (.None, .None) -> true
+            (.Val(a), .Val(b)) -> {
+                compatible := carrier_compatible(a, b)
+                if (a, b) == (.Result{ok: want_ok, ..}, .Result{ok: got_ok, err: got_err}) {
+                    compatible |= got_err.is_never() && carrier_compatible(want_ok, got_ok)
+                }
+                compatible
+            }
+            (.None, .Val(b)) | (.Val(b), .None) -> is_unit_callable_return(b)
+        }
+        return return_compatible && effect_bound_compatible(we, ge)
+    }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1005
+pub fn property_param_generatable(ty: &Type) -> Bool {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN{..} | .InlineRange{..} -> true
+        .List(inner) | .Option(inner) -> property_param_generatable(inner)
+        .FixedList{elem, ..} -> property_param_generatable(elem)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1022
+pub fn property_param_unsupported(ty: &Type, span: Span) -> Diagnostic? {
+    if property_param_generatable(ty) -> return None
+    Val(Diagnostic.error(
+        "E0613",
+        "a property test can't generate values of type `{ty.name()}`",
+        "a parameterized `#{Syntax.KW_TEST} fn` is a property test (D-TEST1): {Syntax.LANG_NAME} generates inputs from each parameter's type, but this type has no built-in generator",
+        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself",
+        Val(span),
+    ))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1044
+pub fn collect_diverging_functions(states: &[ModuleState]) -> HashSet<String> {
+    diverging := HashSet<String>.new()
+    for state in states {
+        for item in &state.items {
+            if item == {
+                .Func(function) -> {
+                    if function.return_type.as_ref().is_some_and(fn(t) { t.has_never_success() }) -> diverging.insert(function.name.clone())
+                }
+                .CodeModule(module) -> {
+                    if module.body.as_ref() == .Val(body) {
+                        for inner in body {
+                            if inner == .Func(function) && function.return_type.as_ref().is_some_and(fn(t) { t.has_never_success() }) {
+                                diverging.insert(jet_foundation.Names.member_name(module.name, function.name))
+                            }
+                        }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop {
+        changed := false
+        for state in states {
+            for item in &state.items {
+                if item == {
+                    .Func(function) -> {
+                        if body_definitely_diverges(&function.body, &diverging, state) && diverging.insert(function.name.clone()) -> changed = true
+                    }
+                    .CodeModule(module) -> {
+                        if module.body.as_ref() == .Val(body) {
+                            for inner in body {
+                                if inner == .Func(function) && body_definitely_diverges(&function.body, &diverging, state) {
+                                    if diverging.insert(jet_foundation.Names.member_name(module.name, function.name)) -> changed = true
+                                }
+                            }
+                        }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        if !changed -> return ^diverging
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1134
+pub fn collect_fixed_length_write_params(states: &[ModuleState]) -> HashSet<(String, USize)> {
+    functions := [(String, &Func)].new()
+    for state in states {
+        for item in &state.items {
+            if item == {
+                .Func(function) -> functions.push((function.name.clone(), function))
+                .CodeModule(module) -> {
+                    for inner in module.body.iter().flatten() {
+                        if inner == .Func(function) -> functions.push((jet_foundation.Names.member_name(module.name, function.name), function))
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    declared := [String: USize] = [:]
+    for (_, function) in &functions -> declared[function.name] = declared.get(function.name).copied().unwrap_or_default() + 1
+    proven := HashSet<(String, USize)>.new() // GATE #4499: composite key equality/hash.
+    onward_uses := []
+    for (name, function) in &functions {
+        if declared.get(function.name).copied().unwrap_or_default() > 1 -> continue
+        for (index, param) in function.params.iter().enumerate() {
+            if param.convention != AccessConvention.Write -> continue
+            if param.ty != .List(_) -> continue
+            if write_list_param_onward_uses(&function.body, param.name) == .Val(onward) {
+                key :: (name.clone(), index)
+                proven.insert(key.clone())
+                onward_uses.push((key, ^onward))
+            }
+        }
+    }
+    loop {
+        before :: proven.len()
+        onward_uses.retain(fn((key, onward)) {
+            if onward.iter().all(fn(target) { proven.contains(target) }) -> true
+            else {
+                proven.remove(key)
+                false
+            }
+        })
+        if proven.len() == before -> return ^proven
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1199
+LENGTH_PRESERVING_LIST_METHODS :: [String] = ["sort", "sort_desc", "sort_by", "sort_by_key", "reverse", "swap", "fill", "shuffle", "rotate_left", "rotate_right"]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1217
+fn write_list_param_onward_uses(body: &[Stmt], param: String) -> [(String, USize)]? {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1218
+    fn is_param(expr: &Expr, param: String) -> Bool {
+        if expr == {
+            .Paren(inner, _) -> is_param(inner, param)
+            .Ident(name, _) -> name == param
+            _ -> false
+        }
+    }
+    resizes := assigns_whole_local(body, param)
+    marks := USize{0}
+    accounted := USize{0}
+    onward := [(String, USize)].new()
+    for stmt in body {
+        stmt.for_each_expr(fn(expr) {
+            if expr == {
+                .Place(inner, .Write, _) -> {
+                    if is_param(inner, param) -> marks += 1
+                }
+                .MethodCall{receiver, method, args, ..} -> {
+                    if receiver == .Place(inner, .Write, _) && is_param(inner, param) {
+                        accounted += 1
+                        if !LENGTH_PRESERVING_LIST_METHODS.contains(method) -> resizes = true
+                    }
+                    if args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && is_param(&arg.expr, param) }) -> resizes = true
+                }
+                .Call(call) -> {
+                    for (index, arg) in call.args.iter().enumerate() {
+                        if arg.convention == AccessConvention.Write && is_param(&arg.expr, param) -> onward.push((call.name.clone(), index))
+                    }
+                }
+                .CallValue{args, ..} -> {
+                    if args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && is_param(&arg.expr, param) }) -> resizes = true
+                }
+                _ -> {}
+            }
+        })
+    }
+    if !resizes && marks == accounted -> Val(^onward) else -> None
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1280
+fn assigns_whole_local(body: &[Stmt], name: String) -> Bool {
+    body.iter().any(fn(stmt) {
+        nested :: if stmt == {
+            .Assign{target: .Local{name: target, ..}, ..} && target == name -> return true
+            .While{body, ..} | .For{body, ..} | .CountedLoop{body, ..} |
+            .Loop{body, ..} | .Reactive{body, ..} | .Shield{body, ..} |
+            .Switched{body, ..} | .Region{body, ..} | .Policy{body, ..} |
+            .AuthorityScope{body, ..} | .ComptimeBlock{body, ..} | .Live{body, ..} |
+            .Transact{body, ..} | .Layout{body, ..} | .Unsafe{body, ..} |
+            .Impure{body, ..} | .TaskGroup{body, ..} | .ContextBlock{body, ..} |
+            .AssumeDet{body, ..} | .ScopeMember{body, ..} -> assigns_whole_local(&body, name)
+            .Switch{arms, else_body, ..} | .ComptimeSwitch{arms, else_body, ..} -> {
+                arms.iter().any(fn(arm) { assigns_whole_local(&arm.body, name) }) ||
+                    else_body.as_ref().is_some_and(fn(body) { assigns_whole_local(body, name) })
+            }
+            .ComptimeIf{then_body, else_body, ..} -> {
+                assigns_whole_local(&then_body, name) || else_body.as_ref().is_some_and(fn(body) { assigns_whole_local(body, name) })
+            }
+            _ -> false
+        }
+        in_expr := false
+        stmt.for_each_expr(fn(expr) {
+            if expr == {
+                .If{then_body, else_body, ..} -> in_expr |= assigns_whole_local(&then_body, name) || assigns_whole_local(&else_body, name)
+                .Lambda(lambda) -> {
+                    if lambda.body == .Block(body) -> in_expr |= assigns_whole_local(&body, name)
+                }
+                _ -> {}
+            }
+        })
+        nested || in_expr
+    })
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1359
+pub fn project_divergence_facts(bundle: &ProgramBundle, diverging: &HashSet<String>) {
+    for module in &bundle.modules {
+        for item in &module.items {
+            if item == {
+                .Func(function) -> function.diverges = diverging.contains(function.name)
+                .CodeModule(code_module) -> {
+                    if code_module.body == .Val(body) {
+                        for inner in &body {
+                            if inner == .Func(function) {
+                                name :: jet_foundation.Names.member_name(code_module.name, function.name)
+                                function.diverges = diverging.contains(name)
+                            }
+                        }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1389
+pub struct DivergenceFlow {
+    pub normal: Bool = false
+    pub returned: Bool = false
+    pub diverged: Bool = false
+    pub broke: Bool = false
+    pub continued: Bool = false
+}
+impl DivergenceFlow {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1398
+    fn normal() -> Self { Self{normal: true} }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1405
+    fn none() -> Self { Self{} }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1409
+    fn union(self: Self, other: Self) -> Self {
+        Self{normal: self.normal || other.normal, returned: self.returned || other.returned, diverged: self.diverged || other.diverged, broke: self.broke || other.broke, continued: self.continued || other.continued}
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1421
+    fn then(self: Self, next: Self) -> Self {
+        if !self.normal -> return self
+        Self{normal: false, returned: self.returned, diverged: self.diverged, broke: self.broke, continued: self.continued}.union(next)
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1435
+    fn return_to_caller(self: Self) -> Self {
+        Self{normal: false, returned: self.returned || self.normal, diverged: self.diverged, broke: self.broke, continued: self.continued}
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1445
+    fn break_to_loop(self: Self) -> Self {
+        Self{normal: false, returned: self.returned, diverged: self.diverged, broke: self.broke || self.normal, continued: self.continued}
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1455
+    fn definitely_diverges(self: Self) -> Bool {
+        self.diverged && !self.normal && !self.returned && !self.broke && !self.continued
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1460
+pub fn body_flow(body: &[Stmt], diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    flow := DivergenceFlow.normal()
+    for stmt in body -> flow = flow.then(stmt_flow(stmt, diverging, state))
+    flow
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1472
+pub fn body_definitely_diverges(body: &[Stmt], diverging: &HashSet<String>, state: &ModuleState) -> Bool {
+    body_flow(body, diverging, state).definitely_diverges()
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1480
+pub fn expr_list_flow<I: IntoIterator<&Expr>>(expressions: I, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    flow := DivergenceFlow.normal()
+    for expression in expressions -> flow = flow.then(expr_flow(expression, diverging, state))
+    flow
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1495
+pub fn call_args_flow(args: &[CallArg], diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    expr_list_flow(args.iter().map(fn(arg) { &arg.expr }), diverging, state)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1503
+pub fn lvalue_flow(target: &LValue, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if target == {
+        .Local{..} -> DivergenceFlow.normal()
+        .Index{base, index, ..} -> expr_flow(base, diverging, state).then(expr_flow(index, diverging, state))
+        .Field{base, ..} -> expr_flow(base, diverging, state)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1517
+pub fn for_kind_flow(kind: &ForKind, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if kind == {
+        .Range{start, end, step, ..} -> expr_flow(start, diverging, state)
+            .then(expr_flow(end, diverging, state))
+            .then(step.as_ref().map(fn(step) { expr_flow(step, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+        .In{collection, step} -> expr_flow(collection, diverging, state)
+            .then(step.as_ref().map(fn(step) { expr_flow(step, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1540
+pub fn finite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
+    DivergenceFlow{normal: true, returned: body.returned, diverged: body.diverged, broke: false, continued: false}
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1552
+pub fn infinite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
+    DivergenceFlow{normal: body.broke, returned: body.returned, diverged: body.diverged || body.normal || body.continued, broke: false, continued: false}
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1564
+pub fn branch_flow(body: &[Stmt], value: &Expr, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    body_flow(body, diverging, state).then(expr_flow(value, diverging, state))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1573
+pub fn switch_flow(subject: &Expr, arms: &[SwitchArm], else_body: [Stmt]?, span: Span, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if arms.is_empty() {
+        return expr_flow(subject, diverging, state).then(else_body.map(fn(body) { body_flow(&body, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+    }
+    branches := DivergenceFlow.none()
+    for arm in arms -> branches = branches.union(expr_flow(&arm.cond, diverging, state).then(body_flow(&arm.body, diverging, state)))
+    fallback :: if else_body == {
+        .Val(body) -> body_flow(&body, diverging, state)
+        .None -> if jet_foundation.is_subjectless_guard(subject, span) -> DivergenceFlow.normal() else -> DivergenceFlow.none()
+    }
+    expr_flow(subject, diverging, state).then(branches.union(fallback))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1604
+pub fn stmt_flow(stmt: &Stmt, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if stmt == {
+        .Expr(expr) -> expr_flow(expr, diverging, state)
+        .Val(binding) -> expr_flow(&binding.init, diverging, state)
+        .Assign{target, value, ..} -> lvalue_flow(target, diverging, state).then(expr_flow(value, diverging, state))
+        .Return(value, ..) -> value.as_ref().map(fn(v) { expr_flow(v, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }).return_to_caller()
+        .Break(_) | .BreakLabel(_, _) -> DivergenceFlow{broke: true}
+        .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> expr_flow(value, diverging, state).break_to_loop()
+        .Continue(_) | .ContinueLabel(_, _) -> DivergenceFlow{continued: true}
+        .Loop{body, ..} -> infinite_loop_flow(body_flow(&body, diverging, state))
+        .While{cond, body, ..} -> {
+            loop_body :: body_flow(&body, diverging, state)
+            loop_flow :: if cond.without_parens() == .Bool(true, _) -> infinite_loop_flow(loop_body) else -> finite_loop_flow(loop_body)
+            expr_flow(cond, diverging, state).then(loop_flow)
+        }
+        .For{kind, body, ..} -> for_kind_flow(kind, diverging, state).then(finite_loop_flow(body_flow(&body, diverging, state)))
+        .CountedLoop{init, cond, step, body, ..} -> {
+            iteration :: body_flow(&body, diverging, state).then(step.as_ref().map(fn(step) { stmt_flow(step, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+            loop_flow :: if cond.without_parens() == .Bool(true, _) -> infinite_loop_flow(iteration) else -> finite_loop_flow(iteration)
+            expr_flow(&init.init, diverging, state).then(expr_flow(cond, diverging, state)).then(loop_flow)
+        }
+        .Switch{subject, arms, else_body, span} | .ComptimeSwitch{subject, arms, else_body, span} -> switch_flow(subject, &arms, else_body, span, diverging, state)
+        .Unsafe{audit_expr, body, ..} | .Impure{reason_expr: audit_expr, body, ..} -> audit_expr.as_ref().map(fn(expr) { expr_flow(expr, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }).then(body_flow(&body, diverging, state))
+        .Reactive{body, ..} | .Shield{body, ..} | .Switched{body, ..} |
+        .Region{body, ..} | .Policy{body, ..} | .Layout{body, ..} |
+        .AuthorityScope{body, ..} | .ComptimeBlock{body, ..} | .Live{body, ..} |
+        .Transact{body, ..} -> body_flow(&body, diverging, state)
+        .TaskGroup{limit, body, ..} -> limit.as_ref().map(fn(expr) { expr_flow(expr, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }).then(body_flow(&body, diverging, state))
+        .ComptimeIf{then_body, else_body, selected_then, ..} -> {
+            if selected_then == {
+                .Val(true) -> body_flow(&then_body, diverging, state)
+                .Val(false) -> else_body.as_ref().map(fn(body) { body_flow(body, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() })
+                .None -> body_flow(&then_body, diverging, state).union(else_body.as_ref().map(fn(body) { body_flow(body, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+            }
+        }
+        .ContextBlock{fields, body, ..} -> expr_list_flow(fields.iter().map(fn((_, value, _)) { value }), diverging, state).then(body_flow(&body, diverging, state))
+        .AssumeDet{reason_expr, body, ..} -> expr_flow(reason_expr, diverging, state).then(body_flow(&body, diverging, state))
+        .Yield(value, _) -> expr_flow(value, diverging, state)
+        .ScopeMember{args, body, ..} -> expr_list_flow(args.iter(), diverging, state).then(body_flow(&body, diverging, state))
+        .DeferClose{close, ..} -> expr_flow(close, diverging, state)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1736
+pub fn typed_lit_flow(body: &TypedLitBody, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if body == {
+        .Fields(fields) -> expr_list_flow(fields.iter().map(fn((_, _, value)) { value }), diverging, state)
+        .Elements(elements) -> expr_list_flow(elements.iter(), diverging, state)
+        .Entries(entries) -> expr_list_flow(entries.iter().flat_map(fn((key, value)) { [key, value] }), diverging, state)
+        .Value(value) -> expr_flow(value, diverging, state)
+        .ByteText(_) | .Empty -> DivergenceFlow.normal()
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1760
+pub fn expr_flow(expr: &Expr, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if expr.without_parens() == {
+        .Str(parts, _) -> {
+            flow := DivergenceFlow.normal()
+            for part in parts {
+                if part == .Interp(value, _) -> flow = flow.then(expr_flow(value, diverging, state))
+            }
+            flow
+        }
+        .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(_, _, _, _) |
+        .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) |
+        .Ident(_, _) | .Absent(_) | .ReduceMarker(_, _) | .ComptimeName{..} |
+        .Lambda(_) -> DivergenceFlow.normal()
+        .ListLit(items, _) -> expr_list_flow(items.iter(), diverging, state)
+        .MemberSpread{base, ..} | .Spread(base, _) -> expr_flow(base, diverging, state)
+        .MapLit(items, _) -> expr_list_flow(items.iter().flat_map(fn((key, value)) { [key, value] }), diverging, state)
+        .Index{base, index, ..} | .Range{start: base, end: index, ..} -> expr_flow(base, diverging, state).then(expr_flow(index, diverging, state))
+        .Slice{base, start, end, range, ..} -> {
+            flow := expr_flow(base, diverging, state).then(expr_flow(start, diverging, state)).then(expr_flow(end, diverging, state))
+            if range == .Val(range) -> flow = flow.then(expr_flow(range, diverging, state))
+            flow
+        }
+        .MethodCall{receiver, method, args, ..} -> {
+            flow :: expr_flow(receiver, diverging, state).then(call_args_flow(&args, diverging, state))
+            if flow.normal && core_call_diverges(state, receiver, method) -> DivergenceFlow{normal: false, diverged: true, ..flow} else -> flow
+        }
+        .UnitLit{..} -> DivergenceFlow.normal()
+        .Call(call) -> {
+            args :: call_args_flow(&call.args, diverging, state)
+            call_diverges :: call.name == Syntax.BUILTIN_PANIC || diverging.contains(call.name)
+            if call_diverges && args.normal -> DivergenceFlow{normal: false, returned: args.returned, diverged: true, broke: args.broke, continued: args.continued} else -> args
+        }
+        .Unary(_, inner, _) -> expr_flow(inner, diverging, state)
+        .Binary(op, left, right, _) -> {
+            left :: expr_flow(left, diverging, state)
+            right :: expr_flow(right, diverging, state)
+            if op == .And || op == .Or {
+                if !left.normal -> left
+                else -> DivergenceFlow{normal: true, returned: left.returned || right.returned, diverged: left.diverged || right.diverged, broke: left.broke || right.broke, continued: left.continued || right.continued}
+            } else -> left.then(right)
+        }
+        .CompareChain{operands, ..} -> {
+            flow := DivergenceFlow.normal()
+            for (index, operand) in operands.iter().enumerate() {
+                prior :: flow
+                flow = flow.then(expr_flow(operand, diverging, state))
+                if index > 0 && prior.normal -> flow.normal = true
+            }
+            flow
+        }
+        .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) |
+        .Field(inner, _, _) | .OptField{base: inner, ..} | .Present(inner, _) |
+        .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) -> expr_flow(inner, diverging, state)
+        .StructLit{fields, ..} -> expr_list_flow(fields.iter().map(fn((_, _, value)) { value }), diverging, state)
+        .TypedLit{body, ..} -> typed_lit_flow(body, diverging, state)
+        .EnumLit{args, ..} -> expr_list_flow(args.iter().filter_map(fn(arg) {
+            if arg == {
+                .Positional(value) | .Named{expr: value, ..} -> Val(value)
+            }
+        }), diverging, state)
+        .Tainted(inner, ..) -> expr_flow(inner, diverging, state)
+        .Todo{..} -> DivergenceFlow{diverged: true}
+        // Omitted exhaustive fallthrough has no runtime outcome, not divergence.
+        .NoElse(_) -> DivergenceFlow.none()
+        .PatternTest{subject, ..} -> expr_flow(subject, diverging, state)
+        .Try(inner, _, _, note) -> {
+            flow := expr_flow(inner, diverging, state)
+            if note == .Val(note) -> flow = flow.union(expr_flow(note, diverging, state))
+            flow
+        }
+        .OrFallback{value, fallback, ..} -> {
+            value_flow :: expr_flow(value, diverging, state)
+            if value_flow.normal -> value_flow.union(or_fallback_flow(fallback, diverging, state)) else -> value_flow
+        }
+        .If{cond, then_body, then_value, else_body, else_value, ..} -> {
+            branches :: branch_flow(&then_body, then_value, diverging, state).union(branch_flow(&else_body, else_value, diverging, state))
+            expr_flow(cond, diverging, state).then(branches)
+        }
+        .TupleLit(fields, _, _) -> expr_list_flow(fields.iter().map(fn((_, value)) { value }), diverging, state)
+        .CallValue{callee, args, ..} -> expr_flow(callee, diverging, state).then(call_args_flow(&args, diverging, state))
+        .PtrFromAddr{addr, ..} -> expr_flow(addr, diverging, state)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1960
+pub fn or_fallback_flow(fallback: &OrFallback, diverging: &HashSet<String>, state: &ModuleState) -> DivergenceFlow {
+    if fallback == {
+        .Value(value) -> expr_flow(value, diverging, state)
+        .Block{body, value, ..} -> body_flow(&body, diverging, state).then(value.as_ref().map(fn(value) { expr_flow(value, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }))
+        .Return(value, _) -> value.as_ref().map(fn(value) { expr_flow(value, diverging, state) }).unwrap_or_else(fn() { DivergenceFlow.normal() }).return_to_caller()
+        .Panic{args, ..} -> {
+            args :: call_args_flow(&args, diverging, state)
+            if args.normal -> DivergenceFlow{normal: false, returned: args.returned, diverged: true, broke: args.broke, continued: args.continued} else -> args
+        }
+        .Break(_) | .BreakLabel(_, _) -> DivergenceFlow{broke: true}
+        .Continue(_) | .ContinueLabel(_, _) -> DivergenceFlow{continued: true}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:2003
+pub fn core_call_diverges(state: &ModuleState, receiver: &Expr, method: String) -> Bool {
+    if receiver.without_parens() == .Ident(alias, _) {
+        module :: state.core_imports.get(alias) ?? return false
+        return jet_sema.CheckerCoreLib.core_call_signature(module, method).and_then(fn((_, ret)) { ret }).is_some_and(fn(ret) {
+            if ret == .Named(name) -> name == Syntax.TYPE_NEVER else -> false
+        })
+    }
+    false
+}
 

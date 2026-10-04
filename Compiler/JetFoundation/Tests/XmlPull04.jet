@@ -1,0 +1,45 @@
+use JetFoundation.XmlPull.[Scanner, Event, Reason]
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:6482-6702 (behavioral control; no inline Rust tests)
+#Test("scanner_consumes_empty_root_and_document_boundaries") {
+    scanner := Scanner.new("<root/>")
+    assert(scanner.next() == Some(Event.DocumentStart))
+    event :: scanner.next().unwrap()
+    match event {
+        ElementStart{name, empty, ..} => { assert(name.local == "root"); assert(empty) }
+        _ => panic("expected element start")
+    }
+    assert(scanner.next() == Some(Event.DocumentEnd))
+    assert(scanner.next().is_none())
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:6102,6482 (behavioral control)
+#Test("scanner_preserves_predefined_entity_value") {
+    scanner := Scanner.new("<root>&amp;</root>")
+    _ :: scanner.next()
+    _ :: scanner.next()
+    match scanner.next().unwrap() {
+        EntityRef{name, resolved, raw} => {
+            assert(name == "amp")
+            assert(resolved == Some("&"))
+            assert(raw == "&amp;")
+        }
+        _ => panic("expected entity reference")
+    }
+    match scanner.next().unwrap() { ElementEnd{name, ..} => assert(name.local == "root"), _ => panic("expected closing tag") }
+    assert(scanner.next() == Some(Event.DocumentEnd))
+}
+// Rust: crates/jet-foundation/src/XmlPull.rs:5932,6482,6686 (behavioral control)
+#Test("scanner_locates_mismatched_closing_tag") {
+    scanner := Scanner.new("<root></other>")
+    _ :: scanner.next()
+    _ :: scanner.next()
+    failed := false
+    _ :: scanner.next() catch { error ->
+        failed = true
+        assert(error.kind == Reason.MismatchedTag)
+        assert(error.path == "$/root")
+        assert(error.reason == "mismatched XML closing tag")
+        None
+    }
+    assert(failed)
+}

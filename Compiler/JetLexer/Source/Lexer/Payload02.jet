@@ -1,731 +1,111 @@
-// PORT-PENDING 0318 crates-jet-lexer-src-lexer-strings-module-group: crates/jet-lexer/src/Lexer/Strings.rs:1-727
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! String-literal scanning: plain single-quote (`"…"`) and triple-quote
-//RS //! (`"""…"""`) literals own the ordinary escapes (S20) and `{expr}`
-//RS //! interpolation (S8); typed-head bodies hand backslashes to their head grammar
-//RS //! (D-BOUND-RAW1).
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Syntax;
-//RS 
-//RS use super::Lexer;
-//RS use super::Scan::{lex_raw_at_depth, lex_raw_generated_at_depth};
-//RS use super::Tokens::{StrTokPart, TokKind, Token};
-//RS 
-//RS impl<'a> Lexer<'a> {
-//RS     /// D-FFI-RAWBODY1=A: unlike every ordinary Jet string, the triple-quoted
-//RS     /// payload of `#FFI(<lang>) fn` is an opaque byte-for-byte foreign-source
-//RS     /// carrier. Braces, backslashes, quotes, and indentation have no Jet
-//RS     /// meaning here.
-//RS     pub(super) fn raw_foreign_string(&mut self, start: usize) -> Option<Token> {
-//RS         let content_start = self.i + 3;
-//RS         let mut close = content_start;
-//RS         while close < self.chars.len()
-//RS             && !(self.at(close) == '"' && self.at(close + 1) == '"' && self.at(close + 2) == '"')
-//RS         {
-//RS             close += 1;
-//RS         }
-//RS         if close >= self.chars.len() {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0002",
-//RS                 "this raw foreign body never gets a closing `\"\"\"`".to_string(),
-//RS                 "a `#FFI` body preserves everything between its opening and closing `\"\"\"`"
-//RS                     .to_string(),
-//RS                 "add a closing `\"\"\"` after the foreign source".to_string(),
-//RS                 Some(Span::new(start, self.end)),
-//RS             ));
-//RS             self.i = self.chars.len();
-//RS             return None;
-//RS         }
-//RS         let begin_byte = self.pos(content_start);
-//RS         let close_byte = self.pos(close);
-//RS         let source = self.src[begin_byte..close_byte].to_string();
-//RS         self.i = close + 3;
-//RS         Some(Token {
-//RS             kind: TokKind::Str(vec![StrTokPart::Lit(source)]),
-//RS             span: Span::new(start, self.pos(self.i)),
-//RS         })
-//RS     }
-//RS     /// D-RAWSTR1=A: backtick fences carry an ordinary `String` without escape
-//RS     /// or interpolation processing. A fence is a maximal run of backticks; a
-//RS     /// closing run must have exactly the same length. Runs of other lengths
-//RS     /// remain payload, which lets the formatter preserve embedded backticks.
-//RS     pub(super) fn raw_string(&mut self, start: usize) -> Option<Token> {
-//RS         let opening = self.i;
-//RS         let mut fence_len = 0usize;
-//RS         while self.at(opening + fence_len) == '`' {
-//RS             fence_len += 1;
-//RS         }
-//RS         let content_start = opening + fence_len;
-//RS         let mut cursor = content_start;
-//RS         let mut close = None;
-//RS         while cursor < self.chars.len() {
-//RS             if self.at(cursor) != '`' {
-//RS                 cursor += 1;
-//RS                 continue;
-//RS             }
-//RS             let run_start = cursor;
-//RS             while self.at(cursor) == '`' {
-//RS                 cursor += 1;
-//RS             }
-//RS             if cursor - run_start == fence_len {
-//RS                 close = Some(run_start);
-//RS                 break;
-//RS             }
-//RS         }
-//RS         let Some(close) = close else {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0002",
-//RS                 "this raw text never gets a closing backtick fence".to_string(),
-//RS                 "a raw string closes with a backtick run that has the same length as its opening run"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "add a closing fence of {} backtick{}",
-//RS                     fence_len,
-//RS                     if fence_len == 1 { "" } else { "s" }
-//RS                 ),
-//RS                 Some(Span::new(start, self.end)),
-//RS             ));
-//RS             self.i = self.chars.len();
-//RS             return None;
-//RS         };
-//RS 
-//RS         let mut text = self.src[self.pos(content_start)..self.pos(close)].to_string();
-//RS         // The fence itself cannot be escaped. One ASCII-space pad preserves
-//RS         // leading/trailing spaces when the content would otherwise resemble
-//RS         // Markdown code-span padding; an all-space payload is left untouched.
-//RS         if text.starts_with(' ')
-//RS             && text.ends_with(' ')
-//RS             && text.as_bytes().iter().any(|byte| *byte != b' ')
-//RS         {
-//RS             text.remove(0);
-//RS             text.pop();
-//RS         }
-//RS         self.i = close + fence_len;
-//RS         Some(Token {
-//RS             kind: TokKind::RawStr(text),
-//RS             span: Span::new(start, self.pos(self.i)),
-//RS         })
-//RS     }
-//RS     /// Skip a raw fence while matching an enclosing ordinary-string
-//RS     /// interpolation. Braces and quotes inside the fence are payload, not
-//RS     /// delimiters for the outer `{…}` hole.
-//RS     fn raw_fence_end(&self, opening: usize, limit: usize) -> Option<usize> {
-//RS         let limit = limit.min(self.chars.len());
-//RS         if opening >= limit || self.at(opening) != '`' {
-//RS             return None;
-//RS         }
-//RS         let mut fence_len = 0usize;
-//RS         while opening + fence_len < limit && self.at(opening + fence_len) == '`' {
-//RS             fence_len += 1;
-//RS         }
-//RS         let mut cursor = opening + fence_len;
-//RS         while cursor < limit {
-//RS             if self.at(cursor) != '`' {
-//RS                 cursor += 1;
-//RS                 continue;
-//RS             }
-//RS             let run_start = cursor;
-//RS             while cursor < limit && self.at(cursor) == '`' {
-//RS                 cursor += 1;
-//RS             }
-//RS             if cursor - run_start == fence_len {
-//RS                 return Some(cursor);
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS 
-//RS 
-//RS     /// Lex a string literal. Plain strings own the four-entry escape table
-//RS     /// (S20); a typed-head body leaves backslashes for its head grammar
-//RS     /// (D-BOUND-RAW1). D-BYTELIT1=B lets a `[U8]` body decode `\xNN` into a
-//RS     /// byte part. Both forms keep literal braces and `{expr}`
-//RS     /// interpolation (S8). Interpolated expressions are lexed in place so
-//RS     /// their tokens carry real source spans.
-//RS     pub(super) fn string(
-//RS         &mut self,
-//RS         start: usize,
-//RS         raw_head: bool,
-//RS         byte_head: bool,
-//RS     ) -> Option<Token> {
-//RS         self.i += 1; // opening quote
-//RS         let mut parts: Vec<StrTokPart> = Vec::new();
-//RS         let mut lit = String::new();
-//RS         let mut closed = false;
-//RS 
-//RS         while self.i < self.chars.len() {
-//RS             let ch = self.at(self.i);
-//RS             match ch {
-//RS                 '"' => {
-//RS                     closed = true;
-//RS                     self.i += 1;
-//RS                     break;
-//RS                 }
-//RS                 '\n' => break,
-//RS                 '\\' => {
-//RS                     if raw_head {
-//RS                         lit.push('\\');
-//RS                         if self.at(self.i + 1) == '"' {
-//RS                             // Keep the ordinary quote-delimiter rule: a quote
-//RS                             // preceded by a slash is part of the body. RAW1
-//RS                             // preserves both source characters instead of
-//RS                             // decoding the pair.
-//RS                             lit.push('"');
-//RS                             self.i += 2;
-//RS                         } else {
-//RS                             self.i += 1;
-//RS                         }
-//RS                     } else if byte_head && self.at(self.i + 1) == 'x' {
-//RS                         let Some(high) = hex_digit(self.at(self.i + 2)) else {
-//RS                             self.invalid_byte_escape(self.i);
-//RS                             self.i += 2;
-//RS                             continue;
-//RS                         };
-//RS                         let Some(low) = hex_digit(self.at(self.i + 3)) else {
-//RS                             self.invalid_byte_escape(self.i);
-//RS                             self.i += 2;
-//RS                             continue;
-//RS                         };
-//RS                         if !lit.is_empty() {
-//RS                             parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
-//RS                         }
-//RS                         parts.push(StrTokPart::Byte((high << 4) | low));
-//RS                         self.i += 4;
-//RS                     } else {
-//RS                         let esc = self.at(self.i + 1);
-//RS                         if let Some(&(_, decoded)) =
-//RS                             Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
-//RS                         {
-//RS                             lit.push(decoded);
-//RS                             self.i += 2;
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0001",
-//RS                                 format!("`\\{}` isn't an escape Jet knows", esc),
-//RS                                 "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
-//RS                                 "write `\\\\` for a real backslash".to_string(),
-//RS                                 Some(Span::new(self.pos(self.i), self.pos(self.i + 2))),
-//RS                             ));
-//RS                             self.i += 2;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 '{' if self.at(self.i + 1) == '{' => {
-//RS                     lit.push('{');
-//RS                     self.i += 2;
-//RS                 }
-//RS                 '}' if self.at(self.i + 1) == '}' => {
-//RS                     lit.push('}');
-//RS                     self.i += 2;
-//RS                 }
-//RS                 // A backslash-dollar-brace sequence is data intended for a
-//RS                 // downstream template language (for example JS `${...}`).
-//RS                 // The first two backslashes have already decoded to one
-//RS                 // literal backslash, so keep the balanced braced payload out
-//RS                 // of Jet's own interpolation parser.
-//RS                 '{' if lit.ends_with("\\$") => {
-//RS                     lit.push('{');
-//RS                     self.i += 1;
-//RS                     let mut depth = 1usize;
-//RS                     while self.i < self.chars.len() && depth > 0 {
-//RS                         let value = self.at(self.i);
-//RS                         lit.push(value);
-//RS                         self.i += 1;
-//RS                         match value {
-//RS                             '{' => depth += 1,
-//RS                             '}' => depth -= 1,
-//RS                             _ => {}
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 '}' => {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0001",
-//RS                         "a lone `}` inside quoted text".to_string(),
-//RS                         "inside quoted text, `{` and `}` mark an interpolated value, so a literal brace is doubled".to_string(),
-//RS                         "write `}}` to print a `}`".to_string(),
-//RS                         Some(Span::new(self.pos(self.i), self.pos(self.i + 1))),
-//RS                     ));
-//RS                     self.i += 1;
-//RS                 }
-//RS                 '{' => {
-//RS                     let open_pos = self.pos(self.i);
-//RS                     self.i += 1;
-//RS                     // Find the matching `}`, respecting nested quotes.
-//RS                     let expr_start = self.i;
-//RS                     let mut depth = 1usize;
-//RS                     let mut in_quote = false;
-//RS                     while self.i < self.chars.len() {
-//RS                         let c2 = self.at(self.i);
-//RS                         if in_quote {
-//RS                             if c2 == '\\' {
-//RS                                 self.i += 1;
-//RS                             } else if c2 == '"' {
-//RS                                 in_quote = false;
-//RS                             }
-//RS                         } else {
-//RS                             match c2 {
-//RS                                 '"' => in_quote = true,
-//RS                                 '`' => {
-//RS                                     if let Some(end) =
-//RS                                         self.raw_fence_end(self.i, self.chars.len())
-//RS                                     {
-//RS                                         self.i = end;
-//RS                                         continue;
-//RS                                     }
-//RS                                     self.i = self.chars.len();
-//RS                                     break;
-//RS                                 }
-//RS                                 '{' => depth += 1,
-//RS                                 '}' => {
-//RS                                     depth -= 1;
-//RS                                     if depth == 0 {
-//RS                                         break;
-//RS                                     }
-//RS                                 }
-//RS                                 '\n' => break,
-//RS                                 _ => {}
-//RS                             }
-//RS                         }
-//RS                         self.i += 1;
-//RS                     }
-//RS                     if depth != 0 || self.at(self.i) != '}' {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0002",
-//RS                             "this `{` never gets a matching `}`".to_string(),
-//RS                             "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends; escaped braces use `{{`/`}}`, while raw backtick strings keep braces literal".to_string(),
-//RS                             "add a `}` after the value, write `{{` for an escaped brace, or write the text as ``…`` for raw text".to_string(),
-//RS                             Some(Span::new(open_pos, self.pos(self.i))),
-//RS                         ));
-//RS                         // Skip to the end of the line; one error is enough.
-//RS                         while self.i < self.chars.len() && self.at(self.i) != '\n' {
-//RS                             self.i += 1;
-//RS                         }
-//RS                         return None;
-//RS                     }
-//RS                     let inner_start_byte = self.pos(expr_start);
-//RS                     let inner_end_byte = self.pos(self.i);
-//RS                     self.i += 1; // closing }
-//RS                     let inner = &self.src[inner_start_byte..inner_end_byte];
-//RS                     if inner.trim().is_empty() {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "there's nothing inside this `{ }` to show".to_string(),
-//RS                             "interpolation puts a value into the text, so the braces need a value"
-//RS                                 .to_string(),
-//RS                             "put a value inside, like `{name}`, or write `{{}}` for literal braces"
-//RS                                 .to_string(),
-//RS                             Some(Span::new(open_pos, self.pos(self.i))),
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                     if !lit.is_empty() {
-//RS                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
-//RS                     }
-//RS                     parts.push(StrTokPart::Interp(self.lex_interpolation(
-//RS                         inner_start_byte,
-//RS                         inner_end_byte,
-//RS                         Span::new(open_pos, self.pos(self.i)),
-//RS                     )));
-//RS                 }
-//RS                 _ => {
-//RS                     lit.push(ch);
-//RS                     self.i += 1;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         if !closed {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0002",
-//RS                 "this text never gets a closing quote".to_string(),
-//RS                 "a piece of text must start and end with a `\"` on the same line".to_string(),
-//RS                 "add a closing `\"` before the end of the line".to_string(),
-//RS                 Some(Span::new(start, self.pos(self.i))),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS         if !lit.is_empty() || parts.is_empty() {
-//RS             parts.push(StrTokPart::Lit(lit));
-//RS         }
-//RS         Some(Token {
-//RS             kind: TokKind::Str(parts),
-//RS             span: Span::new(start, self.pos(self.i)),
-//RS         })
-//RS     }
-//RS 
-//RS     /// S70 (D-SG5): `"""…"""` multi-line string. The line break right after the
-//RS     /// opening `"""` is dropped, the line break before the closing `"""` is
-//RS     /// dropped, and the closing `"""`'s indentation is stripped from every line.
-//RS     /// Plain-string escapes (S20) and `{interp}` (S8) stay active. A typed-head
-//RS     /// body leaves backslashes literal for its head grammar (D-BOUND-RAW1),
-//RS     /// except that D-BYTELIT1=B decodes `\xNN` in a `[U8]` body.
-//RS     /// The processed text is stored as ordinary [`StrTokPart`]s;
-//RS     /// `jet fmt` re-derives the triple-quoted shape from the span.
-//RS     pub(super) fn triple_string(
-//RS         &mut self,
-//RS         start: usize,
-//RS         raw_head: bool,
-//RS         byte_head: bool,
-//RS     ) -> Option<Token> {
-//RS         let open_end = self.i + 3; // char index just past the opening `"""`
-//RS 
-//RS         // Pass 1: locate the closing `"""`, skipping `\`-escapes and the
-//RS         // contents of `{ … }` interpolations (so a `"""` inside an interpolated
-//RS         // expression doesn't close the literal).
-//RS         let mut j = open_end;
-//RS         let mut close_at: Option<usize> = None;
-//RS         let mut depth = 0usize;
-//RS         while j < self.chars.len() {
-//RS             let c = self.at(j);
-//RS             if depth > 0 {
-//RS                 match c {
-//RS                     '{' => depth += 1,
-//RS                     '}' => depth -= 1,
-//RS                     '`' => {
-//RS                         if let Some(end) = self.raw_fence_end(j, self.chars.len()) {
-//RS                             j = end;
-//RS                             continue;
-//RS                         }
-//RS                         j = self.chars.len();
-//RS                         continue;
-//RS                     }
-//RS                     '"' => {
-//RS                         j += 1;
-//RS                         while j < self.chars.len() && self.at(j) != '"' {
-//RS                             if self.at(j) == '\\' {
-//RS                                 j += 1;
-//RS                             }
-//RS                             j += 1;
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 j += 1;
-//RS                 continue;
-//RS             }
-//RS             match c {
-//RS                 '\\' if !raw_head => j += 2,
-//RS                 '\\' if self.at(j + 1) == '"' => j += 2,
-//RS                 '\\' => j += 1,
-//RS                 '{' if self.at(j + 1) != '{' => {
-//RS                     depth += 1;
-//RS                     j += 1;
-//RS                 }
-//RS                 '{' => j += 2, // `{{` literal brace
-//RS                 '"' if self.at(j + 1) == '"' && self.at(j + 2) == '"' => {
-//RS                     close_at = Some(j);
-//RS                     break;
-//RS                 }
-//RS                 _ => j += 1,
-//RS             }
-//RS         }
-//RS 
-//RS         let close = match close_at {
-//RS             Some(c) => c,
-//RS             None => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0002",
-//RS                     "this multi-line text never gets a closing `\"\"\"`".to_string(),
-//RS                     "a multi-line string starts and ends with `\"\"\"`".to_string(),
-//RS                     "add a closing `\"\"\"` on its own line".to_string(),
-//RS                     Some(Span::new(start, self.pos(self.chars.len()))),
-//RS                 ));
-//RS                 self.i = self.chars.len();
-//RS                 return None;
-//RS             }
-//RS         };
-//RS 
-//RS         // The closing delimiter's indentation: the whitespace from the start of
-//RS         // its line up to the `"""`. That exact prefix is stripped per line.
-//RS         let mut close_line_start = close;
-//RS         while close_line_start > open_end && self.at(close_line_start - 1) != '\n' {
-//RS             close_line_start -= 1;
-//RS         }
-//RS         let indent = if (close_line_start..close).all(|k| matches!(self.at(k), ' ' | '\t')) {
-//RS             close - close_line_start
-//RS         } else {
-//RS             0
-//RS         };
-//RS 
-//RS         // Drop the line break right after the opening `"""`.
-//RS         let mut content_begin = open_end;
-//RS         {
-//RS             let mut k = open_end;
-//RS             while k < close && self.at(k) != '\n' {
-//RS                 k += 1;
-//RS             }
-//RS             if k < close && self.at(k) == '\n' {
-//RS                 content_begin = k + 1;
-//RS             }
-//RS         }
-//RS         // Drop the line break right before the closing delimiter's line.
-//RS         let mut content_end = close_line_start;
-//RS         if content_end > content_begin && self.at(content_end - 1) == '\n' {
-//RS             content_end -= 1;
-//RS         }
-//RS         if content_end < content_begin {
-//RS             content_end = content_begin;
-//RS         }
-//RS 
-//RS         // Pass 2: build the parts, stripping the closing indentation at the
-//RS         // start of every line.
-//RS         let mut parts: Vec<StrTokPart> = Vec::new();
-//RS         let mut lit = String::new();
-//RS         let mut k = content_begin;
-//RS         let mut at_line_start = true;
-//RS         while k < content_end {
-//RS             if at_line_start {
-//RS                 let mut stripped = 0;
-//RS                 while stripped < indent && k < content_end && matches!(self.at(k), ' ' | '\t') {
-//RS                     k += 1;
-//RS                     stripped += 1;
-//RS                 }
-//RS                 at_line_start = false;
-//RS             }
-//RS             let ch = self.at(k);
-//RS             match ch {
-//RS                 '\n' => {
-//RS                     lit.push('\n');
-//RS                     k += 1;
-//RS                     at_line_start = true;
-//RS                 }
-//RS                 '\\' => {
-//RS                     if raw_head {
-//RS                         lit.push('\\');
-//RS                         if self.at(k + 1) == '"' {
-//RS                             // As in an ordinary triple string, a quoted
-//RS                             // delimiter is not a closing delimiter. Preserve
-//RS                             // the slash and quote as raw body text.
-//RS                             lit.push('"');
-//RS                             k += 2;
-//RS                         } else {
-//RS                             k += 1;
-//RS                         }
-//RS                     } else if byte_head && self.at(k + 1) == 'x' {
-//RS                         let Some(high) = hex_digit(self.at(k + 2)) else {
-//RS                             self.invalid_byte_escape(k);
-//RS                             k += 2;
-//RS                             continue;
-//RS                         };
-//RS                         let Some(low) = hex_digit(self.at(k + 3)) else {
-//RS                             self.invalid_byte_escape(k);
-//RS                             k += 2;
-//RS                             continue;
-//RS                         };
-//RS                         if !lit.is_empty() {
-//RS                             parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
-//RS                         }
-//RS                         parts.push(StrTokPart::Byte((high << 4) | low));
-//RS                         k += 4;
-//RS                     } else {
-//RS                         let esc = self.at(k + 1);
-//RS                         if let Some(&(_, decoded)) =
-//RS                             Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
-//RS                         {
-//RS                             lit.push(decoded);
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0001",
-//RS                                 format!("`\\{}` isn't an escape Jet knows", esc),
-//RS                                 "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
-//RS                                 "write `\\\\` for a real backslash".to_string(),
-//RS                                 Some(Span::new(self.pos(k), self.pos(k + 2))),
-//RS                             ));
-//RS                         }
-//RS                         k += 2;
-//RS                     }
-//RS                 }
-//RS                 '{' if self.at(k + 1) == '{' => {
-//RS                     lit.push('{');
-//RS                     k += 2;
-//RS                 }
-//RS                 '}' if self.at(k + 1) == '}' => {
-//RS                     lit.push('}');
-//RS                     k += 2;
-//RS                 }
-//RS                 '{' if lit.ends_with("\\$") => {
-//RS                     lit.push('{');
-//RS                     k += 1;
-//RS                     let mut depth = 1usize;
-//RS                     while k < content_end && depth > 0 {
-//RS                         let value = self.at(k);
-//RS                         lit.push(value);
-//RS                         k += 1;
-//RS                         match value {
-//RS                             '{' => depth += 1,
-//RS                             '}' => depth -= 1,
-//RS                             _ => {}
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 '}' => {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0001",
-//RS                         "a lone `}` inside quoted text".to_string(),
-//RS                         "inside quoted text, `{` and `}` mark an interpolated value, so a literal brace is doubled".to_string(),
-//RS                         "write `}}` to print a `}`".to_string(),
-//RS                         Some(Span::new(self.pos(k), self.pos(k + 1))),
-//RS                     ));
-//RS                     k += 1;
-//RS                 }
-//RS                 '{' => {
-//RS                     let open_pos = self.pos(k);
-//RS                     k += 1;
-//RS                     let expr_start = k;
-//RS                     let mut bdepth = 1usize;
-//RS                     let mut in_quote = false;
-//RS                     while k < content_end {
-//RS                         let c2 = self.at(k);
-//RS                         if in_quote {
-//RS                             if c2 == '\\' {
-//RS                                 k += 1;
-//RS                             } else if c2 == '"' {
-//RS                                 in_quote = false;
-//RS                             }
-//RS                         } else {
-//RS                             match c2 {
-//RS                                 '"' => in_quote = true,
-//RS                                 '`' => {
-//RS                                     if let Some(end) = self.raw_fence_end(k, content_end) {
-//RS                                         k = end;
-//RS                                         continue;
-//RS                                     }
-//RS                                     k = content_end;
-//RS                                     break;
-//RS                                 }
-//RS                                 '{' => bdepth += 1,
-//RS                                 '}' => {
-//RS                                     bdepth -= 1;
-//RS                                     if bdepth == 0 {
-//RS                                         break;
-//RS                                     }
-//RS                                 }
-//RS                                 _ => {}
-//RS                             }
-//RS                         }
-//RS                         k += 1;
-//RS                     }
-//RS                     if bdepth != 0 || k >= content_end || self.at(k) != '}' {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0002",
-//RS                             "this `{` never gets a matching `}`".to_string(),
-//RS                             "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends; escaped braces use `{{`/`}}`, while raw backtick strings keep braces literal".to_string(),
-//RS                             "add a `}` after the value, write `{{` for an escaped brace, or write the text as ``…`` for raw text".to_string(),
-//RS                             Some(Span::new(open_pos, self.pos(k))),
-//RS                         ));
-//RS                         self.i = close + 3;
-//RS                         return None;
-//RS                     }
-//RS                     let inner_start_byte = self.pos(expr_start);
-//RS                     let inner_end_byte = self.pos(k);
-//RS                     k += 1; // closing `}`
-//RS                     let inner = &self.src[inner_start_byte..inner_end_byte];
-//RS                     if inner.trim().is_empty() {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "there's nothing inside this `{ }` to show".to_string(),
-//RS                             "interpolation puts a value into the text, so the braces need a value"
-//RS                                 .to_string(),
-//RS                             "put a value inside, like `{name}`, or write `{{}}` for literal braces"
-//RS                                 .to_string(),
-//RS                             Some(Span::new(open_pos, self.pos(k))),
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                     if !lit.is_empty() {
-//RS                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
-//RS                     }
-//RS                     parts.push(StrTokPart::Interp(self.lex_interpolation(
-//RS                         inner_start_byte,
-//RS                         inner_end_byte,
-//RS                         Span::new(open_pos, self.pos(k)),
-//RS                     )));
-//RS                 }
-//RS                 _ => {
-//RS                     lit.push(ch);
-//RS                     k += 1;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         self.i = close + 3; // consume the closing `"""`
-//RS         if !lit.is_empty() || parts.is_empty() {
-//RS             parts.push(StrTokPart::Lit(lit));
-//RS         }
-//RS         Some(Token {
-//RS             kind: TokKind::Str(parts),
-//RS             span: Span::new(start, self.pos(self.i)),
-//RS         })
-//RS     }
-//RS 
-//RS     fn lex_interpolation(
-//RS         &mut self,
-//RS         inner_start_byte: usize,
-//RS         inner_end_byte: usize,
-//RS         span: Span,
-//RS     ) -> Vec<Token> {
-//RS         let next_depth = self.interpolation_depth.saturating_add(1);
-//RS         if self.interpolation_depth >= crate::Diagnostics::MAX_SOURCE_NESTING {
-//RS             self.diags
-//RS                 .push(Diagnostic::source_nesting_exceeded(next_depth, span));
-//RS             return Vec::new();
-//RS         }
-//RS 
-//RS         let inner = &self.src[inner_start_byte..inner_end_byte];
-//RS         let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
-//RS             lex_raw_generated_at_depth(inner, next_depth)
-//RS         } else {
-//RS             lex_raw_at_depth(inner, next_depth)
-//RS         };
-//RS         // Nested interpolations carry spans relative to this `inner` slice
-//RS         // too, so rebase every token in the tree, not only the top level.
-//RS         let mut pending: Vec<&mut [Token]> = vec![inner_toks.as_mut_slice()];
-//RS         while let Some(tokens) = pending.pop() {
-//RS             for t in tokens {
-//RS                 t.span = Span::new(
-//RS                     t.span.start + inner_start_byte,
-//RS                     t.span.end + inner_start_byte,
-//RS                 );
-//RS                 if let TokKind::Str(parts) = &mut t.kind {
-//RS                     for part in parts {
-//RS                         if let StrTokPart::Interp(nested) = part {
-//RS                             pending.push(nested.as_mut_slice());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for mut d in inner_diags {
-//RS             if let Some(s) = d.span.as_mut() {
-//RS                 *s = Span::new(s.start + inner_start_byte, s.end + inner_start_byte);
-//RS             }
-//RS             self.diags.push(d);
-//RS         }
-//RS         inner_toks
-//RS     }
-//RS 
-//RS     fn invalid_byte_escape(&mut self, at: usize) {
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0001",
-//RS             "`\\x` needs two hexadecimal digits".to_string(),
-//RS             "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal"
-//RS                 .to_string(),
-//RS             "write two hexadecimal digits after `\\x`, for example `\\x00`".to_string(),
-//RS             Some(Span::new(self.pos(at), self.pos(at + 4))),
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS fn hex_digit(ch: char) -> Option<u8> {
-//RS     match ch {
-//RS         '0'..='9' => Some(ch as u8 - b'0'),
-//RS         'a'..='f' => Some(ch as u8 - b'a' + 10),
-//RS         'A'..='F' => Some(ch as u8 - b'A' + 10),
-//RS         _ => None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0318 crates/jet-lexer/src/Lexer/Strings.rs:1-727
-
+// Private continuation of JetLexer.Lexer.Payload; reuse the existing payload
+// carriers and decoders rather than duplicating Token/StringPart.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:1
+// Literal escapes belong to ordinary strings; typed heads retain backslashes.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:18
+// raw_foreign_string maps to Payload.jet:722 decode_string raw_foreign_body_at
+// branch (:724-730), with boundary and unterminated diagnostic in Scan/Payload.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:51
+// raw_string maps to Scan.jet:351 scan_raw_fence_end and Payload.jet:693
+// decode_raw_string: exact-length fence, one-space padding only for non-space text.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:111
+fn raw_fence_end(source: [U8], opening: Int, limit: Int) -> Int? Never! {
+    bounded :: limit.min(source.len())
+    if opening >= bounded || byte_at(source, opening) != 96 -> return None
+    fence := 0
+    loop opening + fence < bounded && byte_at(source, opening + fence) == 96 -> fence += 1
+    cursor := opening + fence
+    loop cursor < bounded {
+        if byte_at(source, cursor) != 96 { cursor += 1; next }
+        run_start :: cursor
+        loop cursor < bounded && byte_at(source, cursor) == 96 -> cursor += 1
+        if cursor - run_start == fence -> return Val(cursor)
+    }
+    None
+}
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:145
+// string maps to Scan.jet:276 scan_plain_string_end plus Payload.jet:515
+// decode_string_content. Every escape/byte/brace/template/empty-hole branch is
+// retained at that owner. This matcher preserves Rust's quote-only hole grammar.
+fn string_interpolation_close(source: [U8], opening: Int, limit: Int, triple: Bool) -> Int? Never! {
+    cursor := opening + 1
+    depth := 1
+    in_quote := false
+    loop cursor < limit {
+        value :: byte_at(source, cursor)
+        if in_quote {
+            if value == 92 {
+                cursor += utf8_width(source, cursor)
+                if cursor >= limit -> break
+            } else if value == 34 -> in_quote = false
+        } else {
+            if value == {
+                34 -> in_quote = true
+                96 -> { cursor = raw_fence_end(source, cursor, limit) ?? return None; next }
+                123 -> depth += 1
+                125 -> { depth -= 1; if depth == 0 -> return Val(cursor) }
+                10 -> { if !triple -> return None }
+                else -> {}
+            }
+        }
+        cursor += utf8_width(source, cursor)
+    }
+    None
+}
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:365
+// triple_string's indentation/drop-first-and-last-newline and part construction
+// map to Payload.jet:722-754 decode_string + :515 decode_string_content.
+// Pass-one Rust matching differs from Scan's extra comment/character grammar.
+fn triple_string_close(source: [U8], opening: Int, raw_head: Bool) -> Int? Never! {
+    cursor := opening + 3
+    depth := 0
+    loop cursor < source.len() {
+        value :: byte_at(source, cursor)
+        if depth > 0 {
+            if value == {
+                123 -> depth += 1
+                125 -> depth -= 1
+                96 -> { cursor = raw_fence_end(source, cursor, source.len()) ?? return None; next }
+                34 -> {
+                    cursor += 1
+                    loop cursor < source.len() && byte_at(source, cursor) != 34 {
+                        if byte_at(source, cursor) == 92 {
+                            cursor += 1
+                            if cursor >= source.len() -> break
+                        }
+                        cursor += utf8_width(source, cursor)
+                    }
+                }
+                else -> {}
+            }
+            cursor += utf8_width(source, cursor)
+            next
+        }
+        if value == {
+            92 -> {
+                if !raw_head || byte_at(source, cursor + 1) == 34 {
+                    cursor += 1
+                    if cursor < source.len() -> cursor += utf8_width(source, cursor)
+                } else -> cursor += 1
+            }
+            123 -> {
+                if byte_at(source, cursor + 1) != 123 { depth += 1; cursor += 1 } else -> cursor += 2
+            }
+            34 -> {
+                if byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34 -> return Val(cursor)
+                cursor += 1
+            }
+            else -> cursor += utf8_width(source, cursor)
+        }
+    }
+    None
+}
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:662
+// lex_interpolation maps to Payload.jet:381 lex_expression (depth-gated raw
+// substream, reserved-identifier mode, nested-token/diagnostic span rebasing).
+// Rust's pending-slice worklist is iterative; retain that property at cutover.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:708
+// invalid_byte_escape maps to Payload.jet:683 invalid_byte_escape, including
+// four-scalar span and exact E0001 text.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:720
+// hex_digit maps to Payload.jet:131 hex_value (negative sentinel instead of None).

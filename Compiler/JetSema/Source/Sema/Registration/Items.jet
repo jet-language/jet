@@ -32,9 +32,7 @@ use jet_foundation.[
     ImportedItem,
     InternalTag,
     Item,
-    LoadedModule,
     ProgramBundle,
-    MIROSTarget,
     MIRTargetMachine,
     MIRTypedHeadKind,
     Marker,
@@ -2195,7 +2193,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     prepared_inputs := inputs
-    bundle_owner :: sema_retained_input_owner(inputs, target_machine, build_facts, canonical_effect_module_identity)
+    bundle_owner :: sema_retained_input_owner(inputs)
     sema_retained_bind_input_owner(&prepared_inputs, bundle_owner, canonical_effect_module_identity)
     catalog :: sema_units_catalog(&diagnostics)
     loop index in 0..<prepared_inputs.len() -> sema_units_inject(&prepared_inputs[index], catalog)

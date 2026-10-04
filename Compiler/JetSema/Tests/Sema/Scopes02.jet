@@ -1,0 +1,226 @@
+use jet_foundation.[ProgramBundle, LoadedModule, DevtoolsRegistry, CFfi, NameLedger, Diagnostic, Span, Item, UnitScaleProvenance, RuntimeLayer, OSTarget, CompileMode, Severity]
+use jet_sema.[dedupe_unknown_names, dedupe_soft_public_lints, validate_script_entries, incremental_global_environment, incremental_module_interface, IncrementalSemaCache, check_bundle_with_effect_facts_incremental, inject_units_prelude, resolve_unit_dimensions, incremental_module_dependencies, PendingFunctionDiagnostic]
+use jet_lexer.[lex]
+use jet_parser.[parse]
+use std.fmt.[debug_string] // GATE #4499: exact Rust-compatible debug byte accounting.
+use std.fs.[read_to_string] // GATE #4494: retained native filesystem primitive.
+use std.env.[cargo_manifest_dir] // GATE #4494: reference-source root provided by the test host.
+
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2212
+#Test("duplicate_unknown_name_at_one_span_is_reported_once") {
+    span :: Span.new(4, 8)
+    unknown :: fn() -> Diagnostic Never! { Diagnostic.error("E0107", "nothing named `x` exists here", "a name must be declared before it is used", "declare it first", Val(span)) }
+    diagnostics := [unknown(), unknown()]
+    dedupe_unknown_names(&diagnostics)
+    assert(diagnostics.len() == 1)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2229
+#Test("same_unknown_name_span_in_two_modules_is_preserved") {
+    unknown :: fn() -> Diagnostic Never! { Diagnostic.error("E0107", "nothing named `x` exists here", "a name must be declared before it is used", "declare it first", Val(Span.new(4, 8))) }
+    first_module := [unknown(), unknown()]
+    second_module := [unknown(), unknown()]
+    dedupe_unknown_names(&first_module)
+    dedupe_unknown_names(&second_module)
+    diagnostics := ^first_module
+    &diagnostics.extend(^second_module)
+    assert(diagnostics.len() == 2)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2248
+#Test("duplicate_soft_public_lint_at_one_occurrence_is_reported_once") {
+    span :: Span.new(4, 8)
+    soft_public :: fn() -> Diagnostic Never! { Diagnostic.lint("L0601", "`_x` is a soft-public API", "a leading underscore allows outside use", "use a public name", Val(span)) }
+    diagnostics := [soft_public(), soft_public()]
+    dedupe_soft_public_lints(&diagnostics)
+    assert(diagnostics.len() == 1)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2265
+#Test("distinct_soft_public_names_at_one_occurrence_are_preserved") {
+    span :: Span.new(4, 8)
+    soft_public :: fn(name: String) -> Diagnostic Never! { Diagnostic.lint("L0601", "`{name}` is a soft-public API", "a leading underscore allows outside use", "use a public name", Val(span)) }
+    diagnostics := [soft_public("_x"), soft_public("_y")]
+    dedupe_soft_public_lints(&diagnostics)
+    assert(diagnostics.len() == 2)
+    assert(diagnostics[0].what == "`_x` is a soft-public API")
+    assert(diagnostics[1].what == "`_y` is a soft-public API")
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2284
+#Test("soft_public_lints_at_distinct_occurrences_are_preserved") {
+    soft_public :: fn(span: Span) -> Diagnostic Never! { Diagnostic.lint("L0601", "`_x` is a soft-public API", "a leading underscore allows outside use", "use a public name", Val(span)) }
+    diagnostics := [soft_public(Span.new(4, 8)), soft_public(Span.new(12, 16))]
+    dedupe_soft_public_lints(&diagnostics)
+    assert(diagnostics.len() == 2)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2300
+#Test("loose_script_body_is_rejected_without_an_edit") {
+    bundle := incremental_bundle("print(\"before\")\nfn run() { print(\"middle\") }\n")
+    diagnostics :: validate_script_entries(&bundle)
+    assert(diagnostics.any(fn(d: Diagnostic) -> Bool Never! { d.code == "E0621" }))
+    assert(diagnostics.all(fn(d: Diagnostic) -> Bool Never! { d.edit == None }))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2312
+fn incremental_bundle(source: String) -> ProgramBundle Never! {
+    (tokens, lexer_diagnostics) :: lex(source)
+    assert(lexer_diagnostics.is_empty())
+    program := parse(tokens).unwrap()
+    ProgramBundle{
+        entry: 0, project_root: OSPath.from("."),
+        modules: [LoadedModule{
+            path: OSPath.from("cache-accounting.jet"), display: "cache-accounting.jet", source: ~source, alias: "main",
+            imports: ^program.imports, items: ^program.items, script_body: ^program.script_body, block_spans: ^program.block_spans,
+            web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
+            default_target: program.default_target, html_path: program.html_path,
+            policy_declarations: ^program.policy_declarations, user_policy_declarations: ^program.user_policy_declarations, rule_facts: ^program.rule_facts
+        }],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: [:], ffi_callback_fns: [:], cffi: CFfi.default(),
+        comptime_inputs: [], name_ledger: NameLedger.default(), layer_ceiling: None, inferred_layer: RuntimeLayer.Core,
+        web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:],
+        package_guarantees: .default(), program_allocator: .default(), active_os: OSTarget.host(), build_facts: .default(), edition: "2027"
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2361
+#Test("incremental_environment_ignores_build_stamp_clock") {
+    left := incremental_bundle("fn run() {}\n")
+    right := incremental_bundle("fn run() {}\n")
+    left.build_facts.stamp.at = "2026-01-01T00:00:00Z"
+    right.build_facts.stamp.at = "2026-01-02T00:00:00Z"
+    assert(incremental_global_environment(left, "plugin") == incremental_global_environment(right, "plugin"))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2374
+#Test("body_only_edit_reuses_unchanged_function") {
+    before :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\nfn run() { print(alpha() + beta()) }\n"
+    after :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 20 }\nfn run() { print(alpha() + beta()) }\n"
+    assert(incremental_module_interface(incremental_bundle(before).modules[0]) == incremental_module_interface(incremental_bundle(after).modules[0]))
+    cache := IncrementalSemaCache.new()
+    first := incremental_bundle(before)
+    (first_diags, _) :: check_bundle_with_effect_facts_incremental(&first, CompileMode.Check, &cache)
+    first_errors :: first_diags.filter(fn(d: Diagnostic) -> Bool Never! { d.severity == Severity.Error })
+    assert(first_errors.is_empty())
+    cold :: cache.stats()
+    &cache.clear_measurement()
+    second := incremental_bundle(after)
+    (second_diags, _) :: check_bundle_with_effect_facts_incremental(&second, CompileMode.Check, &cache)
+    second_errors :: second_diags.filter(fn(d: Diagnostic) -> Bool Never! { d.severity == Severity.Error })
+    assert(second_errors.is_empty())
+    warm :: cache.stats()
+    assert(warm.hits - cold.hits == 2)
+    assert(warm.recomputes - cold.recomputes == 1)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2437
+#Test("ordinary_units_prelude_supplies_standard_axes_and_provenance") {
+    bundle := incremental_bundle("#UnitFamily(Token, dimension, base: token) { token }\n#UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) { token_per_second }\nfn touch_mass() { _ :: 1dalton }\n")
+    assert(inject_units_prelude(&bundle).is_empty())
+    assert(resolve_unit_dimensions(&bundle).is_empty())
+    families :: bundle.modules[0].items.filter_map(fn(item: Item) { if item == .UnitFamily(family) -> return Val(family); None })
+    token :: families.find(fn(family) { family.family == "Token" }).unwrap()
+    time :: families.find(fn(family) { family.family == "Time" }).unwrap()
+    rate :: families.find(fn(family) { family.family == "TokenRate" }).unwrap()
+    assert(rate.resolved_dimension == token.resolved_dimension.unwrap().divide(time.resolved_dimension.unwrap()))
+    mass :: families.find(fn(family) { family.family == "Mass" }).unwrap()
+    dalton :: mass.members.find(fn(member) { member.name == "dalton" }).unwrap()
+    assert(dalton.scale_provenance is UnitScaleProvenance.Measured)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2491
+#Test("imported_public_dimension_participates_in_derived_claims") {
+    bundle := incremental_bundle("use dep\n#UnitFamily(InventoryRate, dimension: Inventory / Time, base: item_per_second) { item_per_second }\n")
+    import_span :: bundle.modules[0].imports[0].span
+    dependency := incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n").modules.remove(0)
+    dependency.path = OSPath.from("deps/dep.jet")
+    dependency.display = "deps/dep.jet"
+    dependency.alias = "dep"
+    &bundle.modules.push(^dependency)
+    &bundle.name_ledger.record_import_target(0, import_span, 1)
+    assert(inject_units_prelude(&bundle).is_empty())
+    assert(resolve_unit_dimensions(&bundle).is_empty())
+    dimension :: fn(module: Int, family: String) {
+        bundle.modules[module].items.find_map(fn(item: Item) {
+            if item == .UnitFamily(definition) && definition.family == family -> return ~definition.resolved_dimension
+            None
+        }).unwrap()
+    }
+    assert(dimension(0, "InventoryRate") == dimension(1, "Inventory").divide(dimension(0, "Time")).unwrap())
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2530
+#Test("incremental_dependencies_include_nested_module_imports") {
+    bundle := incremental_bundle("module api {\n    use dep.[value]\n    pub fn call() -> Int { return value() }\n}\n")
+    dependency := incremental_bundle("pub fn value() -> Int { return 1 }\n").modules.remove(0)
+    dependency.path = OSPath.from("dep.jet")
+    dependency.display = "dep.jet"
+    dependency.alias = "dep"
+    &bundle.modules.push(^dependency)
+    dependencies :: incremental_module_dependencies(bundle)
+    assert(dependencies["cache-accounting.jet"] == ["dep.jet"])
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2547
+#Test("incremental_dependencies_match_directory_module_imports") {
+    bundle := incremental_bundle("use archive\nfn run() -> Int { return archive.value() }\n")
+    dependency := incremental_bundle("pub fn value() -> Int { return 1 }\n").modules.remove(0)
+    dependency.path = OSPath.from("archive/run.jet")
+    dependency.display = "archive/run.jet"
+    dependency.alias = "run"
+    &bundle.modules.push(^dependency)
+    dependencies :: incremental_module_dependencies(bundle)
+    assert(dependencies["cache-accounting.jet"] == ["archive/run.jet"])
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2566
+#Test("pending_diagnostics_have_exact_retained_byte_cost") {
+    bundle := incremental_bundle("fn run() {}\n")
+    cache := IncrementalSemaCache.new()
+    (diagnostics, _) :: check_bundle_with_effect_facts_incremental(&bundle, CompileMode.Check, &cache)
+    assert(diagnostics.is_empty())
+    assert(cache.functions.len() == 1)
+    before :: cache.stats().live_item_bytes
+    pending :: PendingFunctionDiagnostic{function_key: "run", function_span: Span.new(0, 11), diagnostic: Diagnostic.error("E2702", "crypto API misuse", "known nonce length", "pass the exact nonce length", Val(Span.new(3, 6)))}
+    expected_delta :: debug_string([~pending]).len() - debug_string([PendingFunctionDiagnostic]{}).len()
+    &cache.functions.values_mut().next().unwrap().pending_diagnostics.push(pending)
+    assert(cache.stats().live_item_bytes - before == expected_delta)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle.rs:2600
+#Test("bundle_stays_split_without_reordering_passes") {
+    // This structural reference contract deliberately reads the original Rust sources.
+    MAX_MODULE_LINES :: 2500
+    root :: cargo_manifest_dir()
+    read :: fn(relative: String) -> String Never! { read_to_string(root.join(relative)).unwrap() }
+    bundle :: read("src/Sema/Bundle.rs")
+    comptime :: read("src/Sema/Bundle/Comptime.rs")
+    units :: read("src/Sema/Bundle/Units.rs")
+    generic :: read("src/Sema/Bundle/GenericModules.rs")
+    substitution :: read("src/Sema/Bundle/GenericModules/Substitution.rs")
+    expansion :: read("src/Sema/Bundle/GenericModules/Expansion.rs")
+    outputs :: read("src/Sema/Bundle/Outputs.rs")
+    inline_calls :: read("src/Sema/Bundle/InlineCalls.rs")
+    pipeline :: read("src/Sema/Bundle/Pipeline.rs")
+    check_inner :: read("src/Sema/Bundle/Pipeline/CheckInner.rs")
+    inline_imports :: read("src/Sema/Bundle/Pipeline/InlineImports.rs")
+    completion :: read("src/Sema/Bundle/Pipeline/Completion.rs")
+    validation :: read("src/Sema/Bundle/Validation.rs")
+    core_usage :: read("src/Sema/Bundle/Validation/CoreUsage.rs")
+    body_check :: read("src/Sema/Bundle/Validation/BodyCheck.rs")
+    production :: bundle.split("#[cfg(test)]\nmod structure_tests").next().unwrap()
+    loop (relative, source) in [
+        ("src/Sema/Bundle.rs", production), ("src/Sema/Bundle/Comptime.rs", comptime), ("src/Sema/Bundle/Units.rs", units),
+        ("src/Sema/Bundle/GenericModules.rs", generic), ("src/Sema/Bundle/GenericModules/Substitution.rs", substitution),
+        ("src/Sema/Bundle/GenericModules/Expansion.rs", expansion), ("src/Sema/Bundle/InlineCalls.rs", inline_calls),
+        ("src/Sema/Bundle/Outputs.rs", outputs), ("src/Sema/Bundle/Pipeline.rs", pipeline),
+        ("src/Sema/Bundle/Pipeline/CheckInner.rs", check_inner), ("src/Sema/Bundle/Pipeline/InlineImports.rs", inline_imports),
+        ("src/Sema/Bundle/Pipeline/Completion.rs", completion), ("src/Sema/Bundle/Validation.rs", validation),
+        ("src/Sema/Bundle/Validation/CoreUsage.rs", core_usage), ("src/Sema/Bundle/Validation/BodyCheck.rs", body_check)
+    ] {
+        assert(source.lines().count() < MAX_MODULE_LINES, "{relative} must stay below the card #510 module boundary")
+        assert(!source.contains("include!("))
+        assert(!source.contains("#[path"))
+    }
+    assert(production.contains("\nmod GenericModules;\nmod InlineCalls;\nmod Liveness;\nmod Outputs;\nmod Pipeline;\nmod TargetMachine;\nmod Validation;\n"))
+    assert(generic.contains("\nmod Substitution;\nmod Expansion;\n"))
+    assert(validation.contains("\nmod CoreUsage;\nmod BodyCheck;\n"))
+    ordered :: [
+        "expand_generic_module_aliases(bundle, &mut diags);", "mangle_inline_sibling_calls(bundle);",
+        "super::super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);",
+        "super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);",
+        "register_type_methods(&module.items, &mut st.registry, &mut diags);", "register_impl_methods(&module.items, &mut st.registry, &mut diags);",
+        "let mut module_diags = check_module_bodies(", "collect_used_core(bundle, &states)",
+        "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);"
+    ]
+    ordered_source :: "{production}\n{pipeline}\n{check_inner}\n{inline_imports}\n{completion}"
+    positions :: ordered.map(fn(needle: String) { ordered_source.find(needle).unwrap() })
+    loop index in 1..<positions.len() -> assert(positions[index - 1] < positions[index])
+}

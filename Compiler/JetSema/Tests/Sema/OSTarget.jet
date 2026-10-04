@@ -1,0 +1,57 @@
+// OSTarget.rs has no inline tests. Controls preserve real AST folding,
+// selected-target booleans, exhaustive validation and typed setting equality.
+use jet_foundation.[Expr, Pattern, PatSlot, Span, Stmt, SwitchArm, OSTarget, BuildFactValue, Diagnostic]
+
+fn os_target_test_arm(name: String, at: Int) -> SwitchArm Never! {
+    span :: Span.new(at, at + 1)
+    SwitchArm{cond: Expr.PatternTest{subject: Expr.Ident{name: "$build.os", span: span},
+        pattern: Pattern.Variant{variant: name, bindings: [], leading_dot: true, span: span}, span: span},
+        body: [Stmt]{Stmt.Expr{expr: Expr.Int{value: at, span: span, width: None, raw: None}}}, span: span}
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:279
+#Test("OS folding uses the supplied active target and keeps arm order") {
+    arms :: [SwitchArm]{os_target_test_arm("Linux", 1), os_target_test_arm("MacOS", 2), os_target_test_arm("Windows", 3)}
+    diags := [Diagnostic]{}
+    span :: Span.new(0, 4)
+    folded :: fold_os_switch(Expr.Ident{name: "$build.os", span: span}, arms, None, span, .Windows, &diags)
+    assert(diags.is_empty())
+    if folded == .ComptimeIf(.Bool(first, _), _, _, .Val(rest), _, _) {
+        assert(!first && rest.len() == 1)
+        if rest[0] == .ComptimeIf(.Bool(second, _), _, _, .Val(last), _, _) {
+            assert(!second && last.len() == 1)
+            assert(if last[0] == { .ComptimeIf(.Bool(selected, _), _, _, None, _, None) -> selected else -> false })
+        } else { panic("MacOS must be the second arm") }
+    } else { panic("Linux must be the outermost arm") }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:279,483
+#Test("duplicate OS arm recovery is distinct from incomplete dispatch") {
+    diags := [Diagnostic]{}
+    span :: Span.new(0, 4)
+    duplicated :: fold_os_switch(Expr.Ident{name: "$build.os", span: span},
+        [SwitchArm]{os_target_test_arm("Linux", 1), os_target_test_arm("Linux", 2)}, None, span, .Linux, &diags)
+    assert(diags.len() == 1 && diags[0].code == "E-OSTARGET-DISPATCH-ARM")
+    assert(if duplicated == { .ComptimeBlock(body, false, kept) -> body.is_empty() && kept == span else -> false })
+    missing_diags := [Diagnostic]{}
+    _ :: fold_os_switch(Expr.Ident{name: "$build.os", span: span},
+        [SwitchArm]{os_target_test_arm("Linux", 1)}, None, span, .Linux, &missing_diags)
+    assert(missing_diags.len() == 1 && missing_diags[0].code == "E-OSTARGET-DISPATCH-EXHAUSTIVE")
+    assert(missing_diags[0].what.contains("MacOS, Windows"))
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:417
+#Test("typed setting equality allows an unqualified enum arm but not unrelated enum types") {
+    assert(setting_values_equal(.Enum{type_name: "", variant: "Fast"}, .Enum{type_name: "Mode", variant: "Fast"}) == Val(true))
+    assert(setting_values_equal(.Enum{type_name: "Other", variant: "Fast"}, .Enum{type_name: "Mode", variant: "Fast"}) == None)
+    assert(setting_values_equal(.Bool{value: true}, .Bool{value: false}) == Val(false))
+    assert(setting_values_equal(.Int{value: 1}, .Bool{value: true}) == None)
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:351,359,389
+#Test("setting arm comparison requires the matching subject and literal value") {
+    span :: Span.new(0, 1)
+    subject :: Expr.Ident{name: "$build.settings.enabled", span: span}
+    equal :: Expr.Binary{op: .Eq, left: subject, right: Expr.Bool{value: true, span: span}, span: span}
+    assert(setting_arm_matches(equal, subject, .Bool{value: true}) == Val(true))
+    different :: Expr.Ident{name: "$build.settings.other", span: span}
+    assert(setting_arm_matches(equal, different, .Bool{value: true}) == None)
+    assert(setting_literal(Expr.Str{parts: [.Lit("left"), .Lit("right")], span: span}) == Val(BuildFactValue.Text{value: "leftright"}))
+    assert(expr_path(Expr.Field{base: Expr.ComptimeName{name: "$build", span: span, value: None}, member: "os", span: span}) == Val("$build.os"))
+}

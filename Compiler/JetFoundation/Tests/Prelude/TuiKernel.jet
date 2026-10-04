@@ -1,0 +1,34 @@
+use JetFoundation.Prelude.TuiKernel.[capabilities, color_ansi16, color_ansi256, color_rgb, ascii, strip_ansi, display_width, truncate, pad, length, fill, percent, layout]
+use core.tui.[TUIColorProfile, TUIColor, TUIDirection]
+use core.ui.[Rect]
+
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:21-88
+// No inline Rust tests; controls cover portable capability/color/display/layout laws.
+#Test("TUI capabilities clamp dimensions and colors") {
+    caps :: capabilities(TUIColorProfile.ASCII, 0, 0)
+    assert(caps.width == 1 && caps.height == 1)
+    assert(!caps.color && !caps.unicode && !caps.mouse && !caps.resize && !caps.clipboard)
+    assert(color_ansi16(I64{-1}) == TUIColor.ANSI16(0))
+    assert(color_ansi256(I64{300}) == TUIColor.ANSI256(255))
+    assert(color_rgb(I64{-1}, I64{10}, I64{300}) == TUIColor.RGB(0, 10, 255))
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:165-263
+#Test("TUI text width preserves combining and wide characters") {
+    assert(ascii("┌─┐→é") == "+-+>?")
+    assert(display_width("é界") == 3)
+    assert(truncate("é界", 1) == "é")
+    assert(pad("界", 3) == "界 ")
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("ASCII escape")
+    assert(strip_ansi("{escape}[31mred{escape}[0m") == "red")
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:324
+#Test("TUI layout scales fixed sizes and distributes weighted remainder") {
+    area :: Rect{x: 2.0, y: 3.0, width: 100.0, height: 10.0}
+    constraints :: [length(20.0), fill(1.0), fill(3.0)]
+    frames :: layout(area, TUIDirection.Horizontal, constraints.view(0..<constraints.len()))
+    assert(frames[0].width == 20.0 && frames[1].width == 20.0 && frames[2].width == 60.0)
+    assert(frames[2].x == 42.0 && frames[2].y == 3.0)
+    oversized :: [length(100.0), percent(100.0)]
+    scaled :: layout(area, TUIDirection.Horizontal, oversized.view(0..<oversized.len()))
+    assert(scaled[0].width == 50.0 && scaled[1].width == 50.0)
+}

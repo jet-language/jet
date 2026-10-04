@@ -1,0 +1,16 @@
+use CoreSources.[core_source_text]
+use CoreSourceTexts.[CORE_SOURCE_TEXTS]
+use jet_foundation.CoreSourceParts.[CORE_TEXT_STRING_MODULE]
+
+// Rust: crates/jet-sema/src/CoreSources.rs:18 (behavioral control)
+#Test("core_source_text_public_bodies") {
+    loop (module, text) in CORE_SOURCE_TEXTS {
+        assert(core_source_text(module) == Val(text))
+    }
+}
+
+// Rust: crates/jet-sema/src/CoreSources.rs:13-18 (behavioral control)
+#Test("core_source_text_private_and_missing") {
+    assert(core_source_text(CORE_TEXT_STRING_MODULE) == Val(#Embed("../../../Core/text/string.jet")))
+    assert(core_source_text("not.a.core.module") == None)
+}

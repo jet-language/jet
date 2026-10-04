@@ -398,6 +398,7 @@ pub fn jet_driver_compiler_check_with_overlays(input: JetDriverCompilerCheckInpu
     build_facts_option :: jet_driver_build_facts(load, request, target, snapshot.entry_path, &fact_diagnostics)
     loop diagnostic in fact_diagnostics -> &load.diagnostics.push(diagnostic)
     build_facts :: build_facts_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
+    if !jet_driver_publish_build_facts(load, build_facts) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the folded native BuildFactSnapshot producer is unavailable"))
     registration := sema_registration_prepare_graph(
         registration_inputs,
         load.imports,

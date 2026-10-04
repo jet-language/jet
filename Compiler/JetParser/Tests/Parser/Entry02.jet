@@ -1,0 +1,404 @@
+use jet_foundation.*
+use jet_lexer.*
+use jet_parser.*
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1775-2943; shared assertion adapters.
+fn entry02_program(source: String) -> Program Never! {
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    parsed :: parse_tokens(lexed.tokens)
+    assert(!parsed.diagnostics.iter().any(fn(d) { d.severity == 1 }))
+    parsed.program
+}
+fn entry02_errors(source: String) -> [Diagnostic] Never! {
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    parsed :: parse_tokens(lexed.tokens)
+    assert(parsed.diagnostics.iter().any(fn(d) { d.severity == 1 }))
+    parsed.diagnostics
+}
+fn entry02_func(p: Program, name: String) -> @Func Never! from p {
+    loop item in p.items { if item == .Func(f) && f.name == name -> return @f }
+    panic("expected function {name}")
+}
+fn entry02_binding(f: Func) -> @Binding Never! from f {
+    loop stmt in f.body { if stmt == .Val(binding) -> return @binding }
+    panic("expected binding")
+}
+fn entry02_struct(p: Program, name: String) -> @StructDef Never! from p {
+    loop item in p.items { if item == .Struct(s) && s.name == name -> return @s }
+    panic("expected struct {name}")
+}
+fn entry02_alias(p: Program, name: String) -> @TypeAliasDef Never! from p {
+    loop item in p.items { if item == .TypeAlias(a) && a.name == name -> return @a }
+    panic("expected alias {name}")
+}
+fn entry02_diag(ds: [Diagnostic], code: String) -> @Diagnostic Never! from ds {
+    loop d in ds { if d.code == code -> return @d }
+    panic("expected diagnostic {code}")
+}
+fn entry02_format(source: String) -> String Never! {
+    formatted :: jet_format_source(source)
+    formatted.source ?? panic("expected successful format: {formatted.diagnostics:Debug}")
+}
+fn entry02_unit_result(ty: Type?, error_name: String) -> Bool Never! {
+    if ty == { .Val(.Result(.Named(unit), .Named(error))) -> unit == Syntax.INTERNAL_UNIT_TYPE && error == error_name, else -> false }
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1775
+#Test("task_combinators_nest_and_accept_block_branches") {
+    p :: entry02_program("fn run() {{\n                result :: task.race {{\n                    task.all {{ one(), two() }},\n                    {{ three() }}\n                }}\n            }}\n")
+    binding :: entry02_binding(entry02_func(p, "run"))
+    if binding.init == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        assert(method == Syntax.INTERNAL_TASK_RACE_METHOD)
+        if args[0].expr == .ListLit(branches, _) {
+            assert(branches.len() == 2)
+            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _, _, _, _) -> spawn == Syntax.INTERNAL_TASK_SPAWN_METHOD && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _, _, _, _, _)) -> inner == Syntax.INTERNAL_TASK_ALL_METHOD, else -> false }, else -> false }, else -> false })
+            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _, _, _, _) -> spawn == Syntax.INTERNAL_TASK_SPAWN_METHOD && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Block(_) -> true, else -> false }, else -> false }, else -> false })
+        } else -> panic("expected task.race branch list")
+    } else -> panic("expected task.race method call")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1833
+#Test("task_timeout_parses_as_duration_method") {
+    p :: entry02_program("fn run() {{\n                wait :: 500ms\n                task.timeout(wait)\n            }}\n")
+    f :: entry02_func(p, "run")
+    found := false
+    loop stmt in f.body {
+        if stmt == .Expr(.MethodCall(_, method, _, _, _, args, _, _, _, _)) {
+            assert(method == Syntax.INTERNAL_TASK_TIMEOUT_METHOD)
+            assert(args.len() == 1)
+            found = true
+            break
+        }
+    }
+    assert(found)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1861
+#Test("ffi_c_inline_tier_parses") {
+    p :: entry02_program("#FFI(c) fn add(a: Int, b: Int) -> Int {{\n    \"\"\"long add(long a, long b) {{ return a + b; }}\\n\"quoted\"\n\"\"\"\n}}\n")
+    f :: entry02_func(p, "add")
+    inline :: f.inline_foreign ?? panic("inline_foreign set")
+    assert(inline.lang == "c")
+    assert(inline.source == "long add(long a, long b) {{ return a + b; }}\\n\"quoted\"\n")
+    assert(f.body.is_empty())
+    assert(f.params.len() == 2)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1888
+#Test("ffi_asm_inline_tier_with_unsafe_gate_parses") {
+    p :: entry02_program("use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {{\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}}\n")
+    f :: entry02_func(p, "rdtsc")
+    assert(f.is_unsafe)
+    assert(f.unsafe_reason == Val("cycle counter"))
+    inline :: f.inline_foreign ?? panic("inline_foreign set")
+    assert(inline.lang == "asm")
+    assert(inline.source.contains("; -> return"))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1911
+#Test("grouped_ffi_keeps_unsafe_gate_and_raw_payload") {
+    p :: entry02_program("use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) -> Int {{\n    \"\"\"add {{a}}, {{b}} ; -> return\"\"\"\n}}\n")
+    f :: entry02_func(p, "add")
+    assert(f.unsafe_reason == Val("scalar registers"))
+    inline :: f.inline_foreign ?? panic("inline_foreign set")
+    assert(inline.source == "add {{a}}, {{b}} ; -> return")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1932
+#Test("grouped_function_rules_keep_meta_and_policy_semantics") {
+    p :: entry02_program("#[Policy(copies: .Explicit), Meta(category: \"api\", maturity: .Tested), Job]\nfn sync() {{}}\n")
+    f :: entry02_func(p, "sync")
+    assert(f.is_job)
+    assert(f.meta != None)
+    assert(f.maturity == Val(.Tested))
+    assert(p.policy_declarations.iter().any(fn(d) { d.key == .Copies && d.scope == .Function && d.target == Val(f.span) }))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:1954
+#Test("named_rule_arguments_bind_by_signature_without_reordering_source") {
+    src :: "#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]\nfn work() {{}}\n"
+    p :: entry02_program(src)
+    f :: entry02_func(p, "work")
+    transition :: f.state_transition ?? panic("bound transition")
+    assert(transition.from == Val("Open"))
+    assert(transition.to == "Closed")
+    assert(f.maturity == Val(.Hardened))
+    assert(!(f.meta ?? panic("meta")).facts().tunable)
+    found := false
+    loop application in p.applied_rules {
+        if application.marker.name == Syntax.KW_TRANSITION {
+            labels := [String?]{}
+            loop label in application.marker.arg_labels -> &labels.push(if label == .Val(named) -> Val(named.name) else -> None)
+            assert(labels == [String?]{Val("to"), Val("from")})
+            found = true
+            break
+        }
+    }
+    assert(found)
+    family_p :: entry02_program("#UnitFamily(base: meter, family: Length) {{\n    meter\n}}\n")
+    found_family := false
+    loop item in family_p.items {
+        if item == .UnitFamily(family) {
+            assert(family.family == "Length")
+            assert(if family.base == .Val(base) -> base.name == "meter" else -> false)
+            found_family = true
+            break
+        }
+    }
+    assert(found_family)
+    assert(entry02_format(src).contains("#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]"))
+    _ :: entry02_diag(entry02_errors("#Transition(to: Closed, Open)\nfn work() {{}}\n"), "E0930")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2027
+#Test("marker_stack_fix_preserves_reordered_named_arguments") {
+    ds :: entry02_errors("#Transition(to: Closed, from: Open)\n#Meta(maturity: .Tested, category: \"state\")\nfn work() {{}}\n")
+    edit :: entry02_diag(ds, "E0999").edit ?? panic("marker stack edit")
+    assert(edit.new_text == "#[Transition(to: Closed, from: Open), Meta(maturity: .Tested, category: \"state\")]")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2044
+#Test("argument_marker_stack_fix_keeps_payloads_and_order") {
+    ds :: entry02_errors("#Codable\n#RenameAll(camel)\nstruct Particle {{ x: Float }}\n")
+    assert((entry02_diag(ds, "E0999").edit ?? panic("machine-applicable stack edit")).new_text == "#[Codable, RenameAll(camel)]")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2058
+#Test("adjacent_marker_stacks_share_one_ordered_e0999_rewrite") {
+    loop (src, expected) in [
+        ("#Job\n#Every(1s)\nfn tick() {{}}\n", "#[Job, Every(1s)]"),
+        ("use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nfn add() {{ \"\"\"void add(void) {{}}\"\"\" }}\n", "#[Unsafe(\"register ABI\"), FFI(c)]"),
+        ("#Target(Web)\n#HTML(\"index.html\")\nfn main() {{}}\n", "#[Target(Web), HTML(\"index.html\")]"),
+        ("#PubFile\n#NoPrelude\nfn main() {{}}\n", "#[PubFile, NoPrelude]"),
+        ("#Codable\n#RenameAll(camel)\nstruct Particle {{ x: Float }}\n", "#[Codable, RenameAll(camel)]")
+    ] {
+        ds :: entry02_errors(src)
+        assert((entry02_diag(ds, "E0999").edit ?? panic("machine-applicable stack edit")).new_text == expected)
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2094
+#Test("ordered_function_and_file_groups_format_idempotently") {
+    loop (src, expected) in [
+        ("use core.mem\n#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {{\n    \"\"\"void add(void) {{}}\"\"\"\n}}\n", "#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]"),
+        ("#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {{}}\n", "#[HTML(Path{{\"index.html\"}}), PubFile, Target(Web), NoPrelude]")
+    ] {
+        once :: entry02_format(src)
+        assert(once.contains(expected))
+        assert(once == entry02_format(once))
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2114
+#Test("grouped_retired_function_markers_keep_known_teaching") {
+    loop src in ["#[Pure, Job]\nfn work() {{}}\n", "#[InlineAlways, Job]\nfn work() {{}}\n", "#[Pure(), Job]\nfn work() {{}}\n", "#[InlineAlways(), Job]\nfn work() {{}}\n"] {
+        ds :: entry02_errors(src)
+        _ :: entry02_diag(ds, "E0927")
+        assert(!ds.iter().any(fn(d) { d.code == "E0930" || d.code == "E0355" }))
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2138
+#Test("abi_function_markers_route_to_the_c_declaration_diagnostic") {
+    loop src in ["#[ABI(C), MustUse]\nfn work() {{}}\n", "#ABI(C) fn work() {{}}\n"] {
+        ds :: entry02_errors(src)
+        assert(ds.iter().any(fn(d) { d.code == "E3212" && d.what.contains("only applies to C declarations") }))
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2158
+#Test("abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules") {
+    p :: entry02_program("#Import module c.demo {{\n    #ABI(sysv64) fn ping(x: I32) -> I32 = \"ping\"\n}}\n")
+    found := false
+    loop item in p.items {
+        if item == .CModule(module) && !module.functions.is_empty() {
+            assert(if module.functions[0].abi == .Val(abi) -> abi.name == "sysv64" else -> false)
+            found = true
+            break
+        }
+    }
+    assert(found)
+    _ :: entry02_diag(entry02_errors("#Import module c.demo {{\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}}\n"), "E3212")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2189
+#Test("doc_on_a_function_requires_task") {
+    _ :: entry02_program("#[Doc(\"task text\"), Job] fn work() {{}}\n")
+    _ :: entry02_diag(entry02_errors("#Doc(\"helper text\") fn helper() {{}}\n"), "E0355")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2210
+#Test("ffi_inline_tier_formats_idempotently") {
+    loop src in ["#FFI(c) fn add(a: Int, b: Int) -> Int {{\n    \"\"\"long add(long a, long b) {{ return a + b; }}\n\"\"\"\n}}\n", "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {{\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}}\n"] {
+        once :: entry02_format(src)
+        assert(once.contains("FFI("))
+        assert(once == entry02_format(once))
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2225
+#Test("pub_file_marker_sets_default_visibility") {
+    src :: "#PubFile\n\nfn greet() -> String {{\n    return \"hi\"\n}}\n\npriv fn secret() -> Int {{\n    return 0\n}}\n\nfn run() {{\n    return\n}}"
+    p :: entry02_program(src)
+    assert(p.pub_file)
+    assert(entry02_func(p, "greet").is_pub)
+    assert(!entry02_func(p, "secret").is_pub)
+    assert(entry02_func(p, "run").is_pub)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2259
+#Test("pub_file_section_label_emits_e0415") {
+    lexed :: lex("#PubFile\n\npriv:\nfn run() {{ return }}\n".bytes())
+    assert(lexed.diagnostics.is_empty())
+    parsed :: parse_tokens(lexed.tokens)
+    assert(parsed.diagnostics.iter().any(fn(d) { d.code == "E0415" }))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2306
+#Test("arrow_control_law_formats_canonical_forms_idempotently") {
+    src :: "protocol Exchange {{\n    client: Hello(id: Int)\n    server: Ready()\n}}\n\nfn classify(score: Int) -> Grade -> if {{\n    score >= 90 -> .A\n    score >= 80 -> .B\n    else -> .C\n}}\n\nfn notify(ready: Bool) -[Net]> {{\n    if ready -> send() else -> skip()\n    loop item in items -> audit(item)\n    outer :: loop {{\n        next(outer)\n    }}\n    task.group group {{\n        task fetch()\n    }}\n    #FX(authority: FS, Net) {{\n        use_caps(caps)\n    }}\n}}\n"
+    once :: entry02_format(src)
+    loop expected in ["fn classify(score: Int) -> Grade -> if {{", "score >= 90 -> .A", "fn notify(ready: Bool) -[Net]> {{", "if ready -> send() else -> skip()", "loop item in items -> audit(item)", "next(outer)", "task fetch()", "#FX(authority: FS, Net)"] -> assert(once.contains(expected))
+    assert(once == entry02_format(once))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2352
+#Test("named_effect_loop_stops_value_lookahead_at_its_body") {
+    _ :: entry02_format("fn run() {{\n    outer :: loop {{\n        break\n    }}\n    values :: loop item in [1, 2] -> item\n    state :: if ready -> 1 else -> 2\n}}\n")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2367
+#Test("multiline_callable_tail_preserves_its_source_expression") {
+    p :: entry02_program("fn double(value: Int) -> Int {{\n    adjusted :: value + 1\n    adjusted * 2\n}}\n")
+    body :: entry02_func(p, "double").body
+    assert(!body.is_empty())
+    assert(if body[body.len() - 1] == { .Expr(_) -> true, else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2382
+#Test("lambda_callable_interface_parses_result_error_and_effects") {
+    p :: entry02_program("fn run() {{\nf :: (n: Int) Int MyError! -[IO]> {{ return Ok(n) }}\n}}\n")
+    init :: entry02_binding(entry02_func(p, "run")).init
+    if init == .Lambda(lambda) {
+        assert(lambda.result_type == Val(.Int))
+        assert(lambda.error_type == Val(.Named("MyError")))
+        names := [String]{}
+        loop row in lambda.effects ?? panic("lambda effects") -> &names.push(row.name)
+        assert(names == [String]{"IO"})
+    } else -> panic("stored lambda")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2421
+#Test("lambda_interface_lookahead_preserves_grouped_multiplication") {
+    _ :: entry02_program("fn run() {{ print((2) * 3) }}\n")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2426
+#Test("retired_arrow_control_forms_have_specific_teaching_diagnostics") {
+    loop (src, code) in [
+        ("fn old() -> Int {{ return 1 }}\n", "E0068"), ("fn old() --[FS]-> Int {{ return 1 }}\n", "E0066"), ("fn old() :> Int {{ return 1 }}\n", "E0068"), ("fn old() :> 1\n", "E0070"), ("fn old() => 1\n", "E0070"), ("fn old() Int :: 1\n", "E0065"), ("fn run() {{ if ready send() }}\n", "E0372"), ("fn run() {{ #Grant(FS) {{ caps -> use_caps(caps) }} }}\n", "E0077"), ("protocol Old {{ client -> server: Hello(id: Int) }}\n", "E0154"), ("fn run() {{ f :: take(value) (x: Int) => x + value }}\n", "E0057")
+    ] {
+        ds :: entry02_errors(src)
+        diagnostic :: entry02_diag(ds, code)
+        if code == "E0065" -> assert((diagnostic.edit ?? panic("canonical replacement")).new_text == "->")
+        if code == "E0077" { assert(diagnostic.what.contains("#Grant")); assert(diagnostic.fix.contains("#FX")) }
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2478
+#Test("adjacent_call_result_has_the_registered_call_value_fix") {
+    ds :: entry02_errors("fn run() {{ make()() }}\n")
+    assert((entry02_diag(ds, "E-CALL-VALUE").edit ?? panic("call value fix")).new_text == ".call")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2494
+#Test("retired_s14_teaching_is_paused") {
+    retired :: [String]{"E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018", "E0021", "E0022", "E0023", "E0024", "E0025", "E0026", "E0027", "E0028", "E0030", "E0032", "E0033", "E0036", "E0044", "E0045", "E0050", "E0051", "E0052", "E0053", "E0054", "E0056", "E0057", "E0984"}
+    loop src in ["def run() {{ return }}", "func run() {{ return }}", "import core.files", "fn run() {{ while true {{ return }} }}", "fn run() {{ for x in xs {{ return }} }}", "fn run() {{ match x {{ 1 -> return }} }}", "fn run() {{ switch x {{ 1 -> return }} }}", "fn run() {{ x :: a or b }}", "fn run() {{ x :: a and b }}", "fn run() {{ x :: not ok }}", "fn run(x: Text) {{ return }}", "fn run() {{ todo }}", "fn run() {{ y :: Some(1) }}", "fn run() {{ y :: lambda x {{ x }} }}", "fn run() {{ y :: append(xs, 1) }}", "class Point {{ x: Int }}", "interface Shape {{ fn draw(self) }}", "fn use_item(mut item: Item) {{ return }}"] {
+        lexed :: lex(src.bytes())
+        assert(lexed.diagnostics.is_empty())
+        admitted :: parse_for_check_with_source(lexed.tokens, src.bytes())
+        assert(admitted.diagnostics.iter().all(fn(d) { !retired.contains(d.code) }))
+    }
+    loop src in ["fn run() {{ y :: |x| x + 1 }}", "fn run() {{ y :: 1 |> print }}"] {
+        lexed :: lex(src.bytes())
+        assert(lexed.diagnostics.is_empty())
+        admitted :: parse_for_check_with_source(lexed.tokens, src.bytes())
+        assert(admitted.diagnostics.iter().any(fn(d) { d.code == "E0003" }))
+        assert(!admitted.diagnostics.iter().any(fn(d) { d.code == "E0033" }))
+    }
+    loop word in [Syntax.FOREIGN_WHILE, Syntax.FOREIGN_FOR] {
+        lexed :: lex(word.bytes())
+        assert(lexed.diagnostics.is_empty())
+        assert(lexed.tokens[0].kind == TOKEN_IDENT)
+        assert(lexed.tokens[0].payload.decoded == word)
+    }
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2571
+#Test("return_type_question_spacing_disambiguates_option_vs_result") {
+    opt :: entry02_program("fn a() -> Int? -> None\nfn run() {{}}\n")
+    assert(if entry02_func(opt, "a").return_type == { .Val(.Option(_)) -> true, else -> false })
+    res :: entry02_program("fn b() -> Int Err! -> Ok(1)\nfn run() {{}}\n")
+    assert(if entry02_func(res, "b").return_type == { .Val(.Result(_, _)) -> true, else -> false })
+    paren :: entry02_program("fn c() -> (Int?) -> None\nfn run() {{}}\n")
+    assert(if entry02_func(paren, "c").return_type == { .Val(.Option(_)) -> true, else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2607
+#Test("fallible_type_sigil_is_valid_in_all_type_positions") {
+    p :: entry02_program("struct Holder {{\nvalue: Int? IOError!\nnested: [Int (DbError | TimeoutError)!]\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Box<Int? IOError!> -> value\nfn run() {{}}\n")
+    assert(p.items.iter().any(fn(item) { if item == { .Struct(_) -> true, else -> false } }))
+    holder :: entry02_struct(p, "Holder")
+    assert(holder.fields[0].ty == .Result(.Option(.Int), .Named("IOError")))
+    assert(if holder.fields[1].ty == { .List(.Result(.Int, .Union(members))) -> members.len() == 2, else -> false })
+    assert(if holder.fields[2].ty == { .Fn(params, .Val(.Result(.Int, .Union(members))), _, _, _, _) -> !params.is_empty() && if params[0] == { .Result(_, _) -> members.len() == 2, else -> false }, else -> false })
+    assert(entry02_alias(p, "Box").target == .Result(.Option(.Named("T")), .Named("IOError")))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2668
+#Test("failure_contracts_compose_optional_success_and_error_union") {
+    p :: entry02_program("struct Holder {{ value: Int? IOError! }}\nfn fetch(value: Int? IOError!) -> Int (DbError | TimeoutError)! -> value\nfn invoke(callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!) -> Int? IOError! -> None\nfn run() {{}}\n")
+    assert(entry02_struct(p, "Holder").fields[0].ty == .Result(.Option(.Int), .Named("IOError")))
+    assert(if entry02_func(p, "fetch").return_type == { .Val(.Result(.Int, .Union(members))) -> members.len() == 2, else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2706
+#Test("unit_fallible_signatures_use_the_error_prefix") {
+    p :: entry02_program("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() IOError! -[FS]> {{}}\nfn load() -> Config IOError! {{}}\n")
+    assert(entry02_unit_result(entry02_func(p, "save").return_type, "IOError"))
+    assert(entry02_unit_result(entry02_func(p, "sync").return_type, Syntax.TYPE_ERR))
+    assert(entry02_unit_result(entry02_func(p, "bounded").return_type, "IOError"))
+    assert(entry02_func(p, "load").return_type == Val(.Result(.Named("Config"), .Named("IOError"))))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2746
+#Test("bare_default_error_contract_is_not_accepted") {
+    loop source in ["struct Holder {{ bare: ! }}\n", "alias DefaultFailure :: !;\n", "fn sync() ! {{}}\n", "fn callback(value: Int !) {{}}\n"] -> _ :: entry02_errors(source)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2760
+#Test("prefix_contract_reaches_nested_general_type_positions") {
+    p :: entry02_program("struct Holder {{\nmap: [String: !IOError]\ntuple: (entry: Entry? StoreError!, failure: !Err)\ncallback: fn(Int? StoreError!) IOError!\n}}\nalias Callback :: fn(Int? StoreError!) IOError!\nfn run() {{}}\n")
+    holder :: entry02_struct(p, "Holder")
+    assert(if holder.fields[0].ty == { .Map(_, _, value) -> entry02_unit_result(Val(value), "IOError"), else -> false })
+    assert(if holder.fields[1].ty == { .Tuple(fields) -> fields.len() >= 2 && fields[0].name == "entry" && if fields[0].ty == { .Result(_, _) -> fields[1].name == "failure" && entry02_unit_result(Val(fields[1].ty), Syntax.TYPE_ERR), else -> false }, else -> false })
+    assert(if holder.fields[2].ty == { .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "IOError"), else -> false })
+    assert(if entry02_alias(p, "Callback").target == { .Fn(_, _, _, _, _, _) -> true, else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2816
+#Test("explicit_error_contract_does_not_consume_the_next_struct_field") {
+    p :: entry02_program("struct Holder {{\nfirst: Int Err!\ncallback: fn() Err!\nfn value(self) -> Int -> 1\nsecond: String\n}}\nfn run() {{}}\n")
+    holder :: entry02_struct(p, "Holder")
+    assert(holder.fields.len() == 3)
+    assert(holder.methods.len() == 1)
+    assert(holder.fields[0].ty == .Result(.Int, .Named("Err")))
+    assert(if holder.fields[1].ty == { .Fn(_, ret, _, _, _, _) -> entry02_unit_result(ret, "Err"), else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2852
+#Test("retired_infix_failure_spelling_is_not_accepted") {
+    _ :: entry02_errors("alias Old :: Int? ! IOError\n")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2860
+#Test("retired_failure_suffix_is_not_accepted") {
+    _ :: entry02_errors("alias Old :: String!\n")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2868
+#Test("retired_unit_infix_failure_spelling_is_not_accepted") {
+    loop source in ["fn save() ! IOError {{}}\n", "alias OldFn :: fn() ! IOError\n"] -> _ :: entry02_errors(source)
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2880
+#Test("unit_fallible_signatures_format_without_arrow") {
+    once :: entry02_format("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() IOError! -[FS]> {{}}\n")
+    assert(once.contains("fn save(path: String) IOError!"))
+    assert(once.contains("fn sync() Err!"))
+    assert(once.contains("fn bounded() IOError! -[FS]>"))
+    assert(once == entry02_format(once))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2896
+#Test("retired_unit_fallible_arrow_form_teaches_the_new_signature") {
+    source :: "fn save() {Syntax.OP_UNIFIED_ARROW} () ! IOError {{ return }}\n"
+    ds :: entry02_errors(source)
+    assert(entry02_diag(ds, "E0003").fix.contains("fn save(path: String) IOError!"))
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2912
+#Test("missing_function_body_is_e0081") {
+    _ :: entry02_diag(entry02_errors("fn greet(name: String) -> String\nfn run() {{}}\n"), "E0081")
+}
+// Rust: crates/jet-parser/src/Parser/mod.rs:2925
+#Test("member_spread_parses") {
+    p :: entry02_program("fn run() {{ x :: a.[b, c] }}")
+    val :: entry02_binding(entry02_func(p, "run"))
+    assert(if val.init == { .MemberSpread(_, _, _) -> true, else -> false })
+}

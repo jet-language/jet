@@ -1,0 +1,12 @@
+use jet_foundation.[Span]
+use jet_sema.CheckerInfer.Calls.Helpers.[e1313]
+
+#Test("variadic_trait_bound_diagnostic") {
+    span :: Span.new(3, 9)
+    diagnostic :: e1313("Widget", "Display", "values", "print", span)
+    assert(diagnostic.code == "E1313")
+    assert(diagnostic.message == "`Widget` doesn't implement `Display`")
+    assert(diagnostic.why == "`values: ...Display` checks every argument against `Display` — that's how `print` accepts a mix of types safely")
+    assert(diagnostic.fix == "implement `Display` for `Widget`'s type, or drop the value from this call")
+    assert(diagnostic.span == Val(span))
+}

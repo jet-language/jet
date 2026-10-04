@@ -1,0 +1,30 @@
+use jet_sema.Sema.CheckerFieldPolicy.[rewrite_field_refs, e0338_computed_field_cycle, e0382_invalid_memo_field]
+use jet_sema.AST.[Expr]
+use jet_sema.Diagnostics.[Span]
+use std.collections.[HashSet]
+
+// Rust: crates/jet-sema/src/Sema/CheckerFieldPolicy.rs:194-381
+#Test("computed_sibling_reads_bind_to_selected_receiver") {
+    span :: Span.new(4, 9)
+    names :: HashSet[String].from([String]{"width"})
+    expr := Expr.Paren{inner: Expr.Ident{name: "width", span: span}, span: span}
+    rewrite_field_refs(&expr, names, "self")
+    assert(expr == Expr.Paren{inner: Expr.Field{base: Expr.Ident{name: "self", span: span}, member: "width", span: span}, span: span})
+    unrelated := Expr.Ident{name: "external", span: span}
+    rewrite_field_refs(&unrelated, names, "self")
+    assert(unrelated == Expr.Ident{name: "external", span: span})
+    validation := Expr.Ident{name: "width", span: span}
+    rewrite_field_refs(&validation, names, "value")
+    assert(validation == Expr.Field{base: Expr.Ident{name: "value", span: span}, member: "width", span: span})
+}
+// Rust: crates/jet-sema/src/Sema/CheckerFieldPolicy.rs:154-180
+#Test("computed_cycle_and_memo_diagnostics") {
+    span :: Span.new(4, 9)
+    direct :: e0338_computed_field_cycle("Rect", "area", "area", span)
+    assert(direct.code == "E0338")
+    assert(direct.what == "computed field `Rect.area` references itself")
+    indirect :: e0338_computed_field_cycle("Rect", "area", "perimeter", span)
+    assert(indirect.what == "computed field `Rect.area` forms a cycle through `perimeter`")
+    assert(indirect.fix == "break the cycle: make `area` or `perimeter` a plain stored field, or rework the formula")
+    assert(e0382_invalid_memo_field("area", span).code == "E0382")
+}

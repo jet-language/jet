@@ -1,1227 +1,331 @@
-// PORT-PENDING 0385 crates-jet-sema-src-sema-checkercorelib-fixed-sigs-slice-1: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1-1223
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
-//RS use super::core_types::{encoding_error_ty, json_ty, u8_ty, unit_ty};
-//RS use crate::Syntax;
-//RS use crate::AST::{AccessConvention, FunctionCallMetadata, Type};
-//RS 
-//RS /// c109 Phase 20: the polymorphic core specials whose return type is resolved by
-//RS /// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
-//RS /// table). Sema writes the resolved return back onto the `Expr::MethodCall`
-//RS /// `resolved_ret` field for exactly these, so the TIR reads it totally (I3).
-//RS /// `io.input` is excluded — it IS in `core_fixed_sig` (`String?`), covered by
-//RS /// Phase 10. `core.mem` ptr ops have their own Phase-18 lowering.
-//RS pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
-//RS     matches!(
-//RS         (module, name),
-//RS         ("core.prelude", "keep")
-//RS             // D-TEST-HISTORY1=A: the operation type is explicit while the
-//RS             // callback/result shape is resolved by the Core call arm.
-//RS             | ("core.testing", "histories")
-//RS             | ("core.math", "abs")
-//RS             | ("core.math", "min")
-//RS             | ("core.math", "max")
-//RS             | ("core.text.fmt", "pretty" | "decimal" | "grouped")
-//RS             | ("core.math", "clamp")
-//RS             // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
-//RS             // their return type is arg-type-dependent, so they use resolved_ret.
-//RS             | ("core.math", "sqrt")
-//RS             | ("core.math", "floor")
-//RS             | ("core.math", "ceil")
-//RS             | ("core.math", "pow")
-//RS             | ("core.math", "sin")
-//RS             | ("core.math", "cos")
-//RS             | ("core.math", "tan")
-//RS             | ("core.math", "asin")
-//RS             | ("core.math", "acos")
-//RS             | ("core.math", "atan")
-//RS             | ("core.math", "atan2")
-//RS             | ("core.math", "sinh")
-//RS             | ("core.math", "cosh")
-//RS             | ("core.math", "tanh")
-//RS             | ("core.math", "exp")
-//RS             | ("core.math", "ln")
-//RS             | ("core.math", "log2")
-//RS             | ("core.math", "log10")
-//RS             | ("core.math", "hypot")
-//RS             | ("core.math", "trunc" | "truncate" | "fract" | "real" | "imag" | "conj" | "float32" | "float64")
-//RS             | ("core.math", "sign")
-//RS             | ("core.math", "is_nan")
-//RS             | ("core.math", "is_inf")
-//RS             | ("core.math", "is_finite")
-//RS             | ("core.math", "to_bits")
-//RS             | ("core.math", "from_bits")
-//RS             | ("core.math", "degrees")
-//RS             | ("core.math", "radians")
-//RS             | ("core.math", "lerp")
-//RS             | ("core.math", "checked_add")
-//RS             | ("core.math", "checked_sub")
-//RS             | ("core.math", "checked_mul")
-//RS             | ("core.math", "checked_pow")
-//RS             | ("core.math", "saturating_add")
-//RS             | ("core.math", "saturating_sub")
-//RS             | ("core.math", "saturating_mul")
-//RS             | ("core.math", "int_pow")
-//RS             | ("core.math", "gcd")
-//RS             | ("core.math", "lcm")
-//RS             | ("core.math", "acosh")
-//RS             | ("core.math", "asinh")
-//RS             | ("core.math", "atanh")
-//RS             | ("core.math", "cbrt")
-//RS             | ("core.math", "copysign")
-//RS             | ("core.math", "exp2")
-//RS             | ("core.math", "exp_m1")
-//RS             | ("core.math", "ln_1p")
-//RS             | ("core.math", "log")
-//RS             | ("core.math", "signum")
-//RS             | ("core.math", "fma" | "muladd")
-//RS             | ("core.math", "is_even")
-//RS             | ("core.math", "is_odd")
-//RS             | ("core.math", "isqrt")
-//RS             | ("core.math", "factorial")
-//RS             | ("core.math", "checked_abs")
-//RS             | ("core.math", "checked_neg")
-//RS             | ("core.math", "checked_div")
-//RS             | ("core.math", "checked_rem")
-//RS             | ("core.math", "is_normal")
-//RS             | ("core.math", "is_subnormal")
-//RS             | ("core.math", "is_canonical")
-//RS             | ("core.math", "is_signed")
-//RS             | ("core.math", "is_zero")
-//RS             | ("core.math", "is_integer")
-//RS             | ("core.math", "sign_bit")
-//RS             | ("core.math", "leading_ones")
-//RS             | ("core.math", "trailing_ones")
-//RS             | ("core.math", "next_up")
-//RS             | ("core.math", "next_down")
-//RS             | ("core.math", "next_after" | "nextafter")
-//RS             | ("core.math", "sin_cos")
-//RS             | ("core.math", "binomial")
-//RS             | ("core.math", "cmp")
-//RS             | ("core.math", "copy")
-//RS             | ("core.math", "cot")
-//RS             | ("core.math", "div_mod")
-//RS             | ("core.math", "div_rem")
-//RS             | ("core.math", "erf")
-//RS             | ("core.math", "erfc")
-//RS             | ("core.math", "frexp")
-//RS             | ("core.math", "gamma")
-//RS             | ("core.math", "lgamma")
-//RS             | ("core.math", "ilogb")
-//RS             | ("core.math", "inv")
-//RS             | ("core.math", "ldexp")
-//RS             | ("core.math", "logb")
-//RS             | ("core.math", "modf")
-//RS             | ("core.math", "radix")
-//RS             | ("core.math", "significand")
-//RS             | ("core.math", "ulp")
-//RS             | ("core.math", "zero")
-//RS             | ("core.math", "scaleb")
-//RS             | ("core.math", "digits")
-//RS             | ("core.math.random", "pick")
-//RS             | ("core.math.random", "weighted_pick")
-//RS             | ("core.math.random", "sample")
-//RS             | ("core.math.random", "shuffle")
-//RS             | ("core.term", "eprint")
-//RS             | ("core.term", "print")
-//RS             | ("core.term", "progress")
-//RS             // D-TEXTWIDTH1=B: `text.display_width(s)` returns `Int`, while
-//RS             // `text.display_width(s, policy: p)` returns `Int !TextError` —
-//RS             // the `.Reject` control policy can fail. One call, two return
-//RS             // types chosen by arity, so no `core_fixed_sig` row can state it:
-//RS             // that table holds exactly one param list and one return, and
-//RS             // `core_fixed_sig_for_row` pins the list length to the call's
-//RS             // arity. The bespoke `infer_core_call` arm already dispatches both
-//RS             // forms; this row is what makes sema write that answer onto
-//RS             // `resolved_ret`, so every tier reads the one resolved type
-//RS             // instead of falling back to Unit (I3).
-//RS             | ("core.text", "display_width")
-//RS             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
-//RS             // types depend on the value type / call-site `<T>`, so codegen reads
-//RS             // them from resolved_ret (I3).
-//RS             | (
-//RS                 "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-//RS                 | "core.encoding.yaml",
-//RS                 "to_string" | "to_string_pretty" | "decode",
-//RS             )
-//RS             | ("core.sys", "decode")
-//RS             | ("core.db", "decode")
-//RS             | ("core.encoding.csv", "query")
-//RS             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
-//RS             | ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name")
-//RS             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
-//RS             // element type is inferred from the initial value / closure return — not in
-//RS             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
-//RS             | ("core.reactive", "signal" | "derived")
-//RS             | ("core.tasks", "after")
-//RS             | (
-//RS                 "core.data",
-//RS                 "csv" | "json" | "csv_reader" | "json_reader" | "count" | "schema" | "plot"
-//RS                     | "load" | "load_default" | "file" | "file_member" | "url" | "database"
-//RS                     | "value" | "snapshot"
-//RS                     | "inner_join" | "left_join" | "pivot_sum" | "query" | "track",
-//RS             )
-//RS             | (
-//RS                 "core.data.plot",
-//RS                 "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render",
-//RS             )
-//RS             | ("core.crypto.vault", "current" | "versions" | "load" | "status"
-//RS                 | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
-//RS                 | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
-//RS                 | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
-//RS                 | "authorize_wrapped_import" | "commit_import_wrapped")
-//RS             | ("core.compute", "gradient" | "value_and_gradient" | "vjp" | "jvp")
-//RS             // D-FLAGSHIP-WEBAPI1=A: generic table/store wrappers resolve their
-//RS             // element type in `infer_core_call`, not in this erased fallback.
-//RS             | (
-//RS                 "core.web.table",
-//RS                 "new" | "new_keyed" | "column" | "with_column" | "with_server_page"
-//RS                     | "state" | "facts" | "keys" | "page_state" | "sort" | "filter" | "page"
-//RS                     | "sort_by" | "filter_by" | "paginate" | "set_rows" | "set_selected"
-//RS                     | "toggle_selection" | "clear_selection" | "focus" | "clear_focus" | "focused_key"
-//RS                     | "selected_keys" | "selected_rows"
-//RS                     | "insert_row" | "replace_row" | "update_row" | "remove_row"
-//RS                     | "first_page" | "next_page" | "last_page" | "visible_rows",
-//RS             )
-//RS             | (
-//RS                 "core.web.virtual",
-//RS                 "window" | "window_measured" | "slice" | "indices"
-//RS                     | "plan" | "plan_measured" | "plan_from_sizes" | "plan_indices"
-//RS                     | "plan_slice" | "plan_viewport" | "plan_measure"
-//RS                     | "plan_viewport_state" | "plan_scroll_to" | "plan_resize"
-//RS                     | "plan_viewport_measure" | "plan_facts",
-//RS             )
-//RS             | (
-//RS                 "core.web.store",
-//RS                 "new" | "with_history" | "value" | "transaction" | "update" | "batch"
-//RS                     | "set" | "set_state" | "optimistic" | "patch" | "patch_active"
-//RS                     | "patch_commit" | "patch_generation" | "patch_rollback"
-//RS                     | "patch_transaction" | "back" | "forward" | "jump" | "scrub" | "restore"
-//RS                     | "history" | "history_at" | "events" | "events_since" | "clear_history"
-//RS                     | "history_enabled" | "history_limit" | "set_history_limit" | "cursor"
-//RS                     | "current_generation" | "subscribe" | "subscribe_selector"
-//RS                     | "subscription_active" | "subscription_unsubscribe" | "derived" | "selector"
-//RS                     | "inspect" | "facts_json" | "event_json",
-//RS             )
-//RS     )
-//RS }
-//RS 
-//RS pub fn core_fixed_sig(
-//RS     module: &str,
-//RS     name: &str,
-//RS ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-//RS     if is_polymorphic_core_special(module, name) {
-//RS         return None;
-//RS     }
-//RS     core_fixed_sig_impl(module, name)
-//RS }
-//RS 
-//RS /// Project the signature used by a plain Core-call consumer.
-//RS ///
-//RS /// A registered row is authoritative for the ordinary call path. Some
-//RS /// polymorphic spellings still have a fixed default shape in this module; use
-//RS /// that shape only when the row projection cannot carry the resolved type.
-//RS /// The inner `None` remains the raw no-return marker; callers that need a
-//RS /// concrete return type should use `core_call_semantic_signature`.
-//RS pub fn core_call_signature(
-//RS     module: &str,
-//RS     name: &str,
-//RS ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-//RS     if let Some(row) = Syntax::core_call(module, name) {
-//RS         if let Some(signature) = core_fixed_sig_for_row(row) {
-//RS             return Some(signature);
-//RS         }
-//RS     }
-//RS     core_fixed_sig_impl(module, name)
-//RS }
-//RS /// Project a checked Core call into its concrete semantic return type.
-//RS ///
-//RS /// The fixed-signature table uses the inner `None` to record a registered
-//RS /// no-return call. The outer `None` remains the distinct "no checking fact"
-//RS /// state, so an unknown call can never acquire `Unit` by projection.
-//RS pub fn core_call_semantic_signature(
-//RS     module: &str,
-//RS     name: &str,
-//RS ) -> Option<(Vec<(AccessConvention, Type)>, Type)> {
-//RS     core_call_signature(module, name)
-//RS         .map(|(params, ret)| (params, ret.unwrap_or_else(unit_ty)))
-//RS }
-//RS 
-//RS /// Complete the signature projection for polymorphic Core spellings whose
-//RS /// ordinary Canvas/default-call shape is still known to sema. The row and
-//RS /// fixed-signature paths remain first; this is only the resolved surface
-//RS /// fallback for generic math and encoding calls.
-//RS pub fn core_call_surface_signature(
-//RS     module: &str,
-//RS     name: &str,
-//RS ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-//RS     if let Some(signature) = core_call_signature(module, name) {
-//RS         return Some(signature);
-//RS     }
-//RS     let read = AccessConvention::Read;
-//RS     let int = Type::Int;
-//RS     let float = Type::Float;
-//RS     let result = |value| {
-//RS         Some((
-//RS             vec![(read, Type::String)],
-//RS             Some(result_ty(value, Type::String)),
-//RS         ))
-//RS     };
-//RS     match (module, name) {
-//RS         ("core.math", "abs") => Some((vec![(read, int.clone())], Some(int))),
-//RS         (
-//RS             "core.math",
-//RS             "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
-//RS             | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "truncate" | "fract"
-//RS             | "sign" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
-//RS             | "fabs" | "expm1",
-//RS         ) => Some((vec![(read, float.clone())], Some(float))),
-//RS         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
-//RS         ("core.math", "int_pow" | "gcd" | "lcm") => {
-//RS             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
-//RS         }
-//RS         ("core.math", "pow" | "atan2" | "hypot") => Some((
-//RS             vec![(read, float.clone()), (read, float.clone())],
-//RS             Some(Type::Float),
-//RS         )),
-//RS         ("core.math", "fmod" | "remainder") => Some((
-//RS             vec![(read, float.clone()), (read, float.clone())],
-//RS             Some(Type::Float),
-//RS         )),
-//RS         ("core.math", "isclose") => Some((
-//RS             vec![
-//RS                 (read, float.clone()),
-//RS                 (read, float.clone()),
-//RS                 (read, float.clone()),
-//RS                 (read, float.clone()),
-//RS             ],
-//RS             Some(Type::Bool),
-//RS         )),
-//RS         ("core.math", "dist") => Some((
-//RS             vec![
-//RS                 (read, Type::List(Box::new(Type::Float))),
-//RS                 (read, Type::List(Box::new(Type::Float))),
-//RS             ],
-//RS             Some(Type::Float),
-//RS         )),
-//RS         ("core.math", "comb" | "perm") => Some((
-//RS             vec![(read, int.clone()), (read, int.clone())],
-//RS             Some(Type::Option(Box::new(Type::Int))),
-//RS         )),
-//RS         ("core.math", "min" | "max") => {
-//RS             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
-//RS         }
-//RS         ("core.math", "clamp") => Some((
-//RS             vec![(read, int.clone()), (read, int.clone()), (read, int)],
-//RS             Some(Type::Int),
-//RS         )),
-//RS         ("core.math", "lerp" | "muladd") => Some((
-//RS             vec![(read, float.clone()), (read, float.clone()), (read, float)],
-//RS             Some(Type::Float),
-//RS         )),
-//RS         ("core.math", "pi" | "e") => Some((vec![], Some(Type::Float))),
-//RS         ("core.math", "is_nan" | "is_inf" | "is_finite" | "isnan" | "isinf" | "isfinite") => {
-//RS             Some((vec![(read, Type::Float)], Some(Type::Bool)))
-//RS         }
-//RS         ("core.math", "is_even" | "is_odd") => {
-//RS             Some((vec![(read, Type::Int)], Some(Type::Bool)))
-//RS         }
-//RS         ("core.math", "fsum") => Some((
-//RS             vec![(read, Type::List(Box::new(Type::Float)))],
-//RS             Some(Type::Float),
-//RS         )),
-//RS         ("core.math", "prod") => Some((
-//RS             vec![(read, Type::List(Box::new(Type::Int)))],
-//RS             Some(Type::Int),
-//RS         )),
-//RS         (
-//RS             "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-//RS             | "core.encoding.yaml",
-//RS             "parse" | "decode" | "loads",
-//RS         ) => result(Type::String),
-//RS         (
-//RS             "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
-//RS             "decode" | "decode_url" | "b64decode" | "standard_b64decode"
-//RS             | "urlsafe_b64decode" | "b32decode" | "b16decode"
-//RS             | "a85decode" | "b85decode" | "z85decode",
-//RS         ) => result(Type::String),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Whether the canonical sema signature for a plain Core call is fallible.
-//RS pub fn core_call_is_fallible(module: &str, name: &str) -> bool {
-//RS     core_call_surface_signature(module, name)
-//RS         .and_then(|(_, ret)| ret)
-//RS         .is_some_and(|ret| ret.is_fallible())
-//RS }
-//RS 
-//RS /// Whether Canvas may synthesize safe starter arguments for this Core call.
-//RS pub fn core_call_has_safe_defaults(module: &str, name: &str) -> bool {
-//RS     module == "core.math"
-//RS         || matches!(
-//RS             (module, name),
-//RS             ("core.encoding.json", "parse" | "decode" | "loads")
-//RS                 | (
-//RS                     "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
-//RS                     "decode" | "decode_url" | "b64decode" | "standard_b64decode"
-//RS                         | "urlsafe_b64decode" | "b16decode"
-//RS                         | "a85decode" | "b85decode" | "z85decode",
-//RS                 )
-//RS         )
-//RS }
-//RS 
-//RS fn web_named(name: &str) -> Type {
-//RS     Type::Named(name.to_string())
-//RS }
-//RS 
-//RS fn web_list(inner: Type) -> Type {
-//RS     Type::List(Box::new(inner))
-//RS }
-//RS 
-//RS fn web_map_string() -> Type {
-//RS     Type::Map {
-//RS         key: Box::new(Type::String),
-//RS         key_span: None,
-//RS         value: Box::new(Type::String),
-//RS     }
-//RS }
-//RS 
-//RS fn web_fn(param: Type, ret: Type) -> Type {
-//RS     Type::Fn {
-//RS         params: vec![param],
-//RS         ret: Some(Box::new(ret)),
-//RS         effect_bound: None,
-//RS         return_view_provenance: None,
-//RS         param_contract: None,
-//RS         call_metadata: None,
-//RS     }
-//RS }
-//RS 
-//RS fn web_apply(name: &str, arg: Type) -> Type {
-//RS     Type::Apply {
-//RS         name: name.to_string(),
-//RS         args: vec![arg],
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn web_result_error(ok: Type, error: &str) -> Type {
-//RS     result_ty(ok, web_named(error))
-//RS }
-//RS 
-//RS fn web_fixed_sig(
-//RS     module: &str,
-//RS     name: &str,
-//RS ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-//RS     let read = AccessConvention::Read;
-//RS     let string = Type::String;
-//RS     let int = Type::Int;
-//RS     let bool_ = Type::Bool;
-//RS     let t = web_named("T");
-//RS     let table = web_apply("WebTable", t.clone());
-//RS     let table_column = web_apply("WebTableColumn", t.clone());
-//RS     let table_page = web_apply("WebTablePage", t.clone());
-//RS     let table_row = web_apply("WebTableRow", t.clone());
-//RS     let table_state = web_named("WebTableState");
-//RS     let table_direction = web_named("WebTableSortDirection");
-//RS     let virtual_window = web_named("WebVirtualWindow");
-//RS     let virtual_plan = web_named("WebVirtualPlan");
-//RS     let virtual_viewport = web_named("WebVirtualPlanViewport");
-//RS     let router = web_named("WebRouter");
-//RS     let router_field = web_named("WebRouterField");
-//RS     let router_codec = web_named("WebRouterSearchCodec");
-//RS     let navigation = web_named("WebNavigation");
-//RS     let http_router = web_named("HTTPRouter");
-//RS     let query = web_named("WebQuery");
-//RS     let query_mode = web_named("WebQueryNetworkMode");
-//RS     let mutation_state = web_named("WebMutationState");
-//RS     let query_mutation = web_fn(string.clone(), string.clone());
-//RS     let query_replay = web_fn(string.clone(), unit_ty());
-//RS     let form_action_error = web_named("WebFormActionError");
-//RS     let signal = string.clone();
-//RS     let form = web_named("WebForm");
-//RS     let form_input = web_named("WebFormInput");
-//RS     let form_field = web_named("WebFormFieldSpec");
-//RS     let form_typed = web_named("WebFormTyped");
-//RS     let form_chain = web_named("WebFormValidationChain");
-//RS     let form_decoded = web_named("WebFormDecodedInput");
-//RS     let form_errors = web_named("WebFormErrorState");
-//RS     let form_lifecycle = web_named("WebFormLifecycle");
-//RS     let form_validation = web_named("WebFormValidation");
-//RS     let form_timing = web_named("WebFormValidationTiming");
-//RS     let form_validator = web_fn(string.clone(), unit_ty());
-//RS     let form_submission = web_named("WebFormTypedSubmission");
-//RS     let form_field_state = web_named("WebFormFieldState");
-//RS     match (module, name) {
-//RS         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
-//RS         ("core.data.sketch", "merge") => Some((
-//RS             vec![(read, string.clone()), (read, string.clone())],
-//RS             Some(string.clone()),
-//RS         )),
-//RS         ("core.web.storage", "local" | "session") => {
-//RS             Some((vec![], Some(web_named("WebStorage"))))
-//RS         }
-//RS         ("core.web.storage", "kind_local" | "kind_session") => {
-//RS             Some((vec![], Some(string.clone())))
-//RS         }
-//RS         // D-WEBFORM1=A: the ratified `web.form(Model, action: handler)`
-//RS         // surface lowers to the existing typed-form runtime boundary. Sema
-//RS         // replaces the model/action source values with a derived input and
-//RS         // stable action name before this signature is consumed.
-//RS         ("core.web", "openapi") => Some((vec![(read, http_router)], Some(string.clone()))),
-//RS         ("core.web", "form") => Some((
-//RS             vec![(read, form_input.clone()), (read, string.clone())],
-//RS             Some(form_typed.clone()),
-//RS         )),
-//RS         ("core.web.router", "route") => Some((
-//RS             vec![
-//RS                 (read, router.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(router_field.clone())),
-//RS                 (read, web_list(router_field.clone())),
-//RS                 (read, web_fn(navigation.clone(), string.clone())),
-//RS             ],
-//RS             Some(web_result_error(router.clone(), "WebRouterError")),
-//RS         )),
-//RS         ("core.web.router", "route_with_search_codec") => Some((
-//RS             vec![
-//RS                 (read, router.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(router_field.clone())),
-//RS                 (read, web_list(router_field.clone())),
-//RS                 (read, router_codec.clone()),
-//RS                 (read, web_fn(navigation.clone(), string.clone())),
-//RS             ],
-//RS             Some(web_result_error(router.clone(), "WebRouterError")),
-//RS         )),
-//RS         ("core.web.router", "not_found") => Some((
-//RS             vec![
-//RS                 (read, router.clone()),
-//RS                 (read, web_fn(string.clone(), string.clone())),
-//RS             ],
-//RS             Some(web_result_error(router.clone(), "WebRouterError")),
-//RS         )),
-//RS         ("core.web.router", "navigate" | "preload") => Some((
-//RS             vec![(read, router.clone()), (read, string.clone())],
-//RS             Some(web_result_error(navigation.clone(), "WebRouterError")),
-//RS         )),
-//RS         ("core.web.router", "abort") => {
-//RS             Some((vec![(read, router.clone())], Some(bool_.clone())))
-//RS         }
-//RS         ("core.web.router", "stale" | "invalidate" | "collect") => Some((
-//RS             vec![(read, router.clone()), (read, string.clone())],
-//RS             Some(int.clone()),
-//RS         )),
-//RS         ("core.web.router", "cache_state") => Some((
-//RS             vec![(read, router.clone()), (read, string.clone())],
-//RS             Some(web_named("WebRouterCacheStatus")),
-//RS         )),
-//RS         ("core.web.router", "cache_show") => {
-//RS             Some((vec![(read, router)], Some(string.clone())))
-//RS         }
-//RS         ("core.web.router", "current") => Some((
-//RS             vec![(read, router)],
-//RS             Some(web_named("WebNavigationState")),
-//RS         )),
-//RS         ("core.web.router", "show") => Some((vec![(read, router)], Some(string.clone()))),
-//RS         ("core.web.router", "link") => Some((
-//RS             vec![
-//RS                 (read, router),
-//RS                 (read, string.clone()),
-//RS                 (read, web_map_string()),
-//RS                 (read, web_map_string()),
-//RS             ],
-//RS             Some(web_result_error(string.clone(), "WebRouterError")),
-//RS         )),
-//RS         ("core.web.query", "new") => Some((
-//RS             vec![(read, string.clone()), (read, web_named("LiveQuery"))],
-//RS             Some(query.clone()),
-//RS         )),
-//RS         ("core.web.query", "live") => Some((
-//RS             vec![
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, Type::Fn {
-//RS                     params: vec![],
-//RS                     ret: Some(Box::new(string.clone())),
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }),
-//RS             ],
-//RS             Some(query.clone()),
-//RS         )),
-//RS         ("core.web.query", "mutate") => Some((
-//RS             vec![
-//RS                 (read, query.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, Type::Option(Box::new(string.clone()))),
-//RS                 (read, query_mutation.clone()),
-//RS             ],
-//RS             Some(mutation_state.clone()),
-//RS         )),
-//RS         ("core.web.query", "mutate_with_invalidations") => Some((
-//RS             vec![
-//RS                 (read, query.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, Type::Option(Box::new(string.clone()))),
-//RS                 (read, web_list(string.clone())),
-//RS                 (read, query_mutation),
-//RS             ],
-//RS             Some(mutation_state.clone()),
-//RS         )),
-//RS         ("core.web.query", "retry") => Some((
-//RS             vec![(read, query.clone()), (read, query_replay)],
-//RS             Some(web_result_error(int.clone(), "WebQueryError")),
-//RS         )),
-//RS         ("core.web.query", "subscribe") => {
-//RS             Some((vec![(read, string.clone())], Some(query.clone())))
-//RS         }
-//RS         ("core.web.query", "invalidate") => {
-//RS             Some((vec![(read, query.clone())], Some(int.clone())))
-//RS         }
-//RS         ("core.web.query", "get" | "show") => {
-//RS             Some((vec![(read, query.clone())], Some(string.clone())))
-//RS         }
-//RS         ("core.web.query", "state") => Some((
-//RS             vec![(read, query.clone())],
-//RS             Some(web_named("WebQueryState")),
-//RS         )),
-//RS         ("core.web.query", "state_signal") => Some((
-//RS             vec![(read, query.clone())],
-//RS             Some(web_apply("Signal", web_named("WebQueryState"))),
-//RS         )),
-//RS         ("core.web.query", "mutation_state") => Some((
-//RS             vec![(read, query.clone())],
-//RS             Some(mutation_state.clone()),
-//RS         )),
-//RS         ("core.web.query", "mutation_signal") => Some((
-//RS             vec![(read, query.clone())],
-//RS             Some(web_apply("Signal", mutation_state.clone())),
-//RS         )),
-//RS         ("core.web.query", "queue") => Some((
-//RS             vec![(read, query.clone()), (read, string.clone())],
-//RS             Some(web_result_error(int.clone(), "WebQueryError")),
-//RS         )),
-//RS         ("core.web.query", "refresh") => {
-//RS             Some((vec![(read, query)], Some(web_result_error(unit_ty(), "WebQueryError"))))
-//RS         }
-//RS         ("core.web.query", "facts") => {
-//RS             Some((vec![(read, query.clone())], Some(string.clone())))
-//RS         }
-//RS         ("core.web.query", "cancel") => {
-//RS             Some((vec![(read, query.clone())], Some(bool_.clone())))
-//RS         }
-//RS         ("core.web.query", "set_online") => Some((
-//RS             vec![(read, query.clone()), (read, bool_.clone())],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.query", "set_mode") => Some((
-//RS             vec![(read, query), (read, query_mode)],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.forms", "new") => Some((vec![(read, string.clone())], Some(form.clone()))),
-//RS         ("core.web.forms", "field") => Some((
-//RS             vec![
-//RS                 (read, form.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, bool_.clone()),
-//RS             ],
-//RS             Some(web_result_error(form.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "set") => Some((
-//RS             vec![
-//RS                 (read, form.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS             ],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "blur") => Some((
-//RS             vec![(read, form.clone()), (read, string.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "validate") => {
-//RS             Some((vec![(read, form.clone())], Some(web_result_error(unit_ty(), "WebFormError"))))
-//RS         }
-//RS         ("core.web.forms", "validate_async") => Some((
-//RS             vec![(read, form.clone())],
-//RS             Some(form.clone()),
-//RS         )),
-//RS         ("core.web.forms", "submit" | "no_script") => Some((
-//RS             vec![(read, form.clone())],
-//RS             Some(web_result_error(string.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "html" | "show") => {
-//RS             Some((vec![(read, form.clone())], Some(string.clone())))
-//RS         }
-//RS         ("core.web.forms", "input") => Some((
-//RS             vec![
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(form_field.clone())),
-//RS             ],
-//RS             Some(web_result_error(form_input.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "input_rename") => Some((
-//RS             vec![
-//RS                 (read, form_input.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS             ],
-//RS             Some(web_result_error(form_input.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "input_exclude") => Some((
-//RS             vec![(read, form_input.clone()), (read, string.clone())],
-//RS             Some(web_result_error(form_input.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "input_group") => Some((
-//RS             vec![
-//RS                 (read, form_input.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS             ],
-//RS             Some(web_result_error(form_input.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "input_replace") => Some((
-//RS             vec![
-//RS                 (read, form_input.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, form_field.clone()),
-//RS             ],
-//RS             Some(web_result_error(form_input.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed") => Some((
-//RS             vec![(read, form_input.clone()), (read, string.clone())],
-//RS             Some(web_result_error(form_typed.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_set") => Some((
-//RS             vec![
-//RS                 (read, form_typed.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS             ],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_set_async_validator") => Some((
-//RS             vec![
-//RS                 (read, form_typed.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, form_timing.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, form_validator.clone()),
-//RS             ],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_set_action") => Some((
-//RS             vec![
-//RS                 (read, form_typed.clone()),
-//RS                 (
-//RS                     read,
-//RS                     web_fn(form_decoded.clone(), string.clone()),
-//RS                 ),
-//RS             ],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.forms", "action_error") => Some((vec![], Some(form_action_error.clone()))),
-//RS         ("core.web.forms", "action_field_error") => Some((
-//RS             vec![
-//RS                 (read, form_action_error.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS             ],
-//RS             Some(form_action_error.clone()),
-//RS         )),
-//RS         ("core.web.forms", "action_form_error") => Some((
-//RS             vec![(read, form_action_error.clone()), (read, string.clone())],
-//RS             Some(form_action_error.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_blur") => Some((
-//RS             vec![(read, form_typed.clone()), (read, string.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_validate") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_validate_async") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(form_validation.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_validate_field") => Some((
-//RS             vec![
-//RS                 (read, form_typed.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, form_timing.clone()),
-//RS                 (read, form_validator.clone()),
-//RS             ],
-//RS             Some(form_chain.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_validation_render") => Some((
-//RS             vec![(read, form_chain)],
-//RS             Some(string.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_submit") | ("core.web.forms", "typed_no_script") => {
-//RS             Some((
-//RS                 vec![(read, form_typed.clone())],
-//RS                 Some(web_result_error(string.clone(), "WebFormError")),
-//RS             ))
-//RS         }
-//RS         ("core.web.forms", "typed_submit_async") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(form_submission.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_post") => Some((
-//RS             vec![(read, form_typed.clone()), (read, string.clone())],
-//RS             Some(web_result_error(string.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_decode_post") => Some((
-//RS             vec![(read, form_typed.clone()), (read, string.clone())],
-//RS             Some(web_result_error(form_decoded.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_html" | "typed_show") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(string.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_state") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(string.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_lifecycle") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(form_lifecycle.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_errors") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(form_errors.clone()),
-//RS         )),
-//RS         ("core.web.forms", "typed_focus") => Some((
-//RS             vec![(read, form_typed.clone()), (read, string.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_cancel") => Some((
-//RS             vec![(read, form_typed.clone())],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.forms", "typed_select_field") => Some((
-//RS             vec![(read, form_typed), (read, string)],
-//RS             Some(web_result_error(form_field_state, "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_validation_wait") => Some((
-//RS             vec![(AccessConvention::Move, form_validation.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_validation_cancel") => Some((
-//RS             vec![(read, form_validation)],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.forms", "typed_submission_wait") => Some((
-//RS             vec![(AccessConvention::Move, form_submission.clone())],
-//RS             Some(web_result_error(string.clone(), "WebFormError")),
-//RS         )),
-//RS         ("core.web.forms", "typed_submission_cancel") => Some((
-//RS             vec![(read, form_submission)],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.table", "new") => Some((
-//RS             vec![(read, string.clone()), (read, web_list(t.clone()))],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "new_keyed") => Some((
-//RS             vec![
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(t.clone())),
-//RS                 (read, web_fn(t.clone(), string.clone())),
-//RS             ],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "column") => Some((
-//RS             vec![
-//RS                 (read, string.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, web_fn(t.clone(), string.clone())),
-//RS             ],
-//RS             Some(table_column.clone()),
-//RS         )),
-//RS         ("core.web.table", "with_column") => Some((
-//RS             vec![(read, table.clone()), (read, table_column)],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "with_server_page") => Some((
-//RS             vec![
-//RS                 (read, table.clone()),
-//RS                 (read, web_fn(table_state.clone(), table_page.clone())),
-//RS             ],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "state") => Some((vec![(read, table.clone())], Some(table_state.clone()))),
-//RS         ("core.web.table", "facts") => Some((vec![(read, table.clone())], Some(string.clone()))),
-//RS         ("core.web.table", "keys") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(web_result_error(web_list(string.clone()), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "page_state") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(web_result_error(table_page.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "sort") => Some((
-//RS             vec![
-//RS                 (read, web_list(t.clone())),
-//RS                 (read, bool_.clone()),
-//RS                 (read, web_fn(t.clone(), string.clone())),
-//RS             ],
-//RS             Some(web_list(t.clone())),
-//RS         )),
-//RS         ("core.web.table", "filter") => Some((
-//RS             vec![
-//RS                 (read, web_list(t.clone())),
-//RS                 (read, web_fn(t.clone(), bool_.clone())),
-//RS             ],
-//RS             Some(web_list(t.clone())),
-//RS         )),
-//RS         ("core.web.table", "page") => Some((
-//RS             vec![
-//RS                 (read, web_list(t.clone())),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS             ],
-//RS             Some(table_page.clone()),
-//RS         )),
-//RS         ("core.web.table", "sort_by") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone()), (read, table_direction)],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "filter_by") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone()), (read, string.clone())],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "paginate") => Some((
-//RS             vec![(read, table.clone()), (read, int.clone()), (read, int.clone())],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "set_rows") => Some((
-//RS             vec![(read, table.clone()), (read, web_list(t.clone()))],
-//RS             Some(web_result_error(unit_ty(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "set_selected") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone()), (read, bool_.clone())],
-//RS             Some(web_result_error(table.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "toggle_selection") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone())],
-//RS             Some(web_result_error(table.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "focus") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone())],
-//RS             Some(web_result_error(table.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "clear_focus") => {
-//RS             Some((vec![(read, table.clone())], Some(table.clone())))
-//RS         }
-//RS         ("core.web.table", "focused_key") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(Type::Option(Box::new(string.clone()))),
-//RS         )),
-//RS         ("core.web.table", "clear_selection") => {
-//RS             Some((vec![(read, table.clone())], Some(table.clone())))
-//RS         }
-//RS         ("core.web.table", "selected_keys") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(web_list(string.clone())),
-//RS         )),
-//RS         ("core.web.table", "selected_rows") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(web_result_error(web_list(table_row.clone()), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "insert_row") => Some((
-//RS             vec![(read, table.clone()), (read, t.clone())],
-//RS             Some(web_result_error(string.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "replace_row") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone()), (read, t.clone())],
-//RS             Some(web_result_error(unit_ty(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "update_row") => Some((
-//RS             vec![
-//RS                 (read, table.clone()),
-//RS                 (read, string.clone()),
-//RS                 (read, web_fn(t.clone(), t.clone())),
-//RS             ],
-//RS             Some(web_result_error(unit_ty(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "remove_row") => Some((
-//RS             vec![(read, table.clone()), (read, string.clone())],
-//RS             Some(web_result_error(t.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "first_page" | "next_page") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(table.clone()),
-//RS         )),
-//RS         ("core.web.table", "last_page") => Some((
-//RS             vec![(read, table.clone())],
-//RS             Some(web_result_error(table.clone(), "WebTableError")),
-//RS         )),
-//RS         ("core.web.table", "visible_rows") => Some((
-//RS             vec![(read, table.clone()), (read, virtual_plan.clone())],
-//RS             Some(web_result_error(web_list(table_row), "WebTableError")),
-//RS         )),
-//RS         ("core.web.virtual", "window") => Some((
-//RS             vec![
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS             ],
-//RS             Some(virtual_window.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "window_measured") => Some((
-//RS             vec![
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, web_list(int.clone())),
-//RS             ],
-//RS             Some(virtual_window.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "slice") => Some((
-//RS             vec![(read, web_list(t.clone())), (read, virtual_window)],
-//RS             Some(web_list(t.clone())),
-//RS         )),
-//RS         ("core.web.virtual", "indices") => Some((
-//RS             vec![(read, virtual_window)],
-//RS             Some(web_list(int.clone())),
-//RS         )),
-//RS         ("core.web.virtual", "plan") => Some((
-//RS             vec![
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS             ],
-//RS             Some(virtual_plan.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_measured") => Some((
-//RS             vec![
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, Type::List(Box::new(Type::Tuple(vec![
-//RS                     ("index".to_string(), Box::new(int.clone())),
-//RS                     ("size".to_string(), Box::new(int.clone())),
-//RS                 ])))),
-//RS             ],
-//RS             Some(virtual_plan.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_from_sizes") => Some((
-//RS             vec![
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, web_list(int.clone())),
-//RS             ],
-//RS             Some(virtual_plan.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_measure") => Some((
-//RS             vec![(read, virtual_plan.clone()), (read, int.clone()), (read, int.clone())],
-//RS             Some(virtual_plan.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_slice") => Some((
-//RS             vec![(read, web_list(t.clone())), (read, virtual_plan.clone())],
-//RS             Some(web_list(t.clone())),
-//RS         )),
-//RS         ("core.web.virtual", "plan_indices") => Some((
-//RS             vec![(read, virtual_plan.clone())],
-//RS             Some(web_list(int.clone())),
-//RS         )),
-//RS         ("core.web.virtual", "plan_viewport") => Some((
-//RS             vec![(read, virtual_plan)],
-//RS             Some(virtual_viewport.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_viewport_state") => Some((
-//RS             vec![(read, virtual_viewport.clone())],
-//RS             Some(virtual_plan.clone()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_scroll_to") => Some((
-//RS             vec![(read, virtual_viewport.clone()), (read, int.clone())],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_resize") => Some((
-//RS             vec![
-//RS                 (read, virtual_viewport.clone()),
-//RS                 (read, int.clone()),
-//RS                 (read, int.clone()),
-//RS             ],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.virtual", "plan_viewport_measure") => Some((
-//RS             vec![
-//RS                 (read, virtual_viewport),
-//RS                 (read, int.clone()),
-//RS                 (read, int),
-//RS             ],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.store", "value") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(t.clone()),
-//RS         )),
-//RS         ("core.web.store", "signal" | "state_signal") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(signal.clone()),
-//RS         )),
-//RS         ("core.web.store", "new") => Some((
-//RS             vec![(read, string.clone()), (read, t.clone())],
-//RS             Some(web_apply("WebStore", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "with_history") => Some((
-//RS             vec![
-//RS                 (read, string.clone()),
-//RS                 (read, t.clone()),
-//RS                 (read, int.clone()),
-//RS             ],
-//RS             Some(web_apply("WebStore", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "transaction" | "update" | "batch") => Some((
-//RS             vec![
-//RS                 (read, web_apply("WebStore", t.clone())),
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(string.clone())),
-//RS                 (read, web_fn(t.clone(), unit_ty())),
-//RS             ],
-//RS             Some(web_apply("WebStoreTransaction", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "set" | "set_state") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone())), (read, t.clone())],
-//RS             Some(web_apply("WebStoreTransaction", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "optimistic" | "patch") => Some((
-//RS             vec![
-//RS                 (read, web_apply("WebStore", t.clone())),
-//RS                 (read, string.clone()),
-//RS                 (read, web_list(string.clone())),
-//RS                 (read, web_fn(t.clone(), unit_ty())),
-//RS             ],
-//RS             Some(web_apply("WebStorePatch", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "patch_generation") => Some((
-//RS             vec![(read, web_apply("WebStorePatch", t.clone()))],
-//RS             Some(int.clone()),
-//RS         )),
-//RS         ("core.web.store", "patch_transaction") => Some((
-//RS             vec![(read, web_apply("WebStorePatch", t.clone()))],
-//RS             Some(web_apply("WebStoreTransaction", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "patch_active") => Some((
-//RS             vec![(read, web_apply("WebStorePatch", t.clone()))],
-//RS             Some(bool_.clone()),
-//RS         )),
-//RS         ("core.web.store", "patch_commit") => Some((
-//RS             vec![(AccessConvention::Move, web_apply("WebStorePatch", t.clone()))],
-//RS             Some(web_apply("WebStoreTransaction", t.clone())),
-//RS         )),
-//RS         ("core.web.store", "patch_rollback") => Some((
-//RS             vec![(AccessConvention::Move, web_apply("WebStorePatch", t.clone()))],
-//RS             Some(Type::Option(Box::new(t.clone()))),
-//RS         )),
-//RS         ("core.web.store", "back" | "forward" | "restore") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(Type::Option(Box::new(t.clone()))),
-//RS         )),
-//RS         ("core.web.store", "jump" | "scrub") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
-//RS             Some(Type::Option(Box::new(t.clone()))),
-//RS         )),
-//RS         ("core.web.store", "history") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(web_list(web_apply("WebStoreTransaction", t.clone()))),
-//RS         )),
-//RS         ("core.web.store", "history_at") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
-//RS             Some(Type::Option(Box::new(web_apply("WebStoreTransaction", t.clone())))),
-//RS         )),
-//RS         ("core.web.store", "events") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(web_list(web_named("WebStoreEvent"))),
-//RS         )),
-//RS         ("core.web.store", "events_since") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
-//RS             Some(web_list(web_named("WebStoreEvent"))),
-//RS         )),
-//RS         ("core.web.store", "clear_history" | "set_history_limit") => Some((
-//RS             if name == "clear_history" {
-//RS                 vec![(read, web_apply("WebStore", t.clone()))]
-//RS             } else {
-//RS                 vec![
-//RS                     (read, web_apply("WebStore", t.clone())),
-//RS                     (read, int.clone()),
-//RS                 ]
-//RS             },
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.store", "history_enabled") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(bool_.clone()),
-//RS         )),
-//RS         ("core.web.store", "history_limit" | "cursor" | "current_generation") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(int.clone()),
-//RS         )),
-//RS         ("core.web.store", "subscribe") => Some((
-//RS             vec![
-//RS                 (read, web_apply("WebStore", t.clone())),
-//RS                 (read, web_fn(t.clone(), unit_ty())),
-//RS             ],
-//RS             Some(web_named("WebStoreSubscription")),
-//RS         )),
-//RS         ("core.web.store", "subscription_unsubscribe") => Some((
-//RS             vec![(read, web_named("WebStoreSubscription"))],
-//RS             Some(unit_ty()),
-//RS         )),
-//RS         ("core.web.store", "subscription_active") => Some((
-//RS             vec![(read, web_named("WebStoreSubscription"))],
-//RS             Some(bool_.clone()),
-//RS         )),
-//RS         ("core.web.store", "subscribe_selector") => Some((
-//RS             vec![
-//RS                 (read, web_apply("WebStore", t.clone())),
-//RS                 (read, web_fn(t.clone(), web_named("U"))),
-//RS                 (read, web_fn(web_named("U"), unit_ty())),
-//RS             ],
-//RS             Some(web_named("WebStoreSubscription")),
-//RS         )),
-//RS         ("core.web.store", "derived" | "selector") => Some((
-//RS             vec![
-//RS                 (read, web_apply("WebStore", t.clone())),
-//RS                 (read, web_fn(t.clone(), web_named("U"))),
-//RS             ],
-//RS             Some(web_apply("Derived", web_named("U"))),
-//RS         )),
-//RS         ("core.web.store", "inspect") => Some((
-//RS             vec![(read, web_apply("WebStore", t.clone()))],
-//RS             Some(web_named("WebStoreInspection")),
-//RS         )),
-//RS         ("core.web.store", "facts_json" | "event_json") => Some((
-//RS             vec![(read, web_apply("WebStore", t))],
-//RS             Some(string),
-//RS         )),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS 
-// END-PORT-PENDING 0385 crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1-1223
+use jet_foundation.[AccessConvention, Type, TypeTupleField, core_call]
 
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:12
+// Polymorphic specials receive resolved_ret from inference, not a fixed row.
+pub fn is_polymorphic_core_special(module: String, name: String) -> Bool Never! {
+    if (module, name) == {
+        ("core.prelude", "keep") | ("core.testing", "histories") -> true
+        ("core.math", "abs" | "min" | "max" | "clamp" | "sqrt" | "floor" | "ceil" | "pow"
+            | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
+            | "exp" | "ln" | "log2" | "log10" | "hypot" | "trunc" | "truncate" | "fract" | "real" | "imag"
+            | "conj" | "float32" | "float64" | "sign" | "is_nan" | "is_inf" | "is_finite" | "to_bits"
+            | "from_bits" | "degrees" | "radians" | "lerp" | "checked_add" | "checked_sub" | "checked_mul"
+            | "checked_pow" | "saturating_add" | "saturating_sub" | "saturating_mul" | "int_pow" | "gcd" | "lcm"
+            | "acosh" | "asinh" | "atanh" | "cbrt" | "copysign" | "exp2" | "exp_m1" | "ln_1p" | "log"
+            | "signum" | "fma" | "muladd" | "is_even" | "is_odd" | "isqrt" | "factorial" | "checked_abs"
+            | "checked_neg" | "checked_div" | "checked_rem" | "is_normal" | "is_subnormal" | "is_canonical"
+            | "is_signed" | "is_zero" | "is_integer" | "sign_bit" | "leading_ones" | "trailing_ones" | "next_up"
+            | "next_down" | "next_after" | "nextafter" | "sin_cos" | "binomial" | "cmp" | "copy" | "cot"
+            | "div_mod" | "div_rem" | "erf" | "erfc" | "frexp" | "gamma" | "lgamma" | "ilogb" | "inv"
+            | "ldexp" | "logb" | "modf" | "radix" | "significand" | "ulp" | "zero" | "scaleb" | "digits") -> true
+        ("core.text.fmt", "pretty" | "decimal" | "grouped") -> true
+        ("core.math.random", "pick" | "weighted_pick" | "sample" | "shuffle") -> true
+        ("core.term", "eprint" | "print" | "progress") -> true
+        // Arity selects Int versus Int !TextError; fixed rows cannot express both.
+        ("core.text", "display_width") -> true
+        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "to_string" | "to_string_pretty" | "decode") -> true
+        ("core.sys" | "core.db", "decode") | ("core.encoding.csv", "query") -> true
+        ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical") -> true
+        ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name") -> true
+        ("core.reactive", "signal" | "derived") | ("core.tasks", "after") -> true
+        ("core.data", "csv" | "json" | "csv_reader" | "json_reader" | "count" | "schema" | "plot" | "load" | "load_default"
+            | "file" | "file_member" | "url" | "database" | "value" | "snapshot" | "inner_join" | "left_join" | "pivot_sum" | "query" | "track") -> true
+        ("core.data.plot", "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render") -> true
+        ("core.crypto.vault", "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate"
+            | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate"
+            | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
+            | "authorize_wrapped_import" | "commit_import_wrapped") -> true
+        ("core.compute", "gradient" | "value_and_gradient" | "vjp" | "jvp") -> true
+        ("core.web.table", "new" | "new_keyed" | "column" | "with_column" | "with_server_page" | "state" | "facts" | "keys"
+            | "page_state" | "sort" | "filter" | "page" | "sort_by" | "filter_by" | "paginate" | "set_rows" | "set_selected"
+            | "toggle_selection" | "clear_selection" | "focus" | "clear_focus" | "focused_key" | "selected_keys" | "selected_rows"
+            | "insert_row" | "replace_row" | "update_row" | "remove_row" | "first_page" | "next_page" | "last_page" | "visible_rows") -> true
+        ("core.web.virtual", "window" | "window_measured" | "slice" | "indices" | "plan" | "plan_measured" | "plan_from_sizes"
+            | "plan_indices" | "plan_slice" | "plan_viewport" | "plan_measure" | "plan_viewport_state" | "plan_scroll_to"
+            | "plan_resize" | "plan_viewport_measure" | "plan_facts") -> true
+        ("core.web.store", "new" | "with_history" | "value" | "transaction" | "update" | "batch" | "set" | "set_state" | "optimistic"
+            | "patch" | "patch_active" | "patch_commit" | "patch_generation" | "patch_rollback" | "patch_transaction" | "back" | "forward"
+            | "jump" | "scrub" | "restore" | "history" | "history_at" | "events" | "events_since" | "clear_history" | "history_enabled"
+            | "history_limit" | "set_history_limit" | "cursor" | "current_generation" | "subscribe" | "subscribe_selector"
+            | "subscription_active" | "subscription_unsubscribe" | "derived" | "selector" | "inspect" | "facts_json" | "event_json") -> true
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:207
+pub fn core_fixed_sig(module: String, name: String) -> ([(AccessConvention, Type)], Type?)? Never! {
+    if is_polymorphic_core_special(module, name) -> return None
+    core_fixed_sig_impl(module, name)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:224
+// Registered projection is authoritative; the fixed default is secondary.
+pub fn core_call_signature(module: String, name: String) -> ([(AccessConvention, Type)], Type?)? Never! {
+    if core_call(module, name) == .Val(row) {
+        if core_fixed_sig_for_row(row) == .Val(signature) -> return Val(signature)
+    }
+    core_fixed_sig_impl(module, name)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:240
+// Preserve unknown (outer None) separately from known no-return (inner None).
+pub fn core_call_semantic_signature(module: String, name: String) -> ([(AccessConvention, Type)], Type)? Never! {
+    signature :: core_call_signature(module, name) ?? return None
+    Val((signature.0, signature.1 ?? unit_ty()))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:252
+pub fn core_call_surface_signature(module: String, name: String) -> ([(AccessConvention, Type)], Type?)? Never! {
+    if core_call_signature(module, name) == .Val(signature) -> return Val(signature)
+    read :: AccessConvention.Read
+    int :: Type.Int
+    float :: Type.Float
+    result :: value -> Val(([(AccessConvention, Type)]{(read, Type.String)}, Val(result_ty(value, Type.String))))
+    if (module, name) == {
+        ("core.math", "abs") -> Val(([(AccessConvention, Type)]{(read, int)}, Val(int)))
+        ("core.math", "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh"
+            | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "truncate" | "fract" | "sign" | "real" | "imag" | "conj"
+            | "float32" | "float64" | "degrees" | "radians" | "fabs" | "expm1") -> Val(([(AccessConvention, Type)]{(read, float)}, Val(float)))
+        ("core.math", "round") -> Val(([(AccessConvention, Type)]{(read, float)}, Val(int)))
+        ("core.math", "int_pow" | "gcd" | "lcm" | "min" | "max") -> Val(([(AccessConvention, Type)]{(read, int), (read, int)}, Val(int)))
+        ("core.math", "pow" | "atan2" | "hypot" | "fmod" | "remainder") -> Val(([(AccessConvention, Type)]{(read, float), (read, float)}, Val(float)))
+        ("core.math", "isclose") -> Val(([(AccessConvention, Type)]{(read, float), (read, float), (read, float), (read, float)}, Val(Type.Bool)))
+        ("core.math", "dist") -> Val(([(AccessConvention, Type)]{(read, Type.List{element: float}), (read, Type.List{element: float})}, Val(float)))
+        ("core.math", "comb" | "perm") -> Val(([(AccessConvention, Type)]{(read, int), (read, int)}, Val(Type.Option{inner: int})))
+        ("core.math", "clamp") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int)}, Val(int)))
+        ("core.math", "lerp" | "muladd") -> Val(([(AccessConvention, Type)]{(read, float), (read, float), (read, float)}, Val(float)))
+        ("core.math", "pi" | "e") -> Val(([(AccessConvention, Type)]{}, Val(float)))
+        ("core.math", "is_nan" | "is_inf" | "is_finite" | "isnan" | "isinf" | "isfinite") -> Val(([(AccessConvention, Type)]{(read, float)}, Val(Type.Bool)))
+        ("core.math", "is_even" | "is_odd") -> Val(([(AccessConvention, Type)]{(read, int)}, Val(Type.Bool)))
+        ("core.math", "fsum") -> Val(([(AccessConvention, Type)]{(read, Type.List{element: float})}, Val(float)))
+        ("core.math", "prod") -> Val(([(AccessConvention, Type)]{(read, Type.List{element: int})}, Val(int)))
+        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "parse" | "decode" | "loads") -> result(Type.String)
+        ("core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32", "decode" | "decode_url" | "b64decode" | "standard_b64decode"
+            | "urlsafe_b64decode" | "b32decode" | "b16decode" | "a85decode" | "b85decode" | "z85decode") -> result(Type.String)
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:351
+pub fn core_call_is_fallible(module: String, name: String) -> Bool Never! {
+    signature :: core_call_surface_signature(module, name) ?? return false
+    ret :: signature.1 ?? return false
+    ret.is_fallible()
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:358
+pub fn core_call_has_safe_defaults(module: String, name: String) -> Bool Never! {
+    if module == "core.math" -> return true
+    if (module, name) == {
+        ("core.encoding.json", "parse" | "decode" | "loads") -> true
+        ("core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32", "decode" | "decode_url" | "b64decode" | "standard_b64decode"
+            | "urlsafe_b64decode" | "b16decode" | "a85decode" | "b85decode" | "z85decode") -> true
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:372
+fn web_named(name: String) -> Type Never! { Type.Named{name: name} }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:376
+fn web_list(inner: Type) -> Type Never! { Type.List{element: inner} }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:380
+fn web_map_string() -> Type Never! { Type.Map{key: Type.String, key_span: None, value: Type.String} }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:388
+fn web_fn(param: Type, ret: Type) -> Type Never! {
+    Type.Fn{params: [Type]{param}, ret: Val(ret), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:399
+fn web_apply(name: String, arg: Type) -> Type Never! { Type.Apply{name: name, args: [Type]{arg}} }
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:407
+fn web_result_error(ok: Type, error: String) -> Type Never! { result_ty(ok, web_named(error)) }
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:411
+fn web_fixed_sig(module: String, name: String) -> ([(AccessConvention, Type)], Type?)? Never! {
+    read :: AccessConvention.Read
+    string :: Type.String
+    int :: Type.Int
+    bool_ :: Type.Bool
+    t :: web_named("T")
+    table :: web_apply("WebTable", t)
+    table_column :: web_apply("WebTableColumn", t)
+    table_page :: web_apply("WebTablePage", t)
+    table_row :: web_apply("WebTableRow", t)
+    table_state :: web_named("WebTableState")
+    table_direction :: web_named("WebTableSortDirection")
+    virtual_window :: web_named("WebVirtualWindow")
+    virtual_plan :: web_named("WebVirtualPlan")
+    virtual_viewport :: web_named("WebVirtualPlanViewport")
+    router :: web_named("WebRouter")
+    router_field :: web_named("WebRouterField")
+    router_codec :: web_named("WebRouterSearchCodec")
+    navigation :: web_named("WebNavigation")
+    http_router :: web_named("HTTPRouter")
+    query :: web_named("WebQuery")
+    query_mode :: web_named("WebQueryNetworkMode")
+    mutation_state :: web_named("WebMutationState")
+    query_mutation :: web_fn(string, string)
+    query_replay :: web_fn(string, unit_ty())
+    form_action_error :: web_named("WebFormActionError")
+    signal :: string
+    form :: web_named("WebForm")
+    form_input :: web_named("WebFormInput")
+    form_field :: web_named("WebFormFieldSpec")
+    form_typed :: web_named("WebFormTyped")
+    form_chain :: web_named("WebFormValidationChain")
+    form_decoded :: web_named("WebFormDecodedInput")
+    form_errors :: web_named("WebFormErrorState")
+    form_lifecycle :: web_named("WebFormLifecycle")
+    form_validation :: web_named("WebFormValidation")
+    form_timing :: web_named("WebFormValidationTiming")
+    form_validator :: web_fn(string, unit_ty())
+    form_submission :: web_named("WebFormTypedSubmission")
+    form_field_state :: web_named("WebFormFieldState")
+    if (module, name) == {
+        ("core.data.sketch", "empty") -> Val(([(AccessConvention, Type)]{}, Val(string)))
+        ("core.data.sketch", "merge") -> Val(([(AccessConvention, Type)]{(read, string), (read, string)}, Val(string)))
+        ("core.web.storage", "local" | "session") -> Val(([(AccessConvention, Type)]{}, Val(web_named("WebStorage"))))
+        ("core.web.storage", "kind_local" | "kind_session") -> Val(([(AccessConvention, Type)]{}, Val(string)))
+        // Derived form input and stable action replace the source model/handler.
+        ("core.web", "openapi") -> Val(([(AccessConvention, Type)]{(read, http_router)}, Val(string)))
+        ("core.web", "form") -> Val(([(AccessConvention, Type)]{(read, form_input), (read, string)}, Val(form_typed)))
+        ("core.web.router", "route") -> Val(([(AccessConvention, Type)]{(read, router), (read, string), (read, web_list(router_field)), (read, web_list(router_field)), (read, web_fn(navigation, string))}, Val(web_result_error(router, "WebRouterError"))))
+        ("core.web.router", "route_with_search_codec") -> Val(([(AccessConvention, Type)]{(read, router), (read, string), (read, web_list(router_field)), (read, web_list(router_field)), (read, router_codec), (read, web_fn(navigation, string))}, Val(web_result_error(router, "WebRouterError"))))
+        ("core.web.router", "not_found") -> Val(([(AccessConvention, Type)]{(read, router), (read, web_fn(string, string))}, Val(web_result_error(router, "WebRouterError"))))
+        ("core.web.router", "navigate" | "preload") -> Val(([(AccessConvention, Type)]{(read, router), (read, string)}, Val(web_result_error(navigation, "WebRouterError"))))
+        ("core.web.router", "abort") -> Val(([(AccessConvention, Type)]{(read, router)}, Val(bool_)))
+        ("core.web.router", "stale" | "invalidate" | "collect") -> Val(([(AccessConvention, Type)]{(read, router), (read, string)}, Val(int)))
+        ("core.web.router", "cache_state") -> Val(([(AccessConvention, Type)]{(read, router), (read, string)}, Val(web_named("WebRouterCacheStatus"))))
+        ("core.web.router", "cache_show" | "show") -> Val(([(AccessConvention, Type)]{(read, router)}, Val(string)))
+        ("core.web.router", "current") -> Val(([(AccessConvention, Type)]{(read, router)}, Val(web_named("WebNavigationState"))))
+        ("core.web.router", "link") -> Val(([(AccessConvention, Type)]{(read, router), (read, string), (read, web_map_string()), (read, web_map_string())}, Val(web_result_error(string, "WebRouterError"))))
+        ("core.web.query", "new") -> Val(([(AccessConvention, Type)]{(read, string), (read, web_named("LiveQuery"))}, Val(query)))
+        ("core.web.query", "live") -> Val(([(AccessConvention, Type)]{(read, string), (read, string), (read, string), (read, Type.Fn{params: [Type]{}, ret: Val(string), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None})}, Val(query)))
+        ("core.web.query", "mutate") -> Val(([(AccessConvention, Type)]{(read, query), (read, string), (read, Type.Option{inner: string}), (read, query_mutation)}, Val(mutation_state)))
+        ("core.web.query", "mutate_with_invalidations") -> Val(([(AccessConvention, Type)]{(read, query), (read, string), (read, Type.Option{inner: string}), (read, web_list(string)), (read, query_mutation)}, Val(mutation_state)))
+        ("core.web.query", "retry") -> Val(([(AccessConvention, Type)]{(read, query), (read, query_replay)}, Val(web_result_error(int, "WebQueryError"))))
+        ("core.web.query", "subscribe") -> Val(([(AccessConvention, Type)]{(read, string)}, Val(query)))
+        ("core.web.query", "invalidate") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(int)))
+        ("core.web.query", "get" | "show" | "facts") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(string)))
+        ("core.web.query", "state") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(web_named("WebQueryState"))))
+        ("core.web.query", "state_signal") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(web_apply("Signal", web_named("WebQueryState")))))
+        ("core.web.query", "mutation_state") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(mutation_state)))
+        ("core.web.query", "mutation_signal") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(web_apply("Signal", mutation_state))))
+        ("core.web.query", "queue") -> Val(([(AccessConvention, Type)]{(read, query), (read, string)}, Val(web_result_error(int, "WebQueryError"))))
+        ("core.web.query", "refresh") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(web_result_error(unit_ty(), "WebQueryError"))))
+        ("core.web.query", "cancel") -> Val(([(AccessConvention, Type)]{(read, query)}, Val(bool_)))
+        ("core.web.query", "set_online") -> Val(([(AccessConvention, Type)]{(read, query), (read, bool_)}, Val(unit_ty())))
+        ("core.web.query", "set_mode") -> Val(([(AccessConvention, Type)]{(read, query), (read, query_mode)}, Val(unit_ty())))
+        ("core.web.forms", "new") -> Val(([(AccessConvention, Type)]{(read, string)}, Val(form)))
+        ("core.web.forms", "field") -> Val(([(AccessConvention, Type)]{(read, form), (read, string), (read, string), (read, bool_)}, Val(web_result_error(form, "WebFormError"))))
+        ("core.web.forms", "set") -> Val(([(AccessConvention, Type)]{(read, form), (read, string), (read, string)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "blur") -> Val(([(AccessConvention, Type)]{(read, form), (read, string)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "validate") -> Val(([(AccessConvention, Type)]{(read, form)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "validate_async") -> Val(([(AccessConvention, Type)]{(read, form)}, Val(form)))
+        ("core.web.forms", "submit" | "no_script") -> Val(([(AccessConvention, Type)]{(read, form)}, Val(web_result_error(string, "WebFormError"))))
+        ("core.web.forms", "html" | "show") -> Val(([(AccessConvention, Type)]{(read, form)}, Val(string)))
+        ("core.web.forms", "input") -> Val(([(AccessConvention, Type)]{(read, string), (read, web_list(form_field))}, Val(web_result_error(form_input, "WebFormError"))))
+        ("core.web.forms", "input_rename" | "input_group") -> Val(([(AccessConvention, Type)]{(read, form_input), (read, string), (read, string)}, Val(web_result_error(form_input, "WebFormError"))))
+        ("core.web.forms", "input_exclude") -> Val(([(AccessConvention, Type)]{(read, form_input), (read, string)}, Val(web_result_error(form_input, "WebFormError"))))
+        ("core.web.forms", "input_replace") -> Val(([(AccessConvention, Type)]{(read, form_input), (read, string), (read, form_field)}, Val(web_result_error(form_input, "WebFormError"))))
+        ("core.web.forms", "typed") -> Val(([(AccessConvention, Type)]{(read, form_input), (read, string)}, Val(web_result_error(form_typed, "WebFormError"))))
+        ("core.web.forms", "typed_set") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string), (read, string)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_set_async_validator") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string), (read, form_timing), (read, int), (read, form_validator)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_set_action") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, web_fn(form_decoded, string))}, Val(unit_ty())))
+        ("core.web.forms", "action_error") -> Val(([(AccessConvention, Type)]{}, Val(form_action_error)))
+        ("core.web.forms", "action_field_error") -> Val(([(AccessConvention, Type)]{(read, form_action_error), (read, string), (read, string)}, Val(form_action_error)))
+        ("core.web.forms", "action_form_error") -> Val(([(AccessConvention, Type)]{(read, form_action_error), (read, string)}, Val(form_action_error)))
+        ("core.web.forms", "typed_blur") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_validate") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_validate_async") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(form_validation)))
+        ("core.web.forms", "typed_validate_field") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string), (read, form_timing), (read, form_validator)}, Val(form_chain)))
+        ("core.web.forms", "typed_validation_render") -> Val(([(AccessConvention, Type)]{(read, form_chain)}, Val(string)))
+        ("core.web.forms", "typed_submit" | "typed_no_script") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(web_result_error(string, "WebFormError"))))
+        ("core.web.forms", "typed_submit_async") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(form_submission)))
+        ("core.web.forms", "typed_post") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string)}, Val(web_result_error(string, "WebFormError"))))
+        ("core.web.forms", "typed_decode_post") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string)}, Val(web_result_error(form_decoded, "WebFormError"))))
+        ("core.web.forms", "typed_html" | "typed_show" | "typed_state") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(string)))
+        ("core.web.forms", "typed_lifecycle") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(form_lifecycle)))
+        ("core.web.forms", "typed_errors") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(form_errors)))
+        ("core.web.forms", "typed_focus") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_cancel") -> Val(([(AccessConvention, Type)]{(read, form_typed)}, Val(unit_ty())))
+        ("core.web.forms", "typed_select_field") -> Val(([(AccessConvention, Type)]{(read, form_typed), (read, string)}, Val(web_result_error(form_field_state, "WebFormError"))))
+        ("core.web.forms", "typed_validation_wait") -> Val(([(AccessConvention, Type)]{(AccessConvention.Move, form_validation)}, Val(web_result_error(unit_ty(), "WebFormError"))))
+        ("core.web.forms", "typed_validation_cancel") -> Val(([(AccessConvention, Type)]{(read, form_validation)}, Val(unit_ty())))
+        ("core.web.forms", "typed_submission_wait") -> Val(([(AccessConvention, Type)]{(AccessConvention.Move, form_submission)}, Val(web_result_error(string, "WebFormError"))))
+        ("core.web.forms", "typed_submission_cancel") -> Val(([(AccessConvention, Type)]{(read, form_submission)}, Val(unit_ty())))
+        ("core.web.table", "new") -> Val(([(AccessConvention, Type)]{(read, string), (read, web_list(t))}, Val(table)))
+        ("core.web.table", "new_keyed") -> Val(([(AccessConvention, Type)]{(read, string), (read, web_list(t)), (read, web_fn(t, string))}, Val(table)))
+        ("core.web.table", "column") -> Val(([(AccessConvention, Type)]{(read, string), (read, string), (read, web_fn(t, string))}, Val(table_column)))
+        ("core.web.table", "with_column") -> Val(([(AccessConvention, Type)]{(read, table), (read, table_column)}, Val(table)))
+        ("core.web.table", "with_server_page") -> Val(([(AccessConvention, Type)]{(read, table), (read, web_fn(table_state, table_page))}, Val(table)))
+        ("core.web.table", "state") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(table_state)))
+        ("core.web.table", "facts") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(string)))
+        ("core.web.table", "keys") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(web_result_error(web_list(string), "WebTableError"))))
+        ("core.web.table", "page_state") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(web_result_error(table_page, "WebTableError"))))
+        ("core.web.table", "sort") -> Val(([(AccessConvention, Type)]{(read, web_list(t)), (read, bool_), (read, web_fn(t, string))}, Val(web_list(t))))
+        ("core.web.table", "filter") -> Val(([(AccessConvention, Type)]{(read, web_list(t)), (read, web_fn(t, bool_))}, Val(web_list(t))))
+        ("core.web.table", "page") -> Val(([(AccessConvention, Type)]{(read, web_list(t)), (read, int), (read, int)}, Val(table_page)))
+        ("core.web.table", "sort_by") -> Val(([(AccessConvention, Type)]{(read, table), (read, string), (read, table_direction)}, Val(table)))
+        ("core.web.table", "filter_by") -> Val(([(AccessConvention, Type)]{(read, table), (read, string), (read, string)}, Val(table)))
+        ("core.web.table", "paginate") -> Val(([(AccessConvention, Type)]{(read, table), (read, int), (read, int)}, Val(table)))
+        ("core.web.table", "set_rows") -> Val(([(AccessConvention, Type)]{(read, table), (read, web_list(t))}, Val(web_result_error(unit_ty(), "WebTableError"))))
+        ("core.web.table", "set_selected") -> Val(([(AccessConvention, Type)]{(read, table), (read, string), (read, bool_)}, Val(web_result_error(table, "WebTableError"))))
+        ("core.web.table", "toggle_selection" | "focus") -> Val(([(AccessConvention, Type)]{(read, table), (read, string)}, Val(web_result_error(table, "WebTableError"))))
+        ("core.web.table", "clear_focus" | "clear_selection" | "first_page" | "next_page") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(table)))
+        ("core.web.table", "focused_key") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(Type.Option{inner: string})))
+        ("core.web.table", "selected_keys") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(web_list(string))))
+        ("core.web.table", "selected_rows") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(web_result_error(web_list(table_row), "WebTableError"))))
+        ("core.web.table", "insert_row") -> Val(([(AccessConvention, Type)]{(read, table), (read, t)}, Val(web_result_error(string, "WebTableError"))))
+        ("core.web.table", "replace_row") -> Val(([(AccessConvention, Type)]{(read, table), (read, string), (read, t)}, Val(web_result_error(unit_ty(), "WebTableError"))))
+        ("core.web.table", "update_row") -> Val(([(AccessConvention, Type)]{(read, table), (read, string), (read, web_fn(t, t))}, Val(web_result_error(unit_ty(), "WebTableError"))))
+        ("core.web.table", "remove_row") -> Val(([(AccessConvention, Type)]{(read, table), (read, string)}, Val(web_result_error(t, "WebTableError"))))
+        ("core.web.table", "last_page") -> Val(([(AccessConvention, Type)]{(read, table)}, Val(web_result_error(table, "WebTableError"))))
+        ("core.web.table", "visible_rows") -> Val(([(AccessConvention, Type)]{(read, table), (read, virtual_plan)}, Val(web_result_error(web_list(table_row), "WebTableError"))))
+        ("core.web.virtual", "window") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int), (read, int), (read, int)}, Val(virtual_window)))
+        ("core.web.virtual", "window_measured") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int), (read, int), (read, int), (read, web_list(int))}, Val(virtual_window)))
+        ("core.web.virtual", "slice") -> Val(([(AccessConvention, Type)]{(read, web_list(t)), (read, virtual_window)}, Val(web_list(t))))
+        ("core.web.virtual", "indices") -> Val(([(AccessConvention, Type)]{(read, virtual_window)}, Val(web_list(int))))
+        ("core.web.virtual", "plan") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int), (read, int), (read, int), (read, int)}, Val(virtual_plan)))
+        ("core.web.virtual", "plan_measured") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int), (read, int), (read, int), (read, int), (read, Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "index", ty: int}, TypeTupleField{name: "size", ty: int}}}})}, Val(virtual_plan)))
+        ("core.web.virtual", "plan_from_sizes") -> Val(([(AccessConvention, Type)]{(read, int), (read, int), (read, int), (read, int), (read, int), (read, int), (read, web_list(int))}, Val(virtual_plan)))
+        ("core.web.virtual", "plan_measure") -> Val(([(AccessConvention, Type)]{(read, virtual_plan), (read, int), (read, int)}, Val(virtual_plan)))
+        ("core.web.virtual", "plan_slice") -> Val(([(AccessConvention, Type)]{(read, web_list(t)), (read, virtual_plan)}, Val(web_list(t))))
+        ("core.web.virtual", "plan_indices") -> Val(([(AccessConvention, Type)]{(read, virtual_plan)}, Val(web_list(int))))
+        ("core.web.virtual", "plan_viewport") -> Val(([(AccessConvention, Type)]{(read, virtual_plan)}, Val(virtual_viewport)))
+        ("core.web.virtual", "plan_viewport_state") -> Val(([(AccessConvention, Type)]{(read, virtual_viewport)}, Val(virtual_plan)))
+        ("core.web.virtual", "plan_scroll_to") -> Val(([(AccessConvention, Type)]{(read, virtual_viewport), (read, int)}, Val(unit_ty())))
+        ("core.web.virtual", "plan_resize" | "plan_viewport_measure") -> Val(([(AccessConvention, Type)]{(read, virtual_viewport), (read, int), (read, int)}, Val(unit_ty())))
+        ("core.web.store", "value") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(t)))
+        ("core.web.store", "signal" | "state_signal") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(signal)))
+        ("core.web.store", "new") -> Val(([(AccessConvention, Type)]{(read, string), (read, t)}, Val(web_apply("WebStore", t))))
+        ("core.web.store", "with_history") -> Val(([(AccessConvention, Type)]{(read, string), (read, t), (read, int)}, Val(web_apply("WebStore", t))))
+        ("core.web.store", "transaction" | "update" | "batch") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, string), (read, web_list(string)), (read, web_fn(t, unit_ty()))}, Val(web_apply("WebStoreTransaction", t))))
+        ("core.web.store", "set" | "set_state") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, t)}, Val(web_apply("WebStoreTransaction", t))))
+        ("core.web.store", "optimistic" | "patch") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, string), (read, web_list(string)), (read, web_fn(t, unit_ty()))}, Val(web_apply("WebStorePatch", t))))
+        ("core.web.store", "patch_generation") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStorePatch", t))}, Val(int)))
+        ("core.web.store", "patch_transaction") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStorePatch", t))}, Val(web_apply("WebStoreTransaction", t))))
+        ("core.web.store", "patch_active") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStorePatch", t))}, Val(bool_)))
+        ("core.web.store", "patch_commit") -> Val(([(AccessConvention, Type)]{(AccessConvention.Move, web_apply("WebStorePatch", t))}, Val(web_apply("WebStoreTransaction", t))))
+        ("core.web.store", "patch_rollback") -> Val(([(AccessConvention, Type)]{(AccessConvention.Move, web_apply("WebStorePatch", t))}, Val(Type.Option{inner: t})))
+        ("core.web.store", "back" | "forward" | "restore") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(Type.Option{inner: t})))
+        ("core.web.store", "jump" | "scrub") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, int)}, Val(Type.Option{inner: t})))
+        ("core.web.store", "history") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(web_list(web_apply("WebStoreTransaction", t)))))
+        ("core.web.store", "history_at") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, int)}, Val(Type.Option{inner: web_apply("WebStoreTransaction", t)})))
+        ("core.web.store", "events") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(web_list(web_named("WebStoreEvent")))))
+        ("core.web.store", "events_since") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, int)}, Val(web_list(web_named("WebStoreEvent")))))
+        ("core.web.store", "clear_history" | "set_history_limit") -> {
+            params :: if name == "clear_history" -> [(AccessConvention, Type)]{(read, web_apply("WebStore", t))} else -> [(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, int)}
+            Val((params, Val(unit_ty())))
+        }
+        ("core.web.store", "history_enabled") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(bool_)))
+        ("core.web.store", "history_limit" | "cursor" | "current_generation") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(int)))
+        ("core.web.store", "subscribe") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, web_fn(t, unit_ty()))}, Val(web_named("WebStoreSubscription"))))
+        ("core.web.store", "subscription_unsubscribe") -> Val(([(AccessConvention, Type)]{(read, web_named("WebStoreSubscription"))}, Val(unit_ty())))
+        ("core.web.store", "subscription_active") -> Val(([(AccessConvention, Type)]{(read, web_named("WebStoreSubscription"))}, Val(bool_)))
+        ("core.web.store", "subscribe_selector") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, web_fn(t, web_named("U"))), (read, web_fn(web_named("U"), unit_ty()))}, Val(web_named("WebStoreSubscription"))))
+        ("core.web.store", "derived" | "selector") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t)), (read, web_fn(t, web_named("U")))}, Val(web_apply("Derived", web_named("U")))))
+        ("core.web.store", "inspect") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(web_named("WebStoreInspection"))))
+        ("core.web.store", "facts_json" | "event_json") -> Val(([(AccessConvention, Type)]{(read, web_apply("WebStore", t))}, Val(string)))
+        else -> None
+    }
+}

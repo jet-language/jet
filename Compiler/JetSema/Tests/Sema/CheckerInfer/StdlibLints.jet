@@ -1,0 +1,22 @@
+use jet_foundation.[Expr, StrPart, Stmt, Span]
+use jet_sema.CheckerInfer.StdlibLints.[single_literal, stmt_has_structural_control_flow, stmt_lint_facts]
+
+#Test("single_literal_requires_one_character_without_interpolation") {
+    span :: Span.new(0, 3)
+    assert(single_literal(&Expr.Str([StrPart.Lit("A")], span)) == Val('A'))
+    assert(single_literal(&Expr.Str([StrPart.Lit("é")], span)) == Val('é'))
+    assert(single_literal(&Expr.Str([StrPart.Lit("")], span)) == None)
+    assert(single_literal(&Expr.Str([StrPart.Lit("AB")], span)) == None)
+    assert(single_literal(&Expr.Str([StrPart.Lit("A"), StrPart.Lit("B")], span)) == None)
+}
+#Test("walk_filter_facts_reject_non_path_uses") {
+    span :: Span.new(10, 15)
+    path :: Stmt.Expr(Expr.Field(Expr.Ident("entry", span), "path", span))
+    facts :: stmt_lint_facts(&path, "entry")
+    assert(facts.path_uses == 1)
+    assert(facts.uses_only_path())
+    assert(!facts.has_control_flow(&path))
+    bare :: Stmt.Expr(Expr.Ident("entry", span))
+    assert(!stmt_lint_facts(&bare, "entry").uses_only_path())
+    assert(stmt_has_structural_control_flow(&Stmt.Continue(span)))
+}

@@ -1,6 +1,7 @@
 // Rust QueryService.rs:663–1458, with host disk writes represented by exact
 // sealed authority snapshots. Run against the frozen compiler source package.
 // No fixture replaces QueryEngine, Driver, Sema, canonical JSON, or Eval.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerQueryStats, JetDriverCheckedQuery, JetDriverQueryMemo, JetDriverQuerySnapshot, JetDriverQueryExternalFile, JetDriverQueryFileState, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverCoreSource, JetDriverReverdictReceipt, JetDriverCallableContractReceipt, jet_driver_query_edit_bytes, jet_driver_query_external_fingerprint, jet_driver_query_state_fingerprint, jet_driver_query_frame]
 use jet_eval.[jet_eval_default_config]
 use jet_queries.[QueryEngine, QueryKey, FileKey]
@@ -22,7 +23,7 @@ fn query_test_snapshot(source: String, extras: [JetDriverAuthorizedSourceFile]) 
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root_path, identity: "fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "fixture-root", entry_path: query_test_os_path.from_text("/query/Main.jet", query_test_os_path.PathPlatform.Unix)},
         canonical_effect_source: "effect Net $irreversible\neffect FS\neffect FS.Read\neffect FS.Write $irreversible\neffect IO\neffect DB\neffect Time\neffect Rand\neffect Env\neffect Exec $irreversible\neffect Log\neffect GPU\neffect FFI $irreversible\neffect Browser\neffect Secret\n",
         core_sources: [JetDriverCoreSource]{},
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("query-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("query-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

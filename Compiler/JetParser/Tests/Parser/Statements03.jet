@@ -1,0 +1,243 @@
+use jet_foundation.[Diagnostic, Expr, FixApplicability, Item, OrFallback, Program, Span, Stmt, TextEdit]
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2017
+fn value_block_parsed(source: String) -> Program {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty(), "lex diagnostics for valid source")
+    admission :: parse_tokens(lexed.tokens)
+    loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse diagnostics")
+    admission.program
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2026
+fn value_block_rejected(source: String) -> [Diagnostic] {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty(), "lex diagnostics for parser rejection")
+    admission :: parse_with_source(lexed.tokens, source.bytes())
+    assert(admission.program == None, "source should be rejected")
+    admission.diagnostics
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2035
+fn value_block_binding_init(program: Program, function_name: String) -> Expr {
+    loop item in program.items {
+        if item == .Func(function) && function.name == function_name {
+            assert(function.body.len() > 0, "function does not start with a value binding")
+            if function.body[0] == .Val(binding) -> return binding.init
+            panic("function does not start with a value binding")
+        }
+    }
+    panic("missing function `{function_name}`")
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2051
+#Test("value_block_accepts_control_statement_before_tail") {
+    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        1\n    }} else -> 0\n}}\n")
+    assert(if value_block_binding_init(program, "run") == {
+        .If(_, then_body, then_value, _, else_value, _) -> {
+            assert(then_body.len() == 1)
+            assert(if then_body[0] == { .Loop(_, _, _, _) -> true; else -> false })
+            assert(if then_value == { .Int(value, _, _, _) -> value == 1; else -> false })
+            assert(if else_value == { .Int(value, _, _, _) -> value == 0; else -> false })
+            true
+        }
+        else -> false
+    }, "binding initializer is not an if expression")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2080
+#Test("value_block_accepts_multiple_nested_control_statements_before_tail") {
+    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if fallback {{\n            notify()\n        }}\n        7\n    }} else -> 0\n}}\n")
+    assert(if value_block_binding_init(program, "run") == {
+        .If(_, then_body, then_value, _, _, _) -> {
+            assert(then_body.len() == 2)
+            assert(if then_body[0] == { .Loop(_, _, _, _) -> true; else -> false })
+            assert(if then_body[1] == { .Switch(_, arms, _, _) -> arms.len() == 1; else -> false })
+            assert(if then_value == { .Int(value, _, _, _) -> value == 7; else -> false })
+            true
+        }
+        else -> false
+    }, "binding initializer is not an if expression")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2116
+#Test("value_block_preserves_non_value_and_diverging_tail_rules") {
+    diagnostics :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        side :: 1\n    }} else -> 0\n}}\n")
+    e0114 := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0114" -> e0114 = true
+        assert(diagnostic.code != "E0003", "synthetic terminator must not create a spurious E0003")
+    }
+    assert(e0114, "expected E0114 for a non-value tail")
+    loop_value :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n    }} else -> 0\n}}\n")
+    assert(if value_block_binding_init(loop_value, "run") == {
+        .If(_, then_body, then_value, _, _, _) -> {
+            assert(then_body.is_empty())
+            if then_value == { .CallValue(callee, _, _) -> if callee == { .Lambda(lambda) -> lambda.meta.result_loop; else -> false }; else -> false }
+        }
+        else -> false
+    }, "loop branch must retain its result-loop lambda")
+    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        return\n    }} else -> 0\n}}\n")
+    assert(if value_block_binding_init(program, "run") == {
+        .If(_, then_body, then_value, _, _, _) -> {
+            assert(then_body.len() == 1)
+            assert(if then_body[0] == { .Return(value, _) -> value == None; else -> false })
+            if then_value == { .NoElse(_) -> true; else -> false }
+        }
+        else -> false
+    }, "return-only branch must diverge")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2189
+#Test("value_block_rejects_authored_semicolon_and_incomplete_input") {
+    diagnostics :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
+    found := false
+    loop diagnostic in diagnostics -> if diagnostic.code == "E0114" -> found = true
+    assert(found, "authored semicolon must keep the value-tail rejection")
+    incomplete :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        1\n    }} else -> {{\n        0\n")
+    rejected := false
+    loop diagnostic in incomplete {
+        if diagnostic.code == "E0003" && diagnostic.what.contains("Expected `}}` to close this `if` branch") -> rejected = true
+    }
+    assert(rejected, "incomplete value branch must remain rejected")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2227
+#Test("result_handler_value_block_accepts_control_statement_before_tail") {
+    program :: value_block_parsed("\nfn run() {{\n    result :: fetch() ? ok -> {{\n        loop {{\n            break\n        }}\n        ok\n    }}\n    ! err -> err\n}}\n")
+    assert(if value_block_binding_init(program, "run") == {
+        .If(_, then_body, then_value, _, _, _) -> {
+            assert(then_body.len() == 1)
+            assert(if then_body[0] == { .Loop(_, _, _, _) -> true; else -> false })
+            if then_value == { .Ident(name, _) -> name == "ok"; else -> false }
+        }
+        else -> false
+    }, "binding initializer is not a Result handler")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2258
+#Test("fallback_block_accepts_nested_control_before_bind_call_return_and_following_declaration") {
+    source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if ready {{\n            observe()\n        }}\n        bound :: 1\n        notify()\n        return\n    }}\n    after :: 2\n}}\n"
+    program :: value_block_parsed(source)
+    assert(if program.items[0] == {
+        .Func(function) -> {
+            assert(function.body.len() == 2, "fallback must leave the following declaration in the function body")
+            assert(if function.body[1] == { .Val(after) -> after.name == "after"; else -> false })
+            assert(if function.body[0] == {
+                .Val(result) -> if result.init == {
+                    .OrFallback(_, fallback, _, _) -> if fallback == {
+                        .Block(body, value, _) -> {
+                            assert(value == None)
+                            assert(body.len() == 5)
+                            assert(if body[0] == {
+                                .Loop(loop_body, _, _, _) -> loop_body.len() == 1 && if loop_body[0] == { .Switch(_, _, _, _) -> true; else -> false }
+                                else -> false
+                            })
+                            assert(if body[1] == { .Switch(_, _, _, _) -> true; else -> false })
+                            assert(if body[2] == { .Val(binding) -> binding.name == "bound"; else -> false })
+                            assert(if body[3] == { .Expr(expr) -> if expr == { .Call(call) -> call.name == "notify"; else -> false }; else -> false })
+                            assert(if body[4] == { .Return(value, _) -> value == None; else -> false })
+                            true
+                        }
+                        else -> false
+                    }
+                    else -> false
+                }
+                else -> false
+            }, "binding initializer is not a fallback block")
+            true
+        }
+        else -> false
+    }, "expected run function")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2315
+#Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
+    source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
+    diagnostics :: value_block_rejected(source)
+    semicolon :: source.find("}};") ?? panic("test source has an authored semicolon")
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0003" && diagnostic.span == Val(Span{start: semicolon + 1, end: semicolon + 2}) && diagnostic.what.contains("found `;`") -> found = true
+    }
+    assert(found, "authored semicolon must not be treated as a synthetic terminator")
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2347
+fn arm_table_checked(source: String) -> (Program, [Diagnostic]) {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty(), "lex")
+    admission :: parse_for_check_with_source(lexed.tokens, source.bytes())
+    program :: admission.program ?? panic("parse")
+    (program, admission.diagnostics)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2354
+fn arm_table_edits(diagnostics: [Diagnostic]) -> [TextEdit] {
+    edits := [TextEdit]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "L0507" -> next
+        if diagnostic.edit == .Val(edit) {
+            assert(diagnostic.applicability == Val(FixApplicability.Safe))
+            &edits.push(edit)
+        }
+    }
+    edits
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2366
+fn arm_table_applied(source: String, edit: TextEdit) -> String {
+    out := [U8]{}
+    bytes :: source.bytes()
+    loop index in 0..<edit.span.start -> &out.push(bytes[index])
+    loop byte in edit.new_text.bytes() -> &out.push(byte)
+    loop index in edit.span.end..<bytes.len() -> &out.push(bytes[index])
+    String.from_bytes(out) ?? panic("edit preserves UTF-8 source boundaries")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2378
+fn arm_table_fix_all(source: String, same_tree: Bool) -> String {
+    (original, _) :: arm_table_checked(source)
+    text := source
+    loop _ in 0..<8 {
+        (_, diagnostics) :: arm_table_checked(text)
+        edits :: arm_table_edits(diagnostics)
+        if edits.is_empty() -> break
+        text = arm_table_applied(text, edits[0])
+    }
+    (fixed, diagnostics) :: arm_table_checked(text)
+    loop diagnostic in diagnostics -> assert(diagnostic.code != "L0507" && diagnostic.severity != 1, "fixed source still warns or fails")
+    if same_tree -> assert(jet_format_canonical_program(original) == jet_format_canonical_program(fixed), "the arm-table rewrite changed program meaning")
+    text
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2405
+#Test("braced_else_if_chain_becomes_one_arm_table") {
+    source :: "fn show(score: Int) {{\n    if score >= 90 {{\n        print(\"a\")\n    }} else if score >= 80 {{\n        print(\"b\")\n    }} else {{\n        print(\"c\")\n    }}\n    print(\"done\")\n}}\n"
+    assert(arm_table_fix_all(source, true) == "fn show(score: Int) {{\n    if {{\n        score >= 90 -> {{\n            print(\"a\")\n        }}\n        score >= 80 -> {{\n            print(\"b\")\n        }}\n        else -> {{\n            print(\"c\")\n        }}\n    }}\n    print(\"done\")\n}}\n")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2414
+#Test("value_tail_chain_becomes_the_function_value_table") {
+    source :: "fn grade(score: Int) -> String {{\n    if score >= 90 {{\n        return \"a\"\n    }} else if score >= 80 {{\n        return \"b\"\n    }} else {{\n        return \"c\"\n    }}\n}}\n"
+    assert(arm_table_fix_all(source, false) == "fn grade(score: Int) -> String {{\n    if {{\n        score >= 90 -> {{\n            return \"a\"\n        }}\n        score >= 80 -> {{\n            return \"b\"\n        }}\n        else -> {{\n            return \"c\"\n        }}\n    }}\n}}\n")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2423
+#Test("arrow_else_if_chain_becomes_one_arm_table") {
+    source :: "fn run() {{\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}}\n"
+    assert(arm_table_fix_all(source, true) == "fn run() {{\n    if {{\n        false -> print(\"a\")\n        true -> print(\"b\")\n        else -> print(\"c\")\n    }}\n}}\n")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2432
+#Test("multi_line_value_branch_becomes_a_value_table") {
+    source :: "fn run() {{\n    answer :: if true -> {{\n        value :: 40 + 2\n        value\n    }} else -> 0\n    print(answer)\n}}\n"
+    assert(arm_table_fix_all(source, true) == "fn run() {{\n    answer :: if {{\n        true -> {{\n            value :: 40 + 2\n            value\n        }}\n        else -> 0\n    }}\n    print(answer)\n}}\n")
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2441
+#Test("nested_chains_converge_across_fix_rounds") {
+    source :: "fn run(a: Bool, b: Bool) {{\n    if a {{\n        if b {{\n            print(\"1\")\n        }} else if a {{\n            print(\"2\")\n        }}\n    }} else if b {{\n        print(\"3\")\n    }}\n}}\n"
+    (_, diagnostics) :: arm_table_checked(source)
+    assert(arm_table_edits(diagnostics).len() == 2)
+    fixed :: arm_table_fix_all(source, true)
+    assert(fixed.contains("            b -> {{"))
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2450
+#Test("comment_between_branches_keeps_the_warning_without_an_edit") {
+    source :: "fn run(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n"
+    (_, diagnostics) :: arm_table_checked(source)
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "L0507" {
+            found = true
+            assert(diagnostic.edit == None, "a comment would be lost")
+            break
+        }
+    }
+    assert(found, "the chain still warns")
+}

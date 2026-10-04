@@ -1,0 +1,15 @@
+// Same-module behavioral controls; primary.rs has no original inline tests.
+use jet_parser.*
+
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1074
+#Test("ordinary_string_byte_parts_are_latin1_text") {
+    assert(parser_primary_byte_text(65) == "A")
+    assert(parser_primary_byte_text(0).bytes() == [U8]{U8{0}})
+    assert(parser_primary_byte_text(127).bytes() == [U8]{U8{127}})
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/primary.rs:1396
+#Test("padding_byte_parts_keep_full_latin1_scalar") {
+    assert(parser_primary_byte_text(128).bytes() == [U8]{U8{194}, U8{128}})
+    assert(parser_primary_byte_text(233) == "é")
+    assert(parser_primary_byte_text(255).bytes() == [U8]{U8{195}, U8{191}})
+}

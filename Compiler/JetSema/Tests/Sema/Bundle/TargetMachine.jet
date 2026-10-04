@@ -1,0 +1,54 @@
+use jet_sema.Sema.Bundle.TargetMachine.[check_target_machine]
+use jet_sema.Diagnostics.[Diagnostic]
+use jet_foundation.TargetMachine.[TargetMachine, TargetMachineUse, TargetCapability, ByteSize, ClockPolicy, MmioAccess, ProviderContract, UnsafeGate]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1112
+fn row(diagnostics: [Diagnostic], code: String) -> Diagnostic from diagnostics {
+    loop diagnostic in diagnostics { if diagnostic.code == code -> return diagnostic }
+    panic("missing {code} diagnostic: {diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1119
+fn assert_row(diagnostics: [Diagnostic], code: String, what: String, why: String, fix: String) Never! {
+    diagnostic :: row(diagnostics, code)
+    assert(diagnostic.what == what)
+    assert(diagnostic.why == why)
+    assert(diagnostic.fix == fix)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1127
+#Test("target_machine_rows_are_registered_and_stable") {
+    machine :: TargetMachine.wasm_no_os()
+    diagnostics :: check_target_machine(machine, TargetMachineUse.from_core_apis([String]{"core.files"}))
+    assert_row(diagnostics, "E3310",
+        "Prelude part `core.files` needs the `hosted` runtime layer, but target `wasm.no-os` provides `core`.",
+        "The complete semantic Prelude closure includes `core.files`; a target cannot emit a higher layer or substitute a second Prelude.",
+        "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.")
+
+    usage := TargetMachineUse.default()
+    usage.required_capabilities = [TargetCapability]{.TimeWall}
+    assert_row(check_target_machine(machine, usage), "E3311",
+        "Target `wasm.no-os` lacks the required `Time.Wall` capability.",
+        "The selected target profile must state each machine service separately; a target triple cannot imply a UART, clock, entropy source, scheduler, allocator, startup provider, or MMIO device.",
+        "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.")
+
+    invalid_provider := machine.clone()
+    invalid_provider.monotonic_clock = ClockPolicy.Provider{provider: ProviderContract.new("", "not-a-digest")}
+    provider_usage := TargetMachineUse.default()
+    provider_usage.required_capabilities = [TargetCapability]{.TimeMonotonic}
+    assert_row(check_target_machine(invalid_provider, provider_usage), "E3312",
+        "Provider `` for `Time.Monotonic` on target `wasm.no-os` has invalid digest `not-a-digest`.",
+        "Every selected provider needs a stable identity and sha256 provenance so artifacts cannot reuse changed target behavior.",
+        "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.")
+
+    mmio_usage := TargetMachineUse.default()
+    mmio_usage.mmio = [MmioAccess]{MmioAccess{address: U64{0x10}, size: ByteSize.bytes(U64{4}), unsafe_gate: Val(UnsafeGate{reason: "probe"})}}
+    assert_row(check_target_machine(machine, mmio_usage), "E3313",
+        "Target `wasm.no-os` has an MMIO fact failure: address 0x10 (4 bytes) is outside a declared MMIO region.",
+        "MMIO addresses must lie inside a declared MMIO region and every access must carry a nonempty `#Unsafe` reason.",
+        "Declare a matching MMIO provider and region, then place the access inside `#Unsafe(\"reason\")`.")
+
+    broken :: TargetMachine.bare_metal("broken", "")
+    assert_row(check_target_machine(broken, TargetMachineUse.default()), "E3314",
+        "Target `broken` has an invalid `target triple` fact: the selected target triple is empty.",
+        "Target memory, linker, allocator, panic, startup, and execution facts are explicit inputs to sema and cannot be recovered safely from a triple.",
+        "Select a complete typed target profile and correct the `target triple` declaration.")
+}

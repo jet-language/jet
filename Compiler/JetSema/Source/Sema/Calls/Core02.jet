@@ -1,2057 +1,962 @@
-// PORT-PENDING 0380 crates-jet-sema-src-sema-checkercorelib-core-call-slice-3592: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3592-5644
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             | ("core.encoding.xml", "reader" | "writer") => {
-//RS                 let csv_reader = module == "core.encoding.csv" && name == "reader";
-//RS                 let max = if csv_reader {
-//RS                     5
-//RS                 } else if (module == "core.encoding.json" && name == "writer")
-//RS                     || module == "core.encoding.xml"
-//RS                 {
-//RS                     3
-//RS                 } else {
-//RS                     2
-//RS                 };
-//RS                 let (min, max) = (1, max);
-//RS                 if !(min..=max).contains(&args.len()) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0104",
-//RS                             format!("`{}.{}` expects {} to {} arguments, got {}", module_short_name(module), name, min, max, args.len()),
-//RS                             "the file handle is required; limits, XML options, and canonical mode use safe defaults when omitted".to_string(),
-//RS                             if module == "core.encoding.xml" {
-//RS                                 format!("write `xml.{name}(^file)`, `xml.{name}(^file, limits)`, or `xml.{name}(^file, limits, options)` with the move marker `^`")
-//RS                             } else if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)` with the move marker `^`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)` with the move marker `^`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)` with the move marker `^`", module_short_name(module), module_short_name(module)) },
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 let Some((params, ret)) = &sig else {
-//RS                     unreachable!()
-//RS                 };
-//RS                 if csv_reader {
-//RS                     let Some(contract) = super::core_param_contract(module, name) else {
-//RS                         unreachable!()
-//RS                     };
-//RS                     let bind_params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
-//RS                         .iter()
-//RS                         .enumerate()
-//RS                         .map(|(index, param)| crate::Sema::CallBinder::BindParam {
-//RS                             label: param.label,
-//RS                             name: param.label,
-//RS                             zone: param.zone,
-//RS                             default: None,
-//RS                             convention: params
-//RS                                 .get(index)
-//RS                                 .map(|(convention, _)| *convention)
-//RS                                 .unwrap_or(AccessConvention::Read),
-//RS                             ty: params.get(index).map(|(_, ty)| ty),
-//RS                             variadic: false,
-//RS                             core_default: param.default,
-//RS                         })
-//RS                         .collect();
-//RS                     if crate::Sema::CallBinder::bind_call_args(
-//RS                         name,
-//RS                         &bind_params,
-//RS                         args,
-//RS                         span,
-//RS                         &mut self.diags,
-//RS                     )
-//RS                     .is_none()
-//RS                     {
-//RS                         for arg in args.iter_mut() {
-//RS                             self.infer(&mut arg.expr);
-//RS                         }
-//RS                         return ret.clone();
-//RS                     }
-//RS                     self.register_binder_refs(args);
-//RS                 }
-//RS                 for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
-//RS                     if *conv == AccessConvention::Move {
-//RS                         self.expect_core_arg_moving(name, i, param_ty, arg);
-//RS                         self.finish_core_call_ownership(name, i, arg, *conv, param_ty);
-//RS                     } else {
-//RS                         self.expect_core_arg(name, i, param_ty, arg);
-//RS                     }
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(params.len()) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 return ret.clone();
-//RS             }
-//RS             ("core.game", "run") => {
-//RS                 if !(1..=4).contains(&args.len()) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0104",
-//RS                             format!("`game.run` expects 1 to 4 arguments, got {}", args.len()),
-//RS                             "`game.run` accepts a scene plus optional replay, backend, and frame-count handles"
-//RS                                 .to_string(),
-//RS                             "write `game.run(scene)`, `game.run(scene, replay: replay)`, `game.run(scene, replay: replay, backend: backend)`, or `game.run(scene, frames: 60)`"
-//RS                                 .to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 if let Some(scene) = args.get_mut(0) {
-//RS                     self.check_game_run_scene_edit(&scene.expr);
-//RS                 }
-//RS                 for (index, ((_, param_ty), arg)) in sig
-//RS                     .as_ref()
-//RS                     .map(|(params, _)| params.as_slice())
-//RS                     .unwrap_or(&[])
-//RS                     .iter()
-//RS                     .zip(args.iter_mut())
-//RS                     .enumerate()
-//RS                 {
-//RS                     let inserted_absent = arg.flags.source_index.is_none()
-//RS                         && arg.flags.binder_slot == Some(index)
-//RS                         && matches!(arg.expr, Expr::Absent(_));
-//RS                     if !inserted_absent {
-//RS                         self.expect_core_arg("run", index, param_ty, arg);
-//RS                     }
-//RS                 }
-//RS                 if let Some(frames) = args.get(3) {
-//RS                     if literal_int(&frames.expr)
-//RS                         .is_some_and(|value| JetGameFrameBudget::validate(value).is_err())
-//RS                     {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             "`game.run` frame budget must be positive".to_string(),
-//RS                             "a non-positive frame budget cannot execute a deterministic frame transcript"
-//RS                                 .to_string(),
-//RS                             "pass a positive frame budget, such as `frames: 600`".to_string(),
-//RS                             Some(frames.expr.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::String);
-//RS             }
-//RS             // D-FOUND-COREAPI1=A: the ignore-file default is one binder-owned
-//RS             // absence. Every tier receives the same two-slot checked shape.
-//RS             ("core.files", "walk" | "walk_parallel" | "walk_files") => {
-//RS                 if !(1..=2).contains(&args.len()) {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some((params, ret)) = sig.as_ref() else {
-//RS                     return None;
-//RS                 };
-//RS                 for (index, ((_, param_ty), arg)) in params
-//RS                     .iter()
-//RS                     .zip(args.iter_mut())
-//RS                     .enumerate()
-//RS                 {
-//RS                     // Optional ABI slots are represented as `Option<T>` in the
-//RS                     // checked signature, while source callers pass `T`, `None`,
-//RS                     // or leave the slot to the binder's absence.
-//RS                     match param_ty.unwrap_option() {
-//RS                         Some(payload_ty) => {
-//RS                             self.expect_core_optional_arg(name, index, payload_ty, arg)
-//RS                         }
-//RS                         None => self.expect_core_arg(name, index, param_ty, arg),
-//RS                     }
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(params.len()) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 return ret.clone();
-//RS             }
-//RS             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode over
-//RS             // the Encode/Decode model.
-//RS             // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
-//RS             // `JSON` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
-//RS             // codegen routes by the lowered arg type. `decode<T>` is the typed decode
-//RS             // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
-//RS             ("core.encoding.csv", "to_string") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 for a in args.iter_mut() {
-//RS                     self.borrow_ctx = true;
-//RS                     let Some(t) = self.infer(&mut a.expr) else {
-//RS                         continue;
-//RS                     };
-//RS                     let valid = match &t {
-//RS                         Type::List(elem) if matches!(elem.as_ref(), Type::List(cell) if matches!(cell.as_ref(), Type::String)) => {
-//RS                             true
-//RS                         }
-//RS                         Type::List(elem) => {
-//RS                             let type_name = match elem.as_ref() {
-//RS                                 Type::Named(name) => Some(name.as_str()),
-//RS                                 Type::Apply { name, .. } => Some(name.as_str()),
-//RS                                 _ => None,
-//RS                             };
-//RS                             type_name.is_some_and(|name| {
-//RS                                 let (namespace, leaf) = name
-//RS                                     .rsplit_once('.')
-//RS                                     .map_or((None, name), |(namespace, leaf)| {
-//RS                                         (Some(namespace), leaf)
-//RS                                     });
-//RS                                 self.struct_owner_module(leaf, namespace)
-//RS                                     .and_then(|owner| self.struct_fields_of(owner, leaf))
-//RS                                     .is_some()
-//RS                             })
-//RS                         }
-//RS                         _ => false,
-//RS                     };
-//RS                     if valid {
-//RS                         self.check_encodable(&t, a.expr.span());
-//RS                     } else {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!(
-//RS                                     "`{}` wants [[String]] rows or a list of #Codable records for argument 1, but this is {}",
-//RS                                     name,
-//RS                                     t.show()
-//RS                                 ),
-//RS                                 "CSV output accepts string rows or typed records".to_string(),
-//RS                                 "use [[String]] rows or a list of #Codable records here".to_string(),
-//RS                                 Some(a.expr.span()),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::String);
-//RS             }
-//RS             ("core.text.fmt", "pretty") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.first_mut() {
-//RS                     self.borrow_ctx = true;
-//RS                     if let Some(t) = self.infer(&mut arg.expr) {
-//RS                         if !is_debuggable(&t, self.registry, self.trait_reg) {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("{} can't use `core.text.fmt.pretty` yet", t.show()),
-//RS                                 "pretty formatting needs a debuggable value".to_string(),
-//RS                                 "implement `Debug` or pass a debuggable value".to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 return Some(Type::String);
-//RS             }
-//RS             // D-FMT-INTERP3=B: decimal accepts both machine Float and exact
-//RS             // Int. The return stays String; the carrier-specific formatter is
-//RS             // selected by each engine only after this sema fact is resolved.
-//RS             ("core.text.fmt", method @ ("decimal" | "grouped")) => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.borrow_ctx = true;
-//RS                     let got = self.infer(&mut arg.expr);
-//RS                     if !matches!(got.as_ref(), Some(Type::Float | Type::Int)) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!(
-//RS                                 "{} can't use `core.text.fmt.{method}`",
-//RS                                 got.map_or_else(|| "this value".to_string(), |ty| ty.show())
-//RS                             ),
-//RS                             format!("{method} formatting accepts a Float or exact Int value"),
-//RS                             format!("pass a Float or Int as the value"),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(1) {
-//RS                     self.expect_core_arg(name, 1, &Type::Int, arg);
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(2) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 return Some(Type::String);
-//RS             }
-//RS             (
-//RS                 "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml",
-//RS                 "to_string" | "to_string_pretty",
-//RS             ) => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 for a in args.iter_mut() {
-//RS                     self.borrow_ctx = true;
-//RS                     if let Some(t) = self.infer(&mut a.expr) {
-//RS                         self.check_encodable(&t, a.expr.span());
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::String);
-//RS             }
-//RS             // D-SHAPE-PROJECT1=A: `args.decode<T>()` decodes a `#CLI` struct from
-//RS             // the process arguments anywhere, through the same builder rows the
-//RS             // entry `fn run(args: T)` derives from T.
-//RS             ("core.args", "decode") => {
-//RS                 if !args.is_empty() {
-//RS                     self.diags.push(wrong_core_arity(name, 0, args.len(), span));
-//RS                 }
-//RS                 for arg in args.iter_mut() {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_cli_shape(&t, span);
-//RS                 return Some(result_ty(t, decode_error_ty()));
-//RS             }
-//RS             // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-//RS             // dynamic decode — same `DataTree !EncodingError` shape as `parse`, with
-//RS             // string→number/bool coercions surfaced as log lines
-//RS             // (Docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
-//RS             // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
-//RS             // in `is_polymorphic_core_special`, so its `core_fixed_sig` row is
-//RS             // never consulted; without this arm the call fell through to
-//RS             // `unknown_core_item` and E1004 claimed `core.encoding.json` has no
-//RS             // item `decode` while suggesting `decode`.
-//RS             ("core.encoding.json", "decode") if type_args.is_empty() => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::String, arg);
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 return Some(result_ty(json_ty(), encoding_error_ty()));
-//RS             }
-//RS             ("core.sys", "decode") if !type_args.is_empty() => {
-//RS                 if args.len() > 3 {
-//RS                     self.diags.push(wrong_core_arity(name, 3, args.len(), span));
-//RS                 }
-//RS                 for (index, arg) in args.iter_mut().enumerate() {
-//RS                     match index {
-//RS                         0 | 1 => self.expect_core_arg(name, index, &Type::String, arg),
-//RS                         2 => self.expect_core_arg(
-//RS                             name,
-//RS                             index,
-//RS                             &Type::List(Box::new(Type::String)),
-//RS                             arg,
-//RS                         ),
-//RS                         _ => {
-//RS                             self.infer(&mut arg.expr);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_decodable(&t, span);
-//RS                 return Some(result_ty(t, decode_error_ty()));
-//RS             }
-//RS             // D-SHAPE-ONE1=A: decode one existing DB row through the same
-//RS             // typed DataTree decoder used by the wire formats. The explicit
-//RS             // row remains the authoritative table/transaction carrier.
-//RS             ("core.db", "decode") if !type_args.is_empty() => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &db_row_ty(), arg);
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_decodable(&t, span);
-//RS                 return Some(result_ty(t, decode_error_ty()));
-//RS             }
-//RS             (
-//RS                 "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-//RS                 | "core.encoding.yaml",
-//RS                 "decode",
-//RS             ) if !type_args.is_empty() => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::String, arg);
-//RS                 }
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_decodable(&t, span);
-//RS                 let inner = if module == "core.encoding.csv" {
-//RS                     Type::List(Box::new(t))
-//RS                 } else {
-//RS                     t
-//RS                 };
-//RS                 return Some(result_ty(inner, decode_error_ty()));
-//RS             }
-//RS             // D-COLUMNAR-BOUNDARY1=A: Arrow owners carry their checked row
-//RS             // type in the unique `DataArrowBatch<T>` carrier. Import and query
-//RS             // consume that owner; the row's registered `borrow_mask` supplies
-//RS             // the same Move convention used by every other Core call. This
-//RS             // arm only projects the carrier's row type and cannot invent a
-//RS             // second ownership policy.
-//RS             ("core.data.arrow", "import" | "query") => {
-//RS                 if !type_args.is_empty() {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0119",
-//RS                         format!("`{name}` does not take an explicit type argument"),
-//RS                         "Arrow operations infer their row type from the `DataArrowBatch<T>` value"
-//RS                             .to_string(),
-//RS                         "remove the explicit type argument and pass a `DataArrowBatch<T>` value"
-//RS                             .to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let row = args.get_mut(0).and_then(|arg| {
-//RS                     let actual = self.infer(&mut arg.expr)?;
-//RS                     let convention = core_call_argument_convention(module, name, 0);
-//RS                     self.finish_core_call_ownership(name, 0, arg, convention, &actual);
-//RS                     match actual {
-//RS                         Type::Apply { name: carrier, args } if carrier == "DataArrowBatch" && args.len() == 1 => {
-//RS                             args.into_iter().next()
-//RS                         }
-//RS                         other => {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("`{name}` expects a `DataArrowBatch<T>` value, got {}", other.show()),
-//RS                                 "Arrow operations preserve the row type carried by the checked owner"
-//RS                                     .to_string(),
-//RS                                 "pass a `DataArrowBatch<T>` value as the argument".to_string(),
-//RS                                 Some(span),
-//RS                             ));
-//RS                             None
-//RS                         }
-//RS                     }
-//RS                 });
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 let Some(row) = row else {
-//RS                     return None;
-//RS                 };
-//RS                 if name == "import" {
-//RS                     return Some(data_carrier_type("DataArrowBatch", row));
-//RS                 }
-//RS                 return Some(result_ty(
-//RS                     data_carrier_type("Query", row),
-//RS                     Type::Named("DataError".to_string()),
-//RS                 ));
-//RS             }
-//RS             // D-DX-LOADERS1=A: loader lifecycle operations infer their row
-//RS             // type from the concrete `DataLoader<T>` argument. The child
-//RS             // operations are not a second generic-call family: only the
-//RS             // top-level data constructors carry explicit `<T>` syntax.
-//RS             (
-//RS                 "core.data.loader",
-//RS                 "authority" | "bind" | "bind_text" | "cancel" | "invalidate"
-//RS                     | "needs_refresh" | "offline" | "ready" | "source_identity"
-//RS                     | "status" | "stream",
-//RS             ) => {
-//RS                 if !type_args.is_empty() {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0119",
-//RS                         format!("`{name}` does not take an explicit type argument"),
-//RS                         "the loader operation reads its row type from the `DataLoader<T>` value"
-//RS                             .to_string(),
-//RS                         "remove the `<T>` and pass a concrete `DataLoader<T>` handle".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 let expected = match name {
-//RS                     "bind" | "bind_text" | "offline" | "invalidate" => 2,
-//RS                     _ => 1,
-//RS                 };
-//RS                 if args.len() != expected {
-//RS                     self.diags.push(wrong_core_arity(name, expected, args.len(), span));
-//RS                 }
-//RS                 let mutating = matches!(
-//RS                     name,
-//RS                     "bind" | "bind_text" | "cancel" | "invalidate" | "offline"
-//RS                 );
-//RS                 let loader_ty = args.get_mut(0).and_then(|arg| {
-//RS                     if mutating && arg.convention != AccessConvention::Write {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0202",
-//RS                             format!("argument 1 to `{name}` requires the write-access marker `&`"),
-//RS                             "this data-loader operation changes the loader state in place"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "write the write-access marker `&`: `{}loader`",
-//RS                                 Syntax::SIGIL_WRITE
-//RS                             ),
-//RS                             Some(arg.span),
-//RS                         ));
-//RS                     }
-//RS                     self.infer(&mut arg.expr)
-//RS                 });
-//RS                 let row = match loader_ty {
-//RS                     Some(Type::Apply { name, args }) if name == "DataLoader" && args.len() == 1 => {
-//RS                         args.into_iter().next()
-//RS                     }
-//RS                     Some(other) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!(
-//RS                                 "`{name}` expects a `DataLoader<T>` handle, got {}",
-//RS                                 other.show()
-//RS                             ),
-//RS                             "loader lifecycle operations preserve the row type carried by the loader"
-//RS                                 .to_string(),
-//RS                             "pass a `DataLoader<T>` value as the first argument".to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                         None
-//RS                     }
-//RS                     None => None,
-//RS                 };
-//RS                 for (index, arg) in args.iter_mut().enumerate().skip(1) {
-//RS                     let expected_ty = match (name, index) {
-//RS                         ("bind", 1) => Some(Type::List(Box::new(u8_ty()))),
-//RS                         ("bind_text", 1) => Some(Type::String),
-//RS                         ("offline", 1) => Some(Type::Bool),
-//RS                         ("invalidate", 1) => {
-//RS                             Some(Type::Named("DataInvalidationCause".to_string()))
-//RS                         }
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(expected_ty) = expected_ty {
-//RS                         self.expect_core_arg(name, index, &expected_ty, arg);
-//RS                     } else {
-//RS                         self.infer(&mut arg.expr);
-//RS                     }
-//RS                 }
-//RS                 let Some(row) = row else {
-//RS                     return None;
-//RS                 };
-//RS                 let result = match name {
-//RS                     "bind" | "bind_text" => {
-//RS                         result_ty(unit_ty(), Type::Named("DataError".to_string()))
-//RS                     }
-//RS                     "cancel" | "offline" | "invalidate" => unit_ty(),
-//RS                     "needs_refresh" | "ready" => Type::Bool,
-//RS                     "status" => Type::Named("DataLoaderStatus".to_string()),
-//RS                     "source_identity" => Type::Named("DataSourceIdentity".to_string()),
-//RS                     "authority" => Type::Named("DataAuthority".to_string()),
-//RS                     "stream" => result_ty(
-//RS                         Type::Apply {
-//RS                             name: "DataStream".to_string(),
-//RS                             args: vec![row],
-//RS                         },
-//RS                         Type::Named("DataError".to_string()),
-//RS                     ),
-//RS                     _ => unreachable!(),
-//RS                 };
-//RS                 return Some(result);
-//RS             }
-//RS             // D-DX-LOADERS1=A: declarations preserve the row type while
-//RS             // snapshot decoding remains an explicit fallible operation.
-//RS             ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot")
-//RS                 if !type_args.is_empty() =>
-//RS             {
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 let expected = match name {
-//RS                     "load" => 2..=2,
-//RS                     "load_default" => 1..=1,
-//RS                     "file" => 3..=3,
-//RS                     "file_member" => 4..=4,
-//RS                     "url" => 4..=4,
-//RS                     "database" => 4..=4,
-//RS                     "value" => 2..=2,
-//RS                     "snapshot" => 1..=1,
-//RS                     _ => unreachable!(),
-//RS                 };
-//RS                 if !expected.contains(&args.len()) {
-//RS                     self.diags.push(wrong_core_arity(name, *expected.end(), args.len(), span));
-//RS                 }
-//RS                 for (index, arg) in args.iter_mut().enumerate() {
-//RS                     let ty = match name {
-//RS                         "load" | "load_default" => {
-//RS                             if index == 0 { Some(Type::String) } else { Some(Type::Named("DataLimits".to_string())) }
-//RS                         }
-//RS                         "file" => Some(if index < 2 { Type::String } else { Type::Named("DataLimits".to_string()) }),
-//RS                         "file_member" => Some(if index < 3 { Type::String } else { Type::Named("DataLimits".to_string()) }),
-//RS                         "url" => Some(if index < 3 { Type::String } else { Type::Named("DataLimits".to_string()) }),
-//RS                         "database" => Some(match index {
-//RS                             0 => Type::String,
-//RS                             1 => Type::List(Box::new(Type::String)),
-//RS                             2 => Type::String,
-//RS                             _ => Type::Named("DataLimits".to_string()),
-//RS                         }),
-//RS                         "value" => Some(if index == 0 {
-//RS                             t.clone()
-//RS                         } else {
-//RS                             Type::Named("DataLimits".to_string())
-//RS                         }),
-//RS                         "snapshot" => Some(Type::Apply { name: "DataLoader".to_string(), args: vec![t.clone()] }),
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(ty) = ty {
-//RS                         if name == "snapshot"
-//RS                             && index == 0
-//RS                             && arg.convention != AccessConvention::Write
-//RS                         {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0202",
-//RS                                 "`snapshot` requires the write-access marker `&`".to_string(),
-//RS                                 "taking a snapshot refreshes loader state in place".to_string(),
-//RS                                 format!(
-//RS                                     "write the write-access marker `&`: `{}loader`",
-//RS                                     Syntax::SIGIL_WRITE
-//RS                                 ),
-//RS                                 Some(arg.span),
-//RS                             ));
-//RS                         }
-//RS                         self.expect_core_arg(name, index, &ty, arg);
-//RS                     } else {
-//RS                         self.infer(&mut arg.expr);
-//RS                     }
-//RS                 }
-//RS                 if name == "value" {
-//RS                     self.check_encodable(&t, span);
-//RS                 }
-//RS                 if name == "snapshot" {
-//RS                     self.check_decodable(&t, span);
-//RS                     self.check_encodable(&t, span);
-//RS                     return Some(result_ty(
-//RS                         Type::Apply { name: "DataSnapshot".to_string(), args: vec![t] },
-//RS                         Type::Named("DataError".to_string()),
-//RS                     ));
-//RS                 }
-//RS                 return Some(result_ty(
-//RS                     Type::Apply { name: "DataLoader".to_string(), args: vec![t] },
-//RS                     Type::Named("DataError".to_string()),
-//RS                 ));
-//RS             }
-//RS             // D-DX-PLOT1=A: plotting consumes an ordinary typed list. The
-//RS             // compiler derives schema facts from the row type.
-//RS             ("core.data", "plot") | ("core.data.plot", "plot") if !type_args.is_empty() => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(row) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::List(Box::new(row.clone())), arg);
-//RS                 }
-//RS                 self.check_encodable(&row, span);
-//RS                 return Some(result_ty(
-//RS                     Type::Apply { name: "JetDataPlot".to_string(), args: vec![row] },
-//RS                     Type::Named("DataError".to_string()),
-//RS                 ));
-//RS             }
-//RS             ("core.data", "inspect" | "inspect_json" | "text" | "svg" | "show" | "render")
-//RS             | ("core.data.plot", "inspect" | "inspect_json" | "text" | "svg" | "show" | "render")
-//RS                 if !type_args.is_empty() =>
-//RS             {
-//RS                 let Some(row) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 let expected = if name == "render" { 2 } else { 1 };
-//RS                 if args.len() != expected {
-//RS                     self.diags.push(wrong_core_arity(name, expected, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(
-//RS                         name,
-//RS                         0,
-//RS                         &Type::Apply { name: "JetDataPlot".to_string(), args: vec![row] },
-//RS                         arg,
-//RS                     );
-//RS                 }
-//RS                 if name == "render" {
-//RS                     if let Some(arg) = args.get_mut(1) {
-//RS                         self.expect_core_arg(name, 1, &Type::Named("JetDataPlotBackend".to_string()), arg);
-//RS                     }
-//RS                 }
-//RS                 let ok = match name {
-//RS                     "inspect" => Type::Named("JetDataPlotInspection".to_string()),
-//RS                     "inspect_json" | "text" | "svg" => Type::String,
-//RS                     _ => Type::Named("JetDataPlotRender".to_string()),
-//RS                 };
-//RS                 return Some(result_ty(ok, Type::Named("DataError".to_string())));
-//RS             }
-//RS             // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV/JSON decoding,
-//RS             // then keeps table/stat selectors as ordinary typed Jet lambdas.
-//RS             ("core.data", "csv" | "json") if !type_args.is_empty() => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 for a in args.iter_mut() {
-//RS                     self.expect_core_arg(name, 0, &Type::String, a);
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_decodable(&t, span);
-//RS                 return Some(result_ty(Type::List(Box::new(t)), decode_error_ty()));
-//RS             }
-//RS             ("core.data", "csv_reader" | "json_reader") if !type_args.is_empty() => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let file_reader = Type::Named("FileReader".to_string());
-//RS                     self.expect_core_arg_moving(name, 0, &file_reader, arg);
-//RS                     self.finish_core_call_ownership(
-//RS                         name,
-//RS                         0,
-//RS                         arg,
-//RS                         AccessConvention::Move,
-//RS                         &file_reader,
-//RS                     );
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(1) {
-//RS                     self.expect_core_arg(name, 1, &Type::Named("DataLimits".to_string()), arg);
-//RS                 }
-//RS                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-//RS                     return None;
-//RS                 };
-//RS                 self.check_decodable(&t, span);
-//RS                 return Some(result_ty(
-//RS                     Type::Apply {
-//RS                         name: "DataStream".to_string(),
-//RS                         args: vec![t],
-//RS                     },
-//RS                     Type::Named("DataError".to_string()),
-//RS                 ));
-//RS             }
-//RS             ("core.data", "count") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return None;
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::List(_)) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`data.count` needs a typed row list, not {}", ty.show()),
-//RS                         "core.data counts ordinary list elements".to_string(),
-//RS                         "pass a `[T]` value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             ("core.data", "schema") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return None;
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::List(_)) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`data.schema` needs a typed row list, not {}", ty.show()),
-//RS                         "core.data schema reads column names and types from ordinary rows"
-//RS                             .to_string(),
-//RS                         "pass a `[T]` value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
-//RS             }
-//RS             ("core.data", "inner_join" | "left_join") => {
-//RS                 if args.len() != 4 {
-//RS                     self.diags.push(wrong_core_arity(name, 4, args.len(), span));
-//RS                 }
-//RS                 let left_ty = args.get_mut(0).and_then(|a| self.infer(&mut a.expr));
-//RS                 let right_ty = args.get_mut(1).and_then(|a| self.infer(&mut a.expr));
-//RS                 let left_row = match left_ty {
-//RS                     Some(Type::List(inner)) => *inner,
-//RS                     Some(other) => {
-//RS                         if let Some(arg) = args.get(0) {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!(
-//RS                                     "`data.{}` needs a typed left list, not {}",
-//RS                                     name,
-//RS                                     other.show()
-//RS                                 ),
-//RS                                 "core.data joins rows from typed lists".to_string(),
-//RS                                 "pass `[LeftRow]` and `[RightRow]` values".to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                         }
-//RS                         return None;
-//RS                     }
-//RS                     None => return None,
-//RS                 };
-//RS                 let right_row = match right_ty {
-//RS                     Some(Type::List(inner)) => *inner,
-//RS                     Some(other) => {
-//RS                         if let Some(arg) = args.get(1) {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!(
-//RS                                     "`data.{}` needs a typed right list, not {}",
-//RS                                     name,
-//RS                                     other.show()
-//RS                                 ),
-//RS                                 "core.data joins rows from typed lists".to_string(),
-//RS                                 "pass `[LeftRow]` and `[RightRow]` values".to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                         }
-//RS                         return None;
-//RS                     }
-//RS                     None => return None,
-//RS                 };
-//RS                 if let Some(left_key) = args.get_mut(2) {
-//RS                     let key_fn = Type::Fn {
-//RS                         params: vec![left_row.clone()],
-//RS                         ret: Some(Box::new(Type::String)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     };
-//RS                     self.expect_core_arg(name, 2, &key_fn, left_key);
-//RS                 }
-//RS                 if let Some(right_key) = args.get_mut(3) {
-//RS                     let key_fn = Type::Fn {
-//RS                         params: vec![right_row.clone()],
-//RS                         ret: Some(Box::new(Type::String)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     };
-//RS                     self.expect_core_arg(name, 3, &key_fn, right_key);
-//RS                 }
-//RS                 let joined_right = if name == "left_join" {
-//RS                     Type::Option(Box::new(right_row))
-//RS                 } else {
-//RS                     right_row
-//RS                 };
-//RS                 let joined = Type::List(Box::new(Type::Apply {
-//RS                     name: "DataJoin".to_string(),
-//RS                     args: vec![left_row, joined_right],
-//RS                 }));
-//RS                 return Some(result_ty(joined, Type::Named("DataError".to_string())));
-//RS             }
-//RS             ("core.data", "pivot_sum") => {
-//RS                 if args.len() != 4 {
-//RS                     self.diags.push(wrong_core_arity(name, 4, args.len(), span));
-//RS                 }
-//RS                 let Some(rows_arg) = args.get_mut(0) else {
-//RS                     return None;
-//RS                 };
-//RS                 let rows_ty = self.infer(&mut rows_arg.expr);
-//RS                 let row_ty = match rows_ty {
-//RS                     Some(Type::List(inner)) => *inner,
-//RS                     Some(other) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`data.{}` needs a typed list, not {}", name, other.show()),
-//RS                             "core.data pivots rows from ordinary typed lists".to_string(),
-//RS                             "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
-//RS                             Some(rows_arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     None => return None,
-//RS                 };
-//RS                 for idx in [1usize, 2usize] {
-//RS                     if let Some(arg) = args.get_mut(idx) {
-//RS                         let key_fn = Type::Fn {
-//RS                             params: vec![row_ty.clone()],
-//RS                             ret: Some(Box::new(Type::String)),
-//RS                             effect_bound: None,
-//RS                             return_view_provenance: None,
-//RS                             param_contract: None,
-//RS                             call_metadata: None,
-//RS                         };
-//RS                         self.expect_core_arg(name, idx, &key_fn, arg);
-//RS                     }
-//RS                 }
-//RS                 if let Some(value_arg) = args.get_mut(3) {
-//RS                     let value_fn = Type::Fn {
-//RS                         params: vec![row_ty],
-//RS                         ret: Some(Box::new(Type::Float)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     };
-//RS                     self.expect_core_arg(name, 3, &value_fn, value_arg);
-//RS                 }
-//RS                 let cell = Type::Named("DataPivotCell".to_string());
-//RS                 let cells = Type::List(Box::new(cell));
-//RS                 return Some(result_ty(cells, Type::Named("DataError".to_string())));
-//RS             }
-//RS 
-//RS             ("core.mem", "volatile_read") => {
-//RS                 if Syntax::core_mem_requires_audit(Syntax::MEM_VOLATILE_READ) && !self.in_unsafe {
-//RS                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
-//RS                 }
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                     return None;
-//RS                 }
-//RS                 let arg = args.get_mut(0)?;
-//RS                 let t = self.infer(&mut arg.expr)?;
-//RS                 return match ptr_elem(&t) {
-//RS                     Some(elem) => Some(elem),
-//RS                     None => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!(
-//RS                                 "`{}` needs a `Ptr<T>`, not {}",
-//RS                                 Syntax::MEM_VOLATILE_READ,
-//RS                                 t.show()
-//RS                             ),
-//RS                             "a volatile read reads through a typed pointer".to_string(),
-//RS                             "build a pointer first with `mem.Ptr<T>.from_addr(addr)`".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         None
-//RS                     }
-//RS                 };
-//RS             }
-//RS             ("core.mem", "volatile_write") => {
-//RS                 if Syntax::core_mem_requires_audit(Syntax::MEM_VOLATILE_WRITE) && !self.in_unsafe {
-//RS                     self.diags.push(e3101(Syntax::MEM_VOLATILE_WRITE, span));
-//RS                 }
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                     return None;
-//RS                 }
-//RS                 let ptr_arg = args.get_mut(0)?;
-//RS                 let ptr_ty = self.infer(&mut ptr_arg.expr)?;
-//RS                 let Some(elem) = ptr_elem(&ptr_ty) else {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!(
-//RS                             "`{}` needs a `Ptr<T>`, not {}",
-//RS                             Syntax::MEM_VOLATILE_WRITE,
-//RS                             ptr_ty.show()
-//RS                         ),
-//RS                         "a volatile write writes through a typed pointer".to_string(),
-//RS                         "build a pointer first with `mem.Ptr<T>.from_addr(addr)`".to_string(),
-//RS                         Some(ptr_arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 };
-//RS                 let value_arg = args.get_mut(1)?;
-//RS                 if let Some(value_ty) = self.infer(&mut value_arg.expr) {
-//RS                     let value_ty = self.widen_numeric_argument(
-//RS                         &mut value_arg.expr,
-//RS                         value_ty,
-//RS                         &elem,
-//RS                         AccessConvention::Read,
-//RS                     );
-//RS                     if !self.check_type_assignable(&elem, &value_ty, value_arg.expr.span()) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!(
-//RS                                 "`{}` writes a {} through this pointer, but the value is {}",
-//RS                                 Syntax::MEM_VOLATILE_WRITE,
-//RS                                 elem.show(),
-//RS                                 value_ty.show()
-//RS                             ),
-//RS                             "a volatile write stores a value of the pointer's element type"
-//RS                                 .to_string(),
-//RS                             format!("write a `{}` value", elem.name()),
-//RS                             Some(value_arg.expr.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 return Some(unit_ty());
-//RS             }
-//RS             // D-PIN1=A: `mem.pin(&place) -> Pin<T>`. Pinning is inert on its
-//RS             // own (S58's rule for `address_of`): it starts a tracked write
-//RS             // window, and the window itself is what safe code relies on, so
-//RS             // no `#Unsafe` is needed here. The window is recorded by
-//RS             // `view_call_sources`; this arm only types the call.
-//RS             ("core.mem", "pin") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                     return None;
-//RS                 }
-//RS                 let arg = args.get_mut(0)?;
-//RS                 let write_place =
-//RS                     matches!(&arg.expr, Expr::Place(_, crate::AST::PlaceAccess::Write, _))
-//RS                         || arg.convention == AccessConvention::Write;
-//RS                 // A pin borrows the place; it never duplicates it. Without
-//RS                 // this the auto-copy pass (D-CAP2) would wrap a field or
-//RS                 // index place in `copy`, and the pin would then promise
-//RS                 // address stability for a temporary instead of the owner.
-//RS                 self.borrow_ctx = true;
-//RS                 let t = self.infer(&mut arg.expr)?;
-//RS                 if !write_place {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0218",
-//RS                             format!(
-//RS                                 "`{}` needs a write window made with the write-access marker `&` into the place being pinned",
-//RS                                 Syntax::MEM_PIN
-//RS                             ),
-//RS                             "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "write `mem.{}({}place)` with the write-access marker `&`",
-//RS                                 Syntax::MEM_PIN,
-//RS                                 Syntax::SIGIL_WRITE
-//RS                             ),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                     return None;
-//RS                 }
-//RS                 let _ = alias_span;
-//RS                 // Pinning is idempotent: a place reached through a live pin
-//RS                 // is already address-stable, so `Pin<Pin<T>>` never exists
-//RS                 // (I8 — one mechanism, one spelling for one promise).
-//RS                 if matches!(&t, Type::Apply { name, args }
-//RS                         if name == Syntax::TYPE_PIN && args.len() == 1)
-//RS                 {
-//RS                     return Some(t);
-//RS                 }
-//RS                 return Some(Type::Apply {
-//RS                     name: Syntax::TYPE_PIN.to_string(),
-//RS                     args: vec![t],
-//RS                 });
-//RS             }
-//RS             ("core.mem", "address_of") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                     return None;
-//RS                 }
-//RS                 // Taking an address is inert (S58): legal outside `#Unsafe`.
-//RS                 let arg = args.get_mut(0)?;
-//RS                 self.infer(&mut arg.expr);
-//RS                 let _ = alias_span;
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             ("core.term", "print") => {
-//RS                 // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
-//RS                 // D-VERDICT-1321-1: variadic — each argument prints on its own line.
-//RS                 if args.is_empty() {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0103",
-//RS                         format!("`{name}` needs at least one thing to print"),
-//RS                         "printing nothing isn't meaningful".to_string(),
-//RS                         "e.g. io.print(\"hello\")".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 for arg in args.iter_mut() {
-//RS                     self.borrow_ctx = true;
-//RS                     if let Some(ty) = self.infer(&mut arg.expr) {
-//RS                         if !is_printable(&ty, self.registry, self.trait_reg)
-//RS                             && !self.is_unit_type(&ty)
-//RS                         {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("{} can't be printed yet", ty.show()),
-//RS                                 "`io.print` prints the same values as ambient `print`".to_string(),
-//RS                                 "print one of its fields, or make it a printable type".to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return None;
-//RS             }
-//RS             ("core.term", "progress") => {
-//RS                 if args.is_empty() || args.len() > 3 {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             "`io.progress` needs one to three arguments".to_string(),
-//RS                             "the first argument is a String message or a List/Iter source; the optional arguments set the description and format".to_string(),
-//RS                             "write `io.progress(items, description, format)` for an iterable".to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                     for arg in args.iter_mut() {
-//RS                         self.infer(&mut arg.expr);
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 let source = self.infer(&mut args[0].expr)?;
-//RS                 if matches!(source, Type::String) {
-//RS                     if args.len() != 1 {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             "`io.progress` takes only one argument for a text update".to_string(),
-//RS                             "the one-string form writes one progress message".to_string(),
-//RS                             "use `io.progress(items, description, format)` for an iterable"
-//RS                                 .to_string(),
-//RS                             Some(args[1].expr.span()),
-//RS                         ));
-//RS                     }
-//RS                     return Some(result_ty(unit_ty(), io_error_ty()));
-//RS                 }
-//RS                 let elem = match source {
-//RS                     Type::List(inner) => *inner,
-//RS                     Type::FixedList { elem, .. } => *elem,
-//RS                     Type::Apply { name, mut args }
-//RS                         if name == Syntax::TYPE_ITER && args.len() == 1 =>
-//RS                     {
-//RS                         args.pop().expect("Iter has one element type")
-//RS                     }
-//RS                     _ => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`io.progress` cannot wrap {}", source.show()),
-//RS                             "progress adapters wrap List<T> and Iter<T> values".to_string(),
-//RS                             "pass a list or lazy iterator".to_string(),
-//RS                             Some(args[0].expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 };
-//RS                 for arg in args.iter_mut().skip(1) {
-//RS                     self.expect_core_arg("progress", 1, &Type::String, arg);
-//RS                 }
-//RS                 return Some(crate::Collections::iter_ty(elem));
-//RS             }
-//RS             ("core.term", "eprint") => {
-//RS                 // D-VERDICT-1321-1: variadic — each argument prints on its own line.
-//RS                 if args.is_empty() {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0103",
-//RS                         format!("`{name}` needs at least one thing to print"),
-//RS                         "printing nothing isn't meaningful".to_string(),
-//RS                         "e.g. io.eprint(\"warning\")".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 for arg in args.iter_mut() {
-//RS                     self.borrow_ctx = true;
-//RS                     if let Some(ty) = self.infer(&mut arg.expr) {
-//RS                         if !is_printable(&ty, self.registry, self.trait_reg)
-//RS                             && !self.is_unit_type(&ty)
-//RS                         {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E0112",
-//RS                                     format!("{} can't be printed yet", ty.show()),
-//RS                                     "`io.eprint` prints the same values as `print`, but writes to stderr"
-//RS                                         .to_string(),
-//RS                                     "print one of its fields, or make it a printable type".to_string(),
-//RS                                     Some(arg.expr.span()),
-//RS                                 ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Named("Unit".to_string()));
-//RS             }
-//RS             // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — the runtime reflection
-//RS             // floor. Legal wherever `x` is interpolatable (`"{x}"`) — the SAME
-//RS             // gate a trait-bounded variadic's `...Renderable` bound uses
-//RS             // (`is_displayable`, reuse, I8), not the looser `is_printable`
-//RS             // `print`/`io.eprint` accept: `Value.display()` is backed by
-//RS             // `jet_display()` (JetDisplay), not `jet_show()`/`{:?}`, so it
-//RS             // shows exactly what `"{x}"` would — never codegen's mangled Rust
-//RS             // field names, which `is_printable` would let through for a
-//RS             // struct with no auto/explicit `Display`.
-//RS             ("core.reflect", "of") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return Some(Type::Named("Value".to_string()));
-//RS                 }
-//RS                 let arg = &mut args[0];
-//RS                 if let Some(ty) = self.infer(&mut arg.expr) {
-//RS                     if !is_displayable(&ty, self.registry, self.trait_reg)
-//RS                         && !self.is_unit_type(&ty)
-//RS                     {
-//RS                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty) {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E0112",
-//RS                                     format!("secret-bearing `{}` cannot be reflected", ty.name()),
-//RS                                     "reflection would expose a cryptographic secret through generic inspection or display".to_string(),
-//RS                                     "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata".to_string(),
-//RS                                     Some(arg.expr.span()),
-//RS                                 ));
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("{} can't be reflected yet", ty.show()),
-//RS                                 "`reflect.of` inspects the same values `\"{x}\"` interpolation can show"
-//RS                                     .to_string(),
-//RS                                 "implement `Display` for its type, or pass one of its fields instead"
-//RS                                     .to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Named("Value".to_string()));
-//RS             }
-//RS             ("core.term", "input") => {
-//RS                 if args.len() > 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::String, arg);
-//RS                 }
-//RS                 return Some(result_ty(Type::String, io_error_ty()));
-//RS             }
-//RS             // Parity of a whole number.
-//RS             ("core.math", "is_even" | "is_odd") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{}` needs a whole number, not {}", name, ty.show()),
-//RS                             "parity is a property of whole numbers".to_string(),
-//RS                             "pass an Int or a sized integer".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Bool);
-//RS             }
-//RS             // D-FLOATW1 (ratified 2026-06-22): sqrt/floor/ceil/pow are width-generic —
-//RS             // they return the same float width they receive (Float→Float, F32→F32).
-//RS             // Mixing widths is a compile error; destination-owned conversion is explicit.
-//RS             (
-//RS                 "core.math",
-//RS                 "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
-//RS                 | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh"
-//RS                 | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "signum" | "trunc" | "truncate"
-//RS                 | "fract" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians",
-//RS             ) => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return Some(Type::Float);
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if exact_rational_math_approx(name)
-//RS                     && matches!(&ty, Type::Named(type_name)
-//RS                             if type_name == Syntax::TYPE_FRACTION
-//RS                                 || type_name == Syntax::TYPE_DECIMAL)
-//RS                 {
-//RS                     return Some(Type::Float);
-//RS                 }
-//RS                 if name == "sqrt"
-//RS                     && matches!(
-//RS                         &ty,
-//RS                         Type::Apply { name, args }
-//RS                             if name == Syntax::TYPE_MEASUREMENT
-//RS                                 && args == &[Type::Float]
-//RS                     )
-//RS                 {
-//RS                     return Some(ty);
-//RS                 }
-//RS                 if !matches!(ty, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!(
-//RS                             "`{}` needs Float, F32, or Measurement<Float>, not {}",
-//RS                             name,
-//RS                             ty.show()
-//RS                         ),
-//RS                         "math functions preserve their numeric knowledge grade".to_string(),
-//RS                         "pass a Float or F32 value, or use `sqrt` with a measurement".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 return Some(ty);
-//RS             }
-//RS             ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd") => {
-//RS                 let wanted = if name == "lerp" || name == "fma" || name == "muladd" {
-//RS                     3
-//RS                 } else {
-//RS                     2
-//RS                 };
-//RS                 if args.len() != wanted {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity(name, wanted, args.len(), span));
-//RS                 }
-//RS                 // D-TYPE2-DEFAULT1: these leave the exact world too, so an
-//RS                 // exact carrier crosses here exactly as it does at the
-//RS                 // one-argument functions above. Admitting `sqrt(0.5)` while
-//RS                 // rejecting `log(0.5, 2)` would be one boundary with two
-//RS                 // rules again.
-//RS                 let exact_crosses = |ty: &Type| {
-//RS                     matches!(ty, Type::Named(name)
-//RS                             if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
-//RS                 };
-//RS                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-//RS                     for a in args.iter_mut().skip(1) {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return Some(Type::Float);
-//RS                 };
-//RS                 let first = if exact_crosses(&first) {
-//RS                     Type::Float
-//RS                 } else {
-//RS                     first
-//RS                 };
-//RS                 if !matches!(first, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`{}` needs Float or F32, not {}", name, first.show()),
-//RS                         "this math function operates on floating-point numbers".to_string(),
-//RS                         "pass Float or F32 values".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 for i in 1..args.len() {
-//RS                     if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
-//RS                         let got = if exact_crosses(&got) {
-//RS                             Type::Float
-//RS                         } else {
-//RS                             got
-//RS                         };
-//RS                         if got != first {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!(
-//RS                                     "`{}` needs all arguments to have the same float type",
-//RS                                     name
-//RS                                 ),
-//RS                                 "D-FLOATW1: mixing float widths is not allowed".to_string(),
-//RS                                 "convert the arguments to the same float width".to_string(),
-//RS                                 Some(args[i].expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return Some(first);
-//RS             }
-//RS             ("core.math", "is_nan" | "is_inf" | "is_finite") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return Some(Type::Bool);
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`{}` needs Float or F32, not {}", name, ty.show()),
-//RS                         "floating-point classification only applies to floats".to_string(),
-//RS                         "pass a Float or F32 value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 return Some(Type::Bool);
-//RS             }
-//RS             ("core.math", "sign") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`sign` needs Float or F32, not {}", ty.show()),
-//RS                             "`sign` classifies a floating-point value as negative, zero, or positive"
-//RS                                 .to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             ("core.math", "to_bits") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`to_bits` needs Float or F32, not {}", ty.show()),
-//RS                             "only floating-point values have this bit representation".to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             ("core.math", "from_bits") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Float);
-//RS             }
-//RS             (
-//RS                 "core.math",
-//RS                 "checked_add" | "checked_sub" | "checked_mul" | "checked_pow" | "checked_div"
-//RS                 | "checked_rem",
-//RS             ) => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 for (idx, arg) in args.iter_mut().enumerate() {
-//RS                     self.expect_core_arg(name, idx, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Option(Box::new(Type::Int)));
-//RS             }
-//RS             // One whole number in, one optional whole number out: the answer
-//RS             // is absent exactly where it would leave the range.
-//RS             ("core.math", "checked_abs" | "checked_neg") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Option(Box::new(Type::Int)));
-//RS             }
-//RS             ("core.math", "isqrt" | "factorial") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     self.expect_core_arg(name, 0, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Option(Box::new(Type::Int)));
-//RS             }
-//RS             ("core.math", "binomial") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 for (idx, arg) in args.iter_mut().enumerate() {
-//RS                     self.expect_core_arg(name, idx, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Option(Box::new(Type::Int)));
-//RS             }
-//RS             ("core.math", "leading_ones" | "trailing_ones" | "digits" | "radix") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     if name == "radix" {
-//RS                         let ty = self.infer(&mut arg.expr)?;
-//RS                         if !matches!(
-//RS                             ty,
-//RS                             Type::Float
-//RS                                 | Type::Float32
-//RS                                 | Type::Int
-//RS                                 | Type::IntN { .. }
-//RS                                 | Type::InlineRange { .. }
-//RS                         ) {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("`radix` needs a number, not {}", ty.show()),
-//RS                                 "radix reports the base of a numeric type".to_string(),
-//RS                                 "pass a Float or Int".to_string(),
-//RS                                 Some(arg.expr.span()),
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                     } else {
-//RS                         self.expect_core_arg(name, 0, &Type::Int, arg);
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             (
-//RS                 "core.math",
-//RS                 "is_normal" | "is_subnormal" | "is_canonical" | "is_signed" | "is_zero"
-//RS                 | "is_integer" | "sign_bit",
-//RS             ) => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return Some(Type::Bool);
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`{}` needs Float or F32, not {}", name, ty.show()),
-//RS                         "floating-point classification only applies to floats".to_string(),
-//RS                         "pass a Float or F32 value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 return Some(Type::Bool);
-//RS             }
-//RS             (
-//RS                 "core.math",
-//RS                 "next_up" | "next_down" | "copy" | "cot" | "inv" | "erf" | "erfc" | "gamma"
-//RS                 | "lgamma" | "logb" | "significand" | "ulp",
-//RS             ) => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return Some(Type::Float);
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`{}` needs Float or F32, not {}", name, ty.show()),
-//RS                         "this math function operates on floating-point numbers".to_string(),
-//RS                         "pass a Float or F32 value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 return Some(ty);
-//RS             }
-//RS             ("core.math", "zero") => {
-//RS                 if !args.is_empty() {
-//RS                     self.diags.push(wrong_core_arity(name, 0, args.len(), span));
-//RS                 }
-//RS                 return Some(Type::Float);
-//RS             }
-//RS             ("core.math", "cmp" | "next_after" | "nextafter" | "ldexp" | "scaleb") => {
-//RS                 let wanted = 2;
-//RS                 if args.len() != wanted {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity(name, wanted, args.len(), span));
-//RS                 }
-//RS                 if name == "cmp" || name == "next_after" || name == "nextafter" {
-//RS                     let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-//RS                         for a in args.iter_mut().skip(1) {
-//RS                             self.infer(&mut a.expr);
-//RS                         }
-//RS                         return Some(if name == "cmp" {
-//RS                             Type::Int
-//RS                         } else {
-//RS                             Type::Float
-//RS                         });
-//RS                     };
-//RS                     if !matches!(first, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{}` needs Float or F32, not {}", name, first.show()),
-//RS                             "this math function operates on floating-point numbers".to_string(),
-//RS                             "pass Float or F32 values".to_string(),
-//RS                             Some(args[0].expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-//RS                         if got != first {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!(
-//RS                                     "`{}` needs all arguments to have the same float type",
-//RS                                     name
-//RS                                 ),
-//RS                                 "D-FLOATW1: mixing float widths is not allowed".to_string(),
-//RS                                 "convert the arguments to the same float width".to_string(),
-//RS                                 Some(args[1].expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     return Some(if name == "cmp" { Type::Int } else { first });
-//RS                 }
-//RS                 // ldexp / scaleb: float, then whole-number exponent.
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{}` needs Float or F32, not {}", name, ty.show()),
-//RS                             "this math function operates on floating-point numbers".to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     if let Some(exp) = args.get_mut(1) {
-//RS                         self.expect_core_arg(name, 1, &Type::Int, exp);
-//RS                     }
-//RS                     return Some(ty);
-//RS                 }
-//RS                 return Some(Type::Float);
-//RS             }
-//RS             ("core.math", "ilogb") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`ilogb` needs Float or F32, not {}", ty.show()),
-//RS                             "ilogb reads the exponent of a floating-point value".to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Option(Box::new(Type::Int)));
-//RS             }
-//RS             ("core.math", "sin_cos" | "modf") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let float_ty = if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{}` needs Float or F32, not {}", name, ty.show()),
-//RS                             "this math function operates on floating-point numbers".to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     ty
-//RS                 } else {
-//RS                     Type::Float
-//RS                 };
-//RS                 let fields = if name == "sin_cos" {
-//RS                     vec![
-//RS                         ("sin".to_string(), Box::new(float_ty.clone())),
-//RS                         ("cos".to_string(), Box::new(float_ty)),
-//RS                     ]
-//RS                 } else {
-//RS                     vec![
-//RS                         ("fract".to_string(), Box::new(float_ty.clone())),
-//RS                         ("whole".to_string(), Box::new(float_ty)),
-//RS                     ]
-//RS                 };
-//RS                 return Some(Type::Tuple(fields));
-//RS             }
-//RS             ("core.math", "frexp") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let float_ty = if let Some(arg) = args.get_mut(0) {
-//RS                     let ty = self.infer(&mut arg.expr)?;
-//RS                     if !matches!(ty, Type::Float | Type::Float32) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`frexp` needs Float or F32, not {}", ty.show()),
-//RS                             "frexp splits a float into fraction and exponent".to_string(),
-//RS                             "pass a Float or F32 value".to_string(),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     ty
-//RS                 } else {
-//RS                     Type::Float
-//RS                 };
-//RS                 return Some(Type::Tuple(vec![
-//RS                     ("frac".to_string(), Box::new(float_ty)),
-//RS                     ("exp".to_string(), Box::new(Type::Int)),
-//RS                 ]));
-//RS             }
-//RS             ("core.math", "div_mod" | "div_rem") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 for (idx, arg) in args.iter_mut().enumerate() {
-//RS                     self.expect_core_arg(name, idx, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Tuple(vec![
-//RS                     ("quot".to_string(), Box::new(Type::Int)),
-//RS                     ("rem".to_string(), Box::new(Type::Int)),
-//RS                 ]));
-//RS             }
-//RS             (
-//RS                 "core.math",
-//RS                 "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm" | "int_pow",
-//RS             ) => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 for (idx, arg) in args.iter_mut().enumerate() {
-//RS                     self.expect_core_arg(name, idx, &Type::Int, arg);
-//RS                 }
-//RS                 return Some(Type::Int);
-//RS             }
-//RS             ("core.math", "pow") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-//RS                     for a in args.iter_mut().skip(1) {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 };
-//RS                 if !matches!(first, Type::Float | Type::Float32) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`pow` needs Float or F32, not {}", first.show()),
-//RS                         "`pow` operates on floating-point numbers".to_string(),
-//RS                         "pass a Float or F32 base".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-//RS                     if second != first {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("`pow` needs both arguments to have the same float type, but base is {} and exponent is {}", first.show(), second.show()),
-//RS                                 "D-FLOATW1: mixing float widths is not allowed — use the same width for both".to_string(),
-//RS                                 "convert with `F32.from_float(value)` or `Float.from_f32(value)` to match".to_string(),
-//RS                                 Some(args[1].expr.span()),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 return Some(first);
-//RS             }
-//RS             ("core.math", "abs") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return Some(Type::Int);
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 // D-FLOATW1: abs also works on F32.
-//RS                 let is_complex = matches!(&ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX);
-//RS                 if !matches!(&ty, Type::Int | Type::Float | Type::Float32) && !is_complex {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`abs` needs Int, Float, or F32, not {}", ty.show()),
-//RS                         "absolute value is only defined for numbers".to_string(),
-//RS                         "pass an Int, Float, or F32".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 return Some(if is_complex { Type::Float } else { ty });
-//RS             }
-//RS             ("core.math", "min" | "max") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-//RS                     for a in args.iter_mut().skip(1) {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 };
-//RS                 if !types_comparable(&first, self.registry) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0905",
-//RS                         format!("`{}` needs comparable values", name),
-//RS                         "min/max compare their two arguments".to_string(),
-//RS                         "use Int, Float, String, Char, Bool, or a comparable type".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-//RS                     if second != first {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{}` needs two values of the same type", name),
-//RS                             "min/max compare like with like".to_string(),
-//RS                             type_fix_hint(&first, &second),
-//RS                             Some(args[1].expr.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 return Some(first);
-//RS             }
-//RS             ("core.math", "clamp") => {
-//RS                 if args.len() != 3 {
-//RS                     self.diags.push(wrong_core_arity(name, 3, args.len(), span));
-//RS                 }
-//RS                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-//RS                     for a in args.iter_mut().skip(1) {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 };
-//RS                 if !types_comparable(&first, self.registry) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0905",
-//RS                         "`clamp` needs comparable values".to_string(),
-//RS                         "clamp compares the value with its lower and upper bounds".to_string(),
-//RS                         "use Int, Float, String, Char, Bool, or a comparable type".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 for i in 1..3 {
-//RS                     if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
-//RS                         if got != first {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0112",
-//RS                                 format!("`clamp` needs all three values to have the same type"),
-//RS                                 "the value and both bounds are compared together".to_string(),
-//RS                                 type_fix_hint(&first, &got),
-//RS                                 Some(args[i].expr.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return Some(first);
-//RS             }
-//RS             ("core.math.random", "pick") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return None;
-//RS                 };
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if let Type::List(inner) = ty {
-//RS                     return Some(Type::Option(inner));
-//RS                 }
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     format!("`pick` needs a list, not {}", ty.show()),
-//RS                     "random.pick chooses one item from a List".to_string(),
-//RS                     "pass a `[T]` value".to_string(),
-//RS                     Some(arg.expr.span()),
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS             ("core.math.random", "sample") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 };
-//RS                 let arg_span = arg.expr.span();
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if let Some(k) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-//RS                     if !matches!(&k, Type::Int | Type::InlineRange { .. }) {
-//RS                         let k_span = args.get(1).map(|a| a.expr.span()).unwrap_or(span);
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`sample` count must be Int, not {}", k.show()),
-//RS                             "random.sample chooses up to k items without replacement".to_string(),
-//RS                             "pass an Int count".to_string(),
-//RS                             Some(k_span),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 if let Type::List(inner) = ty {
-//RS                     return Some(Type::List(inner));
-//RS                 }
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     format!("`sample` needs a list, not {}", ty.show()),
-//RS                     "random.sample chooses items from a List".to_string(),
-//RS                     "pass a `[T]` value".to_string(),
-//RS                     Some(arg_span),
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS             ("core.math.random", "weighted_pick") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-//RS                 }
-//RS                 let Some(items_arg) = args.get_mut(0) else {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 };
-//RS                 let items_span = items_arg.expr.span();
-//RS                 let items_ty = self.infer(&mut items_arg.expr)?;
-//RS                 if let Some(weights_arg) = args.get_mut(1) {
-//RS                     let weights_ty = self.infer(&mut weights_arg.expr);
-//RS                     if weights_ty != Some(Type::List(Box::new(Type::Float))) {
-//RS                         if let Some(got) = weights_ty {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E0112",
-//RS                                     format!("`weighted_pick` weights must be [Float], not {}", got.show()),
-//RS                                     "random.weighted_pick pairs each item with a non-negative Float weight".to_string(),
-//RS                                     "pass a `[Float]` weights list".to_string(),
-//RS                                     Some(weights_arg.expr.span()),
-//RS                                 ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 if let Type::List(inner) = items_ty {
-//RS                     return Some(Type::Option(inner));
-//RS                 }
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     format!("`weighted_pick` needs a list, not {}", items_ty.show()),
-//RS                     "random.weighted_pick chooses one weighted item from a List".to_string(),
-//RS                     "pass a `[T]` value".to_string(),
-//RS                     Some(items_span),
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS             ("core.math.random", "shuffle") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-//RS                 }
-//RS                 let Some(arg) = args.get_mut(0) else {
-//RS                     return None;
-//RS                 };
-//RS                 if arg.convention != AccessConvention::Write {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0202",
-//RS                         "`shuffle` edits its list in place".to_string(),
-//RS                         "the write-access marker `&` is required; pass the list with that marker"
-//RS                             .to_string(),
-//RS                         "write `random.shuffle(&xs)` with the write-access marker `&`".to_string(),
-//RS                         Some(arg.span),
-//RS                     ));
-//RS                 }
-//RS                 let ty = self.infer(&mut arg.expr)?;
-//RS                 if !matches!(ty, Type::List(_)) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!("`shuffle` needs a list, not {}", ty.show()),
-//RS                         "random.shuffle reorders a List in place".to_string(),
-//RS                         "pass a `[T]` value".to_string(),
-//RS                         Some(arg.expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 return None;
-//RS             }
-//RS             // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
-//RS             // site is too noisy (breaks showcase golden tests via path-specific output).
-//RS             // Revisit when the test harness can normalise paths in exact comparisons.
-//RS             ("core.files", "read") => {}
-//RS             // D-TYPE2-TIME1=A: scheduler timer channels consume the canonical
-//RS             // Duration delta; `after(duration)` emits a unit tick and
-//RS             // `after(duration, value)` emits a typed timeout value.
-//RS             ("core.tasks", "after") => {
-//RS                 if !(args.len() == 1 || args.len() == 2) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0104",
-//RS                             format!(
-//RS                                 "`tasks.after` takes one Duration and an optional value, got {} argument{}",
-//RS                                 args.len(),
-//RS                                 if args.len() == 1 { "" } else { "s" }
-//RS                             ),
-//RS                             "a one-shot timer channel fires after the given Duration".to_string(),
-//RS                             "write `tasks.after(100ms)` or `tasks.after(100ms, fallback)`".to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 let duration_ty = self.infer(&mut args[0].expr)?;
-//RS                 if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!(
-//RS                             "`tasks.after(duration: …)` needs a Duration, not {}",
-//RS                             duration_ty.show()
-//RS                         ),
-//RS                         "timer channels use the canonical Time delta".to_string(),
-//RS                         "write `tasks.after(100ms)`".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 let elem = if args.len() == 2 {
-//RS                     self.infer(&mut args[1].expr)?
-//RS                 } else {
-//RS                     Type::Named("Unit".to_string())
-//RS                 };
-//RS                 if let Some(problem) =
-//RS                     self.crossing_problem(&elem, SendCrossing::ChannelSend, false)
-//RS                 {
-//RS                     self.report_unsendable(
-//RS                         "timer value",
-//RS                         &elem,
-//RS                         problem,
-//RS                         SendCrossing::ChannelSend,
-//RS                         args.get(1).map(|a| a.expr.span()).unwrap_or(span),
-//RS                     );
-//RS                 }
-//RS                 return Some(Type::Apply {
-//RS                     name: "Receiver".to_string(),
-//RS                     args: vec![elem],
-//RS                 });
-//RS             }
-//RS             // D-TYPE2-TIME1=A: interval timer consumes the canonical Duration
-//RS             // and sends tick numbers (1, 2, ...).
-//RS             ("core.tasks", "interval") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity("interval", 1, args.len(), span));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 let duration_ty = self.infer(&mut args[0].expr)?;
-//RS                 if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0112",
-//RS                         format!(
-//RS                             "`tasks.interval(duration: …)` needs a Duration, not {}",
-//RS                             duration_ty.show()
-//RS                         ),
-//RS                         "interval channels use the canonical Time delta".to_string(),
-//RS                         "write `tasks.interval(1000ms)`".to_string(),
-//RS                         Some(args[0].expr.span()),
-//RS                     ));
-//RS                 }
-//RS                 return Some(Type::Apply {
-//RS                     name: "Receiver".to_string(),
-//RS                     args: vec![Type::Int],
-//RS                 });
-//RS             }
-//RS             // D-ROUTE1=A: jet.http.router() → HTTPRouter.
-//RS             ("core.http", "router") => {
-//RS                 if !args.is_empty() {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity("router", 0, args.len(), span));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Named("HTTPRouter".to_string()));
-//RS             }
-//RS             // D-ROUTE1=A: http.parse(raw_string) → HTTPRequest (parses HTTP/1.1 bytes).
-//RS             ("core.http", "parse") => {
-//RS                 if args.len() != 1 {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity("parse", 1, args.len(), span));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
-//RS                 return Some(Type::Named("HTTPRequest".to_string()));
-//RS             }
-//RS             // D-HTTP-CORE2=A: the router's sole Handler propagates HTTPError.
-//RS             ("core.http", "dispatch") => {
-//RS                 if args.len() != 2 {
-//RS                     self.diags
-//RS                         .push(wrong_core_arity("dispatch", 2, args.len(), span));
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 let router_ty = self.infer(&mut args[0].expr);
-//RS                 match &router_ty {
-// END-PORT-PENDING 0380 crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3592-5644
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, Span, Type, JetGameFrameBudget]
+use jet_sema.[Checker, BindParam, SendCrossing, PlaceAccess, Syntax, bind_call_args, core_param_contract, core_call_argument_convention, module_short_name, wrong_core_arity, literal_int, exactly_one_type_arg, is_debuggable, is_printable, is_displayable, is_secret_bearing_crypto_type, types_comparable, type_fix_hint, result_ty, unit_ty, json_ty, encoding_error_ty, decode_error_ty, db_row_ty, u8_ty, io_error_ty, ptr_elem, e3101, exact_rational_math_approx, data_carrier_type, iter_ty]
 
+// Private continuation of Core.infer_core_call. Parent dispatch routes only the
+// arms listed here; files.read deliberately remains a fallthrough in the parent.
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3592
+fn infer_core_call_0380(self: &Checker, module: String, name: String, alias_span: Span, span: Span, type_args: [Type], args: &[CallArg], sig: ([(AccessConvention, Type)], Type?)?) -> Type? {
+    if (module, name) == {
+        ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor" | "core.encoding.xml", "reader" | "writer") -> {
+            csv_reader :: module == "core.encoding.csv" && name == "reader"
+            max :: if csv_reader -> 5 else if (module == "core.encoding.json" && name == "writer") || module == "core.encoding.xml" -> 3 else -> 2
+            if args.len() < 1 || args.len() > max {
+                fix :: if module == "core.encoding.xml" -> "write `xml.{name}(^file)`, `xml.{name}(^file, limits)`, or `xml.{name}(^file, limits, options)` with the move marker `^`" else if name == "reader" -> "write `{module_short_name(module)}.reader(^file)` or `{module_short_name(module)}.reader(^file, limits)` with the move marker `^`" else if module == "core.encoding.json" -> "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)` with the move marker `^`" else -> "write `{module_short_name(module)}.writer(^file)` or `{module_short_name(module)}.writer(^file, limits)` with the move marker `^`"
+                &self.diags.push(Diagnostic.error("E0104", "`{module_short_name(module)}.{name}` expects 1 to {max} arguments, got {args.len()}", "the file handle is required; limits, XML options, and canonical mode use safe defaults when omitted", fix, Val(span)))
+            }
+            (params, ret) :: sig.expect("registered encoding signature")
+            if csv_reader {
+                contract :: core_param_contract(module, name).expect("registered CSV contract")
+                bind_params := [BindParam]{}
+                loop index in 0..contract.len() {
+                    param :: contract[index]
+                    convention :: if index < params.len() -> params[index].0 else -> AccessConvention.Read
+                    ty :: if index < params.len() -> Val(params[index].1) else -> None
+                    &bind_params.push(BindParam{label: param.label, name: param.label, zone: param.zone, default: None, convention: convention, ty: ty, variadic: false, core_default: param.default})
+                }
+                if bind_call_args(name, bind_params, &args, span, &self.diags) == None {
+                    loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                    return ret
+                }
+                self.register_binder_refs(args)
+            }
+            loop i in 0..min(params.len(), args.len()) {
+                (conv, param_ty) :: params[i]
+                if conv == AccessConvention.Move {
+                    self.expect_core_arg_moving(name, i, param_ty, &args[i])
+                    self.finish_core_call_ownership(name, i, &args[i], conv, param_ty)
+                } else { self.expect_core_arg(name, i, param_ty, &args[i]) }
+            }
+            loop i in params.len()..args.len() -> _ :: self.infer(&args[i].expr)
+            return ret
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3668
+        ("core.game", "run") -> {
+            if args.len() < 1 || args.len() > 4 {
+                &self.diags.push(Diagnostic.error("E0104", "`game.run` expects 1 to 4 arguments, got {args.len()}", "`game.run` accepts a scene plus optional replay, backend, and frame-count handles", "write `game.run(scene)`, `game.run(scene, replay: replay)`, `game.run(scene, replay: replay, backend: backend)`, or `game.run(scene, frames: 60)`", Val(span)))
+            }
+            if args.len() > 0 -> self.check_game_run_scene_edit(args[0].expr)
+            params :: if sig == { .Val((params, _)) -> params; .None -> [(AccessConvention, Type)]{} }
+            loop index in 0..min(params.len(), args.len()) {
+                inserted_absent :: args[index].flags.source_index == None && args[index].flags.binder_slot == Val(index) && (if args[index].expr == { .Absent(_) -> true; else -> false })
+                if !inserted_absent -> self.expect_core_arg("run", index, params[index].1, &args[index])
+            }
+            if args.len() > 3 {
+                if literal_int(args[3].expr) == .Val(value) {
+                    if JetGameFrameBudget.validate(value).is_err() {
+                        &self.diags.push(Diagnostic.error("E0112", "`game.run` frame budget must be positive", "a non-positive frame budget cannot execute a deterministic frame transcript", "pass a positive frame budget, such as `frames: 600`", Val(args[3].expr.span())))
+                    }
+                }
+            }
+            return Val(Type.String)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3716
+        ("core.files", "walk" | "walk_parallel" | "walk_files") -> {
+            if args.len() < 1 || args.len() > 2 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            (params, ret) :: sig ?? return None
+            loop index in 0..min(params.len(), args.len()) {
+                param_ty :: params[index].1
+                if param_ty.unwrap_option() == {
+                    .Val(payload_ty) -> self.expect_core_optional_arg(name, index, payload_ty, &args[index])
+                    .None -> self.expect_core_arg(name, index, param_ty, &args[index])
+                }
+            }
+            loop i in params.len()..args.len() -> _ :: self.infer(&args[i].expr)
+            return ret
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3749
+        ("core.encoding.csv", "to_string") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            loop i in 0..args.len() {
+                self.borrow_ctx = true
+                t :: self.infer(&args[i].expr) ?? next
+                valid :: if t == {
+                    .List(elem) -> {
+                        if elem == .List(Type.String) { true } else {
+                            type_name :: if elem == { .Named(name) -> Val(name); .Apply(name, _) -> Val(name); else -> None }
+                            if type_name == {
+                                .Val(record_name) -> {
+                                    namespace := None
+                                    leaf := record_name
+                                    if record_name.rsplit_once('.') == .Val((prefix, suffix)) { namespace = Val(prefix); leaf = suffix }
+                                    if self.struct_owner_module(leaf, namespace) == {
+                                        .Val(owner) -> self.struct_fields_of(owner, leaf) != None
+                                        .None -> false
+                                    }
+                                }
+                                .None -> false
+                            }
+                        }
+                    }
+                    else -> false
+                }
+                if valid { self.check_encodable(t, args[i].expr.span()) } else {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` wants [[String]] rows or a list of #Codable records for argument 1, but this is {t.show()}", "CSV output accepts string rows or typed records", "use [[String]] rows or a list of #Codable records here", Val(args[i].expr.span())))
+                }
+            }
+            return Val(Type.String)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3799
+        ("core.text.fmt", "pretty") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                self.borrow_ctx = true
+                if self.infer(&args[0].expr) == .Val(t) {
+                    if !is_debuggable(t, self.registry, self.trait_reg) {
+                        &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `core.text.fmt.pretty` yet", "pretty formatting needs a debuggable value", "implement `Debug` or pass a debuggable value", Val(args[0].expr.span())))
+                    }
+                }
+            }
+            loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+            return Val(Type.String)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3825
+        ("core.text.fmt", "decimal" | "grouped") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            if args.len() > 0 {
+                self.borrow_ctx = true
+                got :: self.infer(&args[0].expr)
+                if got != Val(Type.Float) && got != Val(Type.Int) {
+                    shown :: if got == { .Val(ty) -> ty.show(); .None -> "this value" }
+                    &self.diags.push(Diagnostic.error("E0112", "{shown} can't use `core.text.fmt.{name}`", "{name} formatting accepts a Float or exact Int value", "pass a Float or Int as the value", Val(args[0].expr.span())))
+                }
+            }
+            if args.len() > 1 -> self.expect_core_arg(name, 1, Type.Int, &args[1])
+            loop i in 2..args.len() -> _ :: self.infer(&args[i].expr)
+            return Val(Type.String)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3853
+        ("core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml", "to_string" | "to_string_pretty") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            loop i in 0..args.len() {
+                self.borrow_ctx = true
+                if self.infer(&args[i].expr) == .Val(t) -> self.check_encodable(t, args[i].expr.span())
+            }
+            return Val(Type.String)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3871
+        ("core.args", "decode") -> {
+            if args.len() != 0 -> &self.diags.push(wrong_core_arity(name, 0, args.len(), span))
+            loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_cli_shape(t, span)
+            return Val(result_ty(t, decode_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3893
+        ("core.encoding.json", "decode") if type_args.len() == 0 -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.String, &args[0])
+            loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+            return Val(result_ty(json_ty(), encoding_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3905
+        ("core.sys", "decode") if type_args.len() > 0 -> {
+            if args.len() > 3 -> &self.diags.push(wrong_core_arity(name, 3, args.len(), span))
+            loop index in 0..args.len() {
+                if index == {
+                    0 | 1 -> self.expect_core_arg(name, index, Type.String, &args[index])
+                    2 -> self.expect_core_arg(name, index, Type.List{element: Type.String}, &args[index])
+                    else -> _ :: self.infer(&args[index].expr)
+                }
+            }
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_decodable(t, span)
+            return Val(result_ty(t, decode_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3932
+        ("core.db", "decode") if type_args.len() > 0 -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, db_row_ty(), &args[0])
+            loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_decodable(t, span)
+            return Val(result_ty(t, decode_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3948
+        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "decode") if type_args.len() > 0 -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.String, &args[0])
+            loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_decodable(t, span)
+            inner :: if module == "core.encoding.csv" -> Type.List{element: t} else -> t
+            return Val(result_ty(inner, decode_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:3979
+        ("core.data.arrow", "import" | "query") -> {
+            if type_args.len() > 0 {
+                &self.diags.push(Diagnostic.error("E0119", "`{name}` does not take an explicit type argument", "Arrow operations infer their row type from the `DataArrowBatch<T>` value", "remove the explicit type argument and pass a `DataArrowBatch<T>` value", Val(span)))
+            }
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            row := None
+            if args.len() > 0 {
+                if self.infer(&args[0].expr) == .Val(actual) {
+                    convention :: core_call_argument_convention(module, name, 0)
+                    self.finish_core_call_ownership(name, 0, &args[0], convention, actual)
+                    row = if actual == {
+                        .Apply(carrier, types) if carrier == "DataArrowBatch" && types.len() == 1 -> Val(types[0])
+                        other -> {
+                            &self.diags.push(Diagnostic.error("E0112", "`{name}` expects a `DataArrowBatch<T>` value, got {other.show()}", "Arrow operations preserve the row type carried by the checked owner", "pass a `DataArrowBatch<T>` value as the argument", Val(span)))
+                            None
+                        }
+                    }
+                }
+            }
+            loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+            row_type :: row ?? return None
+            if name == "import" -> return Val(data_carrier_type("DataArrowBatch", row_type))
+            return Val(result_ty(data_carrier_type("Query", row_type), Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4033
+        ("core.data.loader", "authority" | "bind" | "bind_text" | "cancel" | "invalidate" | "needs_refresh" | "offline" | "ready" | "source_identity" | "status" | "stream") -> {
+            if type_args.len() > 0 {
+                &self.diags.push(Diagnostic.error("E0119", "`{name}` does not take an explicit type argument", "the loader operation reads its row type from the `DataLoader<T>` value", "remove the `<T>` and pass a concrete `DataLoader<T>` handle", Val(span)))
+            }
+            expected :: if name == { "bind" | "bind_text" | "offline" | "invalidate" -> 2; else -> 1 }
+            if args.len() != expected -> &self.diags.push(wrong_core_arity(name, expected, args.len(), span))
+            mutating :: if name == { "bind" | "bind_text" | "cancel" | "invalidate" | "offline" -> true; else -> false }
+            loader_ty := None
+            if args.len() > 0 {
+                if mutating && args[0].convention != AccessConvention.Write {
+                    &self.diags.push(Diagnostic.error("E0202", "argument 1 to `{name}` requires the write-access marker `&`", "this data-loader operation changes the loader state in place", "write the write-access marker `&`: `{Syntax.SIGIL_WRITE}loader`", Val(args[0].span)))
+                }
+                loader_ty = self.infer(&args[0].expr)
+            }
+            row :: if loader_ty == {
+                .Val(.Apply(carrier, types)) if carrier == "DataLoader" && types.len() == 1 -> Val(types[0])
+                .Val(other) -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` expects a `DataLoader<T>` handle, got {other.show()}", "loader lifecycle operations preserve the row type carried by the loader", "pass a `DataLoader<T>` value as the first argument", Val(span)))
+                    None
+                }
+                .None -> None
+            }
+            loop index in 1..args.len() {
+                expected_ty :: if (name, index) == {
+                    ("bind", 1) -> Val(Type.List{element: u8_ty()})
+                    ("bind_text", 1) -> Val(Type.String)
+                    ("offline", 1) -> Val(Type.Bool)
+                    ("invalidate", 1) -> Val(Type.Named{name: "DataInvalidationCause"})
+                    else -> None
+                }
+                if expected_ty == { .Val(ty) -> self.expect_core_arg(name, index, ty, &args[index]); .None -> _ :: self.infer(&args[index].expr) }
+            }
+            row_type :: row ?? return None
+            result :: if name == {
+                "bind" | "bind_text" -> result_ty(unit_ty(), Type.Named{name: "DataError"})
+                "cancel" | "offline" | "invalidate" -> unit_ty()
+                "needs_refresh" | "ready" -> Type.Bool
+                "status" -> Type.Named{name: "DataLoaderStatus"}
+                "source_identity" -> Type.Named{name: "DataSourceIdentity"}
+                "authority" -> Type.Named{name: "DataAuthority"}
+                "stream" -> result_ty(Type.Apply{name: "DataStream", args: [row_type]}, Type.Named{name: "DataError"})
+                else -> panic("unreachable loader operation")
+            }
+            return Val(result)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4137
+        ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot") if type_args.len() > 0 -> {
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            expected :: if name == { "load" | "value" -> 2; "load_default" | "snapshot" -> 1; "file" -> 3; "file_member" | "url" | "database" -> 4; else -> panic("unreachable data constructor") }
+            if args.len() != expected -> &self.diags.push(wrong_core_arity(name, expected, args.len(), span))
+            loop index in 0..args.len() {
+                ty :: if name == {
+                    "load" | "load_default" -> Val(if index == 0 -> Type.String else -> Type.Named{name: "DataLimits"})
+                    "file" -> Val(if index < 2 -> Type.String else -> Type.Named{name: "DataLimits"})
+                    "file_member" | "url" -> Val(if index < 3 -> Type.String else -> Type.Named{name: "DataLimits"})
+                    "database" -> Val(if index == { 0 | 2 -> Type.String; 1 -> Type.List{element: Type.String}; else -> Type.Named{name: "DataLimits"} })
+                    "value" -> Val(if index == 0 -> t else -> Type.Named{name: "DataLimits"})
+                    "snapshot" -> Val(Type.Apply{name: "DataLoader", args: [t]})
+                    else -> None
+                }
+                if ty == {
+                    .Val(expected_ty) -> {
+                        if name == "snapshot" && index == 0 && args[index].convention != AccessConvention.Write {
+                            &self.diags.push(Diagnostic.error("E0202", "`snapshot` requires the write-access marker `&`", "taking a snapshot refreshes loader state in place", "write the write-access marker `&`: `{Syntax.SIGIL_WRITE}loader`", Val(args[index].span)))
+                        }
+                        self.expect_core_arg(name, index, expected_ty, &args[index])
+                    }
+                    .None -> _ :: self.infer(&args[index].expr)
+                }
+            }
+            if name == "value" -> self.check_encodable(t, span)
+            if name == "snapshot" {
+                self.check_decodable(t, span)
+                self.check_encodable(t, span)
+                return Val(result_ty(Type.Apply{name: "DataSnapshot", args: [t]}, Type.Named{name: "DataError"}))
+            }
+            return Val(result_ty(Type.Apply{name: "DataLoader", args: [t]}, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4218
+        ("core.data" | "core.data.plot", "plot") if type_args.len() > 0 -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            row :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.List{element: row}, &args[0])
+            self.check_encodable(row, span)
+            return Val(result_ty(Type.Apply{name: "JetDataPlot", args: [row]}, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4234
+        ("core.data" | "core.data.plot", "inspect" | "inspect_json" | "text" | "svg" | "show" | "render") if type_args.len() > 0 -> {
+            row :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            expected :: if name == "render" -> 2 else -> 1
+            if args.len() != expected -> &self.diags.push(wrong_core_arity(name, expected, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.Apply{name: "JetDataPlot", args: [row]}, &args[0])
+            if name == "render" && args.len() > 1 -> self.expect_core_arg(name, 1, Type.Named{name: "JetDataPlotBackend"}, &args[1])
+            ok :: if name == { "inspect" -> Type.Named{name: "JetDataPlotInspection"}; "inspect_json" | "text" | "svg" -> Type.String; else -> Type.Named{name: "JetDataPlotRender"} }
+            return Val(result_ty(ok, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4267
+        ("core.data", "csv" | "json") if type_args.len() > 0 -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            loop i in 0..args.len() -> self.expect_core_arg(name, 0, Type.String, &args[i])
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_decodable(t, span)
+            return Val(result_ty(Type.List{element: t}, decode_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4280
+        ("core.data", "csv_reader" | "json_reader") if type_args.len() > 0 -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            if args.len() > 0 {
+                file_reader :: Type.Named{name: "FileReader"}
+                self.expect_core_arg_moving(name, 0, file_reader, &args[0])
+                self.finish_core_call_ownership(name, 0, &args[0], AccessConvention.Move, file_reader)
+            }
+            if args.len() > 1 -> self.expect_core_arg(name, 1, Type.Named{name: "DataLimits"}, &args[1])
+            t :: exactly_one_type_arg(&self, name, type_args, span) ?? return None
+            self.check_decodable(t, span)
+            return Val(result_ty(Type.Apply{name: "DataStream", args: [t]}, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4310
+        ("core.data", "count") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return None
+            ty :: self.infer(&args[0].expr) ?? return None
+            if !(if ty == { .List(_) -> true; else -> false }) {
+                &self.diags.push(Diagnostic.error("E0112", "`data.count` needs a typed row list, not {ty.show()}", "core.data counts ordinary list elements", "pass a `[T]` value", Val(args[0].expr.span())))
+            }
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4329
+        ("core.data", "schema") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return None
+            ty :: self.infer(&args[0].expr) ?? return None
+            if !(if ty == { .List(_) -> true; else -> false }) {
+                &self.diags.push(Diagnostic.error("E0112", "`data.schema` needs a typed row list, not {ty.show()}", "core.data schema reads column names and types from ordinary rows", "pass a `[T]` value", Val(args[0].expr.span())))
+            }
+            return Val(Type.List{element: Type.Named{name: "DataColumn"}})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4349
+        ("core.data", "inner_join" | "left_join") -> {
+            if args.len() != 4 -> &self.diags.push(wrong_core_arity(name, 4, args.len(), span))
+            left_ty := None
+            right_ty := None
+            if args.len() > 0 -> left_ty = self.infer(&args[0].expr)
+            if args.len() > 1 -> right_ty = self.infer(&args[1].expr)
+            left_row :: if left_ty == {
+                .Val(.List(inner)) -> inner
+                .Val(other) -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`data.{name}` needs a typed left list, not {other.show()}", "core.data joins rows from typed lists", "pass `[LeftRow]` and `[RightRow]` values", Val(args[0].expr.span())))
+                    return None
+                }
+                .None -> return None
+            }
+            right_row :: if right_ty == {
+                .Val(.List(inner)) -> inner
+                .Val(other) -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`data.{name}` needs a typed right list, not {other.show()}", "core.data joins rows from typed lists", "pass `[LeftRow]` and `[RightRow]` values", Val(args[1].expr.span())))
+                    return None
+                }
+                .None -> return None
+            }
+            if args.len() > 2 -> self.expect_core_arg(name, 2, Type.Fn{params: [left_row], ret: Val(Type.String), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}, &args[2])
+            if args.len() > 3 -> self.expect_core_arg(name, 3, Type.Fn{params: [right_row], ret: Val(Type.String), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}, &args[3])
+            joined_right :: if name == "left_join" -> Type.Option{inner: right_row} else -> right_row
+            joined :: Type.List{element: Type.Apply{name: "DataJoin", args: [left_row, joined_right]}}
+            return Val(result_ty(joined, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4428
+        ("core.data", "pivot_sum") -> {
+            if args.len() != 4 -> &self.diags.push(wrong_core_arity(name, 4, args.len(), span))
+            if args.len() == 0 -> return None
+            rows_ty :: self.infer(&args[0].expr)
+            row_ty :: if rows_ty == {
+                .Val(.List(inner)) -> inner
+                .Val(other) -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`data.{name}` needs a typed list, not {other.show()}", "core.data pivots rows from ordinary typed lists", "pass a `[Row]` value, such as `data.csv<Row>(text)?`", Val(args[0].expr.span())))
+                    return None
+                }
+                .None -> return None
+            }
+            loop idx in [1, 2] {
+                if args.len() > idx -> self.expect_core_arg(name, idx, Type.Fn{params: [row_ty], ret: Val(Type.String), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}, &args[idx])
+            }
+            if args.len() > 3 -> self.expect_core_arg(name, 3, Type.Fn{params: [row_ty], ret: Val(Type.Float), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}, &args[3])
+            return Val(result_ty(Type.List{element: Type.Named{name: "DataPivotCell"}}, Type.Named{name: "DataError"}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4479
+        ("core.mem", "volatile_read") -> {
+            if Syntax.core_mem_requires_audit(Syntax.MEM_VOLATILE_READ) && !self.in_unsafe -> &self.diags.push(e3101(Syntax.MEM_VOLATILE_READ, span))
+            if args.len() != 1 { &self.diags.push(wrong_core_arity(name, 1, args.len(), span)); return None }
+            t :: self.infer(&args[0].expr) ?? return None
+            if ptr_elem(t) == {
+                .Val(elem) -> return Val(elem)
+                .None -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`{Syntax.MEM_VOLATILE_READ}` needs a `Ptr<T>`, not {t.show()}", "a volatile read reads through a typed pointer", "build a pointer first with `mem.Ptr<T>.from_addr(addr)`", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4507
+        ("core.mem", "volatile_write") -> {
+            if Syntax.core_mem_requires_audit(Syntax.MEM_VOLATILE_WRITE) && !self.in_unsafe -> &self.diags.push(e3101(Syntax.MEM_VOLATILE_WRITE, span))
+            if args.len() != 2 { &self.diags.push(wrong_core_arity(name, 2, args.len(), span)); return None }
+            ptr_ty :: self.infer(&args[0].expr) ?? return None
+            elem :: ptr_elem(ptr_ty) ?? {
+                &self.diags.push(Diagnostic.error("E0112", "`{Syntax.MEM_VOLATILE_WRITE}` needs a `Ptr<T>`, not {ptr_ty.show()}", "a volatile write writes through a typed pointer", "build a pointer first with `mem.Ptr<T>.from_addr(addr)`", Val(args[0].expr.span())))
+                return None
+            }
+            if self.infer(&args[1].expr) == .Val(inferred) {
+                value_ty :: self.widen_numeric_argument(&args[1].expr, inferred, elem, AccessConvention.Read)
+                if !self.check_type_assignable(elem, value_ty, args[1].expr.span()) {
+                    &self.diags.push(Diagnostic.error("E0112", "`{Syntax.MEM_VOLATILE_WRITE}` writes a {elem.show()} through this pointer, but the value is {value_ty.show()}", "a volatile write stores a value of the pointer's element type", "write a `{elem.name()}` value", Val(args[1].expr.span())))
+                }
+            }
+            return Val(unit_ty())
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4562
+        ("core.mem", "pin") -> {
+            if args.len() != 1 { &self.diags.push(wrong_core_arity(name, 1, args.len(), span)); return None }
+            write_place :: (if args[0].expr == { .Place(_, PlaceAccess.Write, _) -> true; else -> false }) || args[0].convention == AccessConvention.Write
+            // Borrow before inference: do not auto-copy the owner's field/index.
+            self.borrow_ctx = true
+            t :: self.infer(&args[0].expr) ?? return None
+            if !write_place {
+                &self.diags.push(Diagnostic.error("E0218", "`{Syntax.MEM_PIN}` needs a write window made with the write-access marker `&` into the place being pinned", "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value", "write `mem.{Syntax.MEM_PIN}({Syntax.SIGIL_WRITE}place)` with the write-access marker `&`", Val(args[0].expr.span())))
+                return None
+            }
+            // Pin is idempotent; no Pin<Pin<T>> carrier is constructed.
+            if t == .Apply(carrier, types) {
+                if carrier == Syntax.TYPE_PIN && types.len() == 1 -> return Val(t)
+            }
+            return Val(Type.Apply{name: Syntax.TYPE_PIN, args: [t]})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4609
+        ("core.mem", "address_of") -> {
+            if args.len() != 1 { &self.diags.push(wrong_core_arity(name, 1, args.len(), span)); return None }
+            // Taking an address is inert and requires no Unsafe region.
+            _ :: self.infer(&args[0].expr)
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4620
+        ("core.term", "print") -> {
+            if args.len() == 0 -> &self.diags.push(Diagnostic.error("E0103", "`{name}` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. io.print(\"hello\")", Val(span)))
+            loop i in 0..args.len() {
+                self.borrow_ctx = true
+                if self.infer(&args[i].expr) == .Val(ty) {
+                    if !is_printable(ty, self.registry, self.trait_reg) && !self.is_unit_type(ty) {
+                        &self.diags.push(Diagnostic.error("E0112", "{ty.show()} can't be printed yet", "`io.print` prints the same values as ambient `print`", "print one of its fields, or make it a printable type", Val(args[i].expr.span())))
+                    }
+                }
+            }
+            return None
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4650
+        ("core.term", "progress") -> {
+            if args.len() == 0 || args.len() > 3 {
+                &self.diags.push(Diagnostic.error("E0112", "`io.progress` needs one to three arguments", "the first argument is a String message or a List/Iter source; the optional arguments set the description and format", "write `io.progress(items, description, format)` for an iterable", Val(span)))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            source :: self.infer(&args[0].expr) ?? return None
+            if source == Type.String {
+                if args.len() != 1 -> &self.diags.push(Diagnostic.error("E0112", "`io.progress` takes only one argument for a text update", "the one-string form writes one progress message", "use `io.progress(items, description, format)` for an iterable", Val(args[1].expr.span())))
+                return Val(result_ty(unit_ty(), io_error_ty()))
+            }
+            elem :: if source == {
+                .List(inner) -> inner
+                .FixedList(elem, _) -> elem
+                .Apply(carrier, types) if carrier == Syntax.TYPE_ITER && types.len() == 1 -> types[0]
+                else -> {
+                    &self.diags.push(Diagnostic.error("E0112", "`io.progress` cannot wrap {source.show()}", "progress adapters wrap List<T> and Iter<T> values", "pass a list or lazy iterator", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+            loop i in 1..args.len() -> self.expect_core_arg("progress", 1, Type.String, &args[i])
+            return Val(iter_ty(elem))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4702
+        ("core.term", "eprint") -> {
+            if args.len() == 0 -> &self.diags.push(Diagnostic.error("E0103", "`{name}` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. io.eprint(\"warning\")", Val(span)))
+            loop i in 0..args.len() {
+                self.borrow_ctx = true
+                if self.infer(&args[i].expr) == .Val(ty) {
+                    if !is_printable(ty, self.registry, self.trait_reg) && !self.is_unit_type(ty) {
+                        &self.diags.push(Diagnostic.error("E0112", "{ty.show()} can't be printed yet", "`io.eprint` prints the same values as `print`, but writes to stderr", "print one of its fields, or make it a printable type", Val(args[i].expr.span())))
+                    }
+                }
+            }
+            return Val(Type.Named{name: "Unit"})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4741
+        ("core.reflect", "of") -> {
+            if args.len() != 1 {
+                &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return Val(Type.Named{name: "Value"})
+            }
+            if self.infer(&args[0].expr) == .Val(ty) {
+                if !is_displayable(ty, self.registry, self.trait_reg) && !self.is_unit_type(ty) {
+                    if is_secret_bearing_crypto_type(ty) {
+                        &self.diags.push(Diagnostic.error("E0112", "secret-bearing `{ty.name()}` cannot be reflected", "reflection would expose a cryptographic secret through generic inspection or display", "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata", Val(args[0].expr.span())))
+                    } else {
+                        &self.diags.push(Diagnostic.error("E0112", "{ty.show()} can't be reflected yet", "`reflect.of` inspects the same values `\"{{x}}\"` interpolation can show", "implement `Display` for its type, or pass one of its fields instead", Val(args[0].expr.span())))
+                    }
+                }
+            }
+            return Val(Type.Named{name: "Value"})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4777
+        ("core.term", "input") -> {
+            if args.len() > 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.String, &args[0])
+            return Val(result_ty(Type.String, io_error_ty()))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4787
+        ("core.math", "is_even" | "is_odd") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if !(if ty == { .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true; else -> false }) {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` needs a whole number, not {ty.show()}", "parity is a property of whole numbers", "pass an Int or a sized integer", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+            return Val(Type.Bool)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4809
+        ("core.math", "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "signum" | "trunc" | "truncate" | "fract" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return Val(Type.Float)
+            ty :: self.infer(&args[0].expr) ?? return None
+            if exact_rational_math_approx(name) && (if ty == { .Named(carrier) -> carrier == Syntax.TYPE_FRACTION || carrier == Syntax.TYPE_DECIMAL; else -> false }) -> return Val(Type.Float)
+            if name == "sqrt" && (if ty == { .Apply(carrier, types) -> carrier == Syntax.TYPE_MEASUREMENT && types == [Type.Float]; else -> false }) -> return Val(ty)
+            if ty != Type.Float && ty != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float, F32, or Measurement<Float>, not {ty.show()}", "math functions preserve their numeric knowledge grade", "pass a Float or F32 value, or use `sqrt` with a measurement", Val(args[0].expr.span())))
+                return None
+            }
+            return Val(ty)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4856
+        ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd") -> {
+            wanted :: if name == "lerp" || name == "fma" || name == "muladd" -> 3 else -> 2
+            if args.len() != wanted -> &self.diags.push(wrong_core_arity(name, wanted, args.len(), span))
+            first_option := None
+            if args.len() > 0 -> first_option = self.infer(&args[0].expr)
+            inferred :: first_option ?? {
+                loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+                return Val(Type.Float)
+            }
+            first :: if inferred == { .Named(carrier) if carrier == Syntax.TYPE_FRACTION || carrier == Syntax.TYPE_DECIMAL -> Type.Float; else -> inferred }
+            if first != Type.Float && first != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {first.show()}", "this math function operates on floating-point numbers", "pass Float or F32 values", Val(args[0].expr.span())))
+                return None
+            }
+            loop i in 1..args.len() {
+                if self.infer(&args[i].expr) == .Val(inferred_got) {
+                    got :: if inferred_got == { .Named(carrier) if carrier == Syntax.TYPE_FRACTION || carrier == Syntax.TYPE_DECIMAL -> Type.Float; else -> inferred_got }
+                    if got != first -> &self.diags.push(Diagnostic.error("E0112", "`{name}` needs all arguments to have the same float type", "D-FLOATW1: mixing float widths is not allowed", "convert the arguments to the same float width", Val(args[i].expr.span())))
+                }
+            }
+            return Val(first)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4919
+        ("core.math", "is_nan" | "is_inf" | "is_finite") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return Val(Type.Bool)
+            ty :: self.infer(&args[0].expr) ?? return None
+            if ty != Type.Float && ty != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {ty.show()}", "floating-point classification only applies to floats", "pass a Float or F32 value", Val(args[0].expr.span())))
+                return None
+            }
+            return Val(Type.Bool)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4939
+        ("core.math", "sign") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`sign` needs Float or F32, not {ty.show()}", "`sign` classifies a floating-point value as negative, zero, or positive", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4959
+        ("core.math", "to_bits") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`to_bits` needs Float or F32, not {ty.show()}", "only floating-point values have this bit representation", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4978
+        ("core.math", "from_bits") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.Int, &args[0])
+            return Val(Type.Float)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:4987
+        ("core.math", "checked_add" | "checked_sub" | "checked_mul" | "checked_pow" | "checked_div" | "checked_rem") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            loop idx in 0..args.len() -> self.expect_core_arg(name, idx, Type.Int, &args[idx])
+            return Val(Type.Option{inner: Type.Int})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5002
+        ("core.math", "checked_abs" | "checked_neg") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.Int, &args[0])
+            return Val(Type.Option{inner: Type.Int})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5011
+        ("core.math", "isqrt" | "factorial") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 -> self.expect_core_arg(name, 0, Type.Int, &args[0])
+            return Val(Type.Option{inner: Type.Int})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5020
+        ("core.math", "binomial") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            loop idx in 0..args.len() -> self.expect_core_arg(name, idx, Type.Int, &args[idx])
+            return Val(Type.Option{inner: Type.Int})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5029
+        ("core.math", "leading_ones" | "trailing_ones" | "digits" | "radix") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                if name == "radix" {
+                    ty :: self.infer(&args[0].expr) ?? return None
+                    if !(if ty == { .Float | .Float32 | .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true; else -> false }) {
+                        &self.diags.push(Diagnostic.error("E0112", "`radix` needs a number, not {ty.show()}", "radix reports the base of a numeric type", "pass a Float or Int", Val(args[0].expr.span())))
+                        return None
+                    }
+                } else { self.expect_core_arg(name, 0, Type.Int, &args[0]) }
+            }
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5059
+        ("core.math", "is_normal" | "is_subnormal" | "is_canonical" | "is_signed" | "is_zero" | "is_integer" | "sign_bit") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return Val(Type.Bool)
+            ty :: self.infer(&args[0].expr) ?? return None
+            if ty != Type.Float && ty != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {ty.show()}", "floating-point classification only applies to floats", "pass a Float or F32 value", Val(args[0].expr.span())))
+                return None
+            }
+            return Val(Type.Bool)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5083
+        ("core.math", "next_up" | "next_down" | "copy" | "cot" | "inv" | "erf" | "erfc" | "gamma" | "lgamma" | "logb" | "significand" | "ulp") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return Val(Type.Float)
+            ty :: self.infer(&args[0].expr) ?? return None
+            if ty != Type.Float && ty != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {ty.show()}", "this math function operates on floating-point numbers", "pass a Float or F32 value", Val(args[0].expr.span())))
+                return None
+            }
+            return Val(ty)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5107
+        ("core.math", "zero") -> {
+            if args.len() != 0 -> &self.diags.push(wrong_core_arity(name, 0, args.len(), span))
+            return Val(Type.Float)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5113
+        ("core.math", "cmp" | "next_after" | "nextafter" | "ldexp" | "scaleb") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            if name == "cmp" || name == "next_after" || name == "nextafter" {
+                first_option := None
+                if args.len() > 0 -> first_option = self.infer(&args[0].expr)
+                first :: first_option ?? {
+                    loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+                    return Val(if name == "cmp" -> Type.Int else -> Type.Float)
+                }
+                if first != Type.Float && first != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {first.show()}", "this math function operates on floating-point numbers", "pass Float or F32 values", Val(args[0].expr.span())))
+                    return None
+                }
+                if args.len() > 1 {
+                    if self.infer(&args[1].expr) == .Val(got) {
+                        if got != first -> &self.diags.push(Diagnostic.error("E0112", "`{name}` needs all arguments to have the same float type", "D-FLOATW1: mixing float widths is not allowed", "convert the arguments to the same float width", Val(args[1].expr.span())))
+                    }
+                }
+                return Val(if name == "cmp" -> Type.Int else -> first)
+            }
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {ty.show()}", "this math function operates on floating-point numbers", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+                if args.len() > 1 -> self.expect_core_arg(name, 1, Type.Int, &args[1])
+                return Val(ty)
+            }
+            return Val(Type.Float)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5176
+        ("core.math", "ilogb") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`ilogb` needs Float or F32, not {ty.show()}", "ilogb reads the exponent of a floating-point value", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+            }
+            return Val(Type.Option{inner: Type.Int})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5195
+        ("core.math", "sin_cos" | "modf") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            float_ty := Type.Float
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`{name}` needs Float or F32, not {ty.show()}", "this math function operates on floating-point numbers", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+                float_ty = ty
+            }
+            fields :: if name == "sin_cos" -> [("sin", float_ty), ("cos", float_ty)] else -> [("fract", float_ty), ("whole", float_ty)]
+            return Val(Type.Tuple{fields: fields})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5228
+        ("core.math", "frexp") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            float_ty := Type.Float
+            if args.len() > 0 {
+                ty :: self.infer(&args[0].expr) ?? return None
+                if ty != Type.Float && ty != Type.Float32 {
+                    &self.diags.push(Diagnostic.error("E0112", "`frexp` needs Float or F32, not {ty.show()}", "frexp splits a float into fraction and exponent", "pass a Float or F32 value", Val(args[0].expr.span())))
+                    return None
+                }
+                float_ty = ty
+            }
+            return Val(Type.Tuple{fields: [("frac", float_ty), ("exp", Type.Int)]})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5253
+        ("core.math", "div_mod" | "div_rem") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            loop idx in 0..args.len() -> self.expect_core_arg(name, idx, Type.Int, &args[idx])
+            return Val(Type.Tuple{fields: [("quot", Type.Int), ("rem", Type.Int)]})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5265
+        ("core.math", "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm" | "int_pow") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            loop idx in 0..args.len() -> self.expect_core_arg(name, idx, Type.Int, &args[idx])
+            return Val(Type.Int)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5277
+        ("core.math", "pow") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            first_option := None
+            if args.len() > 0 -> first_option = self.infer(&args[0].expr)
+            first :: first_option ?? {
+                loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            if first != Type.Float && first != Type.Float32 {
+                &self.diags.push(Diagnostic.error("E0112", "`pow` needs Float or F32, not {first.show()}", "`pow` operates on floating-point numbers", "pass a Float or F32 base", Val(args[0].expr.span())))
+                return None
+            }
+            if args.len() > 1 {
+                if self.infer(&args[1].expr) == .Val(second) {
+                    if second != first -> &self.diags.push(Diagnostic.error("E0112", "`pow` needs both arguments to have the same float type, but base is {first.show()} and exponent is {second.show()}", "D-FLOATW1: mixing float widths is not allowed — use the same width for both", "convert with `F32.from_float(value)` or `Float.from_f32(value)` to match", Val(args[1].expr.span())))
+                }
+            }
+            return Val(first)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5310
+        ("core.math", "abs") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return Val(Type.Int)
+            ty :: self.infer(&args[0].expr) ?? return None
+            is_complex :: if ty == { .Named(carrier) -> carrier == Syntax.TYPE_COMPLEX; else -> false }
+            if ty != Type.Int && ty != Type.Float && ty != Type.Float32 && !is_complex {
+                &self.diags.push(Diagnostic.error("E0112", "`abs` needs Int, Float, or F32, not {ty.show()}", "absolute value is only defined for numbers", "pass an Int, Float, or F32", Val(args[0].expr.span())))
+                return None
+            }
+            return Val(if is_complex -> Type.Float else -> ty)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5332
+        ("core.math", "min" | "max") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            first_option := None
+            if args.len() > 0 -> first_option = self.infer(&args[0].expr)
+            first :: first_option ?? {
+                loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            if !types_comparable(first, self.registry) -> &self.diags.push(Diagnostic.error("E0905", "`{name}` needs comparable values", "min/max compare their two arguments", "use Int, Float, String, Char, Bool, or a comparable type", Val(args[0].expr.span())))
+            if args.len() > 1 {
+                if self.infer(&args[1].expr) == .Val(second) {
+                    if second != first -> &self.diags.push(Diagnostic.error("E0112", "`{name}` needs two values of the same type", "min/max compare like with like", type_fix_hint(first, second), Val(args[1].expr.span())))
+                }
+            }
+            return Val(first)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5364
+        ("core.math", "clamp") -> {
+            if args.len() != 3 -> &self.diags.push(wrong_core_arity(name, 3, args.len(), span))
+            first_option := None
+            if args.len() > 0 -> first_option = self.infer(&args[0].expr)
+            first :: first_option ?? {
+                loop i in 1..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            if !types_comparable(first, self.registry) -> &self.diags.push(Diagnostic.error("E0905", "`clamp` needs comparable values", "clamp compares the value with its lower and upper bounds", "use Int, Float, String, Char, Bool, or a comparable type", Val(args[0].expr.span())))
+            loop i in 1..3 {
+                if i < args.len() {
+                    if self.infer(&args[i].expr) == .Val(got) {
+                        if got != first -> &self.diags.push(Diagnostic.error("E0112", "`clamp` needs all three values to have the same type", "the value and both bounds are compared together", type_fix_hint(first, got), Val(args[i].expr.span())))
+                    }
+                }
+            }
+            return Val(first)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5398
+        ("core.math.random", "pick") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return None
+            ty :: self.infer(&args[0].expr) ?? return None
+            if ty == .List(inner) -> return Val(Type.Option{inner: inner})
+            &self.diags.push(Diagnostic.error("E0112", "`pick` needs a list, not {ty.show()}", "random.pick chooses one item from a List", "pass a `[T]` value", Val(args[0].expr.span())))
+            return None
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5418
+        ("core.math.random", "sample") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            if args.len() == 0 {
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            arg_span :: args[0].expr.span()
+            ty :: self.infer(&args[0].expr) ?? return None
+            if args.len() > 1 {
+                if self.infer(&args[1].expr) == .Val(k) {
+                    if !(if k == { .Int | .InlineRange(_, _, _) -> true; else -> false }) {
+                        &self.diags.push(Diagnostic.error("E0112", "`sample` count must be Int, not {k.show()}", "random.sample chooses up to k items without replacement", "pass an Int count", Val(args[1].expr.span())))
+                    }
+                }
+            }
+            if ty == .List(inner) -> return Val(Type.List{element: inner})
+            &self.diags.push(Diagnostic.error("E0112", "`sample` needs a list, not {ty.show()}", "random.sample chooses items from a List", "pass a `[T]` value", Val(arg_span)))
+            return None
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5454
+        ("core.math.random", "weighted_pick") -> {
+            if args.len() != 2 -> &self.diags.push(wrong_core_arity(name, 2, args.len(), span))
+            if args.len() == 0 {
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            items_span :: args[0].expr.span()
+            items_ty :: self.infer(&args[0].expr) ?? return None
+            if args.len() > 1 {
+                weights_ty :: self.infer(&args[1].expr)
+                if weights_ty != Val(Type.List{element: Type.Float}) {
+                    if weights_ty == .Val(got) -> &self.diags.push(Diagnostic.error("E0112", "`weighted_pick` weights must be [Float], not {got.show()}", "random.weighted_pick pairs each item with a non-negative Float weight", "pass a `[Float]` weights list", Val(args[1].expr.span())))
+                }
+            }
+            if items_ty == .List(inner) -> return Val(Type.Option{inner: inner})
+            &self.diags.push(Diagnostic.error("E0112", "`weighted_pick` needs a list, not {items_ty.show()}", "random.weighted_pick chooses one weighted item from a List", "pass a `[T]` value", Val(items_span)))
+            return None
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5492
+        ("core.math.random", "shuffle") -> {
+            if args.len() != 1 -> &self.diags.push(wrong_core_arity(name, 1, args.len(), span))
+            if args.len() == 0 -> return None
+            if args[0].convention != AccessConvention.Write -> &self.diags.push(Diagnostic.error("E0202", "`shuffle` edits its list in place", "the write-access marker `&` is required; pass the list with that marker", "write `random.shuffle(&xs)` with the write-access marker `&`", Val(args[0].span)))
+            ty :: self.infer(&args[0].expr) ?? return None
+            if !(if ty == { .List(_) -> true; else -> false }) -> &self.diags.push(Diagnostic.error("E0112", "`shuffle` needs a list, not {ty.show()}", "random.shuffle reorders a List in place", "pass a `[T]` value", Val(args[0].expr.span())))
+            return None
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5524
+        // files.read has no special diagnostic: the parent continues fixed-sig
+        // inference, rather than returning None from this fragment.
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5528
+        ("core.tasks", "after") -> {
+            if args.len() != 1 && args.len() != 2 {
+                suffix :: if args.len() == 1 -> "" else -> "s"
+                &self.diags.push(Diagnostic.error("E0104", "`tasks.after` takes one Duration and an optional value, got {args.len()} argument{suffix}", "a one-shot timer channel fires after the given Duration", "write `tasks.after(100ms)` or `tasks.after(100ms, fallback)`", Val(span)))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            duration_ty :: self.infer(&args[0].expr) ?? return None
+            if duration_ty != Type.Named{name: "Duration"} -> &self.diags.push(Diagnostic.error("E0112", "`tasks.after(duration: …)` needs a Duration, not {duration_ty.show()}", "timer channels use the canonical Time delta", "write `tasks.after(100ms)`", Val(args[0].expr.span())))
+            elem :: if args.len() == 2 -> self.infer(&args[1].expr) ?? return None else -> Type.Named{name: "Unit"}
+            if self.crossing_problem(elem, SendCrossing.ChannelSend, false) == .Val(problem) {
+                value_span :: if args.len() > 1 -> args[1].expr.span() else -> span
+                self.report_unsendable("timer value", elem, problem, SendCrossing.ChannelSend, value_span)
+            }
+            return Val(Type.Apply{name: "Receiver", args: [elem]})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5582
+        ("core.tasks", "interval") -> {
+            if args.len() != 1 {
+                &self.diags.push(wrong_core_arity("interval", 1, args.len(), span))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            duration_ty :: self.infer(&args[0].expr) ?? return None
+            if duration_ty != Type.Named{name: "Duration"} -> &self.diags.push(Diagnostic.error("E0112", "`tasks.interval(duration: …)` needs a Duration, not {duration_ty.show()}", "interval channels use the canonical Time delta", "write `tasks.interval(1000ms)`", Val(args[0].expr.span())))
+            return Val(Type.Apply{name: "Receiver", args: [Type.Int]})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5609
+        ("core.http", "router") -> {
+            if args.len() != 0 {
+                &self.diags.push(wrong_core_arity("router", 0, args.len(), span))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+            }
+            return Val(Type.Named{name: "HTTPRouter"})
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5620
+        ("core.http", "parse") -> {
+            if args.len() != 1 {
+                &self.diags.push(wrong_core_arity("parse", 1, args.len(), span))
+                loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+                return None
+            }
+            self.expect_core_arg("parse", 0, Type.String, &args[0])
+            return Val(Type.Named{name: "HTTPRequest"})
+        }
+        else -> panic("parent must route only the 0380 arms")
+    }
+}
+
+// The final arm crosses the packet boundary. The next fragment receives the
+// inferred router type, without re-inferring the first argument. False means
+// arity was rejected and the parent must return None, not run the continuation.
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5634
+fn infer_core_call_0380_dispatch_prefix(self: &Checker, span: Span, args: &[CallArg], router_ty: &Type?) -> Bool {
+    if args.len() != 2 {
+        &self.diags.push(wrong_core_arity("dispatch", 2, args.len(), span))
+        loop i in 0..args.len() -> _ :: self.infer(&args[i].expr)
+        return false
+    }
+    router_ty = self.infer(&args[0].expr)
+    true
+}

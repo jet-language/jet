@@ -103,6 +103,14 @@ pub fn walk_imports(module: LoadedModule) -> [LoadedImport] from module {
     loop index in 0..<module.imports.len() {
         &imports.push(LoadedImport{namespace: None, declaration: module.imports[index..<(index + 1)]})
     }
+    aliases := [String:[Int]]{}
+    loop (index, item) in module.items {
+        if item == .ModuleAlias(application) {
+            rows := aliases.get(application.target) ?? [Int]{}
+            &rows.push(index)
+            aliases[application.target] = ^rows
+        }
+    }
     loop item in module.items {
         if item == {
             .CodeModule(code_module) -> loaded_module_code_imports(code_module, &imports)
@@ -110,8 +118,8 @@ pub fn walk_imports(module: LoadedModule) -> [LoadedImport] from module {
                 loop index in 0..<generic_module.imports.len() {
                     &imports.push(LoadedImport{namespace: Val(generic_module.name.after("")), declaration: generic_module.imports[index..<(index + 1)]})
                 }
-                loop alias in module.items {
-                    if alias == .ModuleAlias(application) && application.target == generic_module.name {
+                loop alias_index in aliases.get(generic_module.name) ?? [Int]{} {
+                    if module.items[alias_index] == .ModuleAlias(application) {
                         loop index in 0..<generic_module.imports.len() {
                             &imports.push(LoadedImport{namespace: Val(application.name.after("")), declaration: generic_module.imports[index..<(index + 1)]})
                         }

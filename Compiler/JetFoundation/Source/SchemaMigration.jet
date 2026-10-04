@@ -1,390 +1,185 @@
-// PORT-PENDING 0097 crates-jet-foundation-src-schemamigration-module-group: crates/jet-foundation/src/SchemaMigration.rs:1-386
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Canonical published-schema migration facts and runtime step application.
-//RS //!
-//RS //! Sema/codegen own the plan. Execution tiers only provide callbacks for the
-//RS //! checked synthetic default/converter functions; field movement and receipts
-//RS //! stay here so the interpreter and resident JIT cannot drift.
-//RS 
-//RS use crate::MIR::MirRuntimeValue;
-//RS use std::collections::BTreeSet;
-//RS use std::fmt;
-//RS 
-//RS /// A checked migration chain for one concrete `#PublishedSchema` record.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SchemaMigrationPlan {
-//RS     pub type_name: String,
-//RS     /// Historical wire-key sets, oldest first. The current shape is the
-//RS     /// implicit shape after the final step.
-//RS     pub historical_shapes: Vec<Vec<String>>,
-//RS     pub steps: Vec<SchemaMigrationStep>,
-//RS }
-//RS 
-//RS impl SchemaMigrationPlan {
-//RS     pub fn new(
-//RS         type_name: impl Into<String>,
-//RS         historical_shapes: Vec<Vec<String>>,
-//RS         steps: Vec<SchemaMigrationStep>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             type_name: type_name.into(),
-//RS             historical_shapes,
-//RS             steps,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Number of migration steps, with the current shape after the final step.
-//RS     pub fn current_shape(&self) -> usize {
-//RS         self.steps.len()
-//RS     }
-//RS 
-//RS     /// Apply the chain to a runtime record. The callbacks execute sema-created
-//RS     /// zero-argument defaults and one-argument converters; all key movement,
-//RS     /// shape selection, and receipt construction is shared here.
-//RS     pub fn apply_wire_step<F, G>(
-//RS         &self,
-//RS         value: &MirRuntimeValue,
-//RS         mut default: F,
-//RS         mut convert: G,
-//RS     ) -> Result<SchemaMigrationResult, SchemaMigrationError>
-//RS     where
-//RS         F: FnMut(&str, &str) -> Result<MirRuntimeValue, String>,
-//RS         G: FnMut(&str, &str, &str, &MirRuntimeValue) -> Result<MirRuntimeValue, String>,
-//RS     {
-//RS         let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS             return Err(SchemaMigrationError::NotRecord);
-//RS         };
-//RS         if type_name != &self.type_name {
-//RS             return Err(SchemaMigrationError::TypeMismatch {
-//RS                 expected: self.type_name.clone(),
-//RS                 actual: type_name.clone(),
-//RS             });
-//RS         }
-//RS         let wire_keys = fields
-//RS             .iter()
-//RS             .map(|(key, _)| key.clone())
-//RS             .collect::<BTreeSet<_>>();
-//RS         let current = self.current_shape_keys();
-//RS         let current_shape = self.current_shape_name();
-//RS         if wire_keys == current {
-//RS             return Ok(SchemaMigrationResult {
-//RS                 value: value.clone(),
-//RS                 receipt: SchemaMigrationReceipt::kept(&self.type_name, &current_shape),
-//RS             });
-//RS         }
-//RS         let Some(start) = self
-//RS             .historical_shapes
-//RS             .iter()
-//RS             .position(|shape| shape.iter().cloned().collect::<BTreeSet<_>>() == wire_keys)
-//RS         else {
-//RS             return Err(SchemaMigrationError::UnknownShape {
-//RS                 type_name: self.type_name.clone(),
-//RS                 keys: wire_keys.into_iter().collect(),
-//RS             });
-//RS         };
-//RS         let mut fields = fields
-//RS             .iter()
-//RS             .cloned()
-//RS             .collect::<std::collections::BTreeMap<_, _>>();
-//RS         let from_shape = self
-//RS             .steps
-//RS             .get(start)
-//RS             .map(|step| step.from_shape.clone())
-//RS             .or_else(|| self.historical_shape_name(start))
-//RS             .unwrap_or_else(|| current_shape.clone());
-//RS         let mut receipt =
-//RS             SchemaMigrationReceipt::migrated(&self.type_name, &from_shape, &current_shape);
-//RS         for (index, step) in self.steps.iter().enumerate().skip(start) {
-//RS             for op in &step.ops {
-//RS                 match op {
-//RS                     SchemaMigrationOp::Rename { from_key, to_key } => {
-//RS                         let Some(old) = fields.remove(from_key) else {
-//RS                             return Err(SchemaMigrationError::MissingField {
-//RS                                 step: step.name(),
-//RS                                 field: from_key.clone(),
-//RS                             });
-//RS                         };
-//RS                         if fields.contains_key(to_key) {
-//RS                             return Err(SchemaMigrationError::DuplicateField {
-//RS                                 step: step.name(),
-//RS                                 field: to_key.clone(),
-//RS                             });
-//RS                         }
-//RS                         fields.insert(to_key.clone(), old);
-//RS                         receipt.swapped.push(format!("{from_key}->{to_key}"));
-//RS                         receipt.migrated.push(to_key.clone());
-//RS                     }
-//RS                     SchemaMigrationOp::Remove { key } => {
-//RS                         if fields.remove(key).is_none() {
-//RS                             return Err(SchemaMigrationError::MissingField {
-//RS                                 step: step.name(),
-//RS                                 field: key.clone(),
-//RS                             });
-//RS                         }
-//RS                         receipt.migrated.push(key.clone());
-//RS                     }
-//RS                     SchemaMigrationOp::Add {
-//RS                         key,
-//RS                         type_name,
-//RS                         default_fn,
-//RS                     } => {
-//RS                         if fields.contains_key(key) {
-//RS                             return Err(SchemaMigrationError::DuplicateField {
-//RS                                 step: step.name(),
-//RS                                 field: key.clone(),
-//RS                             });
-//RS                         }
-//RS                         let value = default(default_fn, type_name).map_err(|detail| {
-//RS                             SchemaMigrationError::Callback {
-//RS                                 step: step.name(),
-//RS                                 field: key.clone(),
-//RS                                 detail,
-//RS                             }
-//RS                         })?;
-//RS                         fields.insert(key.clone(), value);
-//RS                         receipt.migrated.push(key.clone());
-//RS                     }
-//RS                     SchemaMigrationOp::Change {
-//RS                         key,
-//RS                         from_type,
-//RS                         to_type,
-//RS                         converter_fn,
-//RS                     } => {
-//RS                         let old = fields.get(key).ok_or_else(|| SchemaMigrationError::MissingField {
-//RS                             step: step.name(),
-//RS                             field: key.clone(),
-//RS                         })?;
-//RS                         let value = convert(converter_fn, from_type, to_type, old).map_err(|detail| {
-//RS                             SchemaMigrationError::Callback {
-//RS                                 step: step.name(),
-//RS                                 field: key.clone(),
-//RS                                 detail,
-//RS                             }
-//RS                         })?;
-//RS                         fields.insert(key.clone(), value);
-//RS                         receipt.migrated.push(key.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if index + 1 == self.steps.len() {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         receipt.kept = fields
-//RS             .keys()
-//RS             .filter(|key| !receipt.migrated.iter().any(|migrated| migrated == *key))
-//RS             .cloned()
-//RS             .collect();
-//RS         Ok(SchemaMigrationResult {
-//RS             value: MirRuntimeValue::Struct {
-//RS                 type_name: type_name.clone(),
-//RS                 fields: fields.into_iter().collect(),
-//RS             },
-//RS             receipt,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn current_shape_keys(&self) -> BTreeSet<String> {
-//RS         let mut keys = self
-//RS             .historical_shapes
-//RS             .first()
-//RS             .cloned()
-//RS             .unwrap_or_default()
-//RS             .into_iter()
-//RS             .collect::<BTreeSet<_>>();
-//RS         for step in &self.steps {
-//RS             for op in &step.ops {
-//RS                 match op {
-//RS                     SchemaMigrationOp::Rename { from_key, to_key } => {
-//RS                         keys.remove(from_key);
-//RS                         keys.insert(to_key.clone());
-//RS                     }
-//RS                     SchemaMigrationOp::Remove { key } => {
-//RS                         keys.remove(key);
-//RS                     }
-//RS                     SchemaMigrationOp::Add { key, .. } => {
-//RS                         keys.insert(key.clone());
-//RS                     }
-//RS                     SchemaMigrationOp::Change { .. } => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         keys
-//RS     }
-//RS 
-//RS     fn historical_shape_name(&self, index: usize) -> Option<String> {
-//RS         self.steps
-//RS             .get(index)
-//RS             .map(|step| step.from_shape.clone())
-//RS             .or_else(|| Some(format!("v{}", index + 1)))
-//RS     }
-//RS 
-//RS     pub fn current_shape_name(&self) -> String {
-//RS         self.steps
-//RS             .last()
-//RS             .map(|step| step.to_shape.clone())
-//RS             .unwrap_or_else(|| "current".to_string())
-//RS     }
-//RS }
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SchemaMigrationStep {
-//RS     pub from_shape: String,
-//RS     pub to_shape: String,
-//RS     pub ops: Vec<SchemaMigrationOp>,
-//RS }
-//RS 
-//RS impl SchemaMigrationStep {
-//RS     pub fn new(
-//RS         from_shape: impl Into<String>,
-//RS         to_shape: impl Into<String>,
-//RS         ops: Vec<SchemaMigrationOp>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             from_shape: from_shape.into(),
-//RS             to_shape: to_shape.into(),
-//RS             ops,
-//RS         }
-//RS     }
-//RS 
-//RS     fn name(&self) -> String {
-//RS         format!("{}->{}", self.from_shape, self.to_shape)
-//RS     }
-//RS }
-//RS 
-//RS /// A wire-key operation. Function names are checked synthetic functions, not
-//RS /// source text; the tier callback resolves them through its canonical program.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum SchemaMigrationOp {
-//RS     Rename {
-//RS         from_key: String,
-//RS         to_key: String,
-//RS     },
-//RS     Remove {
-//RS         key: String,
-//RS     },
-//RS     Add {
-//RS         key: String,
-//RS         type_name: String,
-//RS         default_fn: String,
-//RS     },
-//RS     Change {
-//RS         key: String,
-//RS         from_type: String,
-//RS         to_type: String,
-//RS         converter_fn: String,
-//RS     },
-//RS }
-//RS 
-//RS /// Shared result of applying a migration chain.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct SchemaMigrationResult {
-//RS     pub value: MirRuntimeValue,
-//RS     pub receipt: SchemaMigrationReceipt,
-//RS }
-//RS 
-//RS /// Human-readable, machine-stable migration accounting. `swapped` is only
-//RS /// rename work; `kept` is untouched data; `migrated` is actual step work;
-//RS /// `restarting` is populated by an adapter when the chain cannot be applied.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SchemaMigrationReceipt {
-//RS     pub type_name: String,
-//RS     pub from_shape: String,
-//RS     pub to_shape: String,
-//RS     pub swapped: Vec<String>,
-//RS     pub kept: Vec<String>,
-//RS     pub migrated: Vec<String>,
-//RS     pub restarting: Option<String>,
-//RS }
-//RS 
-//RS impl SchemaMigrationReceipt {
-//RS     pub fn kept(type_name: &str, shape: &str) -> Self {
-//RS         Self {
-//RS             type_name: type_name.to_string(),
-//RS             from_shape: shape.to_string(),
-//RS             to_shape: shape.to_string(),
-//RS             swapped: Vec::new(),
-//RS             kept: Vec::new(),
-//RS             migrated: Vec::new(),
-//RS             restarting: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn migrated(type_name: &str, from: &str, to: &str) -> Self {
-//RS         Self {
-//RS             type_name: type_name.to_string(),
-//RS             from_shape: from.to_string(),
-//RS             to_shape: to.to_string(),
-//RS             swapped: Vec::new(),
-//RS             kept: Vec::new(),
-//RS             migrated: Vec::new(),
-//RS             restarting: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn restarting(type_name: &str, reason: impl Into<String>) -> Self {
-//RS         Self {
-//RS             type_name: type_name.to_string(),
-//RS             from_shape: String::new(),
-//RS             to_shape: String::new(),
-//RS             swapped: Vec::new(),
-//RS             kept: Vec::new(),
-//RS             migrated: Vec::new(),
-//RS             restarting: Some(reason.into()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Why one typed migration could not be applied. An adapter must convert this
-//RS /// into a restart receipt rather than silently dropping the resident value.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum SchemaMigrationError {
-//RS     NotRecord,
-//RS     TypeMismatch {
-//RS         expected: String,
-//RS         actual: String,
-//RS     },
-//RS     UnknownShape {
-//RS         type_name: String,
-//RS         keys: Vec<String>,
-//RS     },
-//RS     MissingField {
-//RS         step: String,
-//RS         field: String,
-//RS     },
-//RS     DuplicateField {
-//RS         step: String,
-//RS         field: String,
-//RS     },
-//RS     Callback {
-//RS         step: String,
-//RS         field: String,
-//RS         detail: String,
-//RS     },
-//RS }
-//RS 
-//RS impl fmt::Display for SchemaMigrationError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::NotRecord => formatter.write_str("published-schema value is not a record"),
-//RS             Self::TypeMismatch { expected, actual } => {
-//RS                 write!(formatter, "published-schema type `{actual}` does not match `{expected}`")
-//RS             }
-//RS             Self::UnknownShape { type_name, keys } => {
-//RS                 write!(formatter, "published-schema `{type_name}` has unknown wire keys {keys:?}")
-//RS             }
-//RS             Self::MissingField { step, field } => {
-//RS                 write!(formatter, "migration {step} needs wire field `{field}`")
-//RS             }
-//RS             Self::DuplicateField { step, field } => {
-//RS                 write!(formatter, "migration {step} would duplicate wire field `{field}`")
-//RS             }
-//RS             Self::Callback { step, field, detail } => {
-//RS                 write!(formatter, "migration {step} failed for `{field}`: {detail}")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for SchemaMigrationError {}
-// END-PORT-PENDING 0097 crates/jet-foundation/src/SchemaMigration.rs:1-386
-
+// Canonical published-schema facts and shared runtime step application.
+use jet_foundation.MIR.[MIRRuntimeValue, MIRRuntimeField]
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:13
+pub struct SchemaMigrationPlan { pub type_name: String, pub historical_shapes: [[String]], pub steps: [SchemaMigrationStep] }
+impl SchemaMigrationPlan {
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:22
+    pub fn new(type_name: ^String, historical_shapes: ^[[String]], steps: ^[SchemaMigrationStep]) -> SchemaMigrationPlan Never! {
+        SchemaMigrationPlan{type_name: ^type_name, historical_shapes: ^historical_shapes, steps: ^steps}
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:35
+    pub fn current_shape(self) -> Int Never! { self.steps.len() }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:42
+    pub fn apply_wire_step(self, value: MIRRuntimeValue, default: &(String, String) -> MIRRuntimeValue Err!, convert: &(String, String, String, MIRRuntimeValue) -> MIRRuntimeValue Err!) -> SchemaMigrationResult SchemaMigrationError! {
+        (type_name, input) :: if value == {
+            .Struct(type_name, fields) -> (type_name, fields)
+            else -> return Err(SchemaMigrationError.NotRecord)
+        }
+        if type_name != self.type_name -> return Err(SchemaMigrationError.TypeMismatch{expected: ~self.type_name, actual: ~type_name})
+        wire_keys := [String:Bool]{}
+        loop field in input -> wire_keys[~field.name] = true
+        current :: self.current_shape_keys()
+        current_shape :: self.current_shape_name()
+        if wire_keys == current -> return Ok(SchemaMigrationResult{value: ~value, receipt: SchemaMigrationReceipt.kept(self.type_name, current_shape)})
+        start := Int?{None}
+        loop index in 0..<self.historical_shapes.len() {
+            shape := [String:Bool]{}
+            loop key in self.historical_shapes[index] -> shape[~key] = true
+            if shape == wire_keys { start = Val(index); break }
+        }
+        first :: start ?? {
+            keys := wire_keys.keys().to_list()
+            &keys.sort()
+            return Err(SchemaMigrationError.UnknownShape{type_name: ~self.type_name, keys: ^keys})
+        }
+        fields := [String:MIRRuntimeValue]{}
+        loop field in input -> fields[~field.name] = ~field.value
+        from_shape :: if self.steps.get(first) == {
+            .Val(step) -> ~step.from_shape
+            else -> self.historical_shape_name(first) ?? ~current_shape
+        }
+        receipt := SchemaMigrationReceipt.migrated(self.type_name, from_shape, current_shape)
+        loop index in first..<self.steps.len() {
+            step :: self.steps[index]
+            loop op in step.ops {
+                if op == {
+                    .Rename(from_key, to_key) -> {
+                        old :: &fields.remove(from_key) ?? return Err(SchemaMigrationError.MissingField{step: step.name(), field: ~from_key})
+                        if fields.has_key(to_key) -> return Err(SchemaMigrationError.DuplicateField{step: step.name(), field: ~to_key})
+                        fields[~to_key] = ^old
+                        &receipt.swapped.push("{from_key}->{to_key}")
+                        &receipt.migrated.push(~to_key)
+                    }
+                    .Remove(key) -> {
+                        if &fields.remove(key) == None -> return Err(SchemaMigrationError.MissingField{step: step.name(), field: ~key})
+                        &receipt.migrated.push(~key)
+                    }
+                    .Add(key, type_name, default_fn) -> {
+                        if fields.has_key(key) -> return Err(SchemaMigrationError.DuplicateField{step: step.name(), field: ~key})
+                        added :: if default(default_fn, type_name) == {
+                            .Ok(result) -> ^result
+                            .Err(detail) -> return Err(SchemaMigrationError.Callback{step: step.name(), field: ~key, detail: ^detail})
+                        }
+                        fields[~key] = ^added
+                        &receipt.migrated.push(~key)
+                    }
+                    .Change(key, from_type, to_type, converter_fn) -> {
+                        old :: fields.get(key) ?? return Err(SchemaMigrationError.MissingField{step: step.name(), field: ~key})
+                        changed :: if convert(converter_fn, from_type, to_type, old) == {
+                            .Ok(result) -> ^result
+                            .Err(detail) -> return Err(SchemaMigrationError.Callback{step: step.name(), field: ~key, detail: ^detail})
+                        }
+                        fields[~key] = ^changed
+                        &receipt.migrated.push(~key)
+                    }
+                }
+            }
+            if index + 1 == self.steps.len() -> break
+        }
+        names := fields.keys().to_list()
+        &names.sort()
+        migrated := [String:Bool]{}
+        loop key in receipt.migrated -> migrated[~key] = true
+        rows := [MIRRuntimeField]{}
+        loop key in names {
+            if !migrated.has_key(key) -> &receipt.kept.push(~key)
+            &rows.push(MIRRuntimeField{name: ~key, value: &fields.remove(key).expect("indexed migration key")})
+        }
+        Ok(SchemaMigrationResult{value: MIRRuntimeValue.Struct{type_name: ~type_name, fields: ^rows}, receipt: ^receipt})
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:185
+    pub fn current_shape_keys(self) -> [String:Bool] Never! {
+        keys := [String:Bool]{}
+        if self.historical_shapes.first() == .Val(shape) { loop key in shape -> keys[~key] = true }
+        loop step in self.steps {
+            loop op in step.ops {
+                if op == {
+                    .Rename(from_key, to_key) -> { _ :: &keys.remove(from_key); keys[~to_key] = true }
+                    .Remove(key) -> _ :: &keys.remove(key)
+                    .Add(key, _, _) -> keys[~key] = true
+                    .Change(_, _, _, _) -> {}
+                }
+            }
+        }
+        ^keys
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:213
+    fn historical_shape_name(self, index: Int) -> String? Never! {
+        if self.steps.get(index) == { .Val(step) -> Val(~step.from_shape) else -> Val("v{index + 1}") }
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:220
+    pub fn current_shape_name(self) -> String Never! {
+        if self.steps.last() == { .Val(step) -> ~step.to_shape else -> "current" }
+    }
+}
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:228
+pub struct SchemaMigrationStep { pub from_shape: String, pub to_shape: String, pub ops: [SchemaMigrationOp] }
+impl SchemaMigrationStep {
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:235
+    pub fn new(from_shape: ^String, to_shape: ^String, ops: ^[SchemaMigrationOp]) -> SchemaMigrationStep Never! { SchemaMigrationStep{from_shape: ^from_shape, to_shape: ^to_shape, ops: ^ops} }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:247
+    fn name(self) -> String Never! { "{self.from_shape}->{self.to_shape}" }
+}
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:254
+pub enum SchemaMigrationOp {
+    Rename(from_key: String, to_key: String)
+    Remove(key: String)
+    Add(key: String, type_name: String, default_fn: String)
+    Change(key: String, from_type: String, to_type: String, converter_fn: String)
+}
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:278
+pub struct SchemaMigrationResult { pub value: MIRRuntimeValue, pub receipt: SchemaMigrationReceipt }
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:287
+pub struct SchemaMigrationReceipt {
+    pub type_name: String, pub from_shape: String, pub to_shape: String,
+    pub swapped: [String], pub kept: [String], pub migrated: [String], pub restarting: String?
+}
+impl SchemaMigrationReceipt {
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:298
+    pub fn kept(type_name: String, shape: String) -> SchemaMigrationReceipt Never! {
+        SchemaMigrationReceipt{type_name: ~type_name, from_shape: ~shape, to_shape: ~shape, swapped: [], kept: [], migrated: [], restarting: None}
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:310
+    pub fn migrated(type_name: String, from: String, to: String) -> SchemaMigrationReceipt Never! {
+        SchemaMigrationReceipt{type_name: ~type_name, from_shape: ~from, to_shape: ~to, swapped: [], kept: [], migrated: [], restarting: None}
+    }
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:322
+    pub fn restarting(type_name: String, reason: ^String) -> SchemaMigrationReceipt Never! {
+        SchemaMigrationReceipt{type_name: ~type_name, from_shape: "", to_shape: "", swapped: [], kept: [], migrated: [], restarting: Val(^reason)}
+    }
+}
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:338
+#Error
+pub enum SchemaMigrationError {
+    NotRecord
+    TypeMismatch(expected: String, actual: String)
+    UnknownShape(type_name: String, keys: [String])
+    MissingField(step: String, field: String)
+    DuplicateField(step: String, field: String)
+    Callback(step: String, field: String, detail: String)
+}
+impl SchemaMigrationError {
+    // Rust: crates/jet-foundation/src/SchemaMigration.rs:364
+    pub fn display(self) -> String Never! {
+        if self == {
+            .NotRecord -> "published-schema value is not a record"
+            .TypeMismatch(expected, actual) -> "published-schema type `{actual}` does not match `{expected}`"
+            .UnknownShape(type_name, keys) -> {
+                rendered := [U8]{91}
+                loop index in 0..<keys.len() {
+                    if index > 0 { &rendered.push(U8{44}); &rendered.push(U8{32}) }
+                    // GATE #4499: canonical Rust string Debug escaping.
+                    core.text.runtime.kernel_escape_debug.debug_str_into(&rendered, keys[index])
+                }
+                &rendered.push(U8{93})
+                names :: String.from_bytes(^rendered).expect("debug escape emits UTF-8")
+                "published-schema `{type_name}` has unknown wire keys {names}"
+            }
+            .MissingField(step, field) -> "migration {step} needs wire field `{field}`"
+            .DuplicateField(step, field) -> "migration {step} would duplicate wire field `{field}`"
+            .Callback(step, field, detail) -> "migration {step} failed for `{field}`: {detail}"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/SchemaMigration.rs:386
+// std::error::Error is carried by #Error on SchemaMigrationError.

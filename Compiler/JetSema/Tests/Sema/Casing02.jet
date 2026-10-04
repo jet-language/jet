@@ -1,0 +1,69 @@
+use jet_foundation.[Diagnostic, Expr, PatSlot, Pattern, PrepParam, Span, TypeParam]
+use JetSema.Sema.Casing02.[check, pascal, pattern_names, screaming, slot_names, snake, type_parameter]
+
+// Rust: crates/jet-sema/src/Sema/Casing.rs:61-93 (behavioral control; no inline Rust tests)
+#Test("generated_and_reserved_casing_names_have_no_rename_site") {
+    out := [Diagnostic]{}
+    check("MixedName", Span{start: 4, end: 4}, "local", &out)
+    check("__compilerName", Span{start: 4, end: 18}, "local", &out)
+    check("", Span{start: 1, end: 2}, "local", &out)
+    assert(out.is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/Casing.rs:61-93 (behavioral control)
+#Test("casing_error_retains_category_message_and_authored_span") {
+    span :: Span{start: 8, end: 17}
+    out := [Diagnostic]{}
+    snake("MixedName", span, "local", &out)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].code, "E0357")
+    assert_eq(out[0].what, "local `MixedName` must be snake_case")
+    assert_eq(out[0].fix, "rename it to `mixed_name`")
+    assert_eq(out[0].span, .Val(span))
+    assert(out[0].why.contains("D-SHAPE-CASE1"))
+}
+// Rust: crates/jet-sema/src/Sema/Casing.rs:123-140,284-290 (behavioral control)
+#Test("qualified_module_constants_and_variables_use_distinct_categories") {
+    span :: Span{start: 0, end: 30}
+    out := [Diagnostic]{}
+    screaming("MAX_COUNT.OTHER-VALUE", span, "constant", &out)
+    snake("mutable_value.other-slot", span, "module variable", &out)
+    assert(out.is_empty())
+    snake("ALL_CAPS", span, "module variable", &out)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].what, "module variable `ALL_CAPS` must be snake_case")
+}
+// Rust: crates/jet-sema/src/Sema/Casing.rs:95-120 (behavioral control)
+#Test("acronym_casing_checks_whole_qualified_authored_name") {
+    out := [Diagnostic]{}
+    span :: Span{start: 5, end: 20}
+    pascal("MirType.HTTPHeader", span, "struct", &out)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].span, .Val(span))
+    assert(out[0].fix.contains("MIRType.HTTPHeader"))
+    &out.clear()
+    pascal("MIRType.HTTPHeader", span, "struct", &out)
+    assert(out.is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/Casing.rs:148-158 (behavioral control)
+#Test("prep_type_parameter_is_rejected_before_casing") {
+    span :: Span{start: 6, end: 10}
+    param :: TypeParam{name: "bad_name", name_span: span, bounds: [], prep: .Val(PrepParam{prep_span: Span{start: 0, end: 4}, value_type: "Int", value_type_span: Span{start: 12, end: 15}})}
+    out := [Diagnostic]{}
+    type_parameter(param, &out)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].code, "E0390")
+    assert_eq(out[0].span, .Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/Casing.rs:595-667 (behavioral control)
+#Test("nested_named_pattern_slots_only_check_payload_bindings") {
+    span :: Span{start: 10, end: 19}
+    slot :: PatSlot.Named("ForeignField", Span{start: 0, end: 9}, .Nested(.Ok("outerIgnored", Span{start: 0, end: 9}, .Val(.Present("BadBinding", span, None, span)), span)))
+    out := [Diagnostic]{}
+    slot_names(slot, &out)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].what, "pattern binding `BadBinding` must be snake_case")
+    assert_eq(out[0].span, .Val(span))
+    &out.clear()
+    pattern_names(.Or([.Absent(span), .Range(0, 1, span), .Variant("ForeignCase", [.Wildcard, .Rest(span), .Bind("good_binding", span)], true, span)], span), &out)
+    assert(out.is_empty())
+}

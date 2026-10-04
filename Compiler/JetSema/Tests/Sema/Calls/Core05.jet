@@ -1,0 +1,29 @@
+use JetSema.Sema.Calls.Core.[is_polymorphic_core_special, core_fixed_sig, core_call_semantic_signature, core_call_surface_signature, core_call_is_fallible, core_call_has_safe_defaults]
+use jet_foundation.[AccessConvention, Type]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:12-205 (behavioral control; no inline Rust tests)
+#Test("polymorphic_core_specials_do_not_acquire_fixed_rows") {
+    assert(is_polymorphic_core_special("core.math", "sqrt"))
+    assert(is_polymorphic_core_special("core.web.table", "new_keyed"))
+    assert(is_polymorphic_core_special("core.text", "display_width"))
+    assert(!is_polymorphic_core_special("core.io", "input"))
+    assert(core_fixed_sig("core.math", "sqrt") == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:224-248 (behavioral control)
+#Test("unknown_core_call_does_not_project_to_unit") {
+    assert(core_call_semantic_signature("core.unknown", "not_registered") == None)
+    assert(core_call_surface_signature("core.unknown", "not_registered") == None)
+    assert(!core_call_is_fallible("core.unknown", "not_registered"))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:252-370 (behavioral control)
+#Test("surface_defaults_and_fallibility_preserve_encoding_scope") {
+    assert(core_call_has_safe_defaults("core.math", "sqrt"))
+    assert(core_call_has_safe_defaults("core.encoding.json", "decode"))
+    assert(core_call_has_safe_defaults("core.encoding.base64", "urlsafe_b64decode"))
+    assert(!core_call_has_safe_defaults("core.encoding.yaml", "decode"))
+    assert(!core_call_has_safe_defaults("core.encoding.json", "to_string"))
+    assert(core_call_is_fallible("core.encoding.json", "decode"))
+    assert(!core_call_is_fallible("core.math", "sqrt"))
+}

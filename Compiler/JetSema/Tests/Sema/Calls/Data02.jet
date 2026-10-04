@@ -1,0 +1,37 @@
+use jet_foundation.[Type, Span, VariantPayload]
+use jet_sema.[core_must_use_type, core_single_use_type, email_method_return, core_task_failure_variants, core_type_known, core_struct_field, data_tree_object_pairs_ty, result_ty]
+use jet_syntax as Syntax
+
+// Behavioral controls for crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:13-2186.
+#Test("core_handle_obligations") {
+    assert(core_must_use_type("ScopeGuard"))
+    assert(core_must_use_type("Iter"))
+    assert(core_must_use_type("Delivery"))
+    assert(!core_must_use_type("TransactionGuard"))
+    assert(core_single_use_type("Delivery"))
+    assert(!core_single_use_type("Task"))
+}
+#Test("email_method_exact_arity") {
+    message :: Type.Named("Message")
+    assert(email_method_return(&message, "envelope", 0) == Val(Val(Type.Named("Envelope"))))
+    assert(email_method_return(&message, "envelope", 1) == None)
+    assert(email_method_return(&message, "with_envelope", 1) == Val(Val(result_ty(Type.Named("Message"), Type.Named("EmailError")))))
+}
+#Test("task_failure_closed_payloads") {
+    variants :: core_task_failure_variants(Syntax.TYPE_TASK_FAILURE).unwrap()
+    zero :: Span.new(0, 0)
+    assert(variants.len() == 3)
+    assert(variants["Cancelled"] == (zero, VariantPayload.Unit))
+    assert(variants["DeadlineBlown"] == (zero, VariantPayload.Unit))
+    assert(variants["Panicked"] == (zero, VariantPayload.Single(Type.String, zero)))
+    assert(core_task_failure_variants("Other") == None)
+}
+#Test("core_record_field_contracts") {
+    assert(core_type_known("DataTree"))
+    assert(!core_type_known("NotACoreType"))
+    assert(core_struct_field("CompilerChecked", "semantic_index") == Val(Type.Option(Type.Named("CompilerSemanticIndex"))))
+    assert(core_struct_field("CSVRow", "fields") == Val(Type.List(Type.String)))
+    assert(core_struct_field("CSVRow", "missing") == None)
+    assert(core_struct_field("ProcessChild", "terminal") == Val(Type.Option(Type.Named(Syntax.TYPE_TERMINAL_SESSION))))
+    assert(data_tree_object_pairs_ty() == Type.List(Type.Tuple([("key", Type.String), ("value", Type.Named(Syntax.TYPE_DATA))])))
+}

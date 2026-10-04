@@ -1,23 +1,10 @@
 // The Loader owner is shared by every graph snapshot. Callable locations are
 // indices of its actual AST, not another function store or a publication replay.
-use core.files.runtime.kernel_path_components as retained_ast_path
-use jet_foundation.[BuildFactSnapshot, Func, Item, LoadedModule, MIRTargetMachine, MIROSTarget, Program, ProgramBundle, Span, SymbolID, SymbolKind, TFuncKind, Diagnostic, foundation_member_name, symbol_id]
-
+use jet_foundation.[Func, Item, ProgramBundle, Span, SymbolID, SymbolKind, TFuncKind, Diagnostic, foundation_member_name, symbol_id]
 struct SemaRetainedFunctionLocation { module: Int, path: [Int], method: Int?, trait_block: Int? }
-fn sema_retained_input_owner(inputs: [SemaRegistrationModuleInput], target: MIRTargetMachine, facts: SemaBuildFacts, canonical: String) -> Shared<ProgramBundle> Never! {
+fn sema_retained_input_owner(inputs: [SemaRegistrationModuleInput]) -> Shared<ProgramBundle> Never! {
     loop input in inputs { if input.bundle_owner == .Val(owner) -> return owner }
-    // Pure declaration clients supply parsed Programs and explicit target/build
-    // facts. This is their original owner; native Driver never uses this path.
-    os :: if facts.os == { "linux" -> MIROSTarget.Linux; "macos" -> MIROSTarget.MacOS; "windows" -> MIROSTarget.Windows; else -> panic("parsed graph inputs omitted their explicit OS fact") }
-    platform :: if os == MIROSTarget.Windows -> retained_ast_path.PathPlatform.Windows else -> retained_ast_path.PathPlatform.Unix
-    root :: if inputs.len() > 0 -> retained_ast_path.parent(retained_ast_path.from_text(inputs[0].source_file, platform)) ?? retained_ast_path.from_text(".", platform) else -> retained_ast_path.from_text(".", platform)
-    bundle := ProgramBundle.new(root, os, facts.snapshot ?? BuildFactSnapshot.for_host(os, target.triple), "2028")
-    loop input in inputs {
-        if input.module_identity == canonical -> next
-        program := input.program
-        &bundle.modules.push(LoadedModule.from_program(retained_ast_path.from_text(input.source_file, platform), input.source_file, input.unit_source, input.module_name, ^program))
-    }
-    shared ^bundle
+    panic("semantic checking requires the original ProgramBundle owner")
 }
 fn sema_retained_bind_input_owner(inputs: &[SemaRegistrationModuleInput], owner: Shared<ProgramBundle>, canonical: String) Never! {
     permit :: owner.guard_read()

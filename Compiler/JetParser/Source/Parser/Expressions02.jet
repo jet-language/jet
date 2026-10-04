@@ -1,1170 +1,230 @@
-// PORT-PENDING 0322 crates-jet-parser-src-parser-expressions-binary-unary: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1-1166
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{
-//RS     leading_dot_variant, pat_span, BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span,
-//RS     Stmt, StrTokPart, Syntax, TokKind, UnOp,
-//RS };
-//RS 
-//RS fn is_fallback_exit(stmt: &Stmt) -> bool {
-//RS     crate::Parser::statement_definitely_exits_value_block(stmt)
-//RS }
-//RS 
-//RS /// D-SHAPE-PLACE1=A / D-CAP-RECEIVER1=D: a `&` or `^` mark binds the maximal
-//RS /// place after it — one name plus fields, indexes, or ranges — and never a
-//RS /// call result. Before a place-rooted method chain it binds the place the
-//RS /// first call receives (`&buf.grow().len()` marks `buf` for `grow`); on a
-//RS /// bare place it is the whole place (`&values[0..1]`).
-//RS pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess, start: usize) -> Expr {
-//RS     match expr {
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             method_span,
-//RS             owner_type_args,
-//RS             type_args,
-//RS             args,
-//RS             recv_type,
-//RS             resolved_ret,
-//RS             operator_rhs,
-//RS             checked_widen,
-//RS         } => Expr::MethodCall {
-//RS             receiver: Box::new(mark_at_maximal_place(*receiver, access, start)),
-//RS             method,
-//RS             method_span,
-//RS             owner_type_args,
-//RS             type_args,
-//RS             args,
-//RS             recv_type,
-//RS             resolved_ret,
-//RS             operator_rhs,
-//RS             checked_widen,
-//RS         },
-//RS         Expr::Field(base, member, span) if contains_method_call(&base) => {
-//RS             Expr::Field(Box::new(mark_at_maximal_place(*base, access, start)), member, span)
-//RS         }
-//RS         Expr::Index {
-//RS             base,
-//RS             index,
-//RS             span,
-//RS             kind,
-//RS         } if contains_method_call(&base) => Expr::Index {
-//RS             base: Box::new(mark_at_maximal_place(*base, access, start)),
-//RS             index,
-//RS             span,
-//RS             kind,
-//RS         },
-//RS         Expr::Slice {
-//RS             base,
-//RS             start: slice_start,
-//RS             end,
-//RS             range,
-//RS             span,
-//RS         } if contains_method_call(&base) => Expr::Slice {
-//RS             base: Box::new(mark_at_maximal_place(*base, access, start)),
-//RS             start: slice_start,
-//RS             end,
-//RS             range,
-//RS             span,
-//RS         },
-//RS         place => {
-//RS             let span = Span::new(start, place.span().end);
-//RS             Expr::Place(Box::new(place), access, span)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// True when a projection chain passes through a method call, so a leading
-//RS /// mark belongs to the place that call receives rather than to the chain.
-//RS pub(super) fn contains_method_call(expr: &Expr) -> bool {
-//RS     match expr {
-//RS         Expr::MethodCall { .. } => true,
-//RS         Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
-//RS             contains_method_call(base)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// D-CONC-SHARE1=A: decide whether `shared` opens a shared-cell construction
-//RS /// (`shared expr`) or is an ordinary identifier. The keyword is contextual, so
-//RS /// this is a closed allow-list of tokens that begin the constructed value —
-//RS /// a name, a literal, a list/typed literal, or an inferred brace literal. Anything
-//RS /// else (a binding sigil, an operator, a `.`, a separator, a call `(`) leaves
-//RS /// `shared` as a plain name, which keeps existing bindings and arguments
-//RS /// spelled `shared` legal.
-//RS pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
-//RS     matches!(
-//RS         kind,
-//RS         TokKind::Ident(_)
-//RS             | TokKind::Int(..)
-//RS             | TokKind::Float(..)
-//RS             | TokKind::UnitNumber { .. }
-//RS             | TokKind::RawStr(_)
-//RS             | TokKind::Str(_)
-//RS             | TokKind::Char(_)
-//RS             | TokKind::KwTrue
-//RS             | TokKind::KwFalse
-//RS             | TokKind::KwSelf
-//RS             | TokKind::LBracket
-//RS             | TokKind::LBrace
-//RS     )
-//RS }
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
-//RS     pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_range(allow_struct_lit)?;
-//RS         loop {
-//RS             match &self.peek().kind {
-//RS                 TokKind::QuestionQuestion => {}
-//RS                 // S71 (D-SG6): the retired word `or` — teach `??`, then recover.
-//RS                 TokKind::Ident(n) if false && n == Syntax::FOREIGN_OR_FALLBACK => {
-//RS                     let span = self.peek().span;
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0045",
-//RS                             "Jet writes the fallback as `??`, not `or`".to_string(),
-//RS                             "`??` supplies a value when a `T?` is absent or a `T E!` failed — `count ?? 0`, `read() ?? return`"
-//RS                                 .to_string(),
-//RS                             "replace `or` with `??`".to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 _ => break,
-//RS             }
-//RS             let op_span = self.bump().span;
-//RS             let fallback = self.parse_or_fallback(allow_struct_lit)?;
-//RS             let end = match &fallback {
-//RS                 OrFallback::Value(e) => e.span().end,
-//RS                 OrFallback::Block { span, .. } => span.end,
-//RS                 OrFallback::Return(_, s) => s.end,
-//RS                 OrFallback::Panic { name_span, .. } => name_span.end,
-//RS                 OrFallback::Break(s)
-//RS                 | OrFallback::Continue(s)
-//RS                 | OrFallback::BreakLabel(_, s)
-//RS                 | OrFallback::ContinueLabel(_, s) => s.end,
-//RS             };
-//RS             let span = Span::new(lhs.span().start, end.max(op_span.end));
-//RS             lhs = Expr::OrFallback {
-//RS                 value: Box::new(lhs),
-//RS                 fallback,
-//RS                 is_option: false,
-//RS                 span,
-//RS             };
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     fn parse_or_fallback(&mut self, allow_struct_lit: bool) -> Result<OrFallback, Diagnostic> {
-//RS         // D-LIT-DOT1: a field-led bare brace is a record literal. Keep
-//RS         // statement-shaped braces as fallback blocks.
-//RS         if matches!(self.peek().kind, TokKind::LBrace)
-//RS             && (!self.brace_starts_record() || matches!(self.peek2().kind, TokKind::RBrace))
-//RS         {
-//RS             return self.parse_or_fallback_block();
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwReturn) {
-//RS             let span = self.bump().span;
-//RS             if self.starts_expr(&self.peek().kind) {
-//RS                 let e = self.expr_or(allow_struct_lit)?;
-//RS                 return Ok(OrFallback::Return(Some(Box::new(e)), span));
-//RS             }
-//RS             return Ok(OrFallback::Return(None, span));
-//RS         }
-//RS         // D-LOOP-CONTROLWORD1=B: bare `?? next` is contextual control;
-//RS         // `?? (next)` remains an ordinary value fallback.
-//RS         if matches!(self.peek().kind, TokKind::KwBreak) {
-//RS             if matches!(self.peek2().kind, TokKind::LParen) {
-//RS                 let start = self.bump().span;
-//RS                 self.bump(); // `(`
-//RS                 let (name, _) = self.expect_ident("as the loop name in `break(name)`")?;
-//RS                 let end = self.peek().span.end;
-//RS                 self.expect(TokKind::RParen, "after the named break target")?;
-//RS                 return Ok(OrFallback::BreakLabel(name, Span::new(start.start, end)));
-//RS             }
-//RS             return Ok(OrFallback::Break(self.bump().span));
-//RS         }
-//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT)
-//RS             && (!matches!(self.peek2().kind, TokKind::LParen)
-//RS                 || matches!(self.peek3().kind, TokKind::Ident(_))
-//RS                     && matches!(self.peek4().kind, TokKind::RParen))
-//RS         {
-//RS             if matches!(self.peek2().kind, TokKind::LParen) {
-//RS                 let start = self.bump().span;
-//RS                 self.bump(); // `(`
-//RS                 let (name, _) = self.expect_ident("as the loop name in `next(name)`")?;
-//RS                 let end = self.peek().span.end;
-//RS                 self.expect(TokKind::RParen, "after the named next target")?;
-//RS                 return Ok(OrFallback::ContinueLabel(name, Span::new(start.start, end)));
-//RS             }
-//RS             return Ok(OrFallback::Continue(self.bump().span));
-//RS         }
-//RS         let e = self.expr_range(allow_struct_lit)?;
-//RS         if let Expr::Call(call) = &e {
-//RS             if call.name == Syntax::BUILTIN_PANIC {
-//RS                 return Ok(OrFallback::Panic {
-//RS                     name_span: call.name_span,
-//RS                     args: call.args.clone(),
-//RS                 });
-//RS             }
-//RS         }
-//RS         Ok(OrFallback::Value(Box::new(e)))
-//RS     }
-//RS 
-//RS     /// D-FAIL-BIND1=A: a fallback block has ordinary statements followed
-//RS     /// by one bare value or one real exit. The old `return value` block
-//RS     /// value reading is retired; `return value` now returns from the fn.
-//RS     fn parse_or_fallback_block(&mut self) -> Result<OrFallback, Diagnostic> {
-//RS         let start = self.peek().span.start;
-//RS         self.expect(TokKind::LBrace, "to open the `??` fallback block")?;
-//RS         let mut body = Vec::new();
-//RS         loop {
-//RS             // S6-R: a nested block statement ends at `}`, so consume the
-//RS             // lexer-inserted zero-width terminator before the next fallback
-//RS             // item. Authored semicolons remain visible to the diagnostics.
-//RS             if matches!(self.peek().kind, TokKind::Semi)
-//RS                 && self.peek().span.start == self.peek().span.end
-//RS             {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             match &self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     let span = self.peek().span;
-//RS                     self.bump();
-//RS                     if let Some(stmt) = body.last() {
-//RS                         if is_fallback_exit(stmt) {
-//RS                             let end = span.end;
-//RS                             return Ok(OrFallback::Block {
-//RS                                 body,
-//RS                                 value: None,
-//RS                                 span: Span::new(start, end),
-//RS                             });
-//RS                         }
-//RS                         return Err(Diagnostic::error(
-//RS                             "E0114",
-//RS                             "this fallback ends with a statement instead of a value".to_string(),
-//RS                             "a value-expected fallback block must end with one unadorned expression; statements yield unit"
-//RS                                 .to_string(),
-//RS                             "put one unadorned expression last, or use `return ...` for an early exit"
-//RS                                 .to_string(),
-//RS                             Some(stmt.span()),
-//RS                         ));
-//RS                     }
-//RS                     return Err(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "a `??` fallback block needs a final value or exit".to_string(),
-//RS                             "a fallback block runs its statements and then produces one value or leaves control"
-//RS                                 .to_string(),
-//RS                             "add a final value or exit, such as `{ log(err); default_value }` or `{ log(err); return }`"
-//RS                                 .to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close the `??` fallback block, found the end of the file"
-//RS                             .to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS 
-//RS             // A control statement is a real exit only when it is the tail.
-//RS             // If more source follows, restore and parse it as an ordinary
-//RS             // body statement so the normal block diagnostic remains local.
-//RS             if matches!(self.peek().kind, TokKind::KwReturn | TokKind::KwBreak)
-//RS                 || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
-//RS             {
-//RS                 let save = self.pos;
-//RS                 let saved_diags = self.diags.len();
-//RS                 if let Ok(stmt) = self.stmt() {
-//RS                     if is_fallback_exit(&stmt) && matches!(self.peek().kind, TokKind::RBrace) {
-//RS                         let end = self.bump().span.end;
-//RS                         let mut body = body;
-//RS                         body.push(stmt);
-//RS                         return Ok(OrFallback::Block {
-//RS                             body,
-//RS                             value: None,
-//RS                             span: Span::new(start, end),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 self.pos = save;
-//RS                 self.diags.truncate(saved_diags);
-//RS             }
-//RS 
-//RS             // As with value-if blocks, speculate on a trailing ordinary
-//RS             // expression before parsing a statement.
-//RS             let save = self.pos;
-//RS             let saved_diags = self.diags.len();
-//RS             if let Ok(value) = self.expr() {
-//RS                 if matches!(self.peek().kind, TokKind::Semi)
-//RS                     && matches!(self.peek2().kind, TokKind::RBrace)
-//RS                 {
-//RS                     let semi = self.peek().span;
-//RS                     if semi.start != semi.end {
-//RS                         let diverges = matches!(value.without_parens(), Expr::Todo { .. })
-//RS                             || matches!(
-//RS                                 value.without_parens(),
-//RS                                 Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
-//RS                             );
-//RS                         if !diverges {
-//RS                             return Err(Diagnostic::error(
-//RS                                 "E0114",
-//RS                                 "this fallback ends with a semicolon-terminated expression"
-//RS                                     .to_string(),
-//RS                                 "a value-expected fallback block must end with one unadorned expression; a semicolon-terminated expression yields unit"
-//RS                                     .to_string(),
-//RS                                 "remove the semicolon, or use `return ...` for an early exit"
-//RS                                     .to_string(),
-//RS                                 Some(value.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     self.bump();
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                     let end = self.bump().span.end;
-//RS                     let is_exit = matches!(value.without_parens(), Expr::Todo { .. })
-//RS                         || matches!(
-//RS                             value.without_parens(),
-//RS                             Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
-//RS                         );
-//RS                     if is_exit {
-//RS                         let mut body = body;
-//RS                         body.push(Stmt::Expr(value));
-//RS                         return Ok(OrFallback::Block {
-//RS                             body,
-//RS                             value: None,
-//RS                             span: Span::new(start, end),
-//RS                         });
-//RS                     }
-//RS                     return Ok(OrFallback::Block {
-//RS                         body,
-//RS                         value: Some(Box::new(value)),
-//RS                         span: Span::new(start, end),
-//RS                     });
-//RS                 }
-//RS             }
-//RS             self.pos = save;
-//RS             self.diags.truncate(saved_diags);
-//RS             match self.stmt() {
-//RS                 Ok(stmt) => body.push(stmt),
-//RS                 Err(diag) => {
-//RS                     self.diags.push(diag);
-//RS                     self.sync_stmt();
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-RANGE-VALUE1=A: ranges are ordinary values and bind looser than
-//RS     /// Boolean operators. Arm heads and distinct constraints keep their
-//RS     /// dedicated literal-only parsers.
-//RS     fn expr_range(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let start = self.expr_or(allow_struct_lit)?;
-//RS         let exclusive = match self.peek().kind {
-//RS             TokKind::DotDot => false,
-//RS             TokKind::DotDotLt => true,
-//RS             _ => return Ok(start),
-//RS         };
-//RS         self.bump();
-//RS         let end = self.expr_or(allow_struct_lit)?;
-//RS         let span = Span::new(start.span().start, end.span().end);
-//RS         Ok(Expr::Range {
-//RS             start: Box::new(start),
-//RS             end: Box::new(end),
-//RS             exclusive,
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     fn expr_or(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_and(allow_struct_lit)?;
-//RS         // D-ARMHEAD-PAREN1 (2026-09-28 amendment): an unparenthesized `&&`
-//RS         // operand of `||` hides the precedence; report each one after the
-//RS         // whole chain is known.
-//RS         let mut and_operands = Vec::new();
-//RS         if matches!(lhs, Expr::Binary(BinOp::And, ..)) {
-//RS             and_operands.push(lhs.span());
-//RS         }
-//RS         let mut saw_or = false;
-//RS         loop {
-//RS             let is_or = matches!(self.peek().kind, TokKind::OrOr);
-//RS             if !is_or {
-//RS                 break;
-//RS             }
-//RS             saw_or = true;
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_and(allow_struct_lit)?;
-//RS             if matches!(rhs, Expr::Binary(BinOp::And, ..)) {
-//RS                 and_operands.push(rhs.span());
-//RS             }
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         if saw_or {
-//RS             for operand in and_operands {
-//RS                 self.mixed_logic_error(operand);
-//RS             }
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     /// E0082: `a || b && c` must spell the grouping `a || (b && c)`. The Safe
-//RS     /// edit inserts exactly the parentheses precedence already implies.
-//RS     fn mixed_logic_error(&mut self, operand: Span) {
-//RS         let grouped = self
-//RS             .source
-//RS             .as_deref()
-//RS             .and_then(|source| source.get(operand.start..operand.end))
-//RS             .map(|text| format!("({text})"));
-//RS         let diagnostic = Diagnostic::from_row(
-//RS             "E0082",
-//RS             &[("grouped", grouped.as_deref().unwrap_or("(… && …)"))],
-//RS             Some(operand),
-//RS         );
-//RS         let diagnostic = match grouped {
-//RS             Some(new_text) => diagnostic.with_edit(crate::Diagnostics::TextEdit {
-//RS                 span: operand,
-//RS                 new_text,
-//RS             }),
-//RS             None => diagnostic,
-//RS         };
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn expr_and(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_cmp(allow_struct_lit)?;
-//RS         loop {
-//RS             let is_and = match &self.peek().kind {
-//RS                 TokKind::AndAnd => true,
-//RS                 TokKind::Ident(n) if false && n == Syntax::FOREIGN_AND => {
-//RS                     self.foreign_logic_error(Syntax::FOREIGN_AND, Syntax::OP_AND);
-//RS                     true
-//RS                 }
-//RS                 _ => false,
-//RS             };
-//RS             if !is_and {
-//RS                 break;
-//RS             }
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_cmp(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(BinOp::And, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     /// D-CHAINCMP1: a run of same-direction relational operators (`<`/`<=`/
-//RS     /// `>`/`>=`) chains into `Expr::CompareChain`, any length. `==`/`!=` never
-//RS     /// chain (with each other or with a relational op) — `a == b == c` and
-//RS     /// `a < b == c` both stay the pre-existing "comparisons can't be chained"
-//RS     /// error (E0003). A mixed-direction relational chain (`a < b > c`) is
-//RS     /// E0333, naming the direction break.
-//RS     pub(in crate::Parser) fn expr_cmp(
-//RS         &mut self,
-//RS         allow_struct_lit: bool,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let lhs = self.expr_bitor(allow_struct_lit)?;
-//RS         if matches!(self.peek().kind, TokKind::KwIn) {
-//RS             let span = self.bump().span;
-//RS             return Err(Diagnostic::from_row("E0384", &[], Some(span)));
-//RS         }
-//RS         let op = match &self.peek().kind {
-//RS             TokKind::EqEq => Some(BinOp::Eq),
-//RS             TokKind::NotEq => Some(BinOp::Ne),
-//RS             TokKind::Lt => Some(BinOp::Lt),
-//RS             TokKind::Gt if self.module_arg_expr_depth != Some(self.depth) => Some(BinOp::Gt),
-//RS             TokKind::Le => Some(BinOp::Le),
-//RS             TokKind::Ge => Some(BinOp::Ge),
-//RS             TokKind::Compare => Some(BinOp::Compare),
-//RS             _ => None,
-//RS         };
-//RS         let Some(op) = op else { return Ok(lhs) };
-//RS         let op_span = self.bump().span;
-//RS         if op == BinOp::Eq {
-//RS             if let Some(pat) = self.try_pattern_rhs(allow_struct_lit)? {
-//RS                 let span = Span::new(lhs.span().start, pat_span(&pat).end.max(op_span.end));
-//RS                 return Ok(Expr::PatternTest {
-//RS                     subject: Box::new(lhs),
-//RS                     pattern: pat,
-//RS                     span,
-//RS                 });
-//RS             }
-//RS         }
-//RS         let rhs = self.expr_bitor(allow_struct_lit)?;
-//RS 
-//RS         // D-CMP3WAY1=B: spaceship comparison is one binary operation, not
-//RS         // a relational chain. User-defined values are rewritten by sema
-//RS         // to their `compare` hook; built-ins retain this node for lowering.
-//RS         if op == BinOp::Compare {
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-//RS             if let Some(second) = self.peek_cmp_span() {
-//RS                 return Err(self.chained_eq_error(second));
-//RS             }
-//RS             return Ok(cmp);
-//RS         }
-//RS 
-//RS         // `==`/`!=` never chain — D-CHAINCMP1 excludes them. Reproduce the
-//RS         // pre-existing behavior exactly: any further relational/equality
-//RS         // token after an `==`/`!=` pair is E0003.
-//RS         if op == BinOp::Eq || op == BinOp::Ne {
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-//RS             if let Some(second) = self.peek_cmp_span() {
-//RS                 return Err(self.chained_eq_error(second));
-//RS             }
-//RS             return Ok(cmp);
-//RS         }
-//RS 
-//RS         // Relational op: collect a same-direction chain.
-//RS         let ascending = matches!(op, BinOp::Lt | BinOp::Le);
-//RS         let mut operands = vec![lhs, rhs];
-//RS         let mut ops = vec![op];
-//RS         loop {
-//RS             let next = match &self.peek().kind {
-//RS                 TokKind::Lt => Some(BinOp::Lt),
-//RS                 TokKind::Le => Some(BinOp::Le),
-//RS                 TokKind::Gt => Some(BinOp::Gt),
-//RS                 TokKind::Ge => Some(BinOp::Ge),
-//RS                 TokKind::EqEq | TokKind::NotEq => {
-//RS                     // `==`/`!=` can't extend a relational chain either.
-//RS                     let bad_span = self.peek().span;
-//RS                     return Err(self.chained_eq_error(bad_span));
-//RS                 }
-//RS                 _ => None,
-//RS             };
-//RS             let Some(next_op) = next else { break };
-//RS             let next_ascending = matches!(next_op, BinOp::Lt | BinOp::Le);
-//RS             if next_ascending != ascending {
-//RS                 let bad_span = self.peek().span;
-//RS                 return Err(Diagnostic::error(
-//RS                         "E0333",
-//RS                         "this comparison chain changes direction".to_string(),
-//RS                         "a chain like `0 <= sev < 10` reads in one direction; mixing `<` and `>` in one chain is almost always a mistake and has no single meaning".to_string(),
-//RS                         "split it into two comparisons joined with `&&`".to_string(),
-//RS                         Some(bad_span),
-//RS                     ));
-//RS             }
-//RS             self.bump();
-//RS             let next_rhs = self.expr_bitor(allow_struct_lit)?;
-//RS             operands.push(next_rhs);
-//RS             ops.push(next_op);
-//RS         }
-//RS 
-//RS         let span = Span::new(
-//RS             operands.first().unwrap().span().start,
-//RS             operands.last().unwrap().span().end,
-//RS         );
-//RS         if ops.len() == 1 {
-//RS             let rhs = operands.pop().unwrap();
-//RS             let lhs = operands.pop().unwrap();
-//RS             return Ok(Expr::Binary(ops[0], Box::new(lhs), Box::new(rhs), span));
-//RS         }
-//RS         Ok(Expr::CompareChain {
-//RS             hooks: vec![false; ops.len()],
-//RS             operands,
-//RS             ops,
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     fn peek_cmp_span(&self) -> Option<Span> {
-//RS         match &self.peek().kind {
-//RS             TokKind::EqEq
-//RS             | TokKind::NotEq
-//RS             | TokKind::Lt
-//RS             | TokKind::Gt
-//RS             | TokKind::Le
-//RS             | TokKind::Ge
-//RS             | TokKind::Compare => Some(self.peek().span),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn chained_eq_error(&self, second: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0003",
-//RS             "comparisons can't be chained".to_string(),
-//RS             format!(
-//RS                 "`a < b < c` doesn't compare all three; check each pair and join with `{}`",
-//RS                 Syntax::OP_AND
-//RS             ),
-//RS             format!("write `a < b {} b < c`", Syntax::OP_AND),
-//RS             Some(second),
-//RS         )
-//RS     }
-//RS 
-//RS     /// D-BITOREXPR1=A: `|` is bitwise OR in value position. Keep it above
-//RS     /// comparisons; type position has its own `|` union grammar.
-//RS     pub(in crate::Parser) fn expr_bitor(
-//RS         &mut self,
-//RS         allow_struct_lit: bool,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_bitxor(allow_struct_lit)?;
-//RS         while matches!(self.peek().kind, TokKind::Pipe)
-//RS             && !matches!(self.peek2().kind, TokKind::Gt)
-//RS         {
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_bitxor(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     /// D-XORSPELL1=A: `~|` is bitwise exclusive-or, in the precedence slot
-//RS     /// the old `^` spelling held.
-//RS     pub(in crate::Parser) fn expr_bitxor(
-//RS         &mut self,
-//RS         allow_struct_lit: bool,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_bitand(allow_struct_lit)?;
-//RS         while matches!(self.peek().kind, TokKind::TildePipe) {
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_bitand(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(BinOp::BitXor, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     fn expr_bitand(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_shift(allow_struct_lit)?;
-//RS         while matches!(self.peek().kind, TokKind::Amp) {
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_shift(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(BinOp::BitAnd, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     fn expr_shift(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_add(allow_struct_lit)?;
-//RS         loop {
-//RS             let op = match &self.peek().kind {
-//RS                 TokKind::Shl => BinOp::Shl,
-//RS                 TokKind::Shr => BinOp::Shr,
-//RS                 _ => break,
-//RS             };
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_add(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     fn expr_add(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_mul(allow_struct_lit)?;
-//RS         loop {
-//RS             let op = match &self.peek().kind {
-//RS                 TokKind::Plus => BinOp::Add,
-//RS                 TokKind::Minus => BinOp::Sub,
-//RS                 _ => break,
-//RS             };
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_mul(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     fn expr_mul(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let mut lhs = self.expr_unary(allow_struct_lit)?;
-//RS         loop {
-//RS             let op = match &self.peek().kind {
-//RS                 TokKind::Star => BinOp::Mul,
-//RS                 TokKind::Slash => BinOp::Div,
-//RS                 // D-FLOORDIV1=A: `/%` sits with the other division-family
-//RS                 // operators, so `a /% b * c` groups left to right.
-//RS                 TokKind::SlashPercent => BinOp::FloorDiv,
-//RS                 // D-MODSEM1=A: `%` is the floored modulo, `%%` the
-//RS                 // truncated remainder. Both sit at the division level.
-//RS                 TokKind::Percent => BinOp::Mod,
-//RS                 TokKind::PercentPercent => BinOp::Rem,
-//RS                 _ => break,
-//RS             };
-//RS             let op_span = self.bump().span;
-//RS             let rhs = self.expr_unary(allow_struct_lit)?;
-//RS             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-//RS         }
-//RS         Ok(lhs)
-//RS     }
-//RS 
-//RS     pub(super) fn expr_unary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let span = self.peek().span;
-//RS         self.with_nesting(span, |p| p.expr_unary_inner(allow_struct_lit))
-//RS     }
-//RS 
-//RS     fn expr_unary_inner(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         match &self.peek().kind {
-//RS             // D-INCR1 is retired: prefix `++x` / `--x` teaches E0160 and
-//RS             // keeps the operand so `--x` never parses as `-(-x)`.
-//RS             TokKind::PlusPlus | TokKind::MinusMinus => {
-//RS                 let op_tok = self.bump();
-//RS                 let increment = matches!(op_tok.kind, TokKind::PlusPlus);
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let whole = Span::new(op_tok.span.start, inner.span().end);
-//RS                 self.teach_retired_step(increment, &inner, whole, true);
-//RS                 Ok(inner)
-//RS             }
-//RS             TokKind::Minus => {
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::Unary(UnOp::Neg, Box::new(inner), full))
-//RS             }
-//RS             TokKind::Bang => {
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
-//RS             }
-//RS             TokKind::Ident(n)
-//RS                 if false && n == Syntax::FOREIGN_NOT && self.starts_expr(&self.peek2().kind) =>
-//RS             {
-//RS                 self.foreign_logic_error(Syntax::FOREIGN_NOT, Syntax::OP_NOT);
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
-//RS             }
-//RS             TokKind::Ident(n)
-//RS                 if false && n == Syntax::FOREIGN_TRY && self.starts_expr(&self.peek2().kind) =>
-//RS             {
-//RS                 let t = self.bump();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0014",
-//RS                     format!(
-//RS                         "{} does not use `{}`",
-//RS                         Syntax::LANG_NAME,
-//RS                         Syntax::FOREIGN_TRY
-//RS                     ),
-//RS                     format!(
-//RS                         "a call that can fail is marked with `{}` after it, like `parse(x){}`",
-//RS                         Syntax::OP_TRY_SUFFIX,
-//RS                         Syntax::OP_TRY_SUFFIX
-//RS                     ),
-//RS                     format!("write `parse(x){}` instead", Syntax::OP_TRY_SUFFIX),
-//RS                     Some(t.span),
-//RS                 ));
-//RS                 self.expr_unary(allow_struct_lit)
-//RS             }
-//RS             TokKind::Star => {
-//RS                 // D-CAP9: prefix `*x` is raw-pointer-of (take a raw pointer to
-//RS                 // `x`), gated to `#Unsafe`. Dereference moved to postfix `p.*`.
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::RawOf(Box::new(inner), full))
-//RS             }
-//RS             // D-SHAPE-PLACE1=A: `&place` is an expression-level exclusive
-//RS             // write window. It is distinct from call-argument convention;
-//RS             // sema proves the operand is a maximal place.
-//RS             // D-CAP-RECEIVER1=D: `&` before a place-rooted method chain marks
-//RS             // the place the first call receives (`&buf.append(x)`).
-//RS             TokKind::Amp => {
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 Ok(mark_at_maximal_place(inner, crate::AST::PlaceAccess::Write, span.start))
-//RS             }
-//RS             // D-CAP-RECEIVER1=D: `^` marks the place a method call takes
-//RS             // (`^buf.seal()`). D-COPY-DEFAULT1=A (#3714): before a bare place
-//RS             // (a name plus fields or indexes) in any value position it is the
-//RS             // programmer's exact move (`ys := ^xs`, `Box{xs: ^xs}`, `^xs` as
-//RS             // a result); sema checks the place and records the move. Only a
-//RS             // fresh value (a literal or call result) has nothing to move.
-//RS             TokKind::Caret => {
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 if contains_method_call(&inner) {
-//RS                     return Ok(mark_at_maximal_place(
-//RS                         inner,
-//RS                         crate::AST::PlaceAccess::Take,
-//RS                         span.start,
-//RS                     ));
-//RS                 }
-//RS                 if matches!(inner, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. }) {
-//RS                     let full = Span::new(span.start, inner.span().end);
-//RS                     return Ok(Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Take, full));
-//RS                 }
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0225",
-//RS                     format!(
-//RS                         "the move marker `{}` here marks a fresh value, not a named place",
-//RS                         Syntax::SIGIL_MOVE
-//RS                     ),
-//RS                     format!(
-//RS                         "`{}` moves a named place (`{}xs`, `{}buf.seal()`); a literal or call result is already new, so it needs no mark",
-//RS                         Syntax::SIGIL_MOVE,
-//RS                         Syntax::SIGIL_MOVE,
-//RS                         Syntax::SIGIL_MOVE
-//RS                     ),
-//RS                     format!("remove `{}`", Syntax::SIGIL_MOVE),
-//RS                     Some(Span::new(span.start, span.end)),
-//RS                 ));
-//RS                 Ok(inner)
-//RS             }
-//RS             // D-CONC-SHARE1=A: `shared expr` is the one shared-cell
-//RS             // construction form (it replaced the retired `Shared.new(x)`
-//RS             // call). It is contextual: `shared` stays an ordinary
-//RS             // identifier unless the next token opens a value, so a
-//RS             // binding or argument still reads as a name. Desugared here
-//RS             // to the `Shared`-receiver constructor shape every tier
-//RS             // already lowers, so no execution tier grows a second
-//RS             // sharing mechanism (I9). The cell owns its payload, so the
-//RS             // value is consumed the way a struct literal's field value is
-//RS             // — construction, not a call argument, so no `^` is written.
-//RS             TokKind::Ident(word)
-//RS                 if word == Syntax::KW_SHARED && starts_shared_operand(&self.peek2().kind) =>
-//RS             {
-//RS                 let span = self.bump().span; // `shared`
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 Ok(Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(Syntax::TYPE_SHARED.to_string(), span)),
-//RS                     method: "new".to_string(),
-//RS                     method_span: span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![crate::AST::CallArg {
-//RS                         convention: crate::AST::AccessConvention::Move,
-//RS                         span: inner.span(),
-//RS                         expr: inner,
-//RS                         flags: Default::default(),
-//RS                         label: None,
-//RS                         spread: false,
-//RS                     }],
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 })
-//RS             }
-//RS             // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
-//RS             // expression form. Legal on any expression; most useful on a named
-//RS             // binding. `.clone()` is not user-typable Jet syntax (I8).
-//RS             TokKind::Tilde => {
-//RS                 let span = self.bump().span;
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::Copy(Box::new(inner), full))
-//RS             }
-//RS             // D-SHAPE-COPY1=A: the `copy` word is retired — copy is now the
-//RS             // `~` sigil (was D-CAP2/S4). Teach, then recover as Expr::Copy so
-//RS             // parsing continues.
-//RS             TokKind::KwCopy => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0991",
-//RS                     format!(
-//RS                         "`{}` is now the `{}` sigil",
-//RS                         Syntax::KW_COPY,
-//RS                         Syntax::SIGIL_COPY
-//RS                     ),
-//RS                     format!(
-//RS                         "Jet has exactly one spelling for a copy — the `{}` sigil \
-//RS                              (D-SHAPE-COPY1) — so all code reads the same",
-//RS                         Syntax::SIGIL_COPY
-//RS                     ),
-//RS                     format!(
-//RS                         "write `{}name` in place of `{} name`",
-//RS                         Syntax::SIGIL_COPY,
-//RS                         Syntax::KW_COPY
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS                 let inner = self.expr_unary(allow_struct_lit)?;
-//RS                 let full = Span::new(span.start, inner.span().end);
-//RS                 Ok(Expr::Copy(Box::new(inner), full))
-//RS             }
-//RS             // D-LIT-DOT1: a non-empty `{ … }` in value position is an
-//RS             // inferred literal. `allow_struct_lit` is the existing
-//RS             // value-vs-block seam.
-//RS             TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
-//RS                 let start = self.peek().span.start;
-//RS                 self.struct_lit_inferred(start)
-//RS             }
-//RS             // D-LIT-DOT1: `.{ … }` is retired. `jet fmt` still rewrites it;
-//RS             // compile (`jet` / `jetpack`) does not accept it.
-//RS             TokKind::Dot if matches!(self.peek2().kind, TokKind::LBrace) => {
-//RS                 let dot = self.bump();
-//RS                 let diagnostic = Diagnostic::error(
-//RS                     "E0320",
-//RS                     "inferred record construction uses `{…}`, not `.{…}`".to_string(),
-//RS                     "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
-//RS                     "write `{…}`".to_string(),
-//RS                     Some(dot.span),
-//RS                 );
-//RS                 if !self.migration_mode {
-//RS                     return Err(diagnostic);
-//RS                 }
-//RS                 self.diags.push(diagnostic);
-//RS                 self.struct_lit_inferred(dot.span.start)
-//RS             }
-//RS             // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit.
-//RS             // Sema fills the empty, unspellable identifier from the ordinary
-//RS             // expected type; downstream lowering then sees the same MethodCall as
-//RS             // an explicit `Type.new(...)`.
-//RS             TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MEM_ALLOC_NEW) =>
-//RS             {
-//RS                 let dot = self.bump().span;
-//RS                 let (method, method_span) = self.expect_field_name()?;
-//RS                 self.expect(TokKind::LParen, "after `.new`")?;
-//RS                 let mut args = Vec::new();
-//RS                 if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                     loop {
-//RS                         args.push(self.call_arg()?);
-//RS                         if matches!(self.peek().kind, TokKind::RParen) {
-//RS                             break;
-//RS                         }
-//RS                         self.expect_list_separator("between arguments", "call")?;
-//RS                         if matches!(self.peek().kind, TokKind::RParen) {
-//RS                             break;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
-//RS                 Ok(Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(String::new(), dot)),
-//RS                     method,
-//RS                     method_span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args,
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 })
-//RS             }
-//RS             // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in
-//RS             // value position. An uppercase ident after `.` with no receiver is a
-//RS             // leading-dot enum literal. type_name="" is the unresolved sentinel;
-//RS             // sema fills it in via expected_type.
-//RS             TokKind::Dot if leading_dot_variant(&self.peek2().kind).is_some() => {
-//RS                 let dot_start = self.bump().span.start; // consume `.`
-//RS                 let variant_token = self.bump();
-//RS                 let mut variant = leading_dot_variant(&variant_token.kind)
-//RS                     .expect("leading-dot variant guard and token must agree");
-//RS                 let mut variant_span = variant_token.span;
-//RS                 // D-TAG1: a dotted leaf path (`.Fire.Burn`) — further uppercase
-//RS                 // segments extend the variant path. `.{` never matches (its second
-//RS                 // token is `{`, not an ident), so named-payload construction below
-//RS                 // still sees its `.` intact.
-//RS                 while matches!(self.peek().kind, TokKind::Dot)
-//RS                     && matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase()))
-//RS                 {
-//RS                     self.bump(); // consume `.`
-//RS                     let (seg, seg_span) =
-//RS                         self.expect_ident("after `.` in a leading-dot enum variant")?;
-//RS                     variant = format!("{variant}.{seg}");
-//RS                     variant_span = Span::new(variant_span.start, seg_span.end);
-//RS                 }
-//RS                 // D-LIT-DOT1: enum payload fields touch the variant name.
-//RS                 let (args, end) = if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace)
-//RS                 {
-//RS                     self.enum_lit_named_fields()?
-//RS                 } else if matches!(self.peek().kind, TokKind::Dot)
-//RS                     && matches!(self.peek2().kind, TokKind::LBrace)
-//RS                 {
-//RS                     // Retired `.Variant.{ … }`. Fmt rewrites; compile rejects.
-//RS                     let dot = self.bump();
-//RS                     let diagnostic = Diagnostic::error(
-//RS                         "E0320",
-//RS                         format!(
-//RS                             "enum payload uses `.{}{{…}}`, not `.{}.{{…}}`",
-//RS                             variant, variant
-//RS                         ),
-//RS                         "D-LIT-DOT1 drops the constructor dot before payload fields".to_string(),
-//RS                         format!("write `.{}{{…}}`", variant),
-//RS                         Some(dot.span),
-//RS                     );
-//RS                     if !self.migration_mode {
-//RS                         return Err(diagnostic);
-//RS                     }
-//RS                     self.diags.push(diagnostic);
-//RS                     self.enum_lit_named_fields()?
-//RS                 } else if matches!(self.peek().kind, TokKind::LParen) {
-//RS                     self.bump(); // consume `(`
-//RS                     let mut args = Vec::new();
-//RS                     if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                         loop {
-//RS                             let e = self.expr()?;
-//RS                             args.push(EnumLitArg::Positional(e));
-//RS                             if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                 break;
-//RS                             }
-//RS                             self.expect(TokKind::Comma, "between enum variant arguments")?;
-//RS                             if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                 break;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     self.expect(TokKind::RParen, "to close the enum variant arguments")?;
-//RS                     let close_end = self.toks[self.pos - 1].span.end;
-//RS                     (args, close_end)
-//RS                 } else {
-//RS                     (Vec::new(), variant_span.end)
-//RS                 };
-//RS                 Ok(Expr::EnumLit {
-//RS                     type_name: String::new(),
-//RS                     variant,
-//RS                     variant_span: Some(variant_span),
-//RS                     args,
-//RS                     leading_dot: true,
-//RS                     span: Span::new(dot_start, end),
-//RS                 })
-//RS             }
-//RS             // D-JPK-BUILDRECIPE1: executable adapter steps are the one
-//RS             // lower-case leading-dot value surface. The parser keeps them
-//RS             // as the ordinary inferred enum-literal node so module
-//RS             // consumers and formatters see one value shape.
-//RS             TokKind::Dot
-//RS                 if self.allow_lowercase_leading_dot
-//RS                     && matches!(&self.peek2().kind, TokKind::Ident(name) if name.chars().next().is_some_and(char::is_lowercase)) =>
-//RS             {
-//RS                 let dot_start = self.bump().span.start;
-//RS                 let (variant, variant_span) = self.expect_ident("after `.` in a build step")?;
-//RS                 let (args, end) = if matches!(self.peek().kind, TokKind::LParen) {
-//RS                     self.bump();
-//RS                     let mut args = Vec::new();
-//RS                     if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                         loop {
-//RS                             let arg = if matches!(self.peek().kind, TokKind::Ident(_))
-//RS                                 && matches!(self.peek2().kind, TokKind::Colon)
-//RS                             {
-//RS                                 let (label, _) =
-//RS                                     self.expect_ident("for a named build-step argument")?;
-//RS                                 self.bump();
-//RS                                 let expr = if label == Syntax::RECIPE_STEP_FIELD_ARGS {
-//RS                                     self.build_step_string_list()?
-//RS                                 } else {
-//RS                                     self.build_step_string()?
-//RS                                 };
-//RS                                 EnumLitArg::Named { label, expr }
-//RS                             } else {
-//RS                                 return Err(Diagnostic::error(
-//RS                                         "E0003",
-//RS                                         "build-step arguments need field labels".to_string(),
-//RS                                         "finite build actions name every tool, path, URL, hash, and argument list".to_string(),
-//RS                                         "write `field: value`, for example `tool: \"cc\"`".to_string(),
-//RS                                         Some(self.peek().span),
-//RS                                     ));
-//RS                             };
-//RS                             args.push(arg);
-//RS                             if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                 break;
-//RS                             }
-//RS                             self.expect(TokKind::Comma, "between build-step arguments")?;
-//RS                             if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                 break;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     self.expect(TokKind::RParen, "to close the build step")?;
-//RS                     (args, self.toks[self.pos - 1].span.end)
-//RS                 } else {
-//RS                     (Vec::new(), variant_span.end)
-//RS                 };
-//RS                 Ok(Expr::EnumLit {
-//RS                     type_name: String::new(),
-//RS                     variant,
-//RS                     variant_span: Some(variant_span),
-//RS                     args,
-//RS                     leading_dot: true,
-//RS                     span: Span::new(dot_start, end),
-//RS                 })
-//RS             }
-//RS             _ => self.expr_pow(allow_struct_lit),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-EXPSEM1=A: infix `^` raises to a power. It binds tighter than
-//RS     /// every other binary operator and tighter than unary minus, so
-//RS     /// `-3 ^ 2` is `-(3 ^ 2)`. It is right-associative and its exponent
-//RS     /// runs back through the unary level, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`
-//RS     /// and `2 ^ -1` reads the negative exponent.
-//RS     fn expr_pow(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-//RS         let base = self.expr_postfix(allow_struct_lit)?;
-//RS         if !matches!(self.peek().kind, TokKind::Caret) {
-//RS             return Ok(base);
-//RS         }
-//RS         let op_span = self.bump().span;
-//RS         let exponent = self.expr_unary(allow_struct_lit)?;
-//RS         let span = Span::new(base.span().start, exponent.span().end.max(op_span.end));
-//RS         Ok(Expr::Binary(
-//RS             BinOp::Pow,
-//RS             Box::new(base),
-//RS             Box::new(exponent),
-//RS             span,
-//RS         ))
-//RS     }
-//RS 
-//RS     /// D-JPK-BUILDRECIPE1: build-step fields are deliberately finite
-//RS     /// strings or lists of strings. Parse these directly instead of
-//RS     /// recursing through the full expression grammar at an already deep
-//RS     /// nested call site.
-//RS     fn build_step_string(&mut self) -> Result<Expr, Diagnostic> {
-//RS         let token = self.peek().clone();
-//RS         let parts = match token.kind {
-//RS             TokKind::Str(parts) => parts,
-//RS             TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
-//RS             _ => {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     "a build-step field must be quoted text".to_string(),
-//RS                     "build actions use fixed strings for tools, paths, URLs, and hashes".to_string(),
-//RS                     "write a quoted string such as `\"src/file\"`".to_string(),
-//RS                     Some(token.span),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         if parts
-//RS             .iter()
-//RS             .any(|part| matches!(part, StrTokPart::Interp(_)))
-//RS         {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "build-step fields must be literal quoted text".to_string(),
-//RS                 "build action identity includes fixed tool, path, URL, and hash facts".to_string(),
-//RS                 "replace interpolation with a quoted literal".to_string(),
-//RS                 Some(token.span),
-//RS             ));
-//RS         }
-//RS         self.bump();
-//RS         self.str_expr_from_parts(parts, token.span)
-//RS     }
-//RS 
-//RS     fn build_step_string_list(&mut self) -> Result<Expr, Diagnostic> {
-//RS         let open = self.peek().span;
-//RS         self.expect(TokKind::LBracket, "before build-step string arguments")?;
-//RS         let mut values = Vec::new();
-//RS         if !matches!(self.peek().kind, TokKind::RBracket) {
-//RS             loop {
-//RS                 values.push(self.build_step_string()?);
-//RS                 if matches!(self.peek().kind, TokKind::RBracket) {
-//RS                     break;
-//RS                 }
-//RS                 self.expect(TokKind::Comma, "between build-step string arguments")?;
-//RS                 if matches!(self.peek().kind, TokKind::RBracket) {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS         let close = self.peek().span;
-//RS         self.expect(TokKind::RBracket, "after build-step string arguments")?;
-//RS         Ok(Expr::ListLit(values, Span::new(open.start, close.end)))
-//RS     }
-//RS }
-// END-PORT-PENDING 0322 crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1-1166
+// Private Expressions fragment. Reuse the canonical Pratt grammar and AST;
+// this file supplies the genuinely missing fallback/build-recipe branches.
+use jet_foundation.[Diagnostic, EnumLitArg, Expr, OrFallback, Span, Stmt, StrPart]
+use jet_lexer.[STRING_PART_INTERPOLATION, TOKEN_BREAK, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_EOF, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING]
 
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:6
+// Canonical owner: Statements.jet:192 parser_statement_definitely_exits_value_block.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:15
+// Canonical owner: Expressions.jet:1843 parser_mark_maximal_place; recursively
+// rebuilds MethodCall/Field/Index/Slice with all ten MethodCall fields intact.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:76
+// Canonical owner: Expressions.jet:1830 parser_contains_method_call.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:93
+// Canonical owner: Expressions.jet:580 parser_starts_shared_operand; exact
+// closed twelve-token allow-list, not the general expression-start predicate.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:113
+// Canonical owner: Expressions.jet:238 parser_parse_expression_restricted,
+// precedence 1; Expr.OrFallback retains input, fallback, is_option=false, span.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:155
+// Canonical owner: Expressions.jet:2016 parser_parse_or_fallback. Integrate the
+// fallback-specific helpers below instead of treating every brace as a block.
+
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:155
+fn parser_fallback_brace_is_block(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_LBRACE -> return false
+    // Empty braces are a block; a field-led inferred record is a value.
+    if parser_kind_at(&state, 1) == TOKEN_RBRACE -> return true
+    !brace_starts_record(&state)
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:173
+fn parser_fallback_control(state: &JetParserState) -> OrFallback? {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_BREAK {
+        parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parser_bump(&state)
+            name :: parser_expect_name(&state, "as the loop name in `break(name)`")
+            end :: parser_current(&state).span.end
+            parser_expect(&state, TOKEN_RPAREN, "after the named break target")
+            return Val(OrFallback.BreakLabel{name: name.payload.decoded, span: Span{start: token.span.start, end: end}})
+        }
+        return Val(OrFallback.Break{span: token.span})
+    }
+    if token.kind == TOKEN_IDENT && token.payload.decoded == "next" && (parser_kind_at(&state, 1) != TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)) {
+        parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parser_bump(&state)
+            name :: parser_expect_name(&state, "as the loop name in `next(name)`")
+            end :: parser_current(&state).span.end
+            parser_expect(&state, TOKEN_RPAREN, "after the named next target")
+            return Val(OrFallback.ContinueLabel{name: name.payload.decoded, span: Span{start: token.span.start, end: end}})
+        }
+        return Val(OrFallback.Continue{span: token.span})
+    }
+    None
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:214
+// A fallback is stricter than an ordinary value block: no final statement,
+// authored semicolon or empty block can masquerade as a value. Preserve
+// speculative parser state and diagnose the exact tail rather than the opener.
+fn parser_parse_fallback_block(state: &JetParserState, depth: Int) -> OrFallback {
+    open :: parser_expect(&state, TOKEN_LBRACE, "to open the `??` fallback block")
+    body := [Stmt]{}
+    loop {
+        current :: parser_current(&state)
+        if current.kind == TOKEN_SEMI && current.span.start == current.span.end { parser_bump(&state); next }
+        if current.kind == TOKEN_RBRACE {
+            close :: parser_bump(&state)
+            if body.last() == .Val(stmt) {
+                if parser_statement_definitely_exits_value_block(stmt) -> return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, close.span)}
+                parser_add_fatal_code(&state, "E0114", stmt.span(), "this fallback ends with a statement instead of a value", "a value-expected fallback block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
+            } else {
+                parser_add_fatal_code(&state, "E0003", close.span, "a `??` fallback block needs a final value or exit", "a fallback block runs its statements and then produces one value or leaves control", "add a final value or exit, such as `{{ log(err); default_value }}` or `{{ log(err); return }}`")
+            }
+            return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, close.span)}
+        }
+        if current.kind == TOKEN_EOF {
+            parser_add_fatal_code(&state, "E0003", current.span, "expected `}` to close the `??` fallback block, found the end of the file", "every `{` needs a matching `}`", "add a closing `}`")
+            return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, current.span)}
+        }
+        if current.kind == TOKEN_RETURN || current.kind == TOKEN_BREAK || (current.kind == TOKEN_IDENT && current.payload.decoded == "next") {
+            saved_position :: state.position
+            saved_diagnostics :: state.diagnostics.len()
+            saved_blocks :: state.block_spans.len()
+            saved_else_arms :: state.else_arms.len()
+            stmt :: parser_parse_statement(&state)
+            if !parser_error_since(state, saved_diagnostics) && parser_statement_definitely_exits_value_block(stmt) && parser_current_kind(&state) == TOKEN_RBRACE {
+                close :: parser_bump(&state)
+                &body.push(stmt)
+                return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, close.span)}
+            }
+            parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+        }
+        saved_position :: state.position
+        saved_diagnostics :: state.diagnostics.len()
+        saved_blocks :: state.block_spans.len()
+        saved_else_arms :: state.else_arms.len()
+        value :: parser_parse_expression(&state, 1, depth + 1)
+        if !parser_error_since(state, saved_diagnostics) {
+            if parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE {
+                semi :: parser_current(&state).span
+                if semi.start != semi.end && !parser_expression_definitely_diverges(value.expr) {
+                    parser_add_fatal_code(&state, "E0114", value.span, "this fallback ends with a semicolon-terminated expression", "a value-expected fallback block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit")
+                    return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, semi)}
+                }
+                parser_bump(&state)
+            }
+            if parser_current_kind(&state) == TOKEN_RBRACE {
+                close :: parser_bump(&state)
+                if parser_expression_definitely_diverges(value.expr) {
+                    &body.push(Stmt.Expr{expr: value.expr})
+                    return OrFallback.Block{body: ^body, value: None, span: parser_cover(open.span, close.span)}
+                }
+                return OrFallback.Block{body: ^body, value: Val(value.expr), span: parser_cover(open.span, close.span)}
+            }
+        }
+        parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+        stmt :: parser_parse_statement(&state)
+        if parser_error_since(state, saved_diagnostics) { parser_sync_stmt(&state) } else { &body.push(stmt) }
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:366
+// Canonical owner: Expressions.jet:238, precedence 2; one range only, RHS at 3.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:384
+// Canonical owner: Expressions.jet:238, precedence 3; left-associative Or.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:418
+// Canonical owner: Expressions.jet:351 parser_check_mixed_logic.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:439
+// Canonical owner: Expressions.jet:238, precedence 4; left-associative And.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:467
+// Canonical owner: Expressions.jet:238/295-331: comparison, pattern RHS,
+// same-direction CompareChain, false hooks, E0333 and E0003.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:576
+// Canonical owner: Expressions.jet:210 parser_expression_comparison_token.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:589
+// Canonical owner: Expressions.jet:216 parser_report_chained_comparison.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:604
+// Canonical owner: Expressions.jet:238, precedence 6; BitOr.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:622
+// Canonical owner: Expressions.jet:238, precedence 7; BitXor.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:636
+// Canonical owner: Expressions.jet:238, precedence 8; BitAnd.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:647
+// Canonical owner: Expressions.jet:238, precedence 10; Shl/Shr.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:663
+// Canonical owner: Expressions.jet:238, precedence 11; Add/Sub.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:679
+// Canonical owner: Expressions.jet:238, precedence 12; Mul/Div/FloorDiv/Mod/Rem.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:702
+// Canonical owner: Expressions.jet:238/584, bounded prefix recursion.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:707
+// Canonical owner: Expressions.jet:584 parser_parse_prefix: ++/-- operand
+// preservation, unary Neg/Not/RawOf, Write/Take maximal place, E0225 fresh
+// move, shared owned constructor, Copy/~, E0991, inferred braces, .new and
+// leading-dot values. The build-step branch is supplied below.
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1095
+// Canonical owner: Expressions.jet:238/279, precedence 14, right-associative
+// Pow; prefix precedence 13 makes -3^2 negative and accepts 2^-1.
+
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1026
+// Invoke before ordinary lower-case implicit-subject members only when the
+// Recipe.build(steps: ...) context enables allow_lowercase_leading_dot.
+fn parser_parse_build_step(state: &JetParserState) -> ParsedExpr {
+    dot :: parser_expect(&state, TOKEN_DOT, "before a build step")
+    variant :: parser_expect_name(&state, "after `.` in a build step")
+    args := [EnumLitArg]{}
+    end := variant.span.end
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        if parser_current_kind(&state) != TOKEN_RPAREN {
+            loop {
+                if parser_current_kind(&state) != TOKEN_IDENT || parser_kind_at(&state, 1) != TOKEN_COLON {
+                    parser_add_fatal_code(&state, "E0003", parser_current(&state).span, "build-step arguments need field labels", "finite build actions name every tool, path, URL, hash, and argument list", "write `field: value`, for example `tool: \"cc\"`")
+                    return ParsedExpr{expr: Expr.EnumLit{type_name: "", variant: variant.payload.decoded, variant_span: Val(variant.span), args: ^args, leading_dot: true, span: Span{start: dot.span.start, end: end}}, span: Span{start: dot.span.start, end: end}}
+                }
+                label :: parser_expect_name(&state, "for a named build-step argument")
+                parser_bump(&state)
+                expr :: if label.payload.decoded == "args" { build_step_string_list(&state) } else { build_step_string(&state) }
+                if parser_aborting(&state) -> return expr
+                &args.push(EnumLitArg.Named{label: label.payload.decoded, expr: expr.expr})
+                if parser_current_kind(&state) == TOKEN_RPAREN -> break
+                parser_expect(&state, TOKEN_COMMA, "between build-step arguments")
+                if parser_aborting(&state) -> return expr
+                if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            }
+        }
+        close :: parser_expect(&state, TOKEN_RPAREN, "to close the build step")
+        end = close.span.end
+    }
+    span :: Span{start: dot.span.start, end: end}
+    ParsedExpr{expr: Expr.EnumLit{type_name: "", variant: variant.payload.decoded, variant_span: Val(variant.span), args: ^args, leading_dot: true, span: span}, span: span}
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1115
+fn build_step_string(state: &JetParserState) -> ParsedExpr {
+    token :: parser_current(&state)
+    if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING {
+        parser_add_fatal_code(&state, "E0003", token.span, "a build-step field must be quoted text", "build actions use fixed strings for tools, paths, URLs, and hashes", "write a quoted string such as `\"src/file\"`")
+        return ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
+    }
+    loop part in token.payload.string_parts {
+        if part.kind == STRING_PART_INTERPOLATION {
+            parser_add_fatal_code(&state, "E0003", token.span, "build-step fields must be literal quoted text", "build action identity includes fixed tool, path, URL, and hash facts", "replace interpolation with a quoted literal")
+            return ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
+        }
+    }
+    // The canonical codec preserves text/byte parts and the raw-string decoded
+    // fallback. No full expression grammar or interpolation parser is entered.
+    parser_parse_string(&state, 0)
+}
+// Rust: crates/jet-parser/src/Parser/Expressions/binary_unary.rs:1146
+fn build_step_string_list(state: &JetParserState) -> ParsedExpr {
+    open :: parser_expect(&state, TOKEN_LBRACKET, "before build-step string arguments")
+    values := [Expr]{}
+    if parser_aborting(&state) -> return ParsedExpr{expr: Expr.Unit{span: open.span}, span: open.span}
+    if parser_current_kind(&state) != TOKEN_RBRACKET {
+        loop {
+            value :: build_step_string(&state)
+            if parser_aborting(&state) -> return value
+            &values.push(value.expr)
+            if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+            parser_expect(&state, TOKEN_COMMA, "between build-step string arguments")
+            if parser_aborting(&state) -> return value
+            if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACKET, "after build-step string arguments")
+    span :: parser_cover(open.span, close.span)
+    ParsedExpr{expr: Expr.ListLit{elements: ^values, span: span}, span: span}
+}

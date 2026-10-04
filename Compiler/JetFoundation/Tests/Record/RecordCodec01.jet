@@ -1,0 +1,72 @@
+// Rust: crates/jet-foundation/src/RecordCodec.rs:777
+fn sample() -> [RecordSection] Never! {
+    digest := [U8]{}
+    &digest.resize(32, U8{7})
+    [RecordSection.new(U64{7}, [
+        record_map([("name", RecordValue.str("core.text")), ("count", RecordValue.Int{value: -3}), ("digest", RecordValue.Digest{value: ^digest})]),
+        RecordValue.List{values: [RecordValue.Null, RecordValue.Bool{value: true}, RecordValue.Bool{value: false}, RecordValue.Bytes{value: [U8]{0,255,16}}, RecordValue.Int{value: Int{I64.min}}, RecordValue.Int{value: Int{I64.max}}]}]),
+     RecordSection.new(U64{1}, [RecordValue.str("core.text"), RecordValue.str("é")]),
+     RecordSection.new(U64{3}, [])]
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:803
+#Test("record_codec_round_trips_every_value_kind") {
+    bytes :: record_encode("jet.test/v1", sample()).bytes.expect("encodes")
+    record :: record_decode(bytes).record.expect("decodes")
+    assert(record.schema == "jet.test/v1")
+    assert(record.sections.map((s) -> s.id).to_list() == [Int]{1,3,7})
+    expected := sample()
+    &expected.sort_by((a,b) -> a.id.compare(b.id))
+    assert(record.sections == expected)
+    assert(record_encode("jet.test/v1", record.sections).bytes.unwrap() == bytes)
+    assert(record.digest == record_digest("jet.test/v1", sample()))
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:816
+#Test("record_codec_reads_one_element_lazily") {
+    bytes :: record_encode("jet.test/v1", sample()).bytes.unwrap()
+    reader :: record_open_schema(bytes, "jet.test/v1").reader.unwrap()
+    assert(record_element_count(reader, 7) == Val(2))
+    assert(record_element_count(reader, 2) == None)
+    value :: record_element(reader, 7, 0).value.unwrap()
+    assert(value.field("name").as_str() == "core.text")
+    wrong :: record_open_schema(bytes, "jet.other/v1")
+    assert(wrong.reader == None)
+    assert(wrong.problem == Val("record schema is `jet.test/v1`, expected `jet.other/v1`"))
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:832
+#Test("record_codec_bytes_are_pinned") {
+    bytes :: record_encode("s", [RecordSection.new(U64{2}, [record_map([("k", RecordValue.Int{value: -1}), ("a", RecordValue.str("k"))])])]).bytes.unwrap()
+    body :: [U8]{74,69,84,82,1,1,115,2,1,97,1,107,1,2,1,8,7,2,0,4,1,1,3,1}
+    assert(bytes.slice(0, bytes.len() - 32) == body)
+    assert(bytes.slice(bytes.len() - 32, bytes.len()) == mir_sha256_bytes(body.view(0..<body.len())))
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:863
+fn reseal(body: [U8]) -> [U8] Never! {
+    out := ~body
+    loop byte in mir_sha256_bytes(body.view(0..<body.len())) -> &out.push(byte)
+    ^out
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:852
+#Test("record_codec_rejects_every_non_canonical_or_damaged_form") {
+    bytes :: record_encode("jet.test/v1", sample()).bytes.unwrap()
+    flipped := ~bytes
+    flipped[10] ^= U8{1}
+    assert(record_decode(flipped).problem == Val("record checksum does not match its bytes"))
+    assert(record_decode(bytes.slice(0,bytes.len()-1)).problem == Val("record checksum does not match its bytes"))
+    assert(record_decode([U8]{74,69,84}).problem == Val("record is truncated"))
+    assert(record_encode("x", [RecordSection.new(U64{1}, []), RecordSection.new(U64{1}, [])]).problem == Val("record section 1 is duplicated or out of order"))
+    assert(record_decode(reseal([U8]{74,69,84,82,129,0,0,0,0})).problem == Val("record is malformed: varint is not minimal"))
+    assert(record_decode(reseal([U8]{74,69,84,82,2,0,0,0})).problem == Val("record format 2 is not supported"))
+    unsorted :: reseal([U8]{74,69,84,82,1,1,115,2,1,107,1,97,1,2,1,6,7,2,0,0,1,0})
+    assert(record_decode(unsorted).problem == Val("record is malformed: map key `a` is duplicated or out of order"))
+    sections :: reseal([U8]{74,69,84,82,1,1,115,0,2,5,0,4,0})
+    assert(record_decode(sections).problem == Val("record section 4 is duplicated or out of order"))
+    index :: reseal([U8]{74,69,84,82,1,1,115,0,1,1,1,2,4,0})
+    assert(record_decode(index).problem == Val("record is malformed: string index 0 is out of range"))
+}
+// Rust: crates/jet-foundation/src/RecordCodec.rs:893
+#Test("record_json_renders_the_decoded_tree") {
+    bytes :: record_encode("jet.test/v1", [RecordSection.new(U64{1}, [record_map([
+        ("b", RecordValue.Bytes{value: [U8]{1,2}}), ("n", RecordValue.Null), ("s", RecordValue.str("q\""))])])]).bytes.unwrap()
+    json :: record_json(bytes)
+    assert(json.ends_with("\"sections\":{\"1\":[{\"b\":{\"bytes\":\"0102\"},\"n\":null,\"s\":\"q\\\"\"}]}}"))
+}

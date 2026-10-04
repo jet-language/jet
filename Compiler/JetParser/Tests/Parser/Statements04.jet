@@ -1,0 +1,49 @@
+// Rust control.rs:1-1805 has no inline tests; these are behavioral controls.
+fn control_packet_state(source: String) -> JetParserState {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty())
+    JetParserState{tokens: lexed.tokens, position: 0, diagnostics: [], source_end: source.len(), block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: source.len(), end: source.len()}, result_handler_depth: 0, statement_start: -1, source: source.bytes()}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/control.rs:432,536,570,582
+#Test("meta lookahead balances nested calls and recognizes following binding markers") {
+    persisted := control_packet_state("#Meta(category: category(\"api\"))\n#Persist state := 1")
+    assert(parser_at_meta_attr(&persisted))
+    assert(parser_at_persist_after_meta(&persisted))
+    assert(!parser_at_comptime_marker_after_meta(&persisted))
+    comptime := control_packet_state("#Meta(tunable) @limit :: 1")
+    assert(parser_at_comptime_marker_after_meta(&comptime))
+    plain := control_packet_state("name :: 1")
+    assert(parser_meta_attr_next_index(&plain) == None)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/control.rs:612
+#Test("layout constructor probe recognizes immutable mutable and retired dotted forms") {
+    loop source in [String]{"layout_value :: Layout{{}}", "layout_value := Layout{{}}", "layout_value :: Layout.{{}}"} {
+        state := control_packet_state(source)
+        assert(parser_looks_like_layout_ctor(&state))
+    }
+    ordinary := control_packet_state("value :: Other{{}}")
+    assert(!parser_looks_like_layout_ctor(&ordinary))
+}
+// Rust: crates/jet-parser/src/Parser/Statements/control.rs:624,693
+#Test("layout mutable and retired keyword receive exact teaching diagnostics") {
+    mutable := control_packet_state("layout_value := Layout{{}}")
+    failed := false
+    _ :: parser_layout_ctor_binding(&mutable) catch { error -> failed = true; assert(error.code == "E0003"); Stmt.Expr{expr: Expr.Unit{span: Span{start: 0, end: 0}}} }
+    assert(failed)
+    retired := control_packet_state("layout scene {{}}")
+    failed = false
+    _ :: parser_retired_layout_keyword(&retired) catch { error -> failed = true; assert(error.code == "E2935"); Stmt.Expr{expr: Expr.Unit{span: Span{start: 0, end: 0}}} }
+    assert(failed)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/control.rs:46
+#Test("collecting loop rejects nonfinite header before parsing a source") {
+    state := control_packet_state("loop true -> 1")
+    failed := false
+    _ :: parser_yielding_loop_expr(&state, 0) catch { error ->
+        failed = true
+        assert(error.code == "E0072")
+        assert(error.what == "this collecting loop cannot return a List because it has no finite exhaustion edge")
+        ParsedExpr{expr: Expr.Unit{span: Span{start: 0, end: 4}}, span: Span{start: 0, end: 4}}
+    }
+    assert(failed)
+}

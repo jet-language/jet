@@ -1,0 +1,86 @@
+// Rust BodyDelta.rs has no inline tests. These controls use the real codec,
+// canonical AST, and parser; no production provider is mocked.
+use jet_foundation.[CtFloat, CtKey, CtReport, CtValue, Expr, Func, Item, Span, Type, stmt_span]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:98,113,287
+#Test("body delta integer wire and complete decode") {
+    assert(encode_value(CtValue.Int{value: 0}) == .Ok([U8]{0, 0}))
+    assert(encode_value(CtValue.Int{value: -1}) == .Ok([U8]{0, 1}))
+    assert(encode_value(CtValue.Int{value: 64}) == .Ok([U8]{0, 128, 1}))
+    loop value in [Int]{-9223372036854775808, -1, 0, 1, 9223372036854775807} {
+        bytes :: encode_value(CtValue.Int{value: value}) !? panic("integer encode")
+        assert(decode_value(bytes) == Val(CtValue.Int{value: value}))
+    }
+    assert(decode_value([U8]{0}) == None)
+    assert(decode_value([U8]{13, 0}) == None)
+    assert(decode_value([U8]{255}) == None)
+    assert(decode_value([U8]{2, 2}) == None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:178,200,411,456
+#Test("body delta corrupt counts varints UTF8 and duplicate keys") {
+    assert(decode_value([U8]{7, 127}) == None)
+    assert(decode_value([U8]{4, 1, 255}) == None)
+    assert(decode_value([U8]{0, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 0}) == None)
+    // Two Int(0) keys in a map, with Unit values: duplicates are cache misses.
+    assert(decode_value([U8]{8, 2, 0, 0, 13, 0, 0, 13}) == None)
+    assert(decode_value([U8]{6, 3, 1, 2}) == None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:335,364
+#Test("body delta spans require authored membership and move relatively") {
+    writer := Writer{bytes: [], start: 10, end: 30, spans: Spans.Require{spans: [(12, 14): true]}}
+    assert(Span{start: 12, end: 14}.put(&writer) == .Ok(()))
+    reader := Reader{bytes: writer.bytes.view(), at: 0, start: 110}
+    assert(Span.get(&reader) == Val(Span{start: 112, end: 114}))
+    assert(Span{start: 13, end: 14}.put(&writer) == .Err("span not authored by the item"))
+    assert(Span{start: 9, end: 14}.put(&writer) == .Err("span outside the item"))
+    assert(Span{start: 14, end: 13}.put(&writer) == .Err("span outside the item"))
+    zero := Writer{bytes: [], start: 0, end: 10, spans: Spans.Require{spans: [:]}}
+    assert(Span{start: 0, end: 0}.put(&zero) == .Err("ambiguous empty span"))
+    assert(Span{start: 0, end: 0}.put(&writer) == .Ok(()))
+    position_free := Reader{bytes: [U8]{0}.view(), at: 0, start: 999}
+    assert(Span.get(&position_free) == Val(Span{start: 0, end: 0}))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:767,1010,1014
+#Test("body delta unsupported nodes and told reports refuse reuse") {
+    assert(encode_value(CtValue.Failed{report: CtReport.Told{value: CtValue.Unit}}) == .Err("unsupported CtReport node"))
+    writer := Writer{bytes: [], start: 1, end: 1, spans: Spans.Require{spans: [:]}}
+    assert(Type.Fn{params: [], ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}.put(&writer) == .Ok(()))
+    unknown := Reader{bytes: [U8]{45}.view(), at: 0, start: 1}
+    assert(Expr.get(&unknown) == None)
+    zero_span := Expr.Unit{span: Span{start: 0, end: 0}}
+    value_writer := Writer{bytes: [], start: 1, end: 1, spans: Spans.Require{spans: [:]}}
+    assert(zero_span.put(&value_writer) == .Ok(()))
+    authored_span := Expr.Unit{span: Span{start: 1, end: 1}}
+    assert(authored_span.put(&value_writer) == .Err("span not authored by the item"))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:299,970
+#Test("body delta floating bit patterns stay lossless") {
+    loop bits in [U64]{0, 0x8000000000000000, 0x7ff0000000000000, 0x7ff8000000000042} {
+        value :: CtValue.Float{value: CtFloat.F64{value: Float.from_bits(bits)}}
+        bytes :: encode_value(value) !? panic("float encode")
+        decoded :: decode_value(bytes) ?? panic("float decode")
+        assert(if decoded == { .Float(float) -> if float == { .F64(number) -> number.to_bits() == bits; else -> false }; else -> false })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:42,75
+fn body_delta_function(source: String) -> Func {
+    parsed :: jet_parser.parse_strict_source(source.bytes())
+    program :: parsed.program ?? panic("valid body delta control source")
+    loop item in program.items -> if item == .Func(function) -> return function
+    panic("control source contains a function")
+}
+#Test("body delta apply is transactional and rebases the complete body") {
+    pristine :: body_delta_function("// prefix\nfn run() {{\n    print(1)\n}}\n")
+    encoded :: encode(pristine, pristine) !? panic("authored function encode")
+    moved := ~pristine
+    moved.span.start += 100
+    moved.span.end += 100
+    assert(apply(&moved, encoded) == Val(()))
+    assert(moved.body.len() == pristine.body.len())
+    assert(stmt_span(moved.body[0]).start == stmt_span(pristine.body[0]).start + 100)
+    before :: ~moved
+    corrupted := ~encoded
+    &corrupted.push(U8{0})
+    assert(apply(&moved, corrupted) == None)
+    assert(moved.params == before.params && moved.return_type == before.return_type && moved.body == before.body && moved.reactive_upgrades == before.reactive_upgrades)
+}

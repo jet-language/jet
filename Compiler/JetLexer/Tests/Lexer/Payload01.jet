@@ -1,0 +1,167 @@
+// Canonical private lexer declarations are shared with this test fragment.
+fn scan_packet_lex(source: String) -> Lexed { lex_payload(source.bytes(), false) }
+fn scan_packet_strings(tokens: [Token]) -> [[StringPart]] Never! {
+    strings := [[StringPart]]{}
+    loop token in tokens {
+        if token.kind == TOKEN_STRING -> strings.push(~token.payload.string_parts)
+    }
+    strings
+}
+fn scan_packet_text(parts: [StringPart], expected: String) -> Bool Never! {
+    parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text == expected
+}
+fn scan_packet_hole(parts: [StringPart]) -> Bool Never! {
+    loop part in parts { if part.kind == STRING_PART_INTERPOLATION -> return true }
+    false
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1062
+#Test("raw_foreign_body_marker_does_not_capture_a_later_function") {
+    source :: `#FFI(c) fn foreign() -> Int {
+    """int64_t foreign(void) { return 1; }"""
+}
+
+fn ordinary(value: Int) {
+    text :: """
+value={value}
+"""
+}`
+    lexed :: scan_packet_lex(source)
+    assert(lexed.diagnostics.is_empty())
+    strings :: scan_packet_strings(lexed.tokens)
+    assert(strings.len() == 2)
+    assert(strings[0].len() == 1 && strings[0][0].kind == STRING_PART_TEXT)
+    assert(scan_packet_hole(strings[1]))
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1092
+#Test("grouped_ffi_marker_keeps_foreign_body_raw") {
+    source :: `#[Unsafe("scalar registers"), FFI(asm)]
+fn add(a: Int, b: Int) -> Int {
+    """add {a}, {b} ; -> return"""
+}`
+    lexed :: scan_packet_lex(source)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop parts in scan_packet_strings(lexed.tokens) {
+        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text.contains("-> return") -> found = true
+    }
+    assert(found)
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1111
+#Test("adjacent_ffi_markers_keep_foreign_body_raw_in_both_orders") {
+    loop source in [String]{
+        `#Unsafe("registers") #FFI(asm) fn add() { """add {a}, {b}""" }`,
+        `#FFI(asm) #Unsafe("registers") fn add() { """add {a}, {b}""" }`
+    } {
+        lexed :: scan_packet_lex(source)
+        assert(lexed.diagnostics.is_empty())
+        found := false
+        loop parts in scan_packet_strings(lexed.tokens) {
+            if scan_packet_text(parts, "add {a}, {b}") -> found = true
+        }
+        assert(found)
+    }
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1127
+#Test("grouped_ffi_argument_name_does_not_make_an_ordinary_body_raw") {
+    source :: "#[Meta(category: FFI(asm)), Task] fn work() {{ text :: \"\"\"\nvalue={{value}}\n\"\"\" }}"
+    lexed :: scan_packet_lex(source)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop parts in scan_packet_strings(lexed.tokens) { if scan_packet_hole(parts) -> found = true }
+    assert(found)
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1143
+#Test("typed_head_bodies_keep_backslashes_and_shared_holes_but_plain_strings_decode_them") {
+    source :: `plain :: "\n"
+pattern :: Regex.{"\n{{literal}}-{value}"}
+multiline :: Path.{"""
+\logs\app
+"""}`
+    lexed :: scan_packet_lex(source)
+    assert(lexed.diagnostics.is_empty())
+    strings :: scan_packet_strings(lexed.tokens)
+    assert(strings.len() == 3)
+    assert(scan_packet_text(strings[0], "\n"))
+    assert(strings[1].len() == 2 && strings[1][0].kind == STRING_PART_TEXT && strings[1][0].text == `\n{literal}-`)
+    assert(strings[1][1].kind == STRING_PART_INTERPOLATION)
+    assert(scan_packet_text(strings[2], `\logs\app`))
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1174
+#Test("typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads") {
+    prefix_count :: 128
+    source := ""
+    loop index in 0..<prefix_count { source.push_str("prefix{index} :: \"prefix\"; ") }
+    source.push_str(`
+ordinary :: "\n"
+raw_dot :: Regex /* block */ . // line comment
+{ /* block */ "\n" }
+raw_name :: Regex /* block */ { // line comment
+"\n" }
+ordinary_lower :: regex /* block */ { /* block */ "\n" }
+incomplete_raw :: Regex /* block */ . /* block */ "\n"
+byte :: [ /* block */ U8 // line comment
+] /* block */ { /* block */ "\x41" }
+byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block */ { /* block */ "\x42" }
+`)
+    lexed :: scan_packet_lex(source)
+    assert(lexed.diagnostics.is_empty())
+    strings :: scan_packet_strings(lexed.tokens)
+    assert(strings.len() == prefix_count + 7)
+    tail :: strings[prefix_count..]
+    assert(scan_packet_text(tail[0], "\n"))
+    assert(scan_packet_text(tail[1], `\n`))
+    assert(scan_packet_text(tail[2], `\n`))
+    assert(scan_packet_text(tail[3], "\n"))
+    assert(scan_packet_text(tail[4], "\n"))
+    assert(tail[5].len() == 1 && tail[5][0].kind == STRING_PART_BYTE && tail[5][0].byte == 0x41)
+    assert(tail[6].len() == 1 && tail[6][0].kind == STRING_PART_BYTE && tail[6][0].byte == 0x42)
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1230
+#Test("at_distinguishes_prefix_package_ref_and_fence") {
+    lexed :: scan_packet_lex("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$")
+    // This original assertion is retained despite the Rust implementation's
+    // E0003/$layout migration branch; integration owns the inconsistent fixture.
+    assert(lexed.diagnostics.is_empty())
+    tokens :: lexed.tokens
+    assert(tokens[0].kind == TOKEN_IDENT && tokens[0].payload.decoded == "foo")
+    assert(tokens[1].kind == TOKEN_AT)
+    assert(tokens[2].kind == TOKEN_IDENT && tokens[2].payload.decoded == "bar")
+    assert(tokens[3].kind == TOKEN_IDENT && tokens[3].payload.decoded == "@baz")
+    assert(tokens[4].kind == TOKEN_IDENT && tokens[4].payload.decoded == "T")
+    assert(tokens[5].kind == TOKEN_DOT)
+    assert(tokens[6].kind == TOKEN_IDENT && tokens[6].payload.decoded == "@layout")
+    assert(tokens[7].kind == TOKEN_FENCE_OPEN && tokens[11].kind == TOKEN_FENCE_CLOSE)
+    assert(tokens[12].kind == TOKEN_IDENT && tokens[12].payload.decoded == "$build")
+    assert(tokens[13].kind == TOKEN_IDENT && tokens[13].payload.decoded == "T")
+    assert(tokens[14].kind == TOKEN_DOT)
+    assert(tokens[15].kind == TOKEN_IDENT && tokens[15].payload.decoded == "$layout")
+    assert(tokens[16].kind == TOKEN_IDENT && tokens[16].payload.decoded == "a")
+    assert(tokens[17].kind == TOKEN_DOLLAR)
+    assert(tokens[18].kind == TOKEN_IDENT && tokens[18].payload.decoded == "b")
+    assert(tokens[19].kind == TOKEN_DOLLAR && tokens[20].kind == TOKEN_LBRACKET)
+    assert(tokens[22].kind == TOKEN_RBRACKET && tokens[23].kind == TOKEN_DOLLAR)
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1262
+#Test("fence_digraphs_are_longest_match_beside_comparisons_and_generics") {
+    lexed :: scan_packet_lex("<: a :> x < y x <= y x <=> y x > y List<Int> a::b c:=d e:f")
+    assert(lexed.diagnostics.is_empty())
+    kinds := [Int]{}
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> kinds.push(token.kind)
+    }
+    assert(kinds == [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE,
+        TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
+}
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1293
+#Test("retired_fence_digraphs_teach_the_new_spelling_with_edits") {
+    lexed :: scan_packet_lex("print(@[ a, b ]@) x:]@")
+    edits := [String]{}
+    loop diagnostic in lexed.diagnostics {
+        assert(diagnostic.code == "E-FENCE-SPELLING")
+        edit :: diagnostic.edit ?? panic("fence respelling edit")
+        edits.push(edit.new_text)
+    }
+    assert(edits == [String]{"<:", ":>", " :>"})
+    assert(lexed.tokens[2].kind == TOKEN_FENCE_OPEN)
+    assert(lexed.tokens[6].kind == TOKEN_FENCE_CLOSE)
+}

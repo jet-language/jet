@@ -1,0 +1,11 @@
+use jet_foundation.[Expr, Stmt, Span]
+use jet_sema.Sema.Bundle.Comptime.[stmts_have_comptime_evaluation]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Comptime.rs:74 (behavioral control)
+#Test("comptime_detection_ordinary_and_marker_statements") {
+    assert(!stmts_have_comptime_evaluation([]))
+    span :: Span{start: 0, end: 0}
+    assert(!stmts_have_comptime_evaluation([Stmt.Expr{expr: Expr.Bool{value: true, span: span}}]))
+    assert(stmts_have_comptime_evaluation([Stmt.ComptimeBlock{body: [], span: span}]))
+    assert(stmts_have_comptime_evaluation([Stmt.Loop{body: [Stmt.ComptimeBlock{body: [], span: span}], span: span}]))
+}

@@ -2,6 +2,7 @@
 // These tests use the real Driver, parser, Sema and checked carrier. Project
 // fixtures below retain their original expected outcomes; a dependency refusal
 // is NOT the original proof and must not close their acceptance gates.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverCheckScope, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_embedded_core_sources, jet_driver_compiler_check, jet_driver_compiler_check_demand_index, jet_driver_receipt_closure]
 use jet_eval.[jet_eval_default_config, JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_compiler_semantic_index_value]
 use jet_foundation.[GateSet, TComptimeValue, DIAGNOSTIC_ERROR, foundation_embedded_core, mir_sha256_hex]
@@ -24,7 +25,7 @@ fn inspect_request(relative: String, source: String, extras: [JetDriverAuthorize
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: inspect_os_path.from_text("/inspect", inspect_os_path.PathPlatform.Unix), identity: "inspect-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "inspect-root", entry_path: inspect_os_path.from_text("/inspect/{relative}", inspect_os_path.PathPlatform.Unix)},
         canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("inspect-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("inspect-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

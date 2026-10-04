@@ -1,440 +1,206 @@
-// PORT-PENDING 0357 crates-jet-sema-src-sema-bundle-pipeline-completion-module-group: crates/jet-sema/src/Sema/Bundle/Pipeline/InlineImports.rs:1-436
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS pub(super) fn resolve_inline_module_imports(
-//RS     bundle: &mut ProgramBundle,
-//RS     states: &mut [ModuleState],
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     // D-NAME-WALK1=A: resolve use/pub use declared inside inline-module
-//RS     // bodies. These bindings inherit the enclosing file's module aliases, but
-//RS     // are keyed by inline module so they cannot leak into sibling or top-level
-//RS     // bodies. Generic module instances are ordinary CodeModules by this pass.
-//RS     for idx in 0..bundle.modules.len() {
-//RS         let inline_imports: Vec<(String, Vec<crate::AST::ImportDecl>)> = bundle.modules[idx]
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 Item::CodeModule(cm) if cm.body.is_some() && !cm.imports.is_empty() => {
-//RS                     Some((cm.name.clone(), cm.imports.clone()))
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         for (inline_name, imports) in inline_imports {
-//RS             let mut inline_names = HashSet::new();
-//RS             for imp in imports {
-//RS                 // Qualified Core imports use the enclosing file's Core
-//RS                 // namespace, but their binding remains local to this inline
-//RS                 // module body.
-//RS                 if let Some(module) = imp.core_module_path() {
-//RS                     if !crate::Syntax::is_known_core_module(&module) {
-//RS                         diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
-//RS                             &module, imp.span,
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                     if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
-//RS                         if let Some(ceiling) = bundle.layer_ceiling {
-//RS                             if mod_layer > ceiling {
-//RS                                 diags.push(crate::Syntax::layer_ceiling_exceeded(
-//RS                                     &module,
-//RS                                     mod_layer,
-//RS                                     ceiling,
-//RS                                     Some(imp.span),
-//RS                                     Some(&format!("`use {module}`")),
-//RS                                 ));
-//RS                                 continue;
-//RS                             }
-//RS                         }
-//RS                         if mod_layer > bundle.inferred_layer {
-//RS                             bundle.inferred_layer = mod_layer;
-//RS                         }
-//RS                     }
-//RS                     let local = imp
-//RS                         .walk_bindings()
-//RS                         .into_iter()
-//RS                         .next()
-//RS                         .map(|binding| binding.local)
-//RS                         .unwrap_or_else(|| imp.import_alias());
-//RS                     if !inline_names.insert(local.clone()) {
-//RS                         diags.push(Diagnostic::error(
-//RS                             "E0105",
-//RS                             format!("the import name `{local}` is used twice"),
-//RS                             "each import needs a unique namespace name in this file".to_string(),
-//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
-//RS                             Some(imp.alias_span),
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                     states[idx]
-//RS                         .inline_core_imports
-//RS                         .insert((inline_name.clone(), local), module);
-//RS                     continue;
-//RS                 }
-//RS                 let foreign = foreign_imports_after_validation(&imp);
-//RS                 if !foreign.is_empty() {
-//RS                     let mut group_failed = false;
-//RS                     let mut resolved = Vec::new();
-//RS                     let mut group_names = Vec::new();
-//RS                     for (namespace, alias) in foreign {
-//RS                         if !inline_names.insert(alias.clone()) {
-//RS                             group_failed = true;
-//RS                             diags.push(Diagnostic::error(
-//RS                                 "E0105",
-//RS                                 format!("the import name `{alias}` is used twice"),
-//RS                                 "each import needs a unique namespace name in this file"
-//RS                                     .to_string(),
-//RS                                 format!("rename one with `{} alias`", Syntax::KW_AS),
-//RS                                 Some(imp.alias_span),
-//RS                             ));
-//RS                             continue;
-//RS                         }
-//RS                         group_names.push(alias.clone());
-//RS                         let target = if namespace.language == crate::AST::ForeignLanguage::C {
-//RS                             bundle
-//RS                                 .cffi
-//RS                                 .target_for_scope(idx, Some(&inline_name), &alias)
-//RS                         } else {
-//RS                             bundle
-//RS                                 .modules
-//RS                                 .iter()
-//RS                                 .position(|candidate| candidate.display == namespace.display())
-//RS                         };
-//RS                         if let Some(target) = target {
-//RS                             resolved.push((alias, target));
-//RS                         } else {
-//RS                             group_failed = true;
-//RS                             let root = namespace.language.root();
-//RS                             diags.push(Diagnostic::error(
-//RS                                 "E1002",
-//RS                                 format!("`{root}` is reserved for first-party or foreign packages"),
-//RS                                 "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
-//RS                                 format!("make the `{root}` binding available or rename the import"),
-//RS                                 Some(imp.alias_span),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     if !group_failed {
-//RS                         for (alias, target) in resolved {
-//RS                             states[idx]
-//RS                                 .inline_foreign_imports
-//RS                                 .insert((inline_name.clone(), alias.clone()), target);
-//RS                             if imp.is_pub {
-//RS                                 states[idx]
-//RS                                     .inline_reexport_foreign
-//RS                                     .insert((inline_name.clone(), alias), target);
-//RS                             }
-//RS                         }
-//RS                     } else {
-//RS                         for alias in group_names {
-//RS                             inline_names.remove(&alias);
-//RS                         }
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 let ImportKind::Unqualified {
-//RS                     module_alias,
-//RS                     module_alias_span,
-//RS                     ..
-//RS                 } = &imp.kind
-//RS                 else {
-//RS                     // Inline bodies inherit file/module aliases; a second
-//RS                     // module-loading declaration has no loader target.
-//RS                     continue;
-//RS                 };
-//RS                 let module_alias = module_alias.as_str();
-//RS                 let module_alias_span = *module_alias_span;
-//RS                 let bindings = imp.walk_bindings();
-//RS                 let group_diagnostics = diags.len();
-//RS                 let mut group_names = Vec::new();
-//RS                 let mut inserted_inline = Vec::new();
-//RS                 let mut inserted_file = Vec::new();
-//RS                 let mut inserted_core = Vec::new();
-//RS                 let mut inserted_core_items = Vec::new();
-//RS                 let mut inserted_reexport_inline = Vec::new();
-//RS                 let mut inserted_reexport_file = Vec::new();
-//RS                 let mut inserted_reexport_core = Vec::new();
-//RS                 let mut pending_item_aliases = Vec::new();
-//RS                 for binding in bindings {
-//RS                     let orig = binding
-//RS                         .original
-//RS                         .expect("member walker returned a binding without a member");
-//RS                     let local = binding.local;
-//RS                     if !inline_names.insert(local.clone()) {
-//RS                         diags.push(Diagnostic::error(
-//RS                             "E0105",
-//RS                             format!("the import name `{local}` is used twice"),
-//RS                             "each import needs a unique namespace name in this file".to_string(),
-//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
-//RS                             Some(imp.alias_span),
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                     group_names.push(local.clone());
-//RS                     enum Target {
-//RS                         Inline {
-//RS                             alias: String,
-//RS                             mangled: String,
-//RS                         },
-//RS                         File {
-//RS                             name: String,
-//RS                             module_idx: usize,
-//RS                         },
-//RS                         Core {
-//RS                             module: String,
-//RS                             item: Option<String>,
-//RS                         },
-//RS                         Item {
-//RS                             target: String,
-//RS                             module_idx: usize,
-//RS                             span: crate::Diagnostics::Span,
-//RS                         },
-//RS                     }
-//RS                     let resolved = {
-//RS                         let st = &states[idx];
-//RS                         if let Some(canonical) = st.code_modules.get(module_alias) {
-//RS                             let mangled = jet_foundation::Names::member_name(canonical, &orig);
-//RS                             if !st.funcs.contains_key(&mangled) {
-//RS                                 diags.push(Diagnostic::error(
-//RS                                     "E0611",
-//RS                                     format!("`{orig}` is not defined in module `{module_alias}`"),
-//RS                                     "check the module body for the item you are importing"
-//RS                                         .to_string(),
-//RS                                     "make sure the name is spelled correctly".to_string(),
-//RS                                     Some(module_alias_span),
-//RS                                 ));
-//RS                                 None
-//RS                             } else {
-//RS                                 if !name_ledger.exported(idx, &mangled) {
-//RS                                     diags.push(Diagnostic::error(
-//RS                                         "E0609",
-//RS                                         format!("`{orig}` is private in module `{module_alias}`"),
-//RS                                         "only public items can be brought into scope with use"
-//RS                                             .to_string(),
-//RS                                         format!(
-//RS                                             "add pub before fn {orig} in module {module_alias}"
-//RS                                         ),
-//RS                                         Some(module_alias_span),
-//RS                                     ));
-//RS                                     None
-//RS                                 } else {
-//RS                                     Some(Target::Inline {
-//RS                                         alias: module_alias.to_string(),
-//RS                                         mangled,
-//RS                                     })
-//RS                                 }
-//RS                             }
-//RS                         } else if let Some(core_prefix) =
-//RS                             crate::AST::core_list_prefix(&module_alias)
-//RS                         {
-//RS                             let full = format!("{core_prefix}.{orig}");
-//RS                             let target = match crate::AST::core_list_path(&module_alias, &orig) {
-//RS                                 Some(crate::AST::CoreListPath::Module(module)) => {
-//RS                                     Some((module, None))
-//RS                                 }
-//RS                                 Some(crate::AST::CoreListPath::Item { module, item })
-//RS                                     if crate::Sema::CheckerCoreLib::core_module_items(&module)
-//RS                                         .iter()
-//RS                                         .any(|known| known == &item) =>
-//RS                                 {
-//RS                                     Some((module, Some(item)))
-//RS                                 }
-//RS                                 _ => None,
-//RS                             };
-//RS                             match target {
-//RS                                 Some((module, item)) => Some(Target::Core { module, item }),
-//RS                                 None => {
-//RS                                     if crate::Syntax::is_known_core_module(&core_prefix) {
-//RS                                         diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
-//RS                                             &core_prefix,
-//RS                                             &orig,
-//RS                                             binding.item_span.unwrap_or(module_alias_span),
-//RS                                         ));
-//RS                                     } else {
-//RS                                         diags.push(
-//RS                                             crate::Sema::CheckerCoreLib::unknown_core_module(
-//RS                                                 &full,
-//RS                                                 module_alias_span,
-//RS                                             ),
-//RS                                         );
-//RS                                     }
-//RS                                     None
-//RS                                 }
-//RS                             }
-//RS                         } else if let Some(&target_idx) = st.imports.get(module_alias) {
-//RS                             let target = &states[target_idx];
-//RS                             let visible = name_ledger.visible(idx, target_idx, &orig);
-//RS                             // D-MOD2: an inline body imports any top-level
-//RS                             // declaration of a file module, like a file does.
-//RS                             // Non-function items bind as NameLedger aliases,
-//RS                             // the table nominal lookup already consults.
-//RS                             let is_function = target.funcs.contains_key(orig);
-//RS                             let is_other_item = !is_function
-//RS                                 && matches!(
-//RS                                     name_ledger
-//RS                                         .declaration(target_idx, orig)
-//RS                                         .map(|declaration| declaration.kind.as_str()),
-//RS                                     Some("type" | "trait" | "const" | "tag" | "protocol")
-//RS                                 );
-//RS                             if !is_function && !is_other_item {
-//RS                                 diags.push(Diagnostic::error(
-//RS                                     "E0611",
-//RS                                     format!("`{orig}` is not defined in module `{module_alias}`"),
-//RS                                     "check the module for the item you are importing".to_string(),
-//RS                                     "make sure the name is spelled correctly".to_string(),
-//RS                                     Some(module_alias_span),
-//RS                                 ));
-//RS                                 None
-//RS                             } else if !visible {
-//RS                                 diags.push(Diagnostic::error(
-//RS                                     "E0609",
-//RS                                     format!("`{orig}` is private in module `{module_alias}`"),
-//RS                                     "only public items can be brought into scope with use"
-//RS                                         .to_string(),
-//RS                                     if is_function {
-//RS                                         format!("add pub before fn {orig} in the imported file")
-//RS                                     } else {
-//RS                                         format!(
-//RS                                             "add pub before the declaration of {orig} in the imported file"
-//RS                                         )
-//RS                                     },
-//RS                                     Some(module_alias_span),
-//RS                                 ));
-//RS                                 None
-//RS                             } else if is_other_item {
-//RS                                 let item_target =
-//RS                                     format!("{}.{}", bundle.modules[target_idx].alias, orig);
-//RS                                 if name_ledger
-//RS                                     .alias(idx, &local)
-//RS                                     .is_some_and(|existing| existing.target != item_target)
-//RS                                 {
-//RS                                     diags.push(Diagnostic::error(
-//RS                                         "E0105",
-//RS                                         format!("the import name `{local}` is used twice"),
-//RS                                         "each import needs a unique namespace name in this file"
-//RS                                             .to_string(),
-//RS                                         format!("rename one with `{} alias`", Syntax::KW_AS),
-//RS                                         Some(imp.alias_span),
-//RS                                     ));
-//RS                                     None
-//RS                                 } else {
-//RS                                     Some(Target::Item {
-//RS                                         target: item_target,
-//RS                                         module_idx: target_idx,
-//RS                                         span: binding.local_span,
-//RS                                     })
-//RS                                 }
-//RS                             } else {
-//RS                                 Some(Target::File {
-//RS                                     name: orig.to_string(),
-//RS                                     module_idx: target_idx,
-//RS                                 })
-//RS                             }
-//RS                         } else {
-//RS                             diags.push(Diagnostic::error(
-//RS                                 "E0610",
-//RS                                 format!("no module named {module_alias} in scope"),
-//RS                                 "the alias must refer to a module in the enclosing file"
-//RS                                     .to_string(),
-//RS                                 format!("import a module as {module_alias} before this use"),
-//RS                                 Some(module_alias_span),
-//RS                             ));
-//RS                             None
-//RS                         }
-//RS                     };
-//RS                     let Some(target) = resolved else { continue };
-//RS                     let st = &mut states[idx];
-//RS                     match target {
-//RS                         Target::Inline { alias, mangled } => {
-//RS                             st.inline_unqualified
-//RS                                 .insert((inline_name.clone(), local.clone()), mangled.clone());
-//RS                             inserted_inline.push((inline_name.clone(), local.clone()));
-//RS                             if imp.is_pub {
-//RS                                 st.inline_reexport_inline
-//RS                                     .insert((inline_name.clone(), local.clone()), (alias, mangled));
-//RS                                 inserted_reexport_inline.push((inline_name.clone(), local));
-//RS                             }
-//RS                         }
-//RS                         Target::File { name, module_idx } => {
-//RS                             st.inline_unqualified_file.insert(
-//RS                                 (inline_name.clone(), local.clone()),
-//RS                                 (name.clone(), module_idx),
-//RS                             );
-//RS                             inserted_file.push((inline_name.clone(), local.clone()));
-//RS                             if imp.is_pub {
-//RS                                 st.inline_reexport_file.insert(
-//RS                                     (inline_name.clone(), local.clone()),
-//RS                                     (name, module_idx),
-//RS                                 );
-//RS                                 inserted_reexport_file.push((inline_name.clone(), local));
-//RS                             }
-//RS                         }
-//RS                         Target::Core { module, item } => {
-//RS                             let key = (inline_name.clone(), local.clone());
-//RS                             st.inline_core_imports.insert(key.clone(), module.clone());
-//RS                             inserted_core.push(key.clone());
-//RS                             if let Some(item) = item {
-//RS                                 st.inline_core_items.insert(key.clone(), item.clone());
-//RS                                 inserted_core_items.push(key.clone());
-//RS                                 if imp.is_pub {
-//RS                                     st.inline_reexport_core.insert(key.clone(), (module, item));
-//RS                                     inserted_reexport_core.push(key);
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         Target::Item {
-//RS                             target,
-//RS                             module_idx,
-//RS                             span,
-//RS                         } => pending_item_aliases.push((local, target, module_idx, span)),
-//RS                     }
-//RS                 }
-//RS                 if diags.len() == group_diagnostics {
-//RS                     // The ledger has no inline-module scope, so the alias
-//RS                     // lives in the enclosing file and never exports from it.
-//RS                     for (local, target, target_idx, span) in pending_item_aliases {
-//RS                         name_ledger.record_alias(
-//RS                             idx,
-//RS                             local,
-//RS                             target,
-//RS                             Some(target_idx),
-//RS                             span,
-//RS                             jet_foundation::Names::NameVisibility::Private,
-//RS                         );
-//RS                     }
-//RS                 } else {
-//RS                     let st = &mut states[idx];
-//RS                     for key in inserted_inline {
-//RS                         st.inline_unqualified.remove(&key);
-//RS                     }
-//RS                     for key in inserted_file {
-//RS                         st.inline_unqualified_file.remove(&key);
-//RS                     }
-//RS                     for key in inserted_core {
-//RS                         st.inline_core_imports.remove(&key);
-//RS                     }
-//RS                     for key in inserted_core_items {
-//RS                         st.inline_core_items.remove(&key);
-//RS                     }
-//RS                     for key in inserted_reexport_inline {
-//RS                         st.inline_reexport_inline.remove(&key);
-//RS                     }
-//RS                     for key in inserted_reexport_file {
-//RS                         st.inline_reexport_file.remove(&key);
-//RS                     }
-//RS                     for key in inserted_reexport_core {
-//RS                         st.inline_reexport_core.remove(&key);
-//RS                     }
-//RS                     for name in group_names {
-//RS                         inline_names.remove(&name);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0357 crates/jet-sema/src/Sema/Bundle/Pipeline/InlineImports.rs:1-436
+use JetSema.Sema.Bundle.Pipeline.*
+use jet_foundation.[AST, Syntax, Names]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use JetSema.Sema.CheckerCoreLib as CheckerCoreLib
 
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/InlineImports.rs:175
+// GATE #4499: tuple keys retain exact structural equality and hashing.
+enum Target {
+    Inline{alias: String, mangled: String}
+    File{name: String, module_idx: USize}
+    Core{module: String, item: String?}
+    Item{target: String, module_idx: USize, span: Span}
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/InlineImports.rs:3
+pub fn resolve_inline_module_imports(bundle: &ProgramBundle, states: &[ModuleState], name_ledger: &Names.NameLedger, diags: &[Diagnostic]) {
+    loop idx in 0..<bundle.modules.len() {
+        inline_imports := [(String, [AST.ImportDecl])]{}
+        loop item in bundle.modules[idx].items {
+            if item is .CodeModule(cm) && cm.body != None && !cm.imports.is_empty() -> inline_imports.push((cm.name, cm.imports.clone()))
+        }
+        loop (inline_name, imports) in inline_imports {
+            inline_names := [String:Bool]{}
+            loop imp in imports {
+                if imp.core_module_path() is module {
+                    if !Syntax.is_known_core_module(module) {
+                        diags.push(CheckerCoreLib.unknown_core_module(module, imp.span))
+                        next
+                    }
+                    if Syntax.core_module_layer(module) is mod_layer {
+                        if bundle.layer_ceiling is ceiling && mod_layer > ceiling {
+                            diags.push(Syntax.layer_ceiling_exceeded(module, mod_layer, ceiling, Val(imp.span), Val("`use {module}`")))
+                            next
+                        }
+                        if mod_layer > bundle.inferred_layer -> bundle.inferred_layer = mod_layer
+                    }
+                    local :: imp.walk_bindings().first().map(fn(binding) { binding.local }) ?? imp.import_alias()
+                    if inline_names.contains_key(local) {
+                        diags.push(Diagnostic.error("E0105", "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `{Syntax.KW_AS} alias`", Val(imp.alias_span)))
+                        next
+                    }
+                    inline_names.insert(local, true)
+                    states[idx].inline_core_imports.insert((inline_name, local), module)
+                    next
+                }
+                foreign :: foreign_imports_after_validation(imp)
+                if !foreign.is_empty() {
+                    group_failed := false
+                    resolved := [(String, USize)]{}
+                    group_names := [String]{}
+                    loop (namespace, alias) in foreign {
+                        if inline_names.contains_key(alias) {
+                            group_failed = true
+                            diags.push(Diagnostic.error("E0105", "the import name `{alias}` is used twice", "each import needs a unique namespace name in this file", "rename one with `{Syntax.KW_AS} alias`", Val(imp.alias_span)))
+                            next
+                        }
+                        inline_names.insert(alias, true)
+                        group_names.push(alias)
+                        target :: if namespace.language == AST.ForeignLanguage.C {
+                            bundle.cffi.target_for_scope(idx, Val(inline_name), alias)
+                        } else {
+                            bundle.modules.iter().position(fn(candidate) { candidate.display == namespace.display() })
+                        }
+                        if target is found {
+                            resolved.push((alias, found))
+                        } else {
+                            group_failed = true
+                            root :: namespace.language.root()
+                            diags.push(Diagnostic.error("E1002", "`{root}` is reserved for first-party or foreign packages", "a foreign namespace must resolve to a mounted library before it can be imported", "make the `{root}` binding available or rename the import", Val(imp.alias_span)))
+                        }
+                    }
+                    if !group_failed {
+                        loop (alias, target) in resolved {
+                            states[idx].inline_foreign_imports.insert((inline_name, alias), target)
+                            if imp.is_pub -> states[idx].inline_reexport_foreign.insert((inline_name, alias), target)
+                        }
+                    } else {
+                        loop alias in group_names -> inline_names.remove(alias)
+                    }
+                    next
+                }
+                if imp.kind is .Unqualified{module_alias, module_alias_span, ..} {
+                    bindings :: imp.walk_bindings()
+                    group_diagnostics :: diags.len()
+                    group_names := [String]{}
+                    inserted_inline := [(String, String)]{}
+                    inserted_file := [(String, String)]{}
+                    inserted_core := [(String, String)]{}
+                    inserted_core_items := [(String, String)]{}
+                    inserted_reexport_inline := [(String, String)]{}
+                    inserted_reexport_file := [(String, String)]{}
+                    inserted_reexport_core := [(String, String)]{}
+                    pending_item_aliases := [(String, String, USize, Span)]{}
+                    loop binding in bindings {
+                        orig :: binding.original ?? panic("member walker returned a binding without a member")
+                        local :: binding.local
+                        if inline_names.contains_key(local) {
+                            diags.push(Diagnostic.error("E0105", "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `{Syntax.KW_AS} alias`", Val(imp.alias_span)))
+                            next
+                        }
+                        inline_names.insert(local, true)
+                        group_names.push(local)
+                        resolved := None as Target?
+                        if states[idx].code_modules.get(module_alias) is canonical {
+                            mangled :: Names.member_name(canonical, orig)
+                            if !states[idx].funcs.contains_key(mangled) {
+                                diags.push(Diagnostic.error("E0611", "`{orig}` is not defined in module `{module_alias}`", "check the module body for the item you are importing", "make sure the name is spelled correctly", Val(module_alias_span)))
+                            } else if !name_ledger.exported(idx, mangled) {
+                                diags.push(Diagnostic.error("E0609", "`{orig}` is private in module `{module_alias}`", "only public items can be brought into scope with use", "add pub before fn {orig} in module {module_alias}", Val(module_alias_span)))
+                            } else {
+                                resolved = Val(Target.Inline{alias: module_alias, mangled: mangled})
+                            }
+                        } else if AST.core_list_prefix(module_alias) is core_prefix {
+                            full :: "{core_prefix}.{orig}"
+                            target := None as (String, String?)?
+                            if AST.core_list_path(module_alias, orig) == {
+                                .Module(module) -> { target = Val((module, None)) }
+                                .Item{module, item} -> {
+                                    if CheckerCoreLib.core_module_items(module).iter().any(fn(known) { known == item }) -> target = Val((module, Val(item)))
+                                }
+                                else -> {}
+                            }
+                            if target is (module, item) {
+                                resolved = Val(Target.Core{module: module, item: item})
+                            } else {
+                                if Syntax.is_known_core_module(core_prefix) {
+                                    diags.push(CheckerCoreLib.unknown_core_item(core_prefix, orig, binding.item_span ?? module_alias_span))
+                                } else {
+                                    diags.push(CheckerCoreLib.unknown_core_module(full, module_alias_span))
+                                }
+                            }
+                        } else if states[idx].imports.get(module_alias) is target_idx {
+                            visible :: name_ledger.visible(idx, target_idx, orig)
+                            is_function :: states[target_idx].funcs.contains_key(orig)
+                            is_other_item :: !is_function && name_ledger.declaration(target_idx, orig).map(fn(declaration) {
+                                if declaration.kind == { "type" | "trait" | "const" | "tag" | "protocol" -> true else -> false }
+                            }) == Val(true)
+                            if !is_function && !is_other_item {
+                                diags.push(Diagnostic.error("E0611", "`{orig}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly", Val(module_alias_span)))
+                            } else if !visible {
+                                fix :: if is_function { "add pub before fn {orig} in the imported file" } else { "add pub before the declaration of {orig} in the imported file" }
+                                diags.push(Diagnostic.error("E0609", "`{orig}` is private in module `{module_alias}`", "only public items can be brought into scope with use", fix, Val(module_alias_span)))
+                            } else if is_other_item {
+                                item_target :: "{bundle.modules[target_idx].alias}.{orig}"
+                                if name_ledger.alias(idx, local).map(fn(existing) { existing.target != item_target }) == Val(true) {
+                                    diags.push(Diagnostic.error("E0105", "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `{Syntax.KW_AS} alias`", Val(imp.alias_span)))
+                                } else {
+                                    resolved = Val(Target.Item{target: item_target, module_idx: target_idx, span: binding.local_span})
+                                }
+                            } else {
+                                resolved = Val(Target.File{name: orig, module_idx: target_idx})
+                            }
+                        } else {
+                            diags.push(Diagnostic.error("E0610", "no module named {module_alias} in scope", "the alias must refer to a module in the enclosing file", "import a module as {module_alias} before this use", Val(module_alias_span)))
+                        }
+                        target :: resolved ?? next
+                        key :: (inline_name, local)
+                        if target == {
+                            .Inline{alias, mangled} -> {
+                                states[idx].inline_unqualified.insert(key, mangled)
+                                inserted_inline.push(key)
+                                if imp.is_pub {
+                                    states[idx].inline_reexport_inline.insert(key, (alias, mangled))
+                                    inserted_reexport_inline.push(key)
+                                }
+                            }
+                            .File{name, module_idx} -> {
+                                states[idx].inline_unqualified_file.insert(key, (name, module_idx))
+                                inserted_file.push(key)
+                                if imp.is_pub {
+                                    states[idx].inline_reexport_file.insert(key, (name, module_idx))
+                                    inserted_reexport_file.push(key)
+                                }
+                            }
+                            .Core{module, item} -> {
+                                states[idx].inline_core_imports.insert(key, module)
+                                inserted_core.push(key)
+                                if item is member {
+                                    states[idx].inline_core_items.insert(key, member)
+                                    inserted_core_items.push(key)
+                                    if imp.is_pub {
+                                        states[idx].inline_reexport_core.insert(key, (module, member))
+                                        inserted_reexport_core.push(key)
+                                    }
+                                }
+                            }
+                            .Item{target, module_idx, span} -> { pending_item_aliases.push((local, target, module_idx, span)) }
+                        }
+                    }
+                    if diags.len() == group_diagnostics {
+                        loop (local, target, target_idx, span) in pending_item_aliases -> name_ledger.record_alias(idx, local, target, Val(target_idx), span, Names.NameVisibility.Private)
+                    } else {
+                        loop key in inserted_inline -> states[idx].inline_unqualified.remove(key)
+                        loop key in inserted_file -> states[idx].inline_unqualified_file.remove(key)
+                        loop key in inserted_core -> states[idx].inline_core_imports.remove(key)
+                        loop key in inserted_core_items -> states[idx].inline_core_items.remove(key)
+                        loop key in inserted_reexport_inline -> states[idx].inline_reexport_inline.remove(key)
+                        loop key in inserted_reexport_file -> states[idx].inline_reexport_file.remove(key)
+                        loop key in inserted_reexport_core -> states[idx].inline_reexport_core.remove(key)
+                        loop name in group_names -> inline_names.remove(name)
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,4 +1,10 @@
+use core.files.runtime.kernel_path_components as sema_fixture_path
 use jet_foundation.[
+    BuildFactSnapshot,
+    LoadedModule,
+    MIRTargetMachine,
+    MIROSTarget,
+    ProgramBundle,
     Diagnostic,
     Item,
     SymbolID,
@@ -76,4 +82,25 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
         copy_events: ~checked.copy_events,
         complete: checked.complete,
     }
+}
+
+// Explicit test fixture boundary. It constructs an owner from genuine parsed
+// input Programs; production registration never invents native host/path facts.
+pub fn sema_test_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, host_hooks: Shared<SemaRegistrationHostHooks>) -> SemaRegistrationGraph {
+    os :: if build_facts.os == { "linux" -> MIROSTarget.Linux; "macos" -> MIROSTarget.MacOS; "windows" -> MIROSTarget.Windows; else -> panic("test fixture must declare its simulated host OS") }
+    platform :: if os == MIROSTarget.Windows -> sema_fixture_path.PathPlatform.Windows else -> sema_fixture_path.PathPlatform.Unix
+    fixture := ProgramBundle.new(sema_fixture_path.from_text(".", platform), os, build_facts.snapshot ?? BuildFactSnapshot.for_host(os, target_machine.triple), "2028")
+    prepared := inputs
+    loop index in 0..<prepared.len() {
+        if prepared[index].module_identity == canonical_effect_module_identity -> next
+        prepared[index].bundle_index = Val(fixture.modules.len())
+        if prepared[index].module_identity == entry_module_identity -> fixture.entry = fixture.modules.len()
+        program := prepared[index].program
+        &fixture.modules.push(LoadedModule.from_program(sema_fixture_path.from_text(prepared[index].source_file, platform), prepared[index].source_file, prepared[index].unit_source, prepared[index].module_name, ^program))
+    }
+    owner :: shared ^fixture
+    loop index in 0..<prepared.len() {
+        if prepared[index].module_identity != canonical_effect_module_identity -> prepared[index].bundle_owner = Val(owner)
+    }
+    sema_registration_prepare_graph(prepared, edges, package_identity, entry_module_identity, canonical_effect_module_identity, foreign_providers, target_machine, build_facts, host_hooks)
 }

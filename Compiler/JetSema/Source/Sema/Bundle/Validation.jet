@@ -1,2309 +1,755 @@
-// PORT-PENDING 0360 crates-jet-sema-src-sema-bundle-validation: crates/jet-sema/src/Sema/Bundle/Validation.rs:1-2305
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use crate::AST::Param;
-//RS use std::collections::BTreeSet;
-//RS 
-//RS mod CoreUsage;
-//RS mod BodyCheck;
-//RS use BodyCheck::*;
-//RS pub(crate) use BodyCheck::{
-//RS     checker_for_module, fn_types_compatible, func_sig_to_fn_type, BodyProducts,
-//RS };
-//RS pub(crate) use BodyCheck::{
-//RS     collect_diverging_functions, collect_fixed_length_write_params, project_divergence_facts,
-//RS };
-//RS pub(crate) use CoreUsage::{
-//RS     apply_helper_layer_inference, check_ui_capabilities, collect_core_expr, collect_core_lvalue,
-//RS     collect_core_stmts, collect_used_core, expand_core_reachable_closure,
-//RS };
-//RS 
-//RS pub(crate) fn uses_raw_protocol_return(
-//RS     trait_name: Option<&str>,
-//RS     implementation_generated: bool,
-//RS     function_generated: bool,
-//RS ) -> bool {
-//RS     // D-FAILURE-FOUNDATION1: these traits are raw Rust protocol ABIs (String,
-//RS     // bool, Ordering, DataTree, and same-type arithmetic) — never the implicit
-//RS     // Outcome carrier. A wrapped body would violate the protocol signature for
-//RS     // user and derived impls alike (rustc E0053/E0308 behind I2).
-//RS     trait_name.is_some_and(|name| {
-//RS         matches!(
-//RS             name,
-//RS             crate::Generics::DISPLAY
-//RS                 | crate::Generics::DEBUG
-//RS                 | crate::Generics::ENCODE
-//RS                 | crate::Generics::DECODE
-//RS                 | crate::Generics::EQUATABLE
-//RS                 | crate::Generics::COMPARABLE
-//RS                 | crate::Generics::ADD
-//RS                 | crate::Generics::SUB
-//RS                 | crate::Generics::MUL
-//RS                 | crate::Generics::DIV
-//RS         )
-//RS     }) || implementation_generated && function_generated
-//RS }
-//RS pub(crate) fn uses_raw_protocol_function_return(
-//RS     trait_name: Option<&str>,
-//RS     implementation_generated: bool,
-//RS     function: &crate::AST::Func,
-//RS ) -> bool {
-//RS     uses_raw_protocol_return(
-//RS         trait_name,
-//RS         implementation_generated,
-//RS         function.compiler_generated,
-//RS     ) || (function.compiler_generated && function.state_transition.is_some())
-//RS }
-//RS 
-//RS 
-//RS /// `sealed` holds the recorded nodes of sealed dependency modules (#2517
-//RS /// S2) as `(alias, [(local key, summary)])`. Their edges are already
-//RS /// qualified, so they join the graph as recorded and take part in short-name
-//RS /// resolution like checked nodes.
-//RS pub(super) fn qualified_effect_facts(
-//RS     modules: &[(String, HashMap<String, EffectSummary>)],
-//RS     sealed: &[(String, Vec<(String, EffectSummary)>)],
-//RS     taint_seeds: &HashMap<String, BTreeSet<String>>,
-//RS ) -> (
-//RS     HashMap<String, EffectSummary>,
-//RS     jet_foundation::Facts::ReachabilityResult,
-//RS ) {
-//RS     let mut locations = HashMap::<String, Vec<String>>::new();
-//RS     let aliases = modules
-//RS         .iter()
-//RS         .map(|(alias, _)| alias.as_str())
-//RS         .collect::<HashSet<_>>();
-//RS     for (alias, summaries) in modules {
-//RS         for key in summaries.keys() {
-//RS             locations
-//RS                 .entry(key.clone())
-//RS                 .or_default()
-//RS                 .push(format!("{alias}::{key}"));
-//RS         }
-//RS     }
-//RS     for (alias, nodes) in sealed {
-//RS         for (key, _) in nodes {
-//RS             locations
-//RS                 .entry(key.clone())
-//RS                 .or_default()
-//RS                 .push(format!("{alias}::{key}"));
-//RS         }
-//RS     }
-//RS     let mut qualified = HashMap::new();
-//RS     for (alias, nodes) in sealed {
-//RS         for (key, summary) in nodes {
-//RS             qualified.insert(format!("{alias}::{key}"), summary.clone());
-//RS         }
-//RS     }
-//RS     for (alias, summaries) in modules {
-//RS         let local_keys: HashSet<String> = summaries.keys().cloned().collect();
-//RS         for (key, summary) in summaries {
-//RS             let mut summary = summary.clone();
-//RS             let resolve_edge = |edge: &String| {
-//RS                 if edge == "__jet_panic__" {
-//RS                     return edge.clone();
-//RS                 }
-//RS                 if local_keys.contains(edge) {
-//RS                     return format!("{alias}::{edge}");
-//RS                 }
-//RS                 if let Some((module, symbol)) = edge.split_once('.') {
-//RS                     if aliases.contains(module) {
-//RS                         return format!("{module}::{symbol}");
-//RS                     }
-//RS                 }
-//RS                 locations
-//RS                     .get(edge)
-//RS                     .and_then(|values| (values.len() == 1).then(|| values[0].clone()))
-//RS                     .unwrap_or_else(|| edge.clone())
-//RS             };
-//RS             summary.edges = summary.edges.iter().map(&resolve_edge).collect();
-//RS             for region in &mut summary.regions {
-//RS                 region.edges = region.edges.iter().map(&resolve_edge).collect();
-//RS             }
-//RS             for obligation in &mut summary.callback_obligations {
-//RS                 obligation.edges = obligation.edges.iter().map(&resolve_edge).collect();
-//RS             }
-//RS             for obligation in &mut summary.autodiff_obligations {
-//RS                 obligation.target = resolve_edge(&obligation.target);
-//RS             }
-//RS             for fact in &mut summary.discarded_results {
-//RS                 fact.callee = resolve_edge(&fact.callee);
-//RS             }
-//RS             for call in &mut summary.memory.calls {
-//RS                 call.callee = resolve_edge(&call.callee);
-//RS             }
-//RS             for region in &mut summary.memory.regions {
-//RS                 region.edges = region.edges.iter().map(&resolve_edge).collect();
-//RS                 for call in &mut region.calls {
-//RS                     call.callee = resolve_edge(&call.callee);
-//RS                 }
-//RS             }
-//RS             qualified.insert(format!("{alias}::{key}"), summary);
-//RS         }
-//RS     }
-//RS     let mut reachability = solve_reachability(&qualified, taint_seeds);
-//RS     for (short, values) in locations.iter().filter(|(_, values)| values.len() == 1) {
-//RS         let qualified_key = &values[0];
-//RS         if let Some(summary) = qualified.get(qualified_key).cloned() {
-//RS             qualified.insert(short.clone(), summary);
-//RS         }
-//RS         reachability.copy_node(short, qualified_key);
-//RS     }
-//RS     (qualified, reachability)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod effect_qualification_tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn nested_region_and_callback_edges_are_module_qualified() {
-//RS         let root = EffectSummary {
-//RS             regions: vec![RegionSummary {
-//RS                 caps: EffectSet::new(),
-//RS                 direct: EffectSet::new(),
-//RS                 edges: ["left.same".to_string()].into_iter().collect(),
-//RS                 maximal: false,
-//RS                 caps_span: Span::new(1, 2),
-//RS             }],
-//RS             callback_obligations: vec![CallbackObligation {
-//RS                 bound: EffectSet::new(),
-//RS                 direct: EffectSet::new(),
-//RS                 edges: ["right.same".to_string()].into_iter().collect(),
-//RS                 maximal: false,
-//RS                 span: Span::new(3, 4),
-//RS             }],
-//RS             ..Default::default()
-//RS         };
-//RS         let modules = vec![
-//RS             (
-//RS                 "main".to_string(),
-//RS                 HashMap::from([("root".to_string(), root)]),
-//RS             ),
-//RS             (
-//RS                 "left".to_string(),
-//RS                 HashMap::from([("same".to_string(), EffectSummary::default())]),
-//RS             ),
-//RS             (
-//RS                 "right".to_string(),
-//RS                 HashMap::from([("same".to_string(), EffectSummary::default())]),
-//RS             ),
-//RS         ];
-//RS 
-//RS         let (summaries, _) = qualified_effect_facts(&modules, &[], &HashMap::new());
-//RS         let root = &summaries["main::root"];
-//RS         assert_eq!(
-//RS             root.regions[0].edges,
-//RS             EffectSet::from(["left::same".to_string()])
-//RS         );
-//RS         assert_eq!(
-//RS             root.callback_obligations[0].edges,
-//RS             EffectSet::from(["right::same".to_string()])
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// D-TAINT1: run the taint pass over one item's function/method bodies in the
-//RS /// bundle path, using `core_imports` to classify sink calls.
-//RS pub(super) fn taint_check_item(
-//RS     item: &Item,
-//RS     scrubbers: &HashMap<String, String>,
-//RS     facts: &jet_foundation::Facts::FactRegistry,
-//RS     returns: &HashMap<String, crate::Sema::Taint::TagSet>,
-//RS     return_types: &crate::Sema::Taint::ReturnTypes,
-//RS     field_tags: &crate::Sema::Taint::FieldTags,
-//RS     field_types: &crate::Sema::Taint::FieldTypes,
-//RS     core_imports: &HashMap<String, String>,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     match item {
-//RS         Item::Func(f) => {
-//RS             let new = check_func_taint(
-//RS                 f,
-//RS                 None,
-//RS                 scrubbers,
-//RS                 facts,
-//RS                 returns,
-//RS                 return_types,
-//RS                 field_tags,
-//RS                 field_types,
-//RS                 core_imports,
-//RS                 diags.as_slice(),
-//RS             );
-//RS             diags.extend(new);
-//RS         }
-//RS         Item::Impl(i) => {
-//RS             for m in &i.methods {
-//RS                 let new = check_func_taint(
-//RS                     m,
-//RS                     Some(&i.type_name),
-//RS                     scrubbers,
-//RS                     facts,
-//RS                     returns,
-//RS                     return_types,
-//RS                     field_tags,
-//RS                     field_types,
-//RS                     core_imports,
-//RS                     diags.as_slice(),
-//RS                 );
-//RS                 diags.extend(new);
-//RS             }
-//RS         }
-//RS         Item::Struct(s) => {
-//RS             for m in &s.methods {
-//RS                 let new = check_func_taint(
-//RS                     m,
-//RS                     Some(&s.name),
-//RS                     scrubbers,
-//RS                     facts,
-//RS                     returns,
-//RS                     return_types,
-//RS                     field_tags,
-//RS                     field_types,
-//RS                     core_imports,
-//RS                     diags.as_slice(),
-//RS                 );
-//RS                 diags.extend(new);
-//RS             }
-//RS             for block in &s.trait_impls {
-//RS                 for m in &block.methods {
-//RS                     let new = check_func_taint(
-//RS                         m,
-//RS                         Some(&s.name),
-//RS                         scrubbers,
-//RS                         facts,
-//RS                         returns,
-//RS                         return_types,
-//RS                         field_tags,
-//RS                         field_types,
-//RS                         core_imports,
-//RS                         diags.as_slice(),
-//RS                     );
-//RS                     diags.extend(new);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Item::Enum(e) => {
-//RS             for m in &e.methods {
-//RS                 let new = check_func_taint(
-//RS                     m,
-//RS                     Some(&e.name),
-//RS                     scrubbers,
-//RS                     facts,
-//RS                     returns,
-//RS                     return_types,
-//RS                     field_tags,
-//RS                     field_types,
-//RS                     core_imports,
-//RS                     diags.as_slice(),
-//RS                 );
-//RS                 diags.extend(new);
-//RS             }
-//RS         }
-//RS         Item::Test(t) => {
-//RS             let new = crate::Sema::Taint::check_body_tags(
-//RS                 &t.body,
-//RS                 scrubbers,
-//RS                 facts,
-//RS                 returns,
-//RS                 return_types,
-//RS                 field_tags,
-//RS                 field_types,
-//RS                 core_imports,
-//RS                 diags.as_slice(),
-//RS             );
-//RS             diags.extend(new);
-//RS         }
-//RS         Item::ErrorConv(ec) => {
-//RS             let new = crate::Sema::Taint::check_body_tags(
-//RS                 &ec.body,
-//RS                 scrubbers,
-//RS                 facts,
-//RS                 returns,
-//RS                 return_types,
-//RS                 field_tags,
-//RS                 field_types,
-//RS                 core_imports,
-//RS                 diags.as_slice(),
-//RS             );
-//RS             diags.extend(new);
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn register_func_item(
-//RS     f: &Func,
-//RS     st: &mut ModuleState,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS     prelude_enabled: bool,
-//RS ) {
-//RS     if f.name == Syntax::BUILTIN_ASSERT_EQ {
-//RS         diags.push(Diagnostic::error(
-//RS             "E0106",
-//RS             format!("the name `{}` is built in and can't be redefined", f.name),
-//RS             format!("`{}` is provided by the language itself", f.name),
-//RS             "choose a different name for this function".to_string(),
-//RS             Some(f.name_span),
-//RS         ));
-//RS         return;
-//RS     }
-//RS     if prelude_enabled && crate::Sema::Prelude::is_prelude_name(&f.name) {
-//RS         diags.push(crate::Sema::Prelude::shadow_warning(&f.name, f.name_span));
-//RS     }
-//RS     if name_defined(&f.name, &st.funcs, &st.registry, &st.consts) {
-//RS         diags.push(Diagnostic::error(
-//RS             "E0105",
-//RS             format!("`{}` is defined twice", f.name),
-//RS             "every function needs a unique name so calls aren't ambiguous".to_string(),
-//RS             "rename or remove one of the definitions".to_string(),
-//RS             Some(f.name_span),
-//RS         ));
-//RS         return;
-//RS     }
-//RS     // L2401: advisory — public fn with a positional Bool parameter.
-//RS     if f.is_pub {
-//RS         for p in &f.params {
-//RS             if matches!(p.ty, Type::Bool) && p.name != Syntax::KW_SELF && p.default.is_none() {
-//RS                 diags.push(Diagnostic::lint(
-//RS                     "L2401",
-//RS                     format!(
-//RS                         "public function `{}` has a positional `Bool` parameter `{}`",
-//RS                         f.name, p.name
-//RS                     ),
-//RS                     "positional booleans are easy to transpose at the call site".to_string(),
-//RS                     format!(
-//RS                         "callers can write `{}: true` to make the intent clear (S61 labels)",
-//RS                         p.name
-//RS                     ),
-//RS                     Some(p.name_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     // E0126: check defaults don't reference later params.
-//RS     check_default_forward_refs(&f.params, &f.name, diags);
-//RS     st.funcs.insert(f.name.clone(), func_to_sig(f));
-//RS }
-//RS 
-//RS /// Core value/container + opaque-handle type names backed by `jet_std`.
-//RS /// Naming one in an annotation needs the Core prelude
-//RS /// even without a method call for the expression walker to observe.
-//RS fn is_encoding_surface_type(name: &str) -> bool {
-//RS     // Annotations may spell the type module-qualified (`encoding.EncodingError`,
-//RS     // `json.JSONReader`); match on the final path segment.
-//RS     let base = name.rsplit('.').next().unwrap_or(name);
-//RS     matches!(
-//RS         base,
-//RS         "DataTree"
-//RS             | "EncodingFormat"
-//RS             | "DataJoin"
-//RS             | "Query"
-//RS             | "DataGroupedQuery"
-//RS             | "Group"
-//RS             | "EncodingLimits"
-//RS             | "EncodingError"
-//RS             | "CBOROptions"
-//RS             | "CBORError"
-//RS             | "CBORErrorKind"
-//RS             | "EncodingCause"
-//RS             | "EncodingErrorKind"
-//RS             | "DataEvent"
-//RS             | "JSONReader"
-//RS             | "JSONWriter"
-//RS             | "JSONLReader"
-//RS             | "JSONLWriter"
-//RS             | "CSVReader"
-//RS             | "CSVWriter"
-//RS             | "XMLReader"
-//RS             | "XMLWriter"
-//RS             | "CBORReader"
-//RS             | "CBORWriter"
-//RS     )
-//RS }
-//RS 
-//RS /// True when `ty` (or any type nested inside it) names a `core.encoding` surface
-//RS /// type. Recurses through every type-carrying `Type` variant.
-//RS fn type_mentions_encoding_surface(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => is_encoding_surface_type(name),
-//RS         Type::Apply { name, args } => {
-//RS             is_encoding_surface_type(name) || args.iter().any(type_mentions_encoding_surface)
-//RS         }
-//RS         Type::TraitObject(names) => names.iter().any(|n| is_encoding_surface_type(n)),
-//RS         Type::List(inner)
-//RS         | Type::Shared(inner)
-//RS         | Type::Option(inner)
-//RS         | Type::Tagged { inner, .. }
-//RS         | Type::InlineRange { base: inner, .. } => type_mentions_encoding_surface(inner),
-//RS         Type::FixedList { elem, .. } => type_mentions_encoding_surface(elem),
-//RS         Type::Map { key, value, .. } => {
-//RS             type_mentions_encoding_surface(key) || type_mentions_encoding_surface(value)
-//RS         }
-//RS         Type::Result { ok, err } => {
-//RS             type_mentions_encoding_surface(ok) || type_mentions_encoding_surface(err)
-//RS         }
-//RS         Type::Fn { params, ret, .. } => {
-//RS             params.iter().any(type_mentions_encoding_surface)
-//RS                 || ret.as_deref().is_some_and(type_mentions_encoding_surface)
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .any(|(_, t)| type_mentions_encoding_surface(t)),
-//RS         Type::Union(members) => members.iter().any(type_mentions_encoding_surface),
-//RS         Type::Int
-//RS         | Type::Float
-//RS         | Type::Bool
-//RS         | Type::String
-//RS         | Type::Char
-//RS         | Type::IntN { .. }
-//RS         | Type::Float32 => false,
-//RS         Type::Quantity { base, .. } => type_mentions_encoding_surface(base),
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS /// A function/method signature (params + return) names an encoding surface type.
-//RS fn func_sig_mentions_encoding_surface(f: &Func) -> bool {
-//RS     f.params
-//RS         .iter()
-//RS         .any(|p| type_mentions_encoding_surface(&p.ty))
-//RS         || f.return_type
-//RS             .as_ref()
-//RS             .is_some_and(type_mentions_encoding_surface)
-//RS }
-//RS 
-//RS /// Scan every annotation position in a module for a `core.encoding` surface type
-//RS /// (struct fields, enum payloads, function/method/trait signatures, type-alias
-//RS /// targets, associated-type impls). Runtime usage always constructs handles via
-//RS /// a format-module call the expression walker already sees; this only covers the
-//RS /// annotation-only case (a signature that names a handle constructed elsewhere).
-//RS fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule) -> bool {
-//RS     fn variant_payload_mentions(payload: &VariantPayload) -> bool {
-//RS         match payload {
-//RS             VariantPayload::Unit => false,
-//RS             VariantPayload::Single(ty, _) => type_mentions_encoding_surface(ty),
-//RS             VariantPayload::Named(fields) => {
-//RS                 fields.iter().any(|f| type_mentions_encoding_surface(&f.ty))
-//RS             }
-//RS         }
-//RS     }
-//RS     module.items.iter().any(|item| match item {
-//RS         Item::Func(f) => func_sig_mentions_encoding_surface(f),
-//RS         Item::Struct(s) => {
-//RS             s.fields
-//RS                 .iter()
-//RS                 .any(|f| type_mentions_encoding_surface(&f.ty))
-//RS                 || s.methods.iter().any(func_sig_mentions_encoding_surface)
-//RS                 || s.trait_impls
-//RS                     .iter()
-//RS                     .any(|b| b.methods.iter().any(func_sig_mentions_encoding_surface))
-//RS         }
-//RS         Item::Enum(e) => {
-//RS             e.variants
-//RS                 .iter()
-//RS                 .any(|v| variant_payload_mentions(&v.payload))
-//RS                 || e.methods.iter().any(func_sig_mentions_encoding_surface)
-//RS                 || e.trait_impls
-//RS                     .iter()
-//RS                     .any(|b| b.methods.iter().any(func_sig_mentions_encoding_surface))
-//RS         }
-//RS         Item::Impl(i) => {
-//RS             i.methods.iter().any(func_sig_mentions_encoding_surface)
-//RS                 || i.assoc_type_impls
-//RS                     .iter()
-//RS                     .any(|(_, _, ty)| type_mentions_encoding_surface(ty))
-//RS         }
-//RS         Item::Trait(t) => t.methods.iter().any(|m| {
-//RS             m.params
-//RS                 .iter()
-//RS                 .any(|p| type_mentions_encoding_surface(&p.ty))
-//RS                 || m.return_type
-//RS                     .as_ref()
-//RS                     .is_some_and(type_mentions_encoding_surface)
-//RS         }),
-//RS         Item::TypeAlias(a) => type_mentions_encoding_surface(&a.target),
-//RS         _ => false,
-//RS     })
-//RS }
-//RS 
-//RS /// Check one function body through the incremental cache. `ledger` and
-//RS /// `products` are this body's own (a ledger `body_snapshot` and empty
-//RS /// products), so a miss can store them as the body's cached result.
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn check_func_body_cached(
-//RS     cx: &BodyContext<'_>,
-//RS     key: String,
-//RS     function: &mut Func,
-//RS     owner_type: Option<&str>,
-//RS     raw_protocol_return: bool,
-//RS     ct_checked_funcs: &HashMap<String, Func>,
-//RS     ledger: &mut jet_foundation::Names::NameLedger,
-//RS     products: &mut BodyProducts,
-//RS     cache: &mut IncrementalSemaCache,
-//RS     cache_allowed: bool,
-//RS ) -> Vec<Diagnostic> {
-//RS     let check = |function: &mut Func,
-//RS                  ledger: &mut jet_foundation::Names::NameLedger,
-//RS                  products: &mut BodyProducts| {
-//RS         check_func_body(
-//RS             cx,
-//RS             function,
-//RS             owner_type,
-//RS             raw_protocol_return,
-//RS             None,
-//RS             Some(ct_checked_funcs),
-//RS             ledger,
-//RS             products,
-//RS         )
-//RS     };
-//RS     if !(cache_allowed && !stmts_have_comptime_evaluation(&function.body)) {
-//RS         cache.record_recompute(key);
-//RS         return check(function, ledger, products);
-//RS     }
-//RS     // The checked function contains source spans used by diagnostics and IDE
-//RS     // facts. Include them in the cache input so whitespace-only edits cannot
-//RS     // reuse stale positions even when the canonical AST is unchanged. Build
-//RS     // this recursive Debug form only when the caller can actually use the
-//RS     // cache: deep fluent expressions can exceed the ordinary test-thread stack,
-//RS     // and disabled-cache checks have no fingerprint consumer.
-//RS     let mut input = format!("{function:?}").into_bytes();
-//RS     input.push(if raw_protocol_return { 1 } else { 0 });
-//RS     if let Some(hit) = cache.get(&key, &input) {
-//RS         *function = hit.function;
-//RS         products.summaries.extend(hit.summaries);
-//RS         products.embed_inputs.extend(hit.comptime_inputs);
-//RS         products.addr_taken.extend(hit.address_taken);
-//RS         ledger.merge_references(&hit.name_ledger);
-//RS         ledger.merge_structure_facts(&hit.name_ledger);
-//RS         products.pending_diagnostics.extend(hit.pending_diagnostics);
-//RS         products.uses_exact_int |= hit.uses_exact_int;
-//RS         products
-//RS             .devtools_publications
-//RS             .extend(hit.devtools_publications);
-//RS         return hit.diagnostics;
-//RS     }
-//RS 
-//RS     let diagnostics = check(function, ledger, products);
-//RS     if !products.embed_inputs.is_empty() {
-//RS         cache.record_recompute(key);
-//RS         return diagnostics;
-//RS     }
-//RS     cache.store(
-//RS         key,
-//RS         CachedFunctionBody {
-//RS             input,
-//RS             function: function.clone(),
-//RS             diagnostics: diagnostics.clone(),
-//RS             summaries: products.summaries.clone(),
-//RS             comptime_inputs: Vec::new(),
-//RS             address_taken: products.addr_taken.clone(),
-//RS             name_ledger: ledger.clone(),
-//RS             pending_diagnostics: products.pending_diagnostics.clone(),
-//RS             uses_exact_int: products.uses_exact_int,
-//RS             devtools_publications: products.devtools_publications.clone(),
-//RS         },
-//RS     );
-//RS     diagnostics
-//RS }
-//RS 
-//RS /// I4: a diagnostic is a product, and a lint is advice addressed to whoever
-//RS /// wrote the code. A compiler-generated derive body has no author and no
-//RS /// user-typeable span: it is expanded from the provider template in
-//RS /// `Prelude/Derives.jet`, so its spans are template offsets, not positions in
-//RS /// the file that declares the type. A lint from that body names a construct
-//RS /// the user never wrote. `L0502` did exactly that for any struct or enum with
-//RS /// a `Float` field, because the package auto-derive default gives every type
-//RS /// an `Equatable.equal` body.
-//RS ///
-//RS /// `TraitImplBlock::compiler_generated` is the parser-unforgeable provenance
-//RS /// (a source `impl T.Trait` is always `false`; jet-foundation `AST/items.rs`),
-//RS /// and it is the only fact consulted here — no second gate, table, or lint
-//RS /// exemption list (I8). Errors are kept, not silenced; they land on `anchor`,
-//RS /// the block's trait span, which a derive sets to the type's name (the only
-//RS /// authored location the derive has), so an edit to the template never moves
-//RS /// them onto an unrelated line of the author's file.
-//RS fn author_facing_diagnostics(
-//RS     generated_anchor: Option<crate::Diagnostics::Span>,
-//RS     mut diagnostics: Vec<Diagnostic>,
-//RS ) -> Vec<Diagnostic> {
-//RS     let Some(anchor) = generated_anchor else {
-//RS         return diagnostics;
-//RS     };
-//RS     diagnostics.retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
-//RS     for diagnostic in &mut diagnostics {
-//RS         diagnostic.span = Some(anchor);
-//RS         diagnostic.labels.clear();
-//RS     }
-//RS     // Every statement of the body now reports at the same place; one report
-//RS     // per distinct problem is enough.
-//RS     diagnostics.dedup_by(|later, earlier| later.code == earlier.code && later.what == earlier.what);
-//RS     diagnostics
-//RS }
-//RS 
-//RS fn has_callable_policy(function: &crate::AST::Func) -> bool {
-//RS     function.markers.iter().any(|marker| {
-//RS         marker.name == Syntax::MARKER_POLICY
-//RS             && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
-//RS     })
-//RS }
-//RS 
-//RS fn collect_callable_policy_functions(
-//RS     functions: impl IntoIterator<Item = crate::AST::Func>,
-//RS     targets: &mut Vec<crate::AST::Func>,
-//RS ) {
-//RS     targets.extend(functions.into_iter().filter(has_callable_policy));
-//RS }
-//RS 
-//RS fn callable_policy_targets(items: &[crate::AST::Item]) -> Vec<crate::AST::Func> {
-//RS     let mut targets = Vec::new();
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) if has_callable_policy(function) => targets.push(function.clone()),
-//RS             Item::Struct(definition) => {
-//RS                 collect_callable_policy_functions(definition.methods.clone(), &mut targets);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     collect_callable_policy_functions(implementation.methods.clone(), &mut targets);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 collect_callable_policy_functions(definition.methods.clone(), &mut targets);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     collect_callable_policy_functions(implementation.methods.clone(), &mut targets);
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 collect_callable_policy_functions(implementation.methods.clone(), &mut targets);
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     targets.extend(callable_policy_targets(body));
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => targets.extend(callable_policy_targets(&module.body)),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     targets
-//RS }
-//RS 
-//RS /// D-STRUCT-POLICY1=A: `apply(user_policy(...), target)` is a checked
-//RS /// callable transformation even when `target` has no `#Policy` marker of its
-//RS /// own. Record the named targets from the already-checked call arguments so
-//RS /// they use the same generated wrapper seam as marker-decorated targets.
-//RS fn collect_callable_policy_apply_uses(
-//RS     items: &mut [crate::AST::Item],
-//RS     uses: &mut HashMap<String, Vec<String>>,
-//RS ) {
-//RS     fn collect_func(function: &mut crate::AST::Func, uses: &mut HashMap<String, Vec<String>>) {
-//RS         for statement in &mut function.body {
-//RS             statement.for_each_expr_mut(|expr| {
-//RS                 let crate::AST::Expr::Call(call) = expr else {
-//RS                     return;
-//RS                 };
-//RS                 if call.name != "apply" {
-//RS                     return;
-//RS                 }
-//RS                 let Some(last) = call.args.last() else {
-//RS                     return;
-//RS                 };
-//RS                 let Some(chain) = last.flags.callable_policy.as_ref() else {
-//RS                     return;
-//RS                 };
-//RS                 let target_name = match &last.expr {
-//RS                     crate::AST::Expr::Ident(name, _) => Some(name.clone()),
-//RS                     crate::AST::Expr::Paren(inner, _) => match inner.as_ref() {
-//RS                         crate::AST::Expr::Ident(name, _) => Some(name.clone()),
-//RS                         _ => None,
-//RS                     },
-//RS                     _ => None,
-//RS                 };
-//RS                 let Some(target_name) = target_name else {
-//RS                     return;
-//RS                 };
-//RS                 let policy_names = chain
-//RS                     .policies
-//RS                     .iter()
-//RS                     .filter(|policy| !crate::AST::CallablePolicyChain::is_builtin(&policy.name))
-//RS                     .map(|policy| policy.name.clone())
-//RS                     .collect::<Vec<_>>();
-//RS                 if policy_names.is_empty() {
-//RS                     return;
-//RS                 }
-//RS                 let entry = uses.entry(target_name).or_default();
-//RS                 for policy_name in policy_names {
-//RS                     if !entry.contains(&policy_name) {
-//RS                         entry.push(policy_name);
-//RS                     }
-//RS                 }
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     for item in items {
-//RS         match item {
-//RS             crate::AST::Item::Func(function) => collect_func(function, uses),
-//RS             crate::AST::Item::Struct(definition) => {
-//RS                 for function in &mut definition.methods {
-//RS                     collect_func(function, uses);
-//RS                 }
-//RS                 for implementation in &mut definition.trait_impls {
-//RS                     for function in &mut implementation.methods {
-//RS                         collect_func(function, uses);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::Enum(definition) => {
-//RS                 for function in &mut definition.methods {
-//RS                     collect_func(function, uses);
-//RS                 }
-//RS                 for implementation in &mut definition.trait_impls {
-//RS                     for function in &mut implementation.methods {
-//RS                         collect_func(function, uses);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::Impl(implementation) => {
-//RS                 for function in &mut implementation.methods {
-//RS                     collect_func(function, uses);
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::CodeModule(module) => {
-//RS                 if let Some(body) = &mut module.body {
-//RS                     collect_callable_policy_apply_uses(body, uses);
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::GenericModule(module) => {
-//RS                 collect_callable_policy_apply_uses(&mut module.body, uses)
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_named_callable_policy_functions<'a>(
-//RS     functions: impl IntoIterator<Item = &'a crate::AST::Func>,
-//RS     names: &HashSet<String>,
-//RS     targets: &mut Vec<crate::AST::Func>,
-//RS ) {
-//RS     targets.extend(
-//RS         functions
-//RS             .into_iter()
-//RS             .filter(|function| names.contains(&function.name))
-//RS             .cloned(),
-//RS     );
-//RS }
-//RS 
-//RS fn named_callable_policy_targets(
-//RS     items: &[crate::AST::Item],
-//RS     names: &HashSet<String>,
-//RS     targets: &mut Vec<crate::AST::Func>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             crate::AST::Item::Func(function) if names.contains(&function.name) => {
-//RS                 targets.push(function.clone())
-//RS             }
-//RS             crate::AST::Item::Struct(definition) => {
-//RS                 collect_named_callable_policy_functions(&definition.methods, names, targets);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     collect_named_callable_policy_functions(
-//RS                         &implementation.methods,
-//RS                         names,
-//RS                         targets,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::Enum(definition) => {
-//RS                 collect_named_callable_policy_functions(&definition.methods, names, targets);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     collect_named_callable_policy_functions(
-//RS                         &implementation.methods,
-//RS                         names,
-//RS                         targets,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::Impl(implementation) => {
-//RS                 collect_named_callable_policy_functions(&implementation.methods, names, targets);
-//RS             }
-//RS             crate::AST::Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     named_callable_policy_targets(body, names, targets);
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::GenericModule(module) => {
-//RS                 named_callable_policy_targets(&module.body, names, targets)
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-STRUCT-POLICY1=A: one checked wrapper function is emitted for each
-//RS /// policy/target pair. The name is compiler-private and deterministic so the
-//RS /// shared TIR can call it without carrying policy semantics in an engine.
-//RS pub(crate) fn callable_policy_wrapper_name(policy: &str, target: &str) -> String {
-//RS     crate::AST::CallablePolicyChain::user_wrapper_name(policy, target)
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct ComptimeStageJob<'a> {
-//RS     owner: Option<String>,
-//RS     raw_protocol_return: bool,
-//RS     function: &'a Func,
-//RS }
-//RS 
-//RS /// Every function and method of `items`, borrowed: the staged pass clones
-//RS /// only the few bodies it checks, not the whole module (#3661).
-//RS fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob<'_>> {
-//RS     let mut jobs = HashMap::new();
-//RS     let mut insert = |key: String, owner: Option<String>, raw_protocol_return: bool, function| {
-//RS         jobs.insert(
-//RS             key,
-//RS             ComptimeStageJob {
-//RS                 owner,
-//RS                 raw_protocol_return,
-//RS                 function,
-//RS             },
-//RS         );
-//RS     };
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => {
-//RS                 insert(function.name.clone(), None, false, function);
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     insert(
-//RS                         format!("{}::{}", definition.name, function.name),
-//RS                         Some(definition.name.clone()),
-//RS                         false,
-//RS                         function,
-//RS                     );
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         insert(
-//RS                             format!("{}::{}", definition.name, function.name),
-//RS                             Some(definition.name.clone()),
-//RS                             uses_raw_protocol_function_return(
-//RS                                 Some(&implementation.trait_name),
-//RS                                 implementation.compiler_generated,
-//RS                                 function,
-//RS                             ),
-//RS                             function,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     insert(
-//RS                         format!("{}::{}", definition.name, function.name),
-//RS                         Some(definition.name.clone()),
-//RS                         false,
-//RS                         function,
-//RS                     );
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         insert(
-//RS                             format!("{}::{}", definition.name, function.name),
-//RS                             Some(definition.name.clone()),
-//RS                             uses_raw_protocol_function_return(
-//RS                                 Some(&implementation.trait_name),
-//RS                                 implementation.compiler_generated,
-//RS                                 function,
-//RS                             ),
-//RS                             function,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for function in &implementation.methods {
-//RS                     insert(
-//RS                         format!("{}::{}", implementation.type_name, function.name),
-//RS                         Some(implementation.type_name.clone()),
-//RS                         uses_raw_protocol_function_return(
-//RS                             implementation.trait_name.as_deref(),
-//RS                             false,
-//RS                             function,
-//RS                         ),
-//RS                         function,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     jobs
-//RS }
-//RS 
-//RS fn comptime_stage_roots(
-//RS     items: &[Item],
-//RS     raw_funcs: &HashMap<String, &Func>,
-//RS ) -> (HashSet<String>, bool) {
-//RS     // Gather the direct roots of every call site first, then take one closure
-//RS     // over their union: a closure per call site repeated the same call-graph
-//RS     // walk for each site, which grew with call sites times reachable code.
-//RS     let mut roots = HashSet::new();
-//RS     let mut all_methods = false;
-//RS     let mut visit_function = |function: &Func| {
-//RS         if !stmts_have_comptime_evaluation(&function.body) {
-//RS             return;
-//RS         }
-//RS         for statement in &function.body {
-//RS             statement.for_each_expr(|expression| {
-//RS                 let is_method = matches!(expression, Expr::MethodCall { .. });
-//RS                 if is_method
-//RS                     && matches!(
-//RS                         expression,
-//RS                         Expr::MethodCall {
-//RS                             recv_type: None, ..
-//RS                         }
-//RS                     )
-//RS                 {
-//RS                     all_methods = true;
-//RS                 }
-//RS                 if matches!(
-//RS                     expression,
-//RS                     Expr::Call(..) | Expr::Ident(..) | Expr::MethodCall { .. }
-//RS                 ) {
-//RS                     crate::Comptime::reachable_owned_function_roots(
-//RS                         expression, raw_funcs, &mut roots,
-//RS                     );
-//RS                 }
-//RS             });
-//RS         }
-//RS     };
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => visit_function(function),
-//RS             Item::Struct(definition) => {
-//RS                 definition.methods.iter().for_each(&mut visit_function);
-//RS                 definition
-//RS                     .trait_impls
-//RS                     .iter()
-//RS                     .flat_map(|implementation| &implementation.methods)
-//RS                     .for_each(&mut visit_function);
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 definition.methods.iter().for_each(&mut visit_function);
-//RS                 definition
-//RS                     .trait_impls
-//RS                     .iter()
-//RS                     .flat_map(|implementation| &implementation.methods)
-//RS                     .for_each(&mut visit_function);
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 implementation.methods.iter().for_each(&mut visit_function);
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     (
-//RS         crate::Comptime::reachable_owned_function_closure(roots, raw_funcs),
-//RS         all_methods,
-//RS     )
-//RS }
-//RS 
-//RS /// The staged comptime pass: check every function a compile-time site can
-//RS /// reach, without running any compile-time expression, so the real pass can
-//RS /// hand them to the evaluator. Returns the staged functions that checked
-//RS /// without errors. Staged checks run no evaluation and keep no products, so
-//RS /// they are independent jobs on the worker pool; the table is filled in key
-//RS /// order afterwards.
-//RS fn stage_comptime_functions(
-//RS     cx: &BodyContext<'_>,
-//RS     items: &[Item],
-//RS     ct_funcs: &HashMap<String, Func>,
-//RS     name_ledger: &jet_foundation::Names::NameLedger,
-//RS ) -> HashMap<String, Func> {
-//RS     let stage_jobs = comptime_stage_jobs(items);
-//RS     let mut raw_eval_funcs = ct_funcs
-//RS         .iter()
-//RS         .map(|(name, function)| (name.clone(), function))
-//RS         .collect::<HashMap<_, _>>();
-//RS     for (key, job) in &stage_jobs {
-//RS         raw_eval_funcs.insert(key.clone(), job.function);
-//RS     }
-//RS     let (stage_names, stage_all_methods) = comptime_stage_roots(items, &raw_eval_funcs);
-//RS     let mut stage_keys = BTreeSet::new();
-//RS     for (key, job) in &stage_jobs {
-//RS         if stage_all_methods && job.owner.is_some()
-//RS             || stage_names.contains(key)
-//RS             || stage_names.contains(&job.function.name)
-//RS         {
-//RS             stage_keys.insert(key.clone());
-//RS         }
-//RS     }
-//RS     let mut staged_unqualified = stage_names.into_iter().collect::<BTreeSet<_>>();
-//RS     for key in &stage_keys {
-//RS         if let Some(job) = stage_jobs.get(key) {
-//RS             staged_unqualified.insert(job.function.name.clone());
-//RS         }
-//RS     }
-//RS     let stage = |owner: Option<&str>, raw_protocol_return: bool, function: &Func| {
-//RS         let mut function = function.clone();
-//RS         let mut ledger = name_ledger.body_snapshot();
-//RS         let mut products = BodyProducts::default();
-//RS         let diagnostics = check_func_body(
-//RS             cx,
-//RS             &mut function,
-//RS             owner,
-//RS             raw_protocol_return,
-//RS             None,
-//RS             None,
-//RS             &mut ledger,
-//RS             &mut products,
-//RS         );
-//RS         if products.uses_exact_int {
-//RS             cx.states[cx.module_idx].exact_int_reachable.set(true);
-//RS         }
-//RS         diagnostics
-//RS             .iter()
-//RS             .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error)
-//RS             .then_some(function)
-//RS     };
-//RS     let keyed = stage_keys
-//RS         .into_iter()
-//RS         .filter_map(|key| stage_jobs.get(&key).map(|job| (key, job)))
-//RS         .collect::<Vec<_>>();
-//RS     let staged = super::Parallel::map_checked(keyed, |(key, job)| {
-//RS         (
-//RS             key,
-//RS             job.owner.clone(),
-//RS             stage(job.owner.as_deref(), job.raw_protocol_return, job.function),
-//RS         )
-//RS     });
-//RS     let mut checked_ct_funcs = HashMap::new();
-//RS     for (key, owner, function) in staged {
-//RS         let Some(function) = function else {
-//RS             continue;
-//RS         };
-//RS         checked_ct_funcs.insert(key, function.clone());
-//RS         if let Some(owner) = owner {
-//RS             checked_ct_funcs.insert(format!("{owner}::{}", function.name), function.clone());
-//RS         }
-//RS         checked_ct_funcs.insert(function.name.clone(), function);
-//RS     }
-//RS     // A direct comptime root can be a top-level function that does not need a
-//RS     // job-specific owner context. Keep that path explicit without staging
-//RS     // unrelated runtime helpers.
-//RS     let unqualified = staged_unqualified
-//RS         .into_iter()
-//RS         .filter(|name| !checked_ct_funcs.contains_key(name))
-//RS         .filter_map(|name| ct_funcs.get(&name).map(|function| (name, function)))
-//RS         .collect::<Vec<_>>();
-//RS     let staged = super::Parallel::map_checked(unqualified, |(name, function)| {
-//RS         (name, stage(None, false, function))
-//RS     });
-//RS     for (name, function) in staged {
-//RS         let Some(function) = function else {
-//RS             continue;
-//RS         };
-//RS         checked_ct_funcs.insert(name, function.clone());
-//RS         checked_ct_funcs.insert(function.name.clone(), function);
-//RS     }
-//RS     checked_ct_funcs
-//RS }
-//RS 
-//RS /// The synthetic function an error conversion body is checked as. It takes
-//RS /// the conversion's body; the caller moves the checked body back.
-//RS fn error_conversion_function(ec: &mut crate::AST::ErrorConvDef) -> Func {
-//RS     Func {
-//RS                     span: ec.body_span,
-//RS                     is_comptime: false,
-//RS                     is_pub: false,
-//RS                     is_package_pub: false,
-//RS                     external_type: None,
-//RS                     name: format!(
-//RS                         "__errconv_{}_to_{}",
-//RS                         ec.from_ty.replace('.', "_"),
-//RS                         ec.to_ty.replace('.', "_")
-//RS                     ),
-//RS                     name_span: ec.from_span,
-//RS                     meta: None,
-//RS                     type_params: Vec::new(),
-//RS                     head_pattern: None,
-//RS                     params: vec![Param {
-//RS                         name: crate::Syntax::KW_SELF.to_string(),
-//RS                         name_span: ec.from_span,
-//RS                         ty: Type::Named(String::new()),
-//RS                         ty_span: ec.from_span,
-//RS                         convention: AccessConvention::Move,
-//RS                         root: false,
-//RS                         default: None,
-//RS                         variadic: false,
-//RS                         variadic_bound_list: None,
-//RS                         declared_view_from_names: None,
-//RS                         public_label: None,
-//RS                         zone: crate::AST::ParamZone::Either,
-//RS                     }],
-//RS                     return_type: Some(Type::Named(ec.to_ty.clone())),
-//RS                     return_type_span: Some(ec.to_span),
-//RS                     return_view_provenance: None,
-//RS                     declared_return_view_provenance: None,
-//RS                     gc_return: false,
-//RS                     diverges: false,
-//RS                     gc_scope: false,
-//RS                     is_unsafe: false,
-//RS                     unsafe_reason: None,
-//RS                     unsafe_span: None,
-//RS                     is_pure: false,
-//RS                     is_reactive: false,
-//RS                     reactive_upgrades: Vec::new(),
-//RS                     is_replayable: false,
-//RS                     replayable_span: None,
-//RS                     is_job: false,
-//RS                     job_span: None,
-//RS                     every: None,
-//RS                     job_metadata: None,
-//RS                     is_must_use: false,
-//RS                     must_use_span: None,
-//RS                     maturity: None,
-//RS                     maturity_span: None,
-//RS                     kernel: None,
-//RS                     is_inline: false,
-//RS                     is_inline_always: false,
-//RS                     inline_span: None,
-//RS                     is_sanitizer: false,
-//RS                     scrub_tag: None,
-//RS                     declared_effects: None,
-//RS                     effect_via: None,
-//RS                     state_requires: None,
-//RS                     state_transition: None,
-//RS                     web_marker: None,
-//RS                     pre: Vec::new(),
-//RS                     post: Vec::new(),
-//RS                     inline_foreign: None,
-//RS                     undo: None,
-//RS                     markers: Vec::new(),
-//RS                     compiler_generated: false,
-//RS                     body: std::mem::take(&mut ec.body),
-//RS     }
-//RS }
-//RS 
-//RS /// One body of a module's main checking pass.
-//RS struct BodyJob<'m> {
-//RS     owner: Option<String>,
-//RS     raw_protocol_return: bool,
-//RS     kind: BodyJobKind<'m>,
-//RS }
-//RS 
-//RS enum BodyJobKind<'m> {
-//RS     /// A top-level function or a method, checked in place.
-//RS     Function {
-//RS         function: &'m mut Func,
-//RS         cache_key: String,
-//RS         /// The names under which the checked body joins `checked_ct_funcs`.
-//RS         ct_keys: Vec<String>,
-//RS         /// A method is checked with its owner's generic parameters in scope;
-//RS         /// these are the parameters its declaration keeps afterwards.
-//RS         restore_type_params: Option<Vec<crate::AST::TypeParam>>,
-//RS         /// For a method of a compiler-generated trait-impl block, the block's
-//RS         /// trait span (the derived type's name): where its diagnostics land.
-//RS         generated_anchor: Option<crate::Diagnostics::Span>,
-//RS     },
-//RS     /// A `#Test` block, checked as a synthetic function.
-//RS     Test {
-//RS         test: &'m mut crate::AST::TestDef,
-//RS         function: Func,
-//RS         param_diagnostics: Vec<Diagnostic>,
-//RS     },
-//RS     /// A function of an inline code module, checked under its imports.
-//RS     InlineModule { function: &'m mut Func, module: String },
-//RS     /// An error conversion, checked as a synthetic function.
-//RS     ErrorConv {
-//RS         conversion: &'m mut crate::AST::ErrorConvDef,
-//RS         function: Func,
-//RS     },
-//RS }
-//RS 
-//RS impl BodyJob<'_> {
-//RS     fn function(&self) -> &Func {
-//RS         match &self.kind {
-//RS             BodyJobKind::Function { function, .. } => &**function,
-//RS             BodyJobKind::InlineModule { function, .. } => &**function,
-//RS             BodyJobKind::Test { function, .. } => function,
-//RS             BodyJobKind::ErrorConv { function, .. } => function,
-//RS         }
-//RS     }
-//RS 
-//RS     fn function_mut(&mut self) -> &mut Func {
-//RS         match &mut self.kind {
-//RS             BodyJobKind::Function { function, .. } => &mut **function,
-//RS             BodyJobKind::InlineModule { function, .. } => &mut **function,
-//RS             BodyJobKind::Test { function, .. } => function,
-//RS             BodyJobKind::ErrorConv { function, .. } => function,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The main pass's body jobs for `items`, in source order. A method gets its
-//RS /// owner's generic parameters here, before its check; the job restores the
-//RS /// declaration's own parameters when it is merged.
-//RS fn collect_body_jobs<'m>(
-//RS     items: &'m mut [Item],
-//RS     st: &ModuleState,
-//RS     module_key: &str,
-//RS     mode: CompileMode,
-//RS     invalid_serde_impls: &HashSet<(String, String)>,
-//RS ) -> Vec<BodyJob<'m>> {
-//RS     let mut jobs = Vec::new();
-//RS     for item in items.iter_mut() {
-//RS         match item {
-//RS             Item::Func(f) => jobs.push(BodyJob {
-//RS                 owner: None,
-//RS                 raw_protocol_return: false,
-//RS                 kind: BodyJobKind::Function {
-//RS                     cache_key: format!("{module_key}::fn:{}", f.name),
-//RS                     ct_keys: vec![f.name.clone()],
-//RS                     restore_type_params: None,
-//RS                     generated_anchor: None,
-//RS                     function: f,
-//RS                 },
-//RS             }),
-//RS             Item::Struct(s) => {
-//RS                 push_owner_method_jobs(
-//RS                     &mut jobs,
-//RS                     module_key,
-//RS                     "struct",
-//RS                     &s.name,
-//RS                     &s.type_params,
-//RS                     &mut s.methods,
-//RS                     &mut s.trait_impls,
-//RS                 );
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 push_owner_method_jobs(
-//RS                     &mut jobs,
-//RS                     module_key,
-//RS                     "enum",
-//RS                     &e.name,
-//RS                     &e.type_params,
-//RS                     &mut e.methods,
-//RS                     &mut e.trait_impls,
-//RS                 );
-//RS             }
-//RS             Item::Impl(i) => {
-//RS                 if i.trait_name.as_deref().is_some_and(|trait_name| {
-//RS                     i.is_generated_serde
-//RS                         && invalid_serde_impls
-//RS                             .contains(&(i.type_name.clone(), trait_name.to_string()))
-//RS                 }) {
-//RS                     continue;
-//RS                 }
-//RS                 let owner_params = st
-//RS                     .trait_reg
-//RS                     .struct_params
-//RS                     .get(&i.type_name)
-//RS                     .or_else(|| st.trait_reg.enum_params.get(&i.type_name));
-//RS                 let type_name = i.type_name.clone();
-//RS                 let trait_name = i.trait_name.clone();
-//RS                 for m in i.methods.iter_mut() {
-//RS                     let own_params = std::mem::take(&mut m.type_params);
-//RS                     // An implementation method sees the owner's generic
-//RS                     // parameters whether the impl names a trait or not. A
-//RS                     // typed derive body can fill a method hole with `T`, and
-//RS                     // the generated `impl Type.Trait` must have the same
-//RS                     // scope as a hand-written trait impl.
-//RS                     m.type_params = if own_params.is_empty() {
-//RS                         owner_params.cloned().unwrap_or_default()
-//RS                     } else {
-//RS                         own_params.clone()
-//RS                     };
-//RS                     let raw_protocol_return =
-//RS                         uses_raw_protocol_function_return(trait_name.as_deref(), false, m);
-//RS                     jobs.push(BodyJob {
-//RS                         owner: Some(type_name.clone()),
-//RS                         raw_protocol_return,
-//RS                         kind: BodyJobKind::Function {
-//RS                             cache_key: format!(
-//RS                                 "{module_key}::impl:{}::{}::method:{}",
-//RS                                 type_name,
-//RS                                 trait_name.as_deref().unwrap_or("inherent"),
-//RS                                 m.name
-//RS                             ),
-//RS                             ct_keys: vec![format!("{}::{}", type_name, m.name), m.name.clone()],
-//RS                             restore_type_params: Some(own_params),
-//RS                             generated_anchor: None,
-//RS                             function: m,
-//RS                         },
-//RS                     });
-//RS                 }
-//RS             }
-//RS             Item::Test(t) if matches!(mode, CompileMode::Test | CompileMode::TestOverride) => {
-//RS                 let Some(test_name) = t.name.clone() else {
-//RS                     continue;
-//RS                 };
-//RS                 // D-TEST1: a parameterized `#Test fn` is a property test — its
-//RS                 // params must be generatable types so the runner can synthesize
-//RS                 // inputs. Validate before checking the body so the error points
-//RS                 // at the offending param type.
-//RS                 let param_diagnostics = t
-//RS                     .params
-//RS                     .iter()
-//RS                     .filter_map(|p| property_param_unsupported(&p.ty, p.ty_span))
-//RS                     .collect();
-//RS                 let mut function = Func::implicit_run(std::mem::take(&mut t.body), t.span);
-//RS                 function.name = format!("__test_{test_name}");
-//RS                 function.name_span = t.name_span;
-//RS                 function.params = t.params.clone();
-//RS                 jobs.push(BodyJob {
-//RS                     owner: None,
-//RS                     raw_protocol_return: false,
-//RS                     kind: BodyJobKind::Test {
-//RS                         test: t,
-//RS                         function,
-//RS                         param_diagnostics,
-//RS                     },
-//RS                 });
-//RS             }
-//RS             Item::CodeModule(cm) => {
-//RS                 // Type-check inline-module function bodies. Sibling calls were
-//RS                 // already rewritten to mangled names by `mangle_inline_sibling_calls`,
-//RS                 // and the mangled signatures are registered in `st.funcs`.
-//RS                 let module = cm.name.clone();
-//RS                 if let Some(body) = cm.body.as_mut() {
-//RS                     for inner in body.iter_mut() {
-//RS                         if let Item::Func(f) = inner {
-//RS                             jobs.push(BodyJob {
-//RS                                 owner: None,
-//RS                                 raw_protocol_return: false,
-//RS                                 kind: BodyJobKind::InlineModule {
-//RS                                     function: f,
-//RS                                     module: module.clone(),
-//RS                                 },
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::ErrorConv(ec) => {
-//RS                 let function = error_conversion_function(ec);
-//RS                 jobs.push(BodyJob {
-//RS                     owner: Some(ec.from_ty.clone()),
-//RS                     raw_protocol_return: false,
-//RS                     kind: BodyJobKind::ErrorConv {
-//RS                         conversion: ec,
-//RS                         function,
-//RS                     },
-//RS                 });
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     jobs
-//RS }
-//RS 
-//RS /// The method jobs of one struct or enum: its own methods, then the methods
-//RS /// of its nested trait impls. Trait impls nested in a type are real method
-//RS /// bodies too. They inherit the type's generic parameters, just as the Rust
-//RS /// impl emitted for them does, so those parameters are exposed to the body
-//RS /// checker while the parsed method signature is kept for codegen.
-//RS fn push_owner_method_jobs<'m>(
-//RS     jobs: &mut Vec<BodyJob<'m>>,
-//RS     module_key: &str,
-//RS     kind: &str,
-//RS     owner: &str,
-//RS     owner_params: &[crate::AST::TypeParam],
-//RS     methods: &'m mut [Func],
-//RS     trait_impls: &'m mut [crate::AST::TraitImplBlock],
-//RS ) {
-//RS     for m in methods.iter_mut() {
-//RS         let own_params = std::mem::take(&mut m.type_params);
-//RS         if own_params.is_empty() {
-//RS             m.type_params = owner_params.to_vec();
-//RS         }
-//RS         jobs.push(BodyJob {
-//RS             owner: Some(owner.to_string()),
-//RS             raw_protocol_return: false,
-//RS             kind: BodyJobKind::Function {
-//RS                 cache_key: format!("{module_key}::{kind}:{owner}::method:{}", m.name),
-//RS                 ct_keys: vec![format!("{owner}::{}", m.name), m.name.clone()],
-//RS                 restore_type_params: Some(own_params),
-//RS                 generated_anchor: None,
-//RS                 function: m,
-//RS             },
-//RS         });
-//RS     }
-//RS     for block in trait_impls.iter_mut() {
-//RS         let trait_name = block.trait_name.clone();
-//RS         let compiler_generated = block.compiler_generated;
-//RS         let generated_anchor = compiler_generated.then_some(block.trait_span);
-//RS         for m in block.methods.iter_mut() {
-//RS             let own_params = std::mem::take(&mut m.type_params);
-//RS             m.type_params = if own_params.is_empty() {
-//RS                 owner_params.to_vec()
-//RS             } else {
-//RS                 own_params.clone()
-//RS             };
-//RS             // Generated serde methods temporarily carry inherited, inferred
-//RS             // bounds solely for sema. Their Rust generics belong on the
-//RS             // enclosing impl, not on the method.
-//RS             let restore_type_params = if matches!(
-//RS                 trait_name.as_str(),
-//RS                 crate::Generics::ENCODE | crate::Generics::DECODE
-//RS             ) {
-//RS                 Vec::new()
-//RS             } else {
-//RS                 own_params
-//RS             };
-//RS             let raw_protocol_return =
-//RS                 uses_raw_protocol_function_return(Some(&trait_name), compiler_generated, m);
-//RS             jobs.push(BodyJob {
-//RS                 owner: Some(owner.to_string()),
-//RS                 raw_protocol_return,
-//RS                 kind: BodyJobKind::Function {
-//RS                     cache_key: format!(
-//RS                         "{module_key}::{kind}:{owner}::trait:{trait_name}::method:{}",
-//RS                         m.name
-//RS                     ),
-//RS                     ct_keys: vec![format!("{owner}::{}", m.name), m.name.clone()],
-//RS                     restore_type_params: Some(restore_type_params),
-//RS                     generated_anchor,
-//RS                     function: m,
-//RS                 },
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// What one body check produced, before it is merged.
-//RS struct BodyOutcome {
-//RS     diagnostics: Vec<Diagnostic>,
-//RS     products: BodyProducts,
-//RS     ledger: jet_foundation::Names::NameLedger,
-//RS }
-//RS 
-//RS /// Check one job's body into fresh products and a fresh ledger snapshot.
-//RS fn check_body_job(
-//RS     cx: &BodyContext<'_>,
-//RS     job: &mut BodyJob<'_>,
-//RS     checked_ct_funcs: &HashMap<String, Func>,
-//RS     name_ledger: &jet_foundation::Names::NameLedger,
-//RS     cache: Option<&mut IncrementalSemaCache>,
-//RS     cache_allowed: bool,
-//RS ) -> BodyOutcome {
-//RS     let mut ledger = name_ledger.body_snapshot();
-//RS     let mut products = BodyProducts::default();
-//RS     let owner = job.owner.as_deref();
-//RS     let raw_protocol_return = job.raw_protocol_return;
-//RS     let diagnostics = match &mut job.kind {
-//RS         BodyJobKind::Function {
-//RS             function,
-//RS             cache_key,
-//RS             ..
-//RS         } => {
-//RS             // #2517 S3R: inside a package-record session, a body whose item
-//RS             // key has a record installs the stored checked body and replays
-//RS             // its outputs instead of being checked. A module with
-//RS             // view-returning callables keeps checking every body, as the
-//RS             // incremental cache does: their view pre-pass reads sibling bodies.
-//RS             let tracked = cache_allowed && super::ItemReuse::tracks(cx.module_idx);
-//RS             if tracked
-//RS                 && super::ItemReuse::reuse(
-//RS                     cx.module_idx,
-//RS                     cache_key,
-//RS                     &mut **function,
-//RS                     owner,
-//RS                     raw_protocol_return,
-//RS                     &mut ledger,
-//RS                     &mut products,
-//RS                 )
-//RS             {
-//RS                 return BodyOutcome {
-//RS                     diagnostics: Vec::new(),
-//RS                     products,
-//RS                     ledger,
-//RS                 };
-//RS             }
-//RS             let pristine = tracked.then(|| (**function).clone());
-//RS             let diagnostics = match cache {
-//RS                 Some(cache) => check_func_body_cached(
-//RS                     cx,
-//RS                     cache_key.clone(),
-//RS                     &mut **function,
-//RS                     owner,
-//RS                     raw_protocol_return,
-//RS                     checked_ct_funcs,
-//RS                     &mut ledger,
-//RS                     &mut products,
-//RS                     cache,
-//RS                     cache_allowed,
-//RS                 ),
-//RS                 None => check_func_body(
-//RS                     cx,
-//RS                     &mut **function,
-//RS                     owner,
-//RS                     raw_protocol_return,
-//RS                     None,
-//RS                     Some(checked_ct_funcs),
-//RS                     &mut ledger,
-//RS                     &mut products,
-//RS                 ),
-//RS             };
-//RS             if let Some(pristine) = pristine {
-//RS                 super::ItemReuse::record(
-//RS                     cx.module_idx,
-//RS                     cache_key,
-//RS                     pristine,
-//RS                     &**function,
-//RS                     owner,
-//RS                     raw_protocol_return,
-//RS                     &diagnostics,
-//RS                     &products,
-//RS                     &ledger,
-//RS                 );
-//RS             }
-//RS             diagnostics
-//RS         }
-//RS         BodyJobKind::Test { function, .. } => check_func_body(
-//RS             cx,
-//RS             function,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             Some(checked_ct_funcs),
-//RS             &mut ledger,
-//RS             &mut products,
-//RS         ),
-//RS         BodyJobKind::InlineModule { function, module } => check_func_body(
-//RS             cx,
-//RS             &mut **function,
-//RS             None,
-//RS             false,
-//RS             Some(module.as_str()),
-//RS             Some(checked_ct_funcs),
-//RS             &mut ledger,
-//RS             &mut products,
-//RS         ),
-//RS         BodyJobKind::ErrorConv { function, .. } => {
-//RS             let cx = BodyContext {
-//RS                 no_os: false,
-//RS                 gates: crate::Policy::GateSet::default(),
-//RS                 ..*cx
-//RS             };
-//RS             check_func_body(
-//RS                 &cx,
-//RS                 function,
-//RS                 owner,
-//RS                 false,
-//RS                 None,
-//RS                 Some(checked_ct_funcs),
-//RS                 &mut ledger,
-//RS                 &mut products,
-//RS             )
-//RS         }
-//RS     };
-//RS     BodyOutcome {
-//RS         diagnostics,
-//RS         products,
-//RS         ledger,
-//RS     }
-//RS }
-//RS 
-//RS /// The main pass's shared sinks. Jobs are checked, in parallel when the pass
-//RS /// has no incremental cache, and merged into these in source order.
-//RS struct MainBodyPass<'p, 'c> {
-//RS     cx: &'p BodyContext<'c>,
-//RS     checked_ct_funcs: &'p mut HashMap<String, Func>,
-//RS     name_ledger: &'p mut jet_foundation::Names::NameLedger,
-//RS     products: &'p mut BodyProducts,
-//RS     diags: &'p mut Vec<Diagnostic>,
-//RS     incremental: Option<&'p mut IncrementalSemaCache>,
-//RS     cache_allowed: bool,
-//RS }
-//RS 
-//RS impl MainBodyPass<'_, '_> {
-//RS     fn run(&mut self, jobs: Vec<BodyJob<'_>>) {
-//RS         let workers = if self.incremental.is_some() {
-//RS             1
-//RS         } else {
-//RS             super::Parallel::check_worker_count(jobs.len())
-//RS         };
-//RS         if workers <= 1 {
-//RS             // Serial: each body sees every body checked before it.
-//RS             for mut job in jobs {
-//RS                 let outcome = self.check(&mut job);
-//RS                 self.merge(job, outcome);
-//RS             }
-//RS             return;
-//RS         }
-//RS         // Parallel: every body is checked once against the staged table. A
-//RS         // body whose check ran the compile-time evaluator depends on the
-//RS         // bodies before it (their checked forms join `checked_ct_funcs` as
-//RS         // they are merged), so the worker puts its pristine form back and
-//RS         // drops that outcome at once; it is checked again below, in source
-//RS         // order, against exactly the table a serial pass gives it. Holding
-//RS         // only one form of each body keeps the peak near a serial pass's.
-//RS         let checked = {
-//RS             let cx = self.cx;
-//RS             let staged = &*self.checked_ct_funcs;
-//RS             let name_ledger = &*self.name_ledger;
-//RS             let cache_allowed = self.cache_allowed;
-//RS             super::Parallel::map_checked(jobs, |mut job| {
-//RS                 let pristine = job.function().clone();
-//RS                 let outcome =
-//RS                     check_body_job(cx, &mut job, staged, name_ledger, None, cache_allowed);
-//RS                 if outcome.products.ran_ct_evaluator {
-//RS                     *job.function_mut() = pristine;
-//RS                     (job, None)
-//RS                 } else {
-//RS                     (job, Some(outcome))
-//RS                 }
-//RS             })
-//RS         };
-//RS         for (mut job, outcome) in checked {
-//RS             let outcome = match outcome {
-//RS                 Some(outcome) => outcome,
-//RS                 None => self.check(&mut job),
-//RS             };
-//RS             self.merge(job, outcome);
-//RS         }
-//RS     }
-//RS 
-//RS     fn check(&mut self, job: &mut BodyJob<'_>) -> BodyOutcome {
-//RS         check_body_job(
-//RS             self.cx,
-//RS             job,
-//RS             &*self.checked_ct_funcs,
-//RS             &*self.name_ledger,
-//RS             self.incremental.as_deref_mut(),
-//RS             self.cache_allowed,
-//RS         )
-//RS     }
-//RS 
-//RS     fn merge(&mut self, job: BodyJob<'_>, outcome: BodyOutcome) {
-//RS         let BodyOutcome {
-//RS             diagnostics,
-//RS             products: mut body,
-//RS             ledger,
-//RS         } = outcome;
-//RS         if body.uses_exact_int {
-//RS             self.cx.states[self.cx.module_idx]
-//RS                 .exact_int_reachable
-//RS                 .set(true);
-//RS         }
-//RS         match job.kind {
-//RS             BodyJobKind::Function {
-//RS                 function,
-//RS                 ct_keys,
-//RS                 restore_type_params,
-//RS                 generated_anchor,
-//RS                 ..
-//RS             } => {
-//RS                 self.diags
-//RS                     .extend(author_facing_diagnostics(generated_anchor, diagnostics));
-//RS                 self.merge_ledger(&ledger);
-//RS                 self.products.absorb(body);
-//RS                 for key in ct_keys {
-//RS                     self.checked_ct_funcs.insert(key, function.clone());
-//RS                 }
-//RS                 if let Some(type_params) = restore_type_params {
-//RS                     function.type_params = type_params;
-//RS                 }
-//RS             }
-//RS             BodyJobKind::Test {
-//RS                 test,
-//RS                 function,
-//RS                 param_diagnostics,
-//RS             } => {
-//RS                 self.diags.extend(param_diagnostics);
-//RS                 self.diags.extend(diagnostics);
-//RS                 self.merge_ledger(&ledger);
-//RS                 self.products.absorb(body);
-//RS                 test.body = function.body;
-//RS             }
-//RS             BodyJobKind::InlineModule { function, module } => {
-//RS                 self.diags.extend(diagnostics);
-//RS                 self.merge_ledger(&ledger);
-//RS                 // Inline-module calls use their registered mangled identity
-//RS                 // (`__jet_module__fn`): the body's summary moves to that key and
-//RS                 // any top-level same-name summary stays in place.
-//RS                 let summary = body.summaries.remove(&function.name);
-//RS                 let function_key = jet_foundation::Names::member_name(&module, &function.name);
-//RS                 for pending in &mut body.pending_diagnostics {
-//RS                     pending.function_key = function_key.clone();
-//RS                 }
-//RS                 self.products.absorb(body);
-//RS                 if let Some(summary) = summary {
-//RS                     self.products.summaries.insert(
-//RS                         crate::Sema::inline_effect_key(&module, &function.name),
-//RS                         summary,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             BodyJobKind::ErrorConv {
-//RS                 conversion,
-//RS                 function,
-//RS             } => {
-//RS                 // Error-conversion bodies are checked like functions, but they
-//RS                 // are not functions: their synthetic names and local analysis
-//RS                 // artifacts stay out of the program-wide accumulators.
-//RS                 self.diags.extend(diagnostics);
-//RS                 self.products
-//RS                     .pending_diagnostics
-//RS                     .extend(body.pending_diagnostics);
-//RS                 self.products
-//RS                     .devtools_publications
-//RS                     .extend(body.devtools_publications);
-//RS                 conversion.body = function.body;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn merge_ledger(&mut self, ledger: &jet_foundation::Names::NameLedger) {
-//RS         self.name_ledger.merge_references(ledger);
-//RS         self.name_ledger.merge_structure_facts(ledger);
-//RS     }
-//RS }
-//RS 
-//RS /// Check every body of one module. Bodies are independent jobs checked on a
-//RS /// bounded worker pool (see `Parallel`) against the module's final tables;
-//RS /// their products are merged in source order, so the checked module,
-//RS /// diagnostics and facts equal a serial run's. `JET_CHECK_THREADS=1` runs the
-//RS /// same jobs one by one.
-//RS #[allow(clippy::too_many_arguments)]
-//RS pub(crate) fn check_module_bodies(
-//RS     module: &mut crate::AST::LoadedModule,
-//RS     module_idx: usize,
-//RS     states: &[ModuleState],
-//RS     plugin_interfaces: &PluginInterfaceRegistry,
-//RS     devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-//RS     effect_facts: &jet_foundation::Facts::FactRegistry,
-//RS     mode: CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     name_ledger: &mut jet_foundation::Names::NameLedger,
-//RS     products: &mut BodyProducts,
-//RS     mut incremental: Option<&mut IncrementalSemaCache>,
-//RS ) -> Vec<Diagnostic> {
-//RS     let st = &states[module_idx];
-//RS     // D-COMPILE-SPEED1 (#3661): registration is over and `states` stays shared
-//RS     // for every body below, so structural type answers (clone, send, view,
-//RS     // heap) are remembered across bindings and functions of this module.
-//RS     let _nominal_memo = st.registry.open_nominal_memo();
-//RS     let mut diags = Vec::new();
-//RS     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
-//RS     let invalid_serde_impls = invalid_serde_derive_impls(&module.items, &st.trait_reg);
-//RS     let ct_base_dir = module
-//RS         .path
-//RS         .parent()
-//RS         .map(|p| p.to_path_buf())
-//RS         .unwrap_or_else(|| std::path::PathBuf::from("."));
-//RS     let cx = BodyContext {
-//RS         module_idx,
-//RS         states,
-//RS         plugin_interfaces,
-//RS         devtools_registry,
-//RS         effect_facts,
-//RS         ct_funcs: &ct_funcs,
-//RS         ct_externs: &ct_externs,
-//RS         ct_base_dir: &ct_base_dir,
-//RS         ct_globals: &ct_globals,
-//RS         no_os,
-//RS         gates,
-//RS         no_prelude: module.no_prelude,
-//RS     };
-//RS     let checked_ct_funcs = stage_comptime_functions(&cx, &module.items, &ct_funcs, name_ledger);
-//RS     // D-MEM-VIEWRET1=B: resolve callable view summaries before the real body
-//RS     // pass so declaration order cannot affect a public owner contract. Each
-//RS     // iteration checks pristine clones and publishes only the canonical fact;
-//RS     // diagnostics and other analysis products are discarded. Tentative facts
-//RS     // let mutually recursive SCCs converge; the real pass below still rejects
-//RS     // any path that ultimately conflicts or cannot stabilize.
-//RS     // Jobs borrow their functions: most are dropped by the view filter below,
-//RS     // and each round clones the kept ones afresh anyway (#3661).
-//RS     struct ViewSummaryJob<'m> {
-//RS         key: String,
-//RS         owner: Option<String>,
-//RS         trait_name: Option<String>,
-//RS         raw_protocol_return: bool,
-//RS         function: &'m Func,
-//RS     }
-//RS     let mut view_jobs = Vec::new();
-//RS     for item in &module.items {
-//RS         match item {
-//RS             Item::Func(function) => view_jobs.push(ViewSummaryJob {
-//RS                 key: function.name.clone(),
-//RS                 owner: None,
-//RS                 trait_name: None,
-//RS                 raw_protocol_return: false,
-//RS                 function,
-//RS             }),
-//RS             Item::Struct(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     view_jobs.push(ViewSummaryJob {
-//RS                         key: format!("{}::{}", definition.name, function.name),
-//RS                         owner: Some(definition.name.clone()),
-//RS                         trait_name: None,
-//RS                         raw_protocol_return: false,
-//RS                         function,
-//RS                     });
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         view_jobs.push(ViewSummaryJob {
-//RS                             key: format!(
-//RS                                 "{}::{}::{}",
-//RS                                 definition.name, implementation.trait_name, function.name
-//RS                             ),
-//RS                             owner: Some(definition.name.clone()),
-//RS                             trait_name: Some(implementation.trait_name.clone()),
-//RS                             raw_protocol_return: uses_raw_protocol_function_return(
-//RS                                 Some(implementation.trait_name.as_str()),
-//RS                                 implementation.compiler_generated,
-//RS                                 function,
-//RS                             ),
-//RS                             function,
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     view_jobs.push(ViewSummaryJob {
-//RS                         key: format!("{}::{}", definition.name, function.name),
-//RS                         owner: Some(definition.name.clone()),
-//RS                         trait_name: None,
-//RS                         raw_protocol_return: false,
-//RS                         function,
-//RS                     });
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         view_jobs.push(ViewSummaryJob {
-//RS                             key: format!(
-//RS                                 "{}::{}::{}",
-//RS                                 definition.name, implementation.trait_name, function.name
-//RS                             ),
-//RS                             owner: Some(definition.name.clone()),
-//RS                             trait_name: Some(implementation.trait_name.clone()),
-//RS                             raw_protocol_return: uses_raw_protocol_function_return(
-//RS                                 Some(implementation.trait_name.as_str()),
-//RS                                 implementation.compiler_generated,
-//RS                                 function,
-//RS                             ),
-//RS                             function,
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for function in &implementation.methods {
-//RS                     view_jobs.push(ViewSummaryJob {
-//RS                         key: format!(
-//RS                             "{}::{}::{}",
-//RS                             implementation.type_name,
-//RS                             implementation.trait_name.as_deref().unwrap_or("inherent"),
-//RS                             function.name
-//RS                         ),
-//RS                         owner: Some(implementation.type_name.clone()),
-//RS                         trait_name: implementation.trait_name.clone(),
-//RS                         raw_protocol_return: uses_raw_protocol_function_return(
-//RS                             implementation.trait_name.as_deref(),
-//RS                             false,
-//RS                             function,
-//RS                         ),
-//RS                         function,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     fn contains_view(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
-//RS         match ty {
-//RS             // D-PIN1=A: `Pin<T>` borrows its owner's storage, so it carries
-//RS             // provenance across a signature exactly like `View`/`ViewMut`.
-//RS             Type::Apply { name, args }
-//RS                 if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
-//RS                     && args.len() == 1 =>
-//RS             {
-//RS                 true
-//RS             }
-//RS             Type::Named(name) => {
-//RS                 seen.insert(name.clone())
-//RS                     && registry.struct_fields(name).is_some_and(|fields| {
-//RS                         fields
-//RS                             .iter()
-//RS                             .any(|(_, _, field_ty)| contains_view(registry, field_ty, seen))
-//RS                     })
-//RS             }
-//RS             Type::Apply { name, args } => {
-//RS                 args.iter().any(|arg| contains_view(registry, arg, seen))
-//RS                     || (seen.insert(name.clone())
-//RS                         && registry.struct_fields(name).is_some_and(|fields| {
-//RS                             fields
-//RS                                 .iter()
-//RS                                 .any(|(_, _, field_ty)| contains_view(registry, field_ty, seen))
-//RS                         }))
-//RS             }
-//RS             Type::Option(inner)
-//RS             | Type::List(inner)
-//RS             | Type::Shared(inner)
-//RS             | Type::Tagged { inner, .. } => contains_view(registry, inner, seen),
-//RS             Type::Result { ok, err } => {
-//RS                 contains_view(registry, ok, seen) || contains_view(registry, err, seen)
-//RS             }
-//RS             Type::Map { key, value, .. } => {
-//RS                 contains_view(registry, key, seen) || contains_view(registry, value, seen)
-//RS             }
-//RS             Type::Tuple(fields) => fields
-//RS                 .iter()
-//RS                 .any(|(_, field_ty)| contains_view(registry, field_ty, seen)),
-//RS             Type::FixedList { elem, .. } => contains_view(registry, elem, seen),
-//RS             Type::Fn { params, ret, .. } => {
-//RS                 params
-//RS                     .iter()
-//RS                     .any(|param| contains_view(registry, param, seen))
-//RS                     || ret
-//RS                         .as_deref()
-//RS                         .is_some_and(|ret| contains_view(registry, ret, seen))
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS     view_jobs.retain(|job| {
-//RS         job.function
-//RS             .return_type
-//RS             .as_ref()
-//RS             .is_some_and(|return_type| {
-//RS                 contains_view(&st.registry, return_type, &mut HashSet::new())
-//RS             })
-//RS     });
-//RS     view_jobs.sort_by(|left, right| left.key.cmp(&right.key));
-//RS     let trait_job_counts = view_jobs.iter().fold(
-//RS         HashMap::<(String, String), usize>::new(),
-//RS         |mut counts, job| {
-//RS             if let Some(trait_name) = &job.trait_name {
-//RS                 *counts
-//RS                     .entry((trait_name.clone(), job.function.name.clone()))
-//RS                     .or_default() += 1;
-//RS             }
-//RS             counts
-//RS         },
-//RS     );
-//RS     // Each round publishes every job's `return_view_provenance` (BodyCheck)
-//RS     // and each complete trait contract. When a round yields exactly the
-//RS     // previous round's per-job results, it published the same values, so the
-//RS     // next round would start from the same state and repeat itself: that is
-//RS     // the fixed point. `view_jobs.len() + 1` rounds stays the upper bound;
-//RS     // running all of them after convergence made this pass quadratic in the
-//RS     // number of view-returning functions.
-//RS     let mut previous_round: Option<Vec<Option<crate::AST::ViewProvenanceMap>>> = None;
-//RS     for _ in 0..=view_jobs.len() {
-//RS         let mut trait_candidates =
-//RS             HashMap::<(String, String), Vec<crate::AST::ViewProvenanceMap>>::new();
-//RS         let mut round = Vec::with_capacity(view_jobs.len());
-//RS         for job in &view_jobs {
-//RS             let mut function = job.function.clone();
-//RS             let mut scratch_ledger = name_ledger.body_snapshot();
-//RS             let mut scratch = BodyProducts::default();
-//RS             let _ = check_func_body(
-//RS                 &cx,
-//RS                 &mut function,
-//RS                 job.owner.as_deref(),
-//RS                 job.raw_protocol_return,
-//RS                 None,
-//RS                 Some(&checked_ct_funcs),
-//RS                 &mut scratch_ledger,
-//RS                 &mut scratch,
-//RS             );
-//RS             if scratch.uses_exact_int {
-//RS                 st.exact_int_reachable.set(true);
-//RS             }
-//RS             round.push(function.return_view_provenance.clone());
-//RS             if let (Some(trait_name), Some(provenance)) =
-//RS                 (&job.trait_name, function.return_view_provenance)
-//RS             {
-//RS                 trait_candidates
-//RS                     .entry((trait_name.clone(), function.name.clone()))
-//RS                     .or_default()
-//RS                     .push(provenance);
-//RS             }
-//RS         }
-//RS         for (key, candidates) in trait_candidates {
-//RS             if candidates.len() != trait_job_counts.get(&key).copied().unwrap_or(0) {
-//RS                 continue;
-//RS             }
-//RS             let Some(first) = candidates.first() else {
-//RS                 continue;
-//RS             };
-//RS             let mut contract = first.clone();
-//RS             if !candidates
-//RS                 .iter()
-//RS                 .skip(1)
-//RS                 .all(|candidate| merge_view_provenance(&mut contract, candidate))
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             if let Some(signature) = st
-//RS                 .trait_reg
-//RS                 .traits
-//RS                 .get(&key.0)
-//RS                 .and_then(|info| info.methods.get(&key.1))
-//RS             {
-//RS                 let _ = signature.return_view_provenance.set(contract);
-//RS             }
-//RS         }
-//RS         if previous_round.as_ref() == Some(&round) {
-//RS             break;
-//RS         }
-//RS         previous_round = Some(round);
-//RS     }
-//RS     let cache_allowed = view_jobs.is_empty();
-//RS     let module_key = module.display.clone();
-//RS     let mut checked_ct_funcs = checked_ct_funcs;
-//RS     let mut pass = MainBodyPass {
-//RS         cx: &cx,
-//RS         checked_ct_funcs: &mut checked_ct_funcs,
-//RS         name_ledger: &mut *name_ledger,
-//RS         products: &mut *products,
-//RS         diags: &mut diags,
-//RS         incremental: incremental.as_deref_mut(),
-//RS         cache_allowed,
-//RS     };
-//RS     // D-FAIL-CONV2=A: the shipped `impl <CoreError> -> Err` conversions are
-//RS     // demand-driven — which ones a module needs is only known once every body
-//RS     // in it has recorded its `TryConvert::Typed` facts. So they are injected
-//RS     // after the module's own bodies are checked, and each appended body then
-//RS     // goes through the `Item::ErrorConv` job exactly like a user-declared
-//RS     // conversion. Injecting after this function returns instead left the
-//RS     // shipped bodies unchecked: `Err("{self}")` stayed an ordinary
-//RS     // `Expr::Call`, never normalized into the default-error `Err` struct
-//RS     // literal, and codegen's TIR gate refused it as an uncovered construct
-//RS     // (an I2 abort, not a user diagnostic).
-//RS     let declared_items = module.items.len();
-//RS     pass.run(collect_body_jobs(
-//RS         &mut module.items,
-//RS         st,
-//RS         &module_key,
-//RS         mode,
-//RS         &invalid_serde_impls,
-//RS     ));
-//RS     pass.diags
-//RS         .extend(super::super::Prelude::inject_exercised_error_conversions(module));
-//RS     pass.run(collect_body_jobs(
-//RS         &mut module.items[declared_items..],
-//RS         st,
-//RS         &module_key,
-//RS         mode,
-//RS         &invalid_serde_impls,
-//RS     ));
-//RS     // D-MEMPROVENANCE2=A: a trait method publishes the union of every
-//RS     // compatible implementation source before TIR.
-//RS     let mut trait_view_contracts: HashMap<
-//RS         (String, String),
-//RS         (crate::AST::ViewProvenanceMap, crate::Diagnostics::Span),
-//RS     > = HashMap::new();
-//RS     let mut record_trait_methods =
-//RS         |trait_name: &str, methods: &[Func], diags: &mut Vec<Diagnostic>| {
-//RS             for method in methods {
-//RS                 let Some(provenance) = method.return_view_provenance.clone() else {
-//RS                     continue;
-//RS                 };
-//RS                 if provenance.is_empty() {
-//RS                     continue;
-//RS                 }
-//RS                 let key = (trait_name.to_string(), method.name.clone());
-//RS                 if let Some((existing, _)) = trait_view_contracts.get_mut(&key) {
-//RS                     if !merge_view_provenance(existing, &provenance) {
-//RS                         diags.push(Diagnostic::error(
-//RS                             "E2305",
-//RS                             format!("implementations of `{}.{}` disagree about returned view slots", trait_name, method.name),
-//RS                             "dynamic dispatch can union possible owners, but every implementation must return the same view-bearing shape and access marker"
-//RS                                 .to_string(),
-//RS                             "return the same read or write view slots in every implementation"
-//RS                                 .to_string(),
-//RS                             Some(method.name_span),
-//RS                         ));
-//RS                     }
-//RS                 } else {
-//RS                     trait_view_contracts.insert(key, (provenance, method.name_span));
-//RS                 }
-//RS             }
-//RS         };
-//RS     for item in &module.items {
-//RS         match item {
-//RS             Item::Impl(implementation) => {
-//RS                 if let Some(trait_name) = implementation.trait_name.as_deref() {
-//RS                     record_trait_methods(trait_name, &implementation.methods, &mut diags);
-//RS                 }
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     record_trait_methods(
-//RS                         &implementation.trait_name,
-//RS                         &implementation.methods,
-//RS                         &mut diags,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     record_trait_methods(
-//RS                         &implementation.trait_name,
-//RS                         &implementation.methods,
-//RS                         &mut diags,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     for ((trait_name, method_name), (provenance, _)) in trait_view_contracts {
-//RS         if let Some(signature) = st
-//RS             .trait_reg
-//RS             .traits
-//RS             .get(&trait_name)
-//RS             .and_then(|info| info.methods.get(&method_name))
-//RS         {
-//RS             // Prefer a declared `from` on the trait method when present.
-//RS             if signature.declared_return_view_provenance.is_none() {
-//RS                 let _ = signature.return_view_provenance.set(provenance);
-//RS             }
-//RS         }
-//RS     }
-//RS     // D-MEMPROVENANCE3=A: trait methods with a declared `from` publish that
-//RS     // contract for every implementation and for open dispatch.
-//RS     for item in &module.items {
-//RS         let Item::Trait(trait_def) = item else {
-//RS             continue;
-//RS         };
-//RS         for method in &trait_def.methods {
-//RS             let Some(declared) = method.declared_return_view_provenance.clone() else {
-//RS                 continue;
-//RS             };
-//RS             if let Some(signature) = st
-//RS                 .trait_reg
-//RS                 .traits
-//RS                 .get(&trait_def.name)
-//RS                 .and_then(|info| info.methods.get(&method.name))
-//RS             {
-//RS                 let _ = signature.return_view_provenance.set(declared.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     // D-STRUCT-POLICY1=A: check each declared wrapper against the complete
-//RS     // signature at its use site. `call` is an ordinary typed function
-//RS     // parameter in this checking slice, so the wrapper can inspect policy
-//RS     // parameters, invoke the captured callable, and return its result without
-//RS     // changing the wrapped function type.
-//RS     let mut generated_policy_wrappers = Vec::new();
-//RS     let mut generated_policy_wrapper_names = HashSet::new();
-//RS     let mut apply_policy_uses = HashMap::new();
-//RS     collect_callable_policy_apply_uses(&mut module.items, &mut apply_policy_uses);
-//RS     let apply_target_names = apply_policy_uses.keys().cloned().collect::<HashSet<_>>();
-//RS     let mut policy_targets = callable_policy_targets(&module.items);
-//RS     named_callable_policy_targets(&module.items, &apply_target_names, &mut policy_targets);
-//RS     for target in policy_targets {
-//RS         let target_sig = st
-//RS             .funcs
-//RS             .get(&target.name)
-//RS             .cloned()
-//RS             .unwrap_or_else(|| crate::Sema::func_to_sig(&target));
-//RS         let call_ty = func_sig_to_fn_type(&target_sig);
-//RS         let mut policy_names = Vec::new();
-//RS         for marker in target
-//RS             .markers
-//RS             .iter()
-//RS             .filter(|marker| marker.name == Syntax::MARKER_POLICY)
-//RS         {
-//RS             let Ok(chain) =
-//RS                 crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()) else {
-//RS                 continue;
-//RS             };
-//RS             for policy in chain.policies {
-//RS                 if !policy_names.contains(&policy.name) {
-//RS                     policy_names.push(policy.name);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(applied_policies) = apply_policy_uses.get(&target.name) {
-//RS             for policy_name in applied_policies {
-//RS                 if !policy_names.contains(policy_name) {
-//RS                     policy_names.push(policy_name.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS         for policy_name in policy_names {
-//RS             let policy_key = (st.package_scope.clone(), policy_name.clone());
-//RS             let Some((_declaring_module, declaration)) =
-//RS                 st.callable_policy_declarations.get(&policy_key)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let wrapper_name = callable_policy_wrapper_name(&policy_name, &target.name);
-//RS             let mut wrapper = Func::implicit_run(declaration.body.clone(), declaration.span);
-//RS             wrapper.name = wrapper_name.clone();
-//RS             wrapper.name_span = declaration.name_span;
-//RS             wrapper.params = declaration.params.clone();
-//RS             wrapper.params.push(Param {
-//RS                 convention: crate::AST::AccessConvention::Read,
-//RS                 root: false,
-//RS                 name: "call".to_string(),
-//RS                 name_span: declaration.name_span,
-//RS                 public_label: None,
-//RS                 zone: crate::AST::ParamZone::Either,
-//RS                 ty: call_ty.clone(),
-//RS                 ty_span: declaration.name_span,
-//RS                 default: None,
-//RS                 variadic: false,
-//RS                 variadic_bound_list: None,
-//RS                 declared_view_from_names: None,
-//RS             });
-//RS             wrapper
-//RS                 .params
-//RS                 .extend(target.params.iter().cloned().map(|mut param| {
-//RS                     // The outer callable has already had defaults resolved by
-//RS                     // its checked call contract. The generated wrapper receives
-//RS                     // every target argument explicitly from its closure.
-//RS                     param.default = None;
-//RS                     param
-//RS                 }));
-//RS             wrapper.return_type = target_sig.return_type.clone();
-//RS             wrapper.return_type_span = target.return_type_span;
-//RS             wrapper.return_view_provenance = target.return_view_provenance.clone();
-//RS             wrapper.declared_return_view_provenance =
-//RS                 target.declared_return_view_provenance.clone();
-//RS             wrapper.compiler_generated = true;
-//RS             let mut wrapper_ledger = name_ledger.body_snapshot();
-//RS             let mut wrapper_products = BodyProducts::default();
-//RS             diags.extend(check_func_body(
-//RS                 &cx,
-//RS                 &mut wrapper,
-//RS                 None,
-//RS                 false,
-//RS                 None,
-//RS                 Some(&checked_ct_funcs),
-//RS                 &mut wrapper_ledger,
-//RS                 &mut wrapper_products,
-//RS             ));
-//RS             if wrapper_products.uses_exact_int {
-//RS                 st.exact_int_reachable.set(true);
-//RS             }
-//RS             for pending in &mut wrapper_products.pending_diagnostics {
-//RS                 pending.function_key = format!("policy:{}::{}", policy_name, target.name);
-//RS             }
-//RS             products
-//RS                 .pending_diagnostics
-//RS                 .extend(wrapper_products.pending_diagnostics);
-//RS             products
-//RS                 .devtools_publications
-//RS                 .extend(wrapper_products.devtools_publications);
-//RS             if generated_policy_wrapper_names.insert(wrapper.name.clone()) {
-//RS                 generated_policy_wrappers.push(crate::AST::Item::Func(wrapper));
-//RS             }
-//RS         }
-//RS     }
-//RS     module.items.extend(generated_policy_wrappers);
-//RS     let _ = st;
-//RS     diags
-//RS }
-// END-PORT-PENDING 0360 crates/jet-sema/src/Sema/Bundle/Validation.rs:1-2305
+use jet_foundation.[Item, Func, Param, Type, TypeParam, LoadedModule, ErrorConvDef, TestDef, TraitImplBlock, VariantPayload, Expr, Diagnostic, Severity, Span, AccessConvention, ParamZone, CallablePolicyChain, ViewProvenanceMap, NameLedger, FactRegistry, ReachabilityResult, CompileMode, GateSet, DevtoolsRegistry, member_name, merge_view_provenance]
+use jet_sema.[ModuleState, TypeRegistry, PluginInterfaceRegistry, EffectSummary, EffectSet, IncrementalSemaCache, CachedFunctionBody, check_func_taint, check_body_tags, TagSet, ReturnTypes, FieldTags, FieldTypes, name_defined, check_default_forward_refs, func_to_sig, stmts_have_comptime_evaluation, solve_reachability, property_param_unsupported, comptime_context_from_items, invalid_serde_derive_impls, inline_effect_key]
+use jet_sema.Bundle.Validation.BodyCheck.[BodyContext, BodyProducts, check_func_body, checker_for_module, fn_types_compatible, func_sig_to_fn_type, collect_diverging_functions, collect_fixed_length_write_params, project_divergence_facts]
+use jet_sema.Bundle.Validation.CoreUsage.[apply_helper_layer_inference, check_ui_capabilities, collect_core_expr, collect_core_lvalue, collect_core_stmts, collect_used_core, expand_core_reachable_closure]
+use jet_sema.Bundle.[Parallel, ItemReuse]
+use jet_sema.Prelude.[is_prelude_name, shadow_warning, inject_exercised_error_conversions]
+use jet_foundation.Syntax.[BUILTIN_ASSERT_EQ, KW_SELF, MARKER_POLICY, TYPE_PIN]
+use jet_foundation.Generics.[DISPLAY, DEBUG, ENCODE, DECODE, EQUATABLE, COMPARABLE, ADD, SUB, MUL, DIV]
+use jet_comptime.[reachable_owned_function_roots, reachable_owned_function_closure]
+use std.fmt.[debug_bytes] // GATE #4499: exact structural debug form used by the cache.
 
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:19
+fn uses_raw_protocol_return(trait_name: String?, implementation_generated: Bool, function_generated: Bool) -> Bool Never! {
+    if trait_name == .Val(name) {
+        if name == DISPLAY || name == DEBUG || name == ENCODE || name == DECODE || name == EQUATABLE || name == COMPARABLE || name == ADD || name == SUB || name == MUL || name == DIV -> return true
+    }
+    implementation_generated && function_generated
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:44
+fn uses_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, function: Func) -> Bool Never! {
+    uses_raw_protocol_return(trait_name, implementation_generated, function.compiler_generated) || (function.compiler_generated && function.state_transition != None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:61
+fn qualified_effect_facts(modules: [(String, [String:EffectSummary])], sealed: [(String, [(String, EffectSummary)])], taint_seeds: [String:[String:Bool]]) -> ([String:EffectSummary], ReachabilityResult) Never! {
+    locations := [String:[String]]{}
+    aliases := [String:Bool]{}
+    loop (alias, summaries) in modules {
+        aliases[~alias] = true
+        loop key in summaries.keys() -> &locations.entry(~key).or_default().push("{alias}::{key}")
+    }
+    loop (alias, nodes) in sealed -> loop (key, _) in nodes -> &locations.entry(~key).or_default().push("{alias}::{key}")
+    qualified := [String:EffectSummary]{}
+    loop (alias, nodes) in sealed -> loop (key, summary) in nodes -> qualified["{alias}::{key}"] = ~summary
+    loop (alias, summaries) in modules {
+        local_keys := [String:Bool]{}
+        loop key in summaries.keys() -> local_keys[~key] = true
+        resolve_edge :: fn(edge: String) -> String Never! {
+            if edge == "__jet_panic__" -> return ~edge
+            if local_keys.has_key(edge) -> return "{alias}::{edge}"
+            if edge.split_once('.') == .Val((module, symbol)) && aliases.has_key(module) -> return "{module}::{symbol}"
+            if locations.get(edge) == .Val(values) && values.len() == 1 -> return ~values[0]
+            ~edge
+        }
+        loop (key, original) in summaries {
+            summary := ~original
+            summary.edges = summary.edges.map(resolve_edge).collect()
+            loop &region in &summary.regions -> region.edges = region.edges.map(resolve_edge).collect()
+            loop &obligation in &summary.callback_obligations -> obligation.edges = obligation.edges.map(resolve_edge).collect()
+            loop &obligation in &summary.autodiff_obligations -> obligation.target = resolve_edge(obligation.target)
+            loop &fact in &summary.discarded_results -> fact.callee = resolve_edge(fact.callee)
+            loop &call in &summary.memory.calls -> call.callee = resolve_edge(call.callee)
+            loop &region in &summary.memory.regions {
+                region.edges = region.edges.map(resolve_edge).collect()
+                loop &call in &region.calls -> call.callee = resolve_edge(call.callee)
+            }
+            qualified["{alias}::{key}"] = ^summary
+        }
+    }
+    reachability := solve_reachability(qualified, taint_seeds)
+    loop (short, values) in locations {
+        if values.len() != 1 -> continue
+        qualified_key :: values[0]
+        if qualified.get(qualified_key) == .Val(summary) -> qualified[~short] = ~summary
+        &reachability.copy_node(short, qualified_key)
+    }
+    (^qualified, ^reachability)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:206
+fn taint_check_item(item: Item, scrubbers: [String:String], facts: FactRegistry, returns: [String:TagSet], return_types: ReturnTypes, field_tags: FieldTags, field_types: FieldTypes, core_imports: [String:String], diags: &[Diagnostic]) Never! {
+    if item == .Func(f) -> &diags.extend(check_func_taint(f, None, scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+    if item == .Impl(i) -> loop m in i.methods -> &diags.extend(check_func_taint(m, Val(i.type_name), scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+    if item == .Struct(s) {
+        loop m in s.methods -> &diags.extend(check_func_taint(m, Val(s.name), scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+        loop block in s.trait_impls -> loop m in block.methods -> &diags.extend(check_func_taint(m, Val(s.name), scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+    }
+    if item == .Enum(e) -> loop m in e.methods -> &diags.extend(check_func_taint(m, Val(e.name), scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+    if item == .Test(t) -> &diags.extend(check_body_tags(t.body, scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+    if item == .ErrorConv(ec) -> &diags.extend(check_body_tags(ec.body, scrubbers, facts, returns, return_types, field_tags, field_types, core_imports, diags))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:333
+fn register_func_item(f: Func, st: &ModuleState, diags: &[Diagnostic], prelude_enabled: Bool) Never! {
+    if f.name == BUILTIN_ASSERT_EQ {
+        &diags.push(Diagnostic.error("E0106", "the name `{f.name}` is built in and can't be redefined", "`{f.name}` is provided by the language itself", "choose a different name for this function", Val(f.name_span)))
+        return
+    }
+    if prelude_enabled && is_prelude_name(f.name) -> &diags.push(shadow_warning(f.name, f.name_span))
+    if name_defined(f.name, st.funcs, st.registry, st.consts) {
+        &diags.push(Diagnostic.error("E0105", "`{f.name}` is defined twice", "every function needs a unique name so calls aren't ambiguous", "rename or remove one of the definitions", Val(f.name_span)))
+        return
+    }
+    if f.is_pub {
+        loop p in f.params {
+            if p.ty == Type.Bool && p.name != KW_SELF && p.default == None -> &diags.push(Diagnostic.lint("L2401", "public function `{f.name}` has a positional `Bool` parameter `{p.name}`", "positional booleans are easy to transpose at the call site", "callers can write `{p.name}: true` to make the intent clear (S61 labels)", Val(p.name_span)))
+        }
+    }
+    check_default_forward_refs(f.params, f.name, &diags)
+    st.funcs[~f.name] = func_to_sig(f)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:390
+fn is_encoding_surface_type(name: String) -> Bool Never! {
+    base :: name.rsplit('.').next().unwrap_or(name)
+    base == "DataTree" || base == "EncodingFormat" || base == "DataJoin" || base == "Query" || base == "DataGroupedQuery" || base == "Group" || base == "EncodingLimits" || base == "EncodingError" || base == "CBOROptions" || base == "CBORError" || base == "CBORErrorKind" || base == "EncodingCause" || base == "EncodingErrorKind" || base == "DataEvent" || base == "JSONReader" || base == "JSONWriter" || base == "JSONLReader" || base == "JSONLWriter" || base == "CSVReader" || base == "CSVWriter" || base == "XMLReader" || base == "XMLWriter" || base == "CBORReader" || base == "CBORWriter"
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:425
+fn type_mentions_encoding_surface(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return is_encoding_surface_type(name)
+    if ty == .Apply(name, args) -> return is_encoding_surface_type(name) || args.any(type_mentions_encoding_surface)
+    if ty == .TraitObject(names) -> return names.any(is_encoding_surface_type)
+    if ty == .List(inner) -> return type_mentions_encoding_surface(inner)
+    if ty == .Shared(inner) -> return type_mentions_encoding_surface(inner)
+    if ty == .Option(inner) -> return type_mentions_encoding_surface(inner)
+    if ty == .Tagged(inner, _) -> return type_mentions_encoding_surface(inner)
+    if ty == .InlineRange(base: inner, ..) -> return type_mentions_encoding_surface(inner)
+    if ty == .FixedList(elem: elem, ..) -> return type_mentions_encoding_surface(elem)
+    if ty == .Map(key: key, value: value, ..) -> return type_mentions_encoding_surface(key) || type_mentions_encoding_surface(value)
+    if ty == .Result(ok: ok, err: err) -> return type_mentions_encoding_surface(ok) || type_mentions_encoding_surface(err)
+    if ty == .Fn(params: params, ret: ret, ..) -> return params.any(type_mentions_encoding_surface) || ret.is_some_and(type_mentions_encoding_surface)
+    if ty == .Tuple(fields) -> return fields.any(fn(field) { type_mentions_encoding_surface(field.1) })
+    if ty == .Union(members) -> return members.any(type_mentions_encoding_surface)
+    if ty == .Quantity(base: base, ..) -> return type_mentions_encoding_surface(base)
+    false
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:465
+fn func_sig_mentions_encoding_surface(f: Func) -> Bool Never! {
+    f.params.any(fn(p) { type_mentions_encoding_surface(p.ty) }) || f.return_type.is_some_and(type_mentions_encoding_surface)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:479
+fn module_annotations_mention_encoding_surface(module: LoadedModule) -> Bool Never! {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:480
+    variant_payload_mentions :: fn(payload: VariantPayload) -> Bool Never! {
+        if payload == .Single(ty, _) -> return type_mentions_encoding_surface(ty)
+        if payload == .Named(fields) -> return fields.any(fn(f) { type_mentions_encoding_surface(f.ty) })
+        false
+    }
+    loop item in module.items {
+        if item == .Func(f) && func_sig_mentions_encoding_surface(f) -> return true
+        if item == .Struct(s) {
+            if s.fields.any(fn(f) { type_mentions_encoding_surface(f.ty) }) || s.methods.any(func_sig_mentions_encoding_surface) || s.trait_impls.any(fn(b) { b.methods.any(func_sig_mentions_encoding_surface) }) -> return true
+        }
+        if item == .Enum(e) {
+            if e.variants.any(fn(v) { variant_payload_mentions(v.payload) }) || e.methods.any(func_sig_mentions_encoding_surface) || e.trait_impls.any(fn(b) { b.methods.any(func_sig_mentions_encoding_surface) }) -> return true
+        }
+        if item == .Impl(i) && (i.methods.any(func_sig_mentions_encoding_surface) || i.assoc_type_impls.any(fn(entry) { type_mentions_encoding_surface(entry.2) })) -> return true
+        if item == .Trait(t) && t.methods.any(fn(m) { m.params.any(fn(p) { type_mentions_encoding_surface(p.ty) }) || m.return_type.is_some_and(type_mentions_encoding_surface) }) -> return true
+        if item == .TypeAlias(a) && type_mentions_encoding_surface(a.target) -> return true
+    }
+    false
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:532
+fn check_func_body_cached(cx: BodyContext, key: String, function: &Func, owner_type: String?, raw_protocol_return: Bool, ct_checked_funcs: [String:Func], ledger: &NameLedger, products: &BodyProducts, cache: &IncrementalSemaCache, cache_allowed: Bool) -> [Diagnostic] Never! {
+    check :: fn(function: &Func, ledger: &NameLedger, products: &BodyProducts) { check_func_body(cx, &function, owner_type, raw_protocol_return, None, Val(ct_checked_funcs), &ledger, &products) }
+    if !(cache_allowed && !stmts_have_comptime_evaluation(function.body)) {
+        &cache.record_recompute(key)
+        return check(&function, &ledger, &products)
+    }
+    input := debug_bytes(function)
+    &input.push(if raw_protocol_return { 1 } else { 0 })
+    if cache.get(key, input) == .Val(hit) {
+        function = ^hit.function
+        &products.summaries.extend(^hit.summaries)
+        &products.embed_inputs.extend(^hit.comptime_inputs)
+        &products.addr_taken.extend(^hit.address_taken)
+        &ledger.merge_references(hit.name_ledger)
+        &ledger.merge_structure_facts(hit.name_ledger)
+        &products.pending_diagnostics.extend(^hit.pending_diagnostics)
+        products.uses_exact_int |= hit.uses_exact_int
+        &products.devtools_publications.extend(^hit.devtools_publications)
+        return ^hit.diagnostics
+    }
+    diagnostics :: check(&function, &ledger, &products)
+    if !products.embed_inputs.is_empty() {
+        &cache.record_recompute(key)
+        return diagnostics
+    }
+    &cache.store(key, CachedFunctionBody{input: ^input, function: ~function, diagnostics: ~diagnostics, summaries: ~products.summaries, comptime_inputs: [], address_taken: ~products.addr_taken, name_ledger: ~ledger, pending_diagnostics: ~products.pending_diagnostics, uses_exact_int: products.uses_exact_int, devtools_publications: ~products.devtools_publications})
+    diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:624
+fn author_facing_diagnostics(generated_anchor: Span?, diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
+    if generated_anchor == .Val(anchor) {
+        &diagnostics.retain(fn(d) { d.severity == Severity.Error })
+        loop &diagnostic in &diagnostics {
+            diagnostic.span = Val(anchor)
+            &diagnostic.labels.clear()
+        }
+        &diagnostics.dedup_by(fn(later, earlier) { later.code == earlier.code && later.what == earlier.what })
+    }
+    ^diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:642
+fn has_callable_policy(function: Func) -> Bool Never! {
+    function.markers.any(fn(marker) { marker.name == MARKER_POLICY && CallablePolicyChain.parse(marker.expr_args_owned()).is_ok() })
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:649
+fn collect_callable_policy_functions(functions: [Func], targets: &[Func]) Never! {
+    loop function in functions -> if has_callable_policy(function) -> &targets.push(~function)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:656
+fn callable_policy_targets(items: [Item]) -> [Func] Never! {
+    targets := [Func]{}
+    loop item in items {
+        if item == .Func(function) && has_callable_policy(function) -> &targets.push(~function)
+        if item == .Struct(d) {
+            collect_callable_policy_functions(d.methods, &targets)
+            loop implementation in d.trait_impls -> collect_callable_policy_functions(implementation.methods, &targets)
+        }
+        if item == .Enum(d) {
+            collect_callable_policy_functions(d.methods, &targets)
+            loop implementation in d.trait_impls -> collect_callable_policy_functions(implementation.methods, &targets)
+        }
+        if item == .Impl(i) -> collect_callable_policy_functions(i.methods, &targets)
+        if item == .CodeModule(m) && m.body == .Val(body) -> &targets.extend(callable_policy_targets(body))
+        if item == .GenericModule(m) -> &targets.extend(callable_policy_targets(m.body))
+    }
+    targets
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:692
+fn collect_callable_policy_apply_uses(items: &[Item], uses: &[String:[String]]) Never! {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:696
+    collect_func :: fn(function: &Func, uses: &[String:[String]]) Never! {
+        loop &statement in &function.body {
+            &statement.for_each_expr_mut(fn(expr: &Expr) Never! {
+                if expr == .Call(call) {
+                    if call.name != "apply" || call.args.is_empty() -> return
+                    last :: call.args[call.args.len() - 1]
+                    if last.flags.callable_policy == .Val(chain) {
+                        target_name := None as String?
+                        if last.expr == .Ident(name, _) -> target_name = Val(~name)
+                        if last.expr == .Paren(inner, _) && inner == .Ident(name, _) -> target_name = Val(~name)
+                        if target_name == .Val(name) {
+                            policy_names :: chain.policies.filter(fn(policy) { !CallablePolicyChain.is_builtin(policy.name) }).map(fn(policy) { ~policy.name }).collect()
+                            if policy_names.is_empty() -> return
+                            entry := &uses.entry(name).or_default()
+                            loop policy_name in policy_names -> if !entry.contains(policy_name) -> &entry.push(policy_name)
+                        }
+                    }
+                }
+            })
+        }
+    }
+    loop &item in &items {
+        if item == .Func(f) -> collect_func(&f, &uses)
+        if item == .Struct(d) {
+            loop &f in &d.methods -> collect_func(&f, &uses)
+            loop &i in &d.trait_impls -> loop &f in &i.methods -> collect_func(&f, &uses)
+        }
+        if item == .Enum(d) {
+            loop &f in &d.methods -> collect_func(&f, &uses)
+            loop &i in &d.trait_impls -> loop &f in &i.methods -> collect_func(&f, &uses)
+        }
+        if item == .Impl(i) -> loop &f in &i.methods -> collect_func(&f, &uses)
+        if item == .CodeModule(m) && m.body == .Val(body) -> collect_callable_policy_apply_uses(&body, &uses)
+        if item == .GenericModule(m) -> collect_callable_policy_apply_uses(&m.body, &uses)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:782
+fn collect_named_callable_policy_functions(functions: [Func], names: [String:Bool], targets: &[Func]) Never! {
+    loop function in functions -> if names.has_key(function.name) -> &targets.push(~function)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:795
+fn named_callable_policy_targets(items: [Item], names: [String:Bool], targets: &[Func]) Never! {
+    loop item in items {
+        if item == .Func(f) && names.has_key(f.name) -> &targets.push(~f)
+        if item == .Struct(d) {
+            collect_named_callable_policy_functions(d.methods, names, &targets)
+            loop i in d.trait_impls -> collect_named_callable_policy_functions(i.methods, names, &targets)
+        }
+        if item == .Enum(d) {
+            collect_named_callable_policy_functions(d.methods, names, &targets)
+            loop i in d.trait_impls -> collect_named_callable_policy_functions(i.methods, names, &targets)
+        }
+        if item == .Impl(i) -> collect_named_callable_policy_functions(i.methods, names, &targets)
+        if item == .CodeModule(m) && m.body == .Val(body) -> named_callable_policy_targets(body, names, &targets)
+        if item == .GenericModule(m) -> named_callable_policy_targets(m.body, names, &targets)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:844
+fn callable_policy_wrapper_name(policy: String, target: String) -> String Never! { CallablePolicyChain.user_wrapper_name(policy, target) }
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:848
+struct ComptimeStageJob { owner: String?, raw_protocol_return: Bool, function: @Func }
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:857
+fn comptime_stage_jobs(items: [Item]) -> [String:ComptimeStageJob] Never! {
+    jobs := [String:ComptimeStageJob]{}
+    insert :: fn(key: String, owner: String?, raw: Bool, function: @Func) Never! { jobs[^key] = ComptimeStageJob{owner: owner, raw_protocol_return: raw, function: function} }
+    loop item in items {
+        if item == .Func(f) -> insert(~f.name, None, false, @f)
+        if item == .Struct(d) {
+            loop f in d.methods -> insert("{d.name}::{f.name}", Val(~d.name), false, @f)
+            loop i in d.trait_impls -> loop f in i.methods -> insert("{d.name}::{f.name}", Val(~d.name), uses_raw_protocol_function_return(Val(i.trait_name), i.compiler_generated, f), @f)
+        }
+        if item == .Enum(d) {
+            loop f in d.methods -> insert("{d.name}::{f.name}", Val(~d.name), false, @f)
+            loop i in d.trait_impls -> loop f in i.methods -> insert("{d.name}::{f.name}", Val(~d.name), uses_raw_protocol_function_return(Val(i.trait_name), i.compiler_generated, f), @f)
+        }
+        if item == .Impl(i) -> loop f in i.methods -> insert("{i.type_name}::{f.name}", Val(~i.type_name), uses_raw_protocol_function_return(i.trait_name, false, f), @f)
+    }
+    jobs
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:942
+fn comptime_stage_roots(items: [Item], raw_funcs: [String:@Func]) -> ([String:Bool], Bool) Never! {
+    roots := [String:Bool]{}
+    all_methods := false
+    visit_function :: fn(f: Func) Never! {
+        if !stmts_have_comptime_evaluation(f.body) -> return
+        loop statement in f.body {
+            statement.for_each_expr(fn(expression: Expr) Never! {
+                if expression == .MethodCall(recv_type: None, ..) -> all_methods = true
+                if expression is Expr.Call || expression is Expr.Ident || expression is Expr.MethodCall -> reachable_owned_function_roots(expression, raw_funcs, &roots)
+            })
+        }
+    }
+    loop item in items {
+        if item == .Func(f) -> visit_function(f)
+        if item == .Struct(d) {
+            loop f in d.methods -> visit_function(f)
+            loop i in d.trait_impls -> loop f in i.methods -> visit_function(f)
+        }
+        if item == .Enum(d) {
+            loop f in d.methods -> visit_function(f)
+            loop i in d.trait_impls -> loop f in i.methods -> visit_function(f)
+        }
+        if item == .Impl(i) -> loop f in i.methods -> visit_function(f)
+    }
+    (reachable_owned_function_closure(roots, raw_funcs), all_methods)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1016
+fn stage_comptime_functions(cx: BodyContext, items: [Item], ct_funcs: [String:Func], name_ledger: NameLedger) -> [String:Func] Never! {
+    stage_jobs :: comptime_stage_jobs(items)
+    raw_eval_funcs := [String:@Func]{}
+    loop (name, f) in ct_funcs -> raw_eval_funcs[~name] = @f
+    loop (key, job) in stage_jobs -> raw_eval_funcs[~key] = job.function
+    (stage_names, stage_all_methods) :: comptime_stage_roots(items, raw_eval_funcs)
+    stage_keys := [String]{}
+    loop (key, job) in stage_jobs -> if (stage_all_methods && job.owner != None) || stage_names.has_key(key) || stage_names.has_key(job.function.name) -> &stage_keys.push(~key)
+    &stage_keys.sort()
+    staged_unqualified := ~stage_names
+    loop key in stage_keys -> if stage_jobs.get(key) == .Val(job) -> staged_unqualified[~job.function.name] = true
+    stage :: fn(owner: String?, raw: Bool, original: Func) -> Func? Never! {
+        function := ~original
+        ledger := name_ledger.body_snapshot()
+        products := BodyProducts.default()
+        diagnostics :: check_func_body(cx, &function, owner, raw, None, None, &ledger, &products)
+        if products.uses_exact_int -> cx.states[cx.module_idx].exact_int_reachable.set(true)
+        if diagnostics.all(fn(d) { d.severity != Severity.Error }) -> return Val(^function)
+        None
+    }
+    keyed :: stage_keys.filter_map(fn(key) { stage_jobs.get(key).map(fn(job) { (key, job) }) }).collect()
+    staged :: Parallel.map_checked(keyed, fn(pair) { (pair.0, ~pair.1.owner, stage(pair.1.owner, pair.1.raw_protocol_return, pair.1.function)) })
+    checked_ct_funcs := [String:Func]{}
+    loop (key, owner, maybe_function) in staged {
+        if maybe_function == .Val(function) {
+            checked_ct_funcs[key] = ~function
+            if owner == .Val(owner_name) -> checked_ct_funcs["{owner_name}::{function.name}"] = ~function
+            checked_ct_funcs[~function.name] = ^function
+        }
+    }
+    unqualified_keys := staged_unqualified.keys().collect()
+    &unqualified_keys.sort()
+    unqualified :: unqualified_keys.filter(fn(name) { !checked_ct_funcs.has_key(name) }).filter_map(fn(name) { ct_funcs.get(name).map(fn(f) { (name, f) }) }).collect()
+    staged :: Parallel.map_checked(unqualified, fn(pair) { (pair.0, stage(None, false, pair.1)) })
+    loop (name, maybe_function) in staged {
+        if maybe_function == .Val(function) {
+            checked_ct_funcs[name] = ~function
+            checked_ct_funcs[~function.name] = ^function
+        }
+    }
+    checked_ct_funcs
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1113
+fn error_conversion_function(ec: &ErrorConvDef) -> Func Never! {
+    body :: ^ec.body
+    ec.body = []
+    Func{
+        span: ec.body_span, is_comptime: false, is_pub: false, is_package_pub: false, external_type: None,
+        name: "__errconv_{ec.from_ty.replace('.', "_")}_to_{ec.to_ty.replace('.', "_")}", name_span: ec.from_span,
+        meta: None, type_params: [], head_pattern: None,
+        params: [Param{name: KW_SELF, name_span: ec.from_span, ty: Type.Named(""), ty_span: ec.from_span, convention: AccessConvention.Move, root: false, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+        return_type: Val(Type.Named(~ec.to_ty)), return_type_span: Val(ec.to_span), return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false, unsafe_reason: None, unsafe_span: None,
+        is_pure: false, is_reactive: false, reactive_upgrades: [], is_replayable: false, replayable_span: None,
+        is_job: false, job_span: None, every: None, job_metadata: None, is_must_use: false, must_use_span: None,
+        maturity: None, maturity_span: None, kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        is_sanitizer: false, scrub_tag: None, declared_effects: None, effect_via: None, state_requires: None, state_transition: None,
+        web_marker: None, pre: [], post: [], inline_foreign: None, undo: None, markers: [], compiler_generated: false, body: ^body
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1188
+struct BodyJob { owner: String?, raw_protocol_return: Bool, kind: BodyJobKind }
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1194
+// GATE #4494: mutable retained views remain disjoint across bounded worker jobs.
+enum BodyJobKind {
+    Function(function: &Func, cache_key: String, ct_keys: [String], restore_type_params: [TypeParam]?, generated_anchor: Span?)
+    Test(test: &TestDef, function: Func, param_diagnostics: [Diagnostic])
+    InlineModule(function: &Func, module: String)
+    ErrorConv(conversion: &ErrorConvDef, function: Func)
+}
+impl BodyJob {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1224
+    fn function(self) -> @Func Never! from self {
+        if self.kind == .Function(function: f, ..) -> return @f
+        if self.kind == .InlineModule(function: f, ..) -> return @f
+        if self.kind == .Test(function: f, ..) -> return @f
+        if self.kind == .ErrorConv(function: f, ..) -> return @f
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1233
+    fn function_mut(&self) -> &Func Never! from self {
+        if self.kind == .Function(function: f, ..) -> return &f
+        if self.kind == .InlineModule(function: f, ..) -> return &f
+        if self.kind == .Test(function: f, ..) -> return &f
+        if self.kind == .ErrorConv(function: f, ..) -> return &f
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1246
+fn collect_body_jobs(items: &[Item], st: ModuleState, module_key: String, mode: CompileMode, invalid_serde_impls: [(String, String):Bool]) -> [BodyJob] Never! from items {
+    jobs := [BodyJob]{}
+    loop &item in &items {
+        if item == .Func(f) -> &jobs.push(BodyJob{owner: None, raw_protocol_return: false, kind: .Function(function: &f, cache_key: "{module_key}::fn:{f.name}", ct_keys: [~f.name], restore_type_params: None, generated_anchor: None)})
+        if item == .Struct(s) -> push_owner_method_jobs(&jobs, module_key, "struct", s.name, s.type_params, &s.methods, &s.trait_impls)
+        if item == .Enum(e) -> push_owner_method_jobs(&jobs, module_key, "enum", e.name, e.type_params, &e.methods, &e.trait_impls)
+        if item == .Impl(i) {
+            if i.trait_name == .Val(trait_name) && i.is_generated_serde && invalid_serde_impls.has_key((i.type_name, trait_name)) -> continue
+            owner_params :: st.trait_reg.struct_params.get(i.type_name).or_else(fn() { st.trait_reg.enum_params.get(i.type_name) })
+            type_name :: ~i.type_name
+            trait_name :: ~i.trait_name
+            loop &m in &i.methods {
+                own_params :: ^m.type_params
+                m.type_params = if own_params.is_empty() { owner_params.cloned().unwrap_or_default() } else { ~own_params }
+                raw :: uses_raw_protocol_function_return(trait_name, false, m)
+                &jobs.push(BodyJob{owner: Val(~type_name), raw_protocol_return: raw, kind: .Function(function: &m, cache_key: "{module_key}::impl:{type_name}::{trait_name.unwrap_or("inherent")}::method:{m.name}", ct_keys: ["{type_name}::{m.name}", ~m.name], restore_type_params: Val(own_params), generated_anchor: None)})
+            }
+        }
+        if item == .Test(t) && (mode == CompileMode.Test || mode == CompileMode.TestOverride) {
+            if t.name == .Val(test_name) {
+                param_diagnostics :: t.params.filter_map(fn(p) { property_param_unsupported(p.ty, p.ty_span) }).collect()
+                body :: ^t.body
+                t.body = []
+                function := Func.implicit_run(body, t.span)
+                function.name = "__test_{test_name}"
+                function.name_span = t.name_span
+                function.params = ~t.params
+                &jobs.push(BodyJob{owner: None, raw_protocol_return: false, kind: .Test(test: &t, function: ^function, param_diagnostics: param_diagnostics)})
+            }
+        }
+        if item == .CodeModule(cm) {
+            module :: ~cm.name
+            if cm.body == .Val(body) {
+                loop &inner in &body -> if inner == .Func(f) -> &jobs.push(BodyJob{owner: None, raw_protocol_return: false, kind: .InlineModule(function: &f, module: ~module)})
+            }
+        }
+        if item == .ErrorConv(ec) {
+            function :: error_conversion_function(&ec)
+            &jobs.push(BodyJob{owner: Val(~ec.from_ty), raw_protocol_return: false, kind: .ErrorConv(conversion: &ec, function: function)})
+        }
+    }
+    jobs
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1405
+fn push_owner_method_jobs(jobs: &[BodyJob], module_key: String, kind: String, owner: String, owner_params: [TypeParam], methods: &[Func], trait_impls: &[TraitImplBlock]) Never! {
+    loop &m in &methods {
+        own_params :: ^m.type_params
+        m.type_params = if own_params.is_empty() { ~owner_params } else { [] }
+        &jobs.push(BodyJob{owner: Val(~owner), raw_protocol_return: false, kind: .Function(function: &m, cache_key: "{module_key}::{kind}:{owner}::method:{m.name}", ct_keys: ["{owner}::{m.name}", ~m.name], restore_type_params: Val(own_params), generated_anchor: None)})
+    }
+    loop &block in &trait_impls {
+        trait_name :: ~block.trait_name
+        compiler_generated :: block.compiler_generated
+        generated_anchor :: if compiler_generated { Val(block.trait_span) } else { None }
+        loop &m in &block.methods {
+            own_params :: ^m.type_params
+            m.type_params = if own_params.is_empty() { ~owner_params } else { ~own_params }
+            restore_type_params :: if trait_name == ENCODE || trait_name == DECODE { [] } else { own_params }
+            raw :: uses_raw_protocol_function_return(Val(trait_name), compiler_generated, m)
+            &jobs.push(BodyJob{owner: Val(~owner), raw_protocol_return: raw, kind: .Function(function: &m, cache_key: "{module_key}::{kind}:{owner}::trait:{trait_name}::method:{m.name}", ct_keys: ["{owner}::{m.name}", ~m.name], restore_type_params: Val(restore_type_params), generated_anchor: generated_anchor)})
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1474
+struct BodyOutcome { diagnostics: [Diagnostic], products: BodyProducts, ledger: NameLedger }
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1481
+fn check_body_job(cx: BodyContext, job: &BodyJob, checked_ct_funcs: [String:Func], name_ledger: NameLedger, cache: &IncrementalSemaCache?, cache_allowed: Bool) -> BodyOutcome Never! {
+    ledger := name_ledger.body_snapshot()
+    products := BodyProducts.default()
+    owner :: job.owner
+    raw :: job.raw_protocol_return
+    diagnostics := [Diagnostic]{}
+    if job.kind == .Function(function: function, cache_key: cache_key, ..) {
+        tracked :: cache_allowed && ItemReuse.tracks(cx.module_idx)
+        if tracked && ItemReuse.reuse(cx.module_idx, cache_key, &function, owner, raw, &ledger, &products) -> return BodyOutcome{diagnostics: [], products: ^products, ledger: ^ledger}
+        pristine :: if tracked { Val(~function) } else { None }
+        if cache == .Val(c) {
+            diagnostics = check_func_body_cached(cx, ~cache_key, &function, owner, raw, checked_ct_funcs, &ledger, &products, &c, cache_allowed)
+        } else {
+            diagnostics = check_func_body(cx, &function, owner, raw, None, Val(checked_ct_funcs), &ledger, &products)
+        }
+        if pristine == .Val(pristine_function) -> ItemReuse.record(cx.module_idx, cache_key, pristine_function, function, owner, raw, diagnostics, products, ledger)
+    }
+    if job.kind == .Test(function: function, ..) -> diagnostics = check_func_body(cx, &function, None, false, None, Val(checked_ct_funcs), &ledger, &products)
+    if job.kind == .InlineModule(function: function, module: module) -> diagnostics = check_func_body(cx, &function, None, false, Val(module), Val(checked_ct_funcs), &ledger, &products)
+    if job.kind == .ErrorConv(function: function, ..) {
+        conversion_cx :: BodyContext{no_os: false, gates: GateSet.default(), ..cx}
+        diagnostics = check_func_body(conversion_cx, &function, owner, false, None, Val(checked_ct_funcs), &ledger, &products)
+    }
+    BodyOutcome{diagnostics: ^diagnostics, products: ^products, ledger: ^ledger}
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1609
+struct MainBodyPass {
+    cx: @BodyContext, checked_ct_funcs: &[String:Func], name_ledger: &NameLedger, products: &BodyProducts,
+    diags: &[Diagnostic], incremental: &IncrementalSemaCache?, cache_allowed: Bool
+}
+impl MainBodyPass {
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1620
+    fn run(&self, jobs: ^[BodyJob]) Never! {
+        workers :: if self.incremental != None { 1 } else { Parallel.check_worker_count(jobs.len()) }
+        if workers <= 1 {
+            loop job in jobs {
+                outcome :: self.check(&job)
+                &self.merge(^job, outcome)
+            }
+            return
+        }
+        cx :: self.cx
+        staged :: self.checked_ct_funcs
+        name_ledger :: self.name_ledger
+        cache_allowed :: self.cache_allowed
+        checked :: Parallel.map_checked(jobs, fn(job: ^BodyJob) {
+            pristine :: ~job.function()
+            outcome :: check_body_job(cx, &job, staged, name_ledger, None, cache_allowed)
+            if outcome.products.ran_ct_evaluator {
+                job.function_mut() = pristine
+                return (^job, None)
+            }
+            (^job, Val(outcome))
+        })
+        loop (job, maybe_outcome) in checked {
+            outcome :: if maybe_outcome == .Val(value) { value } else { self.check(&job) }
+            &self.merge(^job, outcome)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1667
+    fn check(&self, job: &BodyJob) -> BodyOutcome Never! { check_body_job(self.cx, &job, self.checked_ct_funcs, self.name_ledger, self.incremental, self.cache_allowed) }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1678
+    fn merge(&self, job: ^BodyJob, outcome: ^BodyOutcome) Never! {
+        diagnostics :: ^outcome.diagnostics
+        body := ^outcome.products
+        ledger :: ^outcome.ledger
+        if body.uses_exact_int -> self.cx.states[self.cx.module_idx].exact_int_reachable.set(true)
+        if job.kind == .Function(function: f, ct_keys: ct_keys, restore_type_params: restore, generated_anchor: anchor, ..) {
+            &self.diags.extend(author_facing_diagnostics(anchor, diagnostics))
+            &self.merge_ledger(ledger)
+            &self.products.absorb(^body)
+            loop key in ct_keys -> self.checked_ct_funcs[key] = ~f
+            if restore == .Val(type_params) -> f.type_params = type_params
+        }
+        if job.kind == .Test(test: test, function: f, param_diagnostics: param_diagnostics) {
+            &self.diags.extend(param_diagnostics)
+            &self.diags.extend(diagnostics)
+            &self.merge_ledger(ledger)
+            &self.products.absorb(^body)
+            test.body = ^f.body
+        }
+        if job.kind == .InlineModule(function: f, module: module) {
+            &self.diags.extend(diagnostics)
+            &self.merge_ledger(ledger)
+            summary :: &body.summaries.remove(f.name)
+            function_key :: member_name(module, f.name)
+            loop &pending in &body.pending_diagnostics -> pending.function_key = ~function_key
+            &self.products.absorb(^body)
+            if summary == .Val(s) -> self.products.summaries[inline_effect_key(module, f.name)] = s
+        }
+        if job.kind == .ErrorConv(conversion: conversion, function: f) {
+            &self.diags.extend(diagnostics)
+            &self.products.pending_diagnostics.extend(^body.pending_diagnostics)
+            &self.products.devtools_publications.extend(^body.devtools_publications)
+            conversion.body = ^f.body
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1757
+    fn merge_ledger(&self, ledger: NameLedger) Never! {
+        &self.name_ledger.merge_references(ledger)
+        &self.name_ledger.merge_structure_facts(ledger)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1819
+struct ViewSummaryJob { key: String, owner: String?, trait_name: String?, raw_protocol_return: Bool, function: @Func }
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1917
+fn contains_view(registry: TypeRegistry, ty: Type, seen: &[String:Bool]) -> Bool Never! {
+    if ty == .Apply(name, args) {
+        if (name == "View" || name == "ViewMut" || name == TYPE_PIN) && args.len() == 1 -> return true
+        if args.any(fn(arg) { contains_view(registry, arg, &seen) }) -> return true
+        if !seen.has_key(name) {
+            seen[~name] = true
+            if registry.struct_fields(name) == .Val(fields) -> return fields.any(fn(field) { contains_view(registry, field.2, &seen) })
+        }
+        return false
+    }
+    if ty == .Named(name) {
+        if seen.has_key(name) -> return false
+        seen[~name] = true
+        if registry.struct_fields(name) == .Val(fields) -> return fields.any(fn(field) { contains_view(registry, field.2, &seen) })
+        return false
+    }
+    if ty == .Option(inner) -> return contains_view(registry, inner, &seen)
+    if ty == .List(inner) -> return contains_view(registry, inner, &seen)
+    if ty == .Shared(inner) -> return contains_view(registry, inner, &seen)
+    if ty == .Tagged(inner: inner, ..) -> return contains_view(registry, inner, &seen)
+    if ty == .Result(ok: ok, err: err) -> return contains_view(registry, ok, &seen) || contains_view(registry, err, &seen)
+    if ty == .Map(key: key, value: value, ..) -> return contains_view(registry, key, &seen) || contains_view(registry, value, &seen)
+    if ty == .Tuple(fields) -> return fields.any(fn(field) { contains_view(registry, field.1, &seen) })
+    if ty == .FixedList(elem: elem, ..) -> return contains_view(registry, elem, &seen)
+    if ty == .Fn(params: params, ret: ret, ..) -> return params.any(fn(param) { contains_view(registry, param, &seen) }) || ret.is_some_and(fn(ret) { contains_view(registry, ret, &seen) })
+    false
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/Validation.rs:1769
+fn check_module_bodies(module: &LoadedModule, module_idx: Int, states: [ModuleState], plugin_interfaces: PluginInterfaceRegistry, devtools_registry: DevtoolsRegistry, effect_facts: FactRegistry, mode: CompileMode, no_os: Bool, gates: GateSet, name_ledger: &NameLedger, products: &BodyProducts, incremental: &IncrementalSemaCache?) -> [Diagnostic] Never! {
+    st :: states[module_idx]
+    nominal_memo :: st.registry.open_nominal_memo()
+    diags := [Diagnostic]{}
+    (ct_funcs, ct_externs, ct_globals) :: comptime_context_from_items(module.items)
+    invalid_serde_impls :: invalid_serde_derive_impls(module.items, st.trait_reg)
+    ct_base_dir :: module.path.parent().map(fn(p) { p.to_path_buf() }).unwrap_or_else(fn() { OSPath.from(".") })
+    cx :: BodyContext{module_idx: module_idx, states: states, plugin_interfaces: plugin_interfaces, devtools_registry: devtools_registry, effect_facts: effect_facts, ct_funcs: @ct_funcs, ct_externs: @ct_externs, ct_base_dir: @ct_base_dir, ct_globals: @ct_globals, no_os: no_os, gates: gates, no_prelude: module.no_prelude}
+    checked_ct_funcs := stage_comptime_functions(cx, module.items, ct_funcs, name_ledger)
+    view_jobs := [ViewSummaryJob]{}
+    loop item in module.items {
+        if item == .Func(f) -> &view_jobs.push(ViewSummaryJob{key: ~f.name, owner: None, trait_name: None, raw_protocol_return: false, function: @f})
+        if item == .Struct(d) {
+            loop f in d.methods -> &view_jobs.push(ViewSummaryJob{key: "{d.name}::{f.name}", owner: Val(~d.name), trait_name: None, raw_protocol_return: false, function: @f})
+            loop i in d.trait_impls -> loop f in i.methods -> &view_jobs.push(ViewSummaryJob{key: "{d.name}::{i.trait_name}::{f.name}", owner: Val(~d.name), trait_name: Val(~i.trait_name), raw_protocol_return: uses_raw_protocol_function_return(Val(i.trait_name), i.compiler_generated, f), function: @f})
+        }
+        if item == .Enum(d) {
+            loop f in d.methods -> &view_jobs.push(ViewSummaryJob{key: "{d.name}::{f.name}", owner: Val(~d.name), trait_name: None, raw_protocol_return: false, function: @f})
+            loop i in d.trait_impls -> loop f in i.methods -> &view_jobs.push(ViewSummaryJob{key: "{d.name}::{i.trait_name}::{f.name}", owner: Val(~d.name), trait_name: Val(~i.trait_name), raw_protocol_return: uses_raw_protocol_function_return(Val(i.trait_name), i.compiler_generated, f), function: @f})
+        }
+        if item == .Impl(i) -> loop f in i.methods -> &view_jobs.push(ViewSummaryJob{key: "{i.type_name}::{i.trait_name.unwrap_or("inherent")}::{f.name}", owner: Val(~i.type_name), trait_name: ~i.trait_name, raw_protocol_return: uses_raw_protocol_function_return(i.trait_name, false, f), function: @f})
+    }
+    &view_jobs.retain(fn(job) {
+        seen := [String:Bool]{}
+        job.function.return_type.is_some_and(fn(ty) { contains_view(st.registry, ty, &seen) })
+    })
+    &view_jobs.sort_by(fn(left, right) { left.key.cmp(right.key) })
+    trait_job_counts := [(String, String):Int]{}
+    loop job in view_jobs -> if job.trait_name == .Val(trait_name) -> &trait_job_counts.entry((~trait_name, ~job.function.name)).or_default() += 1
+    previous_round := None as [ViewProvenanceMap?]?
+    loop _ in 0..=view_jobs.len() {
+        trait_candidates := [(String, String):[ViewProvenanceMap]]{}
+        round := [ViewProvenanceMap?].with_capacity(view_jobs.len())
+        loop job in view_jobs {
+            function := ~job.function
+            scratch_ledger := name_ledger.body_snapshot()
+            scratch := BodyProducts.default()
+            _ :: check_func_body(cx, &function, job.owner, job.raw_protocol_return, None, Val(checked_ct_funcs), &scratch_ledger, &scratch)
+            if scratch.uses_exact_int -> st.exact_int_reachable.set(true)
+            &round.push(~function.return_view_provenance)
+            if job.trait_name == .Val(trait_name) && function.return_view_provenance == .Val(provenance) -> &trait_candidates.entry((~trait_name, ~function.name)).or_default().push(provenance)
+        }
+        loop (key, candidates) in trait_candidates {
+            if candidates.len() != trait_job_counts.get(key).copied().unwrap_or(0) || candidates.is_empty() -> continue
+            contract := ~candidates[0]
+            merged := true
+            loop index in 1..<candidates.len() {
+                if !merge_view_provenance(&contract, candidates[index]) { merged = false; break }
+            }
+            if !merged -> continue
+            if st.trait_reg.traits.get(key.0) == .Val(info) && info.methods.get(key.1) == .Val(signature) -> _ :: signature.return_view_provenance.set(contract)
+        }
+        if previous_round == Val(round) -> break
+        previous_round = Val(^round)
+    }
+    cache_allowed :: view_jobs.is_empty()
+    module_key :: ~module.display
+    pass := MainBodyPass{cx: @cx, checked_ct_funcs: &checked_ct_funcs, name_ledger: &name_ledger, products: &products, diags: &diags, incremental: incremental, cache_allowed: cache_allowed}
+    declared_items :: module.items.len()
+    &pass.run(collect_body_jobs(&module.items, st, module_key, mode, invalid_serde_impls))
+    &pass.diags.extend(inject_exercised_error_conversions(&module))
+    &pass.run(collect_body_jobs(&module.items[declared_items..], st, module_key, mode, invalid_serde_impls))
+    trait_view_contracts := [(String, String):(ViewProvenanceMap, Span)]{}
+    record_trait_methods :: fn(trait_name: String, methods: [Func], diags: &[Diagnostic]) Never! {
+        loop method in methods {
+            if method.return_view_provenance == .Val(provenance) {
+                if provenance.is_empty() -> continue
+                key :: (~trait_name, ~method.name)
+                if trait_view_contracts.get_mut(key) == .Val((existing, _)) {
+                    if !merge_view_provenance(&existing, provenance) -> &diags.push(Diagnostic.error("E2305", "implementations of `{trait_name}.{method.name}` disagree about returned view slots", "dynamic dispatch can union possible owners, but every implementation must return the same view-bearing shape and access marker", "return the same read or write view slots in every implementation", Val(method.name_span)))
+                } else { trait_view_contracts[key] = (~provenance, method.name_span) }
+            }
+        }
+    }
+    loop item in module.items {
+        if item == .Impl(i) && i.trait_name == .Val(trait_name) -> record_trait_methods(trait_name, i.methods, &diags)
+        if item == .Struct(d) -> loop i in d.trait_impls -> record_trait_methods(i.trait_name, i.methods, &diags)
+        if item == .Enum(d) -> loop i in d.trait_impls -> record_trait_methods(i.trait_name, i.methods, &diags)
+    }
+    loop ((trait_name, method_name), (provenance, _)) in trait_view_contracts {
+        if st.trait_reg.traits.get(trait_name) == .Val(info) && info.methods.get(method_name) == .Val(signature) && signature.declared_return_view_provenance == None -> _ :: signature.return_view_provenance.set(provenance)
+    }
+    loop item in module.items {
+        if item == .Trait(trait_def) {
+            loop method in trait_def.methods {
+                if method.declared_return_view_provenance == .Val(declared) && st.trait_reg.traits.get(trait_def.name) == .Val(info) && info.methods.get(method.name) == .Val(signature) -> _ :: signature.return_view_provenance.set(~declared)
+            }
+        }
+    }
+    generated_policy_wrappers := [Item]{}
+    generated_policy_wrapper_names := [String:Bool]{}
+    apply_policy_uses := [String:[String]]{}
+    collect_callable_policy_apply_uses(&module.items, &apply_policy_uses)
+    apply_target_names := [String:Bool]{}
+    loop name in apply_policy_uses.keys() -> apply_target_names[~name] = true
+    policy_targets := callable_policy_targets(module.items)
+    named_callable_policy_targets(module.items, apply_target_names, &policy_targets)
+    loop target in policy_targets {
+        target_sig :: st.funcs.get(target.name).cloned().unwrap_or_else(fn() { func_to_sig(target) })
+        call_ty :: func_sig_to_fn_type(target_sig)
+        policy_names := [String]{}
+        loop marker in target.markers {
+            if marker.name != MARKER_POLICY -> continue
+            if CallablePolicyChain.parse(marker.expr_args_owned()) == .Ok(chain) -> loop policy in chain.policies -> if !policy_names.contains(policy.name) -> &policy_names.push(policy.name)
+        }
+        if apply_policy_uses.get(target.name) == .Val(applied_policies) -> loop policy_name in applied_policies -> if !policy_names.contains(policy_name) -> &policy_names.push(~policy_name)
+        loop policy_name in policy_names {
+            policy_key :: (~st.package_scope, ~policy_name)
+            if st.callable_policy_declarations.get(policy_key) == .Val((_declaring_module, declaration)) {
+                wrapper_name :: callable_policy_wrapper_name(policy_name, target.name)
+                wrapper := Func.implicit_run(~declaration.body, declaration.span)
+                wrapper.name = ~wrapper_name
+                wrapper.name_span = declaration.name_span
+                wrapper.params = ~declaration.params
+                &wrapper.params.push(Param{convention: AccessConvention.Read, root: false, name: "call", name_span: declaration.name_span, public_label: None, zone: ParamZone.Either, ty: ~call_ty, ty_span: declaration.name_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None})
+                loop original in target.params {
+                    param := ~original
+                    param.default = None
+                    &wrapper.params.push(^param)
+                }
+                wrapper.return_type = ~target_sig.return_type
+                wrapper.return_type_span = target.return_type_span
+                wrapper.return_view_provenance = ~target.return_view_provenance
+                wrapper.declared_return_view_provenance = ~target.declared_return_view_provenance
+                wrapper.compiler_generated = true
+                wrapper_ledger := name_ledger.body_snapshot()
+                wrapper_products := BodyProducts.default()
+                &diags.extend(check_func_body(cx, &wrapper, None, false, None, Val(checked_ct_funcs), &wrapper_ledger, &wrapper_products))
+                if wrapper_products.uses_exact_int -> st.exact_int_reachable.set(true)
+                loop &pending in &wrapper_products.pending_diagnostics -> pending.function_key = "policy:{policy_name}::{target.name}"
+                &products.pending_diagnostics.extend(^wrapper_products.pending_diagnostics)
+                &products.devtools_publications.extend(^wrapper_products.devtools_publications)
+                if !generated_policy_wrapper_names.has_key(wrapper.name) {
+                    generated_policy_wrapper_names[~wrapper.name] = true
+                    &generated_policy_wrappers.push(Item.Func(^wrapper))
+                }
+            }
+        }
+    }
+    &module.items.extend(^generated_policy_wrappers)
+    diags
+}

@@ -1,0 +1,38 @@
+use jet_foundation.[Type, Expr, Stmt, Span, BinOp]
+use jet_sema.Sema.Statements04.[division_fix_hint, return_value_fix, encoding_reader_item_type, stream_element_type, exits_current_block, drained_collection]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:79 (behavioral control)
+#Test("statement_encoding_reader_item_types") {
+    assert(encoding_reader_item_type("JSONReader") == Val(Type.Named{name: "DataEvent"}))
+    assert(encoding_reader_item_type("CBORReader") == Val(Type.Named{name: "DataEvent"}))
+    assert(encoding_reader_item_type("JSONLReader") == Val(Type.Named{name: "DataTree"}))
+    assert(encoding_reader_item_type("XMLReader") == Val(Type.Named{name: "DataTree"}))
+    assert(encoding_reader_item_type("CSVReader") == Val(Type.Named{name: "CSVRow"}))
+    assert(encoding_reader_item_type("Reader") == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:88 (behavioral control)
+#Test("statement_stream_requires_exact_one_argument") {
+    assert(stream_element_type(Val(Type.Apply{name: "Stream", args: [Type.Int]})) == Val(Type.Int))
+    assert(stream_element_type(Val(Type.Apply{name: "Stream", args: []})) == None)
+    assert(stream_element_type(Val(Type.Apply{name: "Stream", args: [Type.Int, Type.String]})) == None)
+    assert(stream_element_type(Val(Type.Result{ok: Type.Apply{name: "Stream", args: [Type.Int]}, err: Type.Named{name: "Err"}})) == None)
+    assert(stream_element_type(None) == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:24 (behavioral control)
+#Test("statement_integer_division_repair") {
+    span :: Span{start: 0, end: 5}
+    value :: Expr.Binary(BinOp.Div, Expr.Int(8, None, span, Val("8")), Expr.Int(2, None, span, Val("2")), span)
+    assert(division_fix_hint(Type.Int, Type.Float, value) == "use `/%` to divide and round down (`/%=` in place), or make the binding a Float")
+    assert(division_fix_hint(Type.Int, Type.Named{name: "Fraction"}, value) == "use `/%` to divide and round down (`/%=` in place), or make the binding a Float")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:42 (behavioral control)
+#Test("statement_return_repairs_keep_contract") {
+    assert(return_value_fix(Type.List(Type.Int), Type.Int) == "wrap the value in a list: `[value]`")
+    assert(return_value_fix(Type.Int, Type.Option(Type.Int)) == "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:100/125 (behavioral control)
+#Test("statement_empty_body_is_not_a_collection_drain") {
+    span :: Span{start: 0, end: 1}
+    assert(exits_current_block(Stmt.Return(None, span)))
+    assert(drained_collection(Expr.Int(0, None, span, Val("0")), []) == None)
+}

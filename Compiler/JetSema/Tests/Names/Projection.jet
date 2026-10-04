@@ -1,6 +1,6 @@
 use jet_foundation.[NameLedger, MIRNameReference, MIRNameVisibility, Program, Span, foundation_embedded_core, foundation_member_name, jet_target_machine_hosted, name_ledger_canonical_path, name_ledger_declaration, name_ledger_reference, name_ledger_references, name_ledger_semantic_identity, name_ledger_new, name_ledger_record_alias, name_ledger_alias, name_ledger_record_reference, name_ledger_mir_facts]
 use jet_parser.[parse_source]
-use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph]
+use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_test_prepare_graph]
 use core.files.host.retained_descriptor as names_test_native
 use core.files.runtime.kernel_path_components as names_test_path
 
@@ -15,7 +15,7 @@ fn names_checked_facts(source: String) -[Env, FS]> NameLedger Never! {
     inputs :: [SemaRegistrationModuleInput]{names_checked_module(^parsed.program, "main", "names.jet", "names"), names_checked_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
     build :: SemaBuildFacts{package_name: "names", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "names-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    registration :: sema_registration_prepare_graph(inputs, [], "names", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    registration :: sema_test_prepare_graph(inputs, [], "names", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
     stage :: sema_collect_comptime_declarations(registration, [], None)
     project_root :: names_test_native.canonicalize(names_test_path.from_text(".", names_test_path.PathPlatform.Unix)) ?? panic("names fixture requires its actual working directory")
     checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)

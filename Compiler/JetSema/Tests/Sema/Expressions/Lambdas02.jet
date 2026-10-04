@@ -1,0 +1,31 @@
+use jet_foundation.[MetaAttr, MetaField, Span, Type]
+use JetSema.Sema.Expressions.Lambdas02.[canonical_fragment_name, contains_taskgroup, check_meta_attr_fields]
+use jet_syntax as Syntax
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:21 (behavioral control; no inline Rust tests)
+#Test("fragment_nominal_identity_precedence") {
+    known :: [String:Bool]{"Stable": true}
+    paths :: [(Int, String):String]{(0, "Stable"): "Wrong", (0, "Alias"): "Resolved"}
+    identities :: [(Int, String):String]{(0, "Alias"): "Shadowed", (0, "Local"): "LocalIdentity"}
+    assert_eq(canonical_fragment_name(0, "Stable", [], paths, identities, known), Val("Stable"))
+    assert_eq(canonical_fragment_name(0, "Alias", [], paths, identities, known), Val("Resolved"))
+    assert_eq(canonical_fragment_name(0, "Local", [], paths, identities, known), Val("LocalIdentity"))
+    assert_eq(canonical_fragment_name(0, "Missing", [], paths, identities, known), None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1069 (behavioral control)
+#Test("taskgroup_is_detected_inside_container_types") {
+    assert(contains_taskgroup(Type.List(Type.Option(Type.Named(Syntax.TYPE_TASKGROUP)))))
+    assert(contains_taskgroup(Type.Result(Type.Int, Type.Named(Syntax.TYPE_TASKGROUP))))
+    assert(!contains_taskgroup(Type.List(Type.Int)))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1100 (behavioral control)
+#Test("meta_repeated_tunable_retains_second_field_span") {
+    first :: Span{start: 1, end: 8}
+    second :: Span{start: 10, end: 17}
+    meta :: MetaAttr{span: Span{start: 0, end: 18}, fields: [MetaField.Tunable(first), MetaField.Tunable(second)]}
+    diags :: check_meta_attr_fields(meta)
+    assert_eq(diags.len(), 1)
+    assert_eq(diags[0].code, "E0346")
+    assert_eq(diags[0].what, "`#Meta` repeats `tunable`")
+    assert_eq(diags[0].span, Val(second))
+}

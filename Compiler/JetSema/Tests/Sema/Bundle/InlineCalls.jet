@@ -1,0 +1,13 @@
+use jet_foundation.[Expr, Span]
+use jet_sema.Sema.Bundle.InlineCalls.[rewrite_inline_calls_expr]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/InlineCalls.rs:159 (behavioral control)
+#Test("inline_sibling_value_reference_uses_module_name") {
+    span :: Span{start: 0, end: 3}
+    sibling := Expr.Ident{name: "run", span: span}
+    rewrite_inline_calls_expr(&sibling, ["run": true], "Inline")
+    assert(sibling == Expr.Ident{name: "Inline", span: span})
+    ordinary := Expr.Ident{name: "outside", span: span}
+    rewrite_inline_calls_expr(&ordinary, ["run": true], "Inline")
+    assert(ordinary == Expr.Ident{name: "outside", span: span})
+}

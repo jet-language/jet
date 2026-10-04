@@ -1,740 +1,370 @@
-// PORT-PENDING 0436 crates-jet-sema-src-sema-nominalwalk-module-group: crates/jet-sema/src/Sema/OSTarget.rs:1-736
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating.
-//RS //! Mirrors `WebPartition.rs`'s shape — one structural check, one signature
-//RS //! check — for the second, mutually-exclusive `#Target(OS.*)` axis of the
-//RS //! same `#Target(...)` marker family.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Syntax::{self, OSTarget as OS};
-//RS use crate::AST::{
-//RS     BinOp, Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, StrPart, SwitchArm, Type,
-//RS };
-//RS use std::collections::HashMap;
-//RS 
-//RS /// D-CONF-READ1=A: fold every `prep if $build.os == {
-//RS /// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
-//RS /// matching this build's active OS (`bundle.active_os`), discarding the rest.
-//RS ///
-//RS /// Runs as the very first step of `check_bundle`, before any other sema pass or
-//RS /// codegen sees a body — so the OS-gating checks, type-checker, and codegen
-//RS /// only ever meet the *taken* arm (constructing an OS-gated type inside it is
-//RS /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
-//RS /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
-//RS /// whose arm conditions are the compile-time constants `$build.os == .OS`
-//RS /// (emitted here as a `Bool` literal), so all the existing `@if`
-//RS /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
-//RS /// handles it unchanged. `$build.os` is a compile-time fact value; ordinary
-//RS /// `build` remains an ordinary identifier everywhere else.
-//RS pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-//RS     let active = bundle.active_os;
-//RS     let build_facts = &bundle.build_facts;
-//RS     let mut diags = Vec::new();
-//RS     for module in &mut bundle.modules {
-//RS         desugar_items(&mut module.items, active, build_facts, &mut diags);
-//RS     }
-//RS     diags
-//RS }
-//RS 
-//RS /// Walk nested code and generic modules before generic expansion. This keeps
-//RS /// `$build.os` dispatch in a template on the same pre-registration path as a
-//RS /// top-level function; expansion then copies the already-folded body.
-//RS fn desugar_items(
-//RS     items: &mut [Item],
-//RS     active: OS,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(f) => desugar_stmts(&mut f.body, active, build_facts, diags),
-//RS             Item::Struct(s) => {
-//RS                 for m in &mut s.methods {
-//RS                     desugar_stmts(&mut m.body, active, build_facts, diags);
-//RS                 }
-//RS                 for b in &mut s.trait_impls {
-//RS                     for m in &mut b.methods {
-//RS                         desugar_stmts(&mut m.body, active, build_facts, diags);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 for m in &mut e.methods {
-//RS                     desugar_stmts(&mut m.body, active, build_facts, diags);
-//RS                 }
-//RS             }
-//RS             Item::Impl(i) => {
-//RS                 for m in &mut i.methods {
-//RS                     desugar_stmts(&mut m.body, active, build_facts, diags);
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &mut module.body {
-//RS                     desugar_items(body, active, build_facts, diags);
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => {
-//RS                 desugar_items(&mut module.body, active, build_facts, diags)
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Recurse through every body-bearing statement, rewriting `ComptimeSwitch` in
-//RS /// place. Also descends into lambda block bodies and value-position `if`
-//RS /// branches so a switch nested in an expression is still folded.
-//RS fn desugar_stmts(
-//RS     stmts: &mut Vec<Stmt>,
-//RS     active: OS,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     for stmt in stmts.iter_mut() {
-//RS         // Recurse into child blocks first, then fold this node if it is a switch.
-//RS         match stmt {
-//RS             Stmt::ComptimeSwitch { .. } => {
-//RS                 // Fold nested switches inside the arms before rewriting this one.
-//RS                 if let Stmt::ComptimeSwitch {
-//RS                     arms, else_body, ..
-//RS                 } = stmt
-//RS                 {
-//RS                     for arm in arms.iter_mut() {
-//RS                         desugar_stmts(&mut arm.body, active, build_facts, diags);
-//RS                     }
-//RS                     if let Some(eb) = else_body {
-//RS                         desugar_stmts(eb, active, build_facts, diags);
-//RS                     }
-//RS                 }
-//RS                 let taken = std::mem::replace(stmt, Stmt::Break(Span::new(0, 0)));
-//RS                 *stmt = fold_switch(taken, active, build_facts, diags);
-//RS             }
-//RS             _ => desugar_child_blocks(stmt, active, build_facts, diags),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Descend into every statement body a non-switch statement carries.
-//RS fn desugar_child_blocks(
-//RS     stmt: &mut Stmt,
-//RS     active: OS,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
-//RS             desugar_expr(e, active, build_facts, diags)
-//RS         }
-//RS         Stmt::Val(b) => desugar_expr(&mut b.init, active, build_facts, diags),
-//RS         Stmt::Assign { value, .. } => desugar_expr(value, active, build_facts, diags),
-//RS         Stmt::Return(Some(e), _) => desugar_expr(e, active, build_facts, diags),
-//RS         Stmt::While { body, .. } | Stmt::For { body, .. } => {
-//RS             desugar_stmts(body, active, build_facts, diags)
-//RS         }
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             for arm in arms {
-//RS                 desugar_stmts(&mut arm.body, active, build_facts, diags);
-//RS             }
-//RS             if let Some(eb) = else_body {
-//RS                 desugar_stmts(eb, active, build_facts, diags);
-//RS             }
-//RS         }
-//RS         Stmt::CountedLoop { body, step, .. } => {
-//RS             if let Some(step) = step {
-//RS                 desugar_child_blocks(step, active, build_facts, diags);
-//RS             }
-//RS             desugar_stmts(body, active, build_facts, diags);
-//RS         }
-//RS         Stmt::Loop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::ScopeMember { body, .. }
-//RS         | Stmt::ContextBlock { body, .. } => desugar_stmts(body, active, build_facts, diags),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             desugar_stmts(then_body, active, build_facts, diags);
-//RS             if let Some(eb) = else_body {
-//RS                 desugar_stmts(eb, active, build_facts, diags);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Descend into the few expression shapes that can hold statement blocks
-//RS /// (lambda block bodies, value-position `if` branches).
-//RS fn desugar_expr(
-//RS     e: &mut Expr,
-//RS     active: OS,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     match e {
-//RS         Expr::Lambda(l) => {
-//RS             if let LambdaBody::Block(body) = &mut l.body {
-//RS                 desugar_stmts(body, active, build_facts, diags);
-//RS             }
-//RS         }
-//RS         Expr::If {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             desugar_stmts(then_body, active, build_facts, diags);
-//RS             desugar_stmts(else_body, active, build_facts, diags);
-//RS         }
-//RS         Expr::Paren(inner, _) => desugar_expr(inner, active, build_facts, diags),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Validate one `prep if $build.os == { … }` switch and rewrite it into the
-//RS /// nested `ComptimeIf` chain. On a validation error, returns an empty block
-//RS /// (`ComptimeBlock` with no body) so the surrounding statements still check.
-//RS fn fold_switch(
-//RS     sw: Stmt,
-//RS     active: OS,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> Stmt {
-//RS     let Stmt::ComptimeSwitch {
-//RS         subject,
-//RS         arms,
-//RS         else_body,
-//RS         span,
-//RS     } = sw
-//RS     else {
-//RS         unreachable!("fold_switch only called on ComptimeSwitch");
-//RS     };
-//RS 
-//RS     // `$build.os` is the original platform switch. Typed settings use the
-//RS     // same dispatch shape and fold against the already-resolved snapshot.
-//RS     let subject_path = expr_path(&subject);
-//RS     if subject_path.as_deref() == Some("$build.os") {
-//RS         return fold_os_switch(subject, arms, else_body, span, active, diags);
-//RS     }
-//RS     let Some(key) = subject_path
-//RS         .as_deref()
-//RS         .and_then(jet_foundation::Registry::build_setting_key)
-//RS     else {
-//RS         diags.push(Syntax::os_target_build_context(Some(subject.span())));
-//RS         return empty_stmt(span);
-//RS     };
-//RS     let Some(setting) = build_facts.setting(key) else {
-//RS         diags.push(Diagnostic::error(
-//RS             "E0302",
-//RS             format!("`$build.settings.{key}` is undeclared"),
-//RS             "a setting must be declared with a type and default before it can be read".to_string(),
-//RS             format!("add `{key}: Type = default` to the package `settings: {{ … }}` block"),
-//RS             Some(subject.span()),
-//RS         ));
-//RS         return empty_stmt(span);
-//RS     };
-//RS 
-//RS     let mut arm_matches = Vec::new();
-//RS     for arm in &arms {
-//RS         let Some(matches) = setting_arm_matches(&arm.cond, &subject, &setting.value) else {
-//RS             diags.push(Diagnostic::error(
-//RS                 "E0302",
-//RS                 format!("invalid arm for `$build.settings.{key}`"),
-//RS                 "typed settings dispatch compares one setting with a literal value".to_string(),
-//RS                 format!("use a literal arm or compare `{key}` with a Bool, Int, Char, String, or enum value"),
-//RS                 Some(arm.span),
-//RS             ));
-//RS             return empty_stmt(span);
-//RS         };
-//RS         arm_matches.push((matches, arm.body.clone(), arm.span));
-//RS     }
-//RS     let mut tail = else_body;
-//RS     for (matches, body, arm_span) in arm_matches.into_iter().rev() {
-//RS         let node = Stmt::ComptimeIf {
-//RS             cond: Expr::Bool(matches, arm_span),
-//RS             cond_span: arm_span,
-//RS             then_body: body,
-//RS             else_body: tail,
-//RS             span: arm_span,
-//RS             selected_then: None,
-//RS         };
-//RS         tail = Some(vec![node]);
-//RS     }
-//RS     match tail.and_then(|mut body| body.pop()) {
-//RS         Some(node) => node,
-//RS         None => empty_stmt(span),
-//RS     }
-//RS }
-//RS 
-//RS fn fold_os_switch(
-//RS     _subject: Expr,
-//RS     arms: Vec<SwitchArm>,
-//RS     else_body: Option<Vec<Stmt>>,
-//RS     span: Span,
-//RS     active: OS,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) -> Stmt {
-//RS     // Each arm head must be a bare, payload-free OS variant; collect them.
-//RS     let mut arm_os: Vec<(OS, Vec<Stmt>, Span)> = Vec::new();
-//RS     let mut seen: Vec<OS> = Vec::new();
-//RS     let mut had_error = false;
-//RS     for arm in arms {
-//RS         match arm_variant(&arm) {
-//RS             Some(os) if !seen.contains(&os) => {
-//RS                 seen.push(os);
-//RS                 arm_os.push((os, arm.body, arm.span));
-//RS             }
-//RS             Some(os) => {
-//RS                 diags.push(Syntax::os_target_dispatch_arm(
-//RS                     &format!(".{}", os.name()),
-//RS                     Some(arm.span),
-//RS                 ));
-//RS                 had_error = true;
-//RS             }
-//RS             None => {
-//RS                 diags.push(Syntax::os_target_dispatch_arm(
-//RS                     &arm_head_text(&arm.cond),
-//RS                     Some(arm.span),
-//RS                 ));
-//RS                 had_error = true;
-//RS             }
-//RS         }
-//RS     }
-//RS     if had_error {
-//RS         return empty_stmt(span);
-//RS     }
-//RS 
-//RS     // Exhaustiveness (build-independent): every OS covered, or an `else`.
-//RS     if else_body.is_none() {
-//RS         let missing: Vec<&str> = [OS::Linux, OS::MacOS, OS::Windows]
-//RS             .into_iter()
-//RS             .filter(|os| !seen.contains(os))
-//RS             .map(|os| os.name())
-//RS             .collect();
-//RS         if !missing.is_empty() {
-//RS             diags.push(Syntax::os_target_dispatch_exhaustive(&missing, Some(span)));
-//RS             return empty_stmt(span);
-//RS         }
-//RS     }
-//RS 
-//RS     // Build the nested `ComptimeIf` chain, arm 0 outermost. Each condition is
-//RS     // the compile-time constant `active == this arm's OS`, emitted as a `Bool`.
-//RS     let mut tail: Option<Vec<Stmt>> = else_body;
-//RS     for (os, body, arm_span) in arm_os.into_iter().rev() {
-//RS         let cond = Expr::Bool(os == active, arm_span);
-//RS         let node = Stmt::ComptimeIf {
-//RS             cond,
-//RS             cond_span: arm_span,
-//RS             then_body: body,
-//RS             else_body: tail,
-//RS             span: arm_span,
-//RS             selected_then: None,
-//RS         };
-//RS         tail = Some(vec![node]);
-//RS     }
-//RS     match tail.and_then(|mut v| v.pop()) {
-//RS         Some(chain) => chain,
-//RS         None => empty_stmt(span),
-//RS     }
-//RS }
-//RS 
-//RS fn expr_path(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
-//RS         Expr::Field(base, member, _) => Some(format!("{}.{}", expr_path(base)?, member)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn setting_arm_matches(
-//RS     cond: &Expr,
-//RS     subject: &Expr,
-//RS     value: &jet_foundation::Facts::BuildFactValue,
-//RS ) -> Option<bool> {
-//RS     match cond {
-//RS         Expr::Binary(op, lhs, rhs, _) if matches!(op, BinOp::Eq | BinOp::Ne) => {
-//RS             if expr_path(lhs) != expr_path(subject) {
-//RS                 return None;
-//RS             }
-//RS             let literal = setting_literal(rhs)?;
-//RS             let equal = setting_values_equal(&literal, value)?;
-//RS             Some(if *op == BinOp::Eq { equal } else { !equal })
-//RS         }
-//RS         Expr::PatternTest {
-//RS             subject: lhs,
-//RS             pattern: Pattern::Variant {
-//RS                 variant, bindings, ..
-//RS             },
-//RS             ..
-//RS         } if expr_path(lhs) == expr_path(subject) && bindings.is_empty() => match value {
-//RS             jet_foundation::Facts::BuildFactValue::Enum {
-//RS                 variant: actual, ..
-//RS             } => Some(variant == actual),
-//RS             _ => None,
-//RS         },
-//RS         _ => setting_values_equal(&setting_literal(cond)?, value),
-//RS     }
-//RS }
-//RS 
-//RS fn setting_literal(expr: &Expr) -> Option<jet_foundation::Facts::BuildFactValue> {
-//RS     match expr {
-//RS         Expr::Bool(value, _) => Some(jet_foundation::Facts::BuildFactValue::Bool(*value)),
-//RS         Expr::Int(value, _, _, _) => Some(jet_foundation::Facts::BuildFactValue::Int(*value)),
-//RS         Expr::Char(value, _) => Some(jet_foundation::Facts::BuildFactValue::Char(*value)),
-//RS         Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
-//RS             let text = parts
-//RS                 .iter()
-//RS                 .map(|part| match part {
-//RS                     StrPart::Lit(text) => text.as_str(),
-//RS                     StrPart::Interp(..) => "",
-//RS                 })
-//RS                 .collect();
-//RS             Some(jet_foundation::Facts::BuildFactValue::Text(text))
-//RS         }
-//RS         Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS             ..
-//RS         } if args.is_empty() => Some(jet_foundation::Facts::BuildFactValue::Enum {
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS         }),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn setting_values_equal(
-//RS     left: &jet_foundation::Facts::BuildFactValue,
-//RS     right: &jet_foundation::Facts::BuildFactValue,
-//RS ) -> Option<bool> {
-//RS     match (left, right) {
-//RS         (
-//RS             jet_foundation::Facts::BuildFactValue::Bool(left),
-//RS             jet_foundation::Facts::BuildFactValue::Bool(right),
-//RS         ) => Some(left == right),
-//RS         (
-//RS             jet_foundation::Facts::BuildFactValue::Int(left),
-//RS             jet_foundation::Facts::BuildFactValue::Int(right),
-//RS         ) => Some(left == right),
-//RS         (
-//RS             jet_foundation::Facts::BuildFactValue::Char(left),
-//RS             jet_foundation::Facts::BuildFactValue::Char(right),
-//RS         ) => Some(left == right),
-//RS         (
-//RS             jet_foundation::Facts::BuildFactValue::Text(left),
-//RS             jet_foundation::Facts::BuildFactValue::Text(right),
-//RS         ) => Some(left == right),
-//RS         (
-//RS             jet_foundation::Facts::BuildFactValue::Enum {
-//RS                 type_name: left_type,
-//RS                 variant: left,
-//RS             },
-//RS             jet_foundation::Facts::BuildFactValue::Enum {
-//RS                 type_name: right_type,
-//RS                 variant: right,
-//RS             },
-//RS         ) if left_type.is_empty() || right_type.is_empty() || left_type == right_type => {
-//RS             Some(left == right)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// The OS variant an arm head names, or `None` if it isn't a bare payload-free
-//RS /// OS variant (`.Linux`/`.MacOS`/`.Windows`).
-//RS fn arm_variant(arm: &SwitchArm) -> Option<OS> {
-//RS     let Expr::PatternTest { pattern, .. } = &arm.cond else {
-//RS         return None;
-//RS     };
-//RS     let Pattern::Variant {
-//RS         variant, bindings, ..
-//RS     } = pattern
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if !bindings.is_empty() {
-//RS         return None;
-//RS     }
-//RS     OS::parse(variant)
-//RS }
-//RS 
-//RS /// A short display of a bad arm head for the diagnostic.
-//RS fn arm_head_text(cond: &Expr) -> String {
-//RS     match cond {
-//RS         Expr::PatternTest { pattern, .. } => match pattern {
-//RS             Pattern::Variant { variant, .. } => format!(".{}", variant),
-//RS             _ => "this pattern".to_string(),
-//RS         },
-//RS         _ => "this arm head".to_string(),
-//RS     }
-//RS }
-//RS 
-//RS fn empty_stmt(span: Span) -> Stmt {
-//RS     Stmt::ComptimeBlock {
-//RS         body: Vec::new(),
-//RS         is_template_loop: false,
-//RS         span,
-//RS     }
-//RS }
-//RS 
-//RS /// Walk the bundle: flag a `#Target(OS.*)`-gated impl whose enclosing file/
-//RS /// module also carries a web-bucket ceiling (`#Target(Wasm)`/`#Target(JS)`)
-//RS /// — a structural conflict between the two mutually-exclusive axes
-//RS /// (E-OSTARGET-MIXED-AXIS) — and flag a function/method that isn't itself
-//RS /// gated to match but takes or returns a value of a gated type
-//RS /// (E-OSTARGET-UNMATCHED-CALL): reachable from any build, it would call a
-//RS /// method the gated `impl` supplies — a Rust compile error (unresolved
-//RS /// method) on every OS but the gated one, since codegen strips that `impl`
-//RS /// entirely there (`Codegen/Imports.rs::emit_program_items`). Catching it in
-//RS /// sema turns that would-be rustc ICE (I2) into a Jet-level diagnostic.
-//RS ///
-//RS /// Signature-level, not a full call-graph walk: mirrors how
-//RS /// `WebPartition::check_abi_export` also only inspects param/return types,
-//RS /// never call bodies. The existing effect call-graph (`fx_edges`) only
-//RS /// records bare-name calls (`CheckerInfer/calls.rs`), never method calls, so
-//RS /// it can't see a caller reaching a gated `impl`'s methods either way.
-//RS pub fn check_os_target(bundle: &ProgramBundle, no_os: bool) -> Vec<Diagnostic> {
-//RS     let mut diags = Vec::new();
-//RS     let mut gate_of_type: HashMap<String, OS> = HashMap::new();
-//RS 
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             let Item::Impl(i) = item else { continue };
-//RS             let Some(os) = i.os_target else { continue };
-//RS             gate_of_type.insert(i.type_name.clone(), os);
-//RS             if let Some(bucket) = module.web_target_ceiling {
-//RS                 let label = match &i.trait_name {
-//RS                     Some(t) => format!("{}.{}", i.type_name, t),
-//RS                     None => i.type_name.clone(),
-//RS                 };
-//RS                 diags.push(Syntax::os_target_mixed_axis(
-//RS                     &label,
-//RS                     os,
-//RS                     bucket.name(),
-//RS                     Some(i.type_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     if !gate_of_type.is_empty() {
-//RS         for module in &bundle.modules {
-//RS             check_items_signatures(&module.items, &gate_of_type, &mut diags);
-//RS         }
-//RS     }
-//RS 
-//RS     check_app_capabilities(bundle, no_os, &mut diags);
-//RS 
-//RS     diags
-//RS }
-//RS 
-//RS /// D-APP-UNIFY1=B: one App type has target-sensitive methods, but target
-//RS /// resolution and rejection stay in sema so AOT, JIT, interpreter, and web
-//RS /// adapters all consume the same checked call shape.
-//RS fn check_app_capabilities(bundle: &ProgramBundle, no_os: bool, diags: &mut Vec<Diagnostic>) {
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         let target = super::CheckerMarkers::resolved_app_target(bundle, module_idx, no_os);
-//RS         check_app_items(&module.items, target, diags);
-//RS     }
-//RS }
-//RS 
-//RS fn check_app_items(items: &[Item], target: &str, diags: &mut Vec<Diagnostic>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(f) => check_app_body(
-//RS                 &f.body,
-//RS                 f.web_marker
-//RS                     .map(|marker| marker.bucket().name())
-//RS                     .unwrap_or(target),
-//RS                 diags,
-//RS             ),
-//RS             Item::Impl(i) => {
-//RS                 for method in &i.methods {
-//RS                     check_app_body(
-//RS                         &method.body,
-//RS                         method
-//RS                             .web_marker
-//RS                             .map(|marker| marker.bucket().name())
-//RS                             .unwrap_or(target),
-//RS                         diags,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Item::Struct(s) => {
-//RS                 for method in &s.methods {
-//RS                     check_app_body(
-//RS                         &method.body,
-//RS                         method
-//RS                             .web_marker
-//RS                             .map(|marker| marker.bucket().name())
-//RS                             .unwrap_or(target),
-//RS                         diags,
-//RS                     );
-//RS                 }
-//RS                 for trait_impl in &s.trait_impls {
-//RS                     for method in &trait_impl.methods {
-//RS                         check_app_body(
-//RS                             &method.body,
-//RS                             method
-//RS                                 .web_marker
-//RS                                 .map(|marker| marker.bucket().name())
-//RS                                 .unwrap_or(target),
-//RS                             diags,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 for method in &e.methods {
-//RS                     check_app_body(
-//RS                         &method.body,
-//RS                         method
-//RS                             .web_marker
-//RS                             .map(|marker| marker.bucket().name())
-//RS                             .unwrap_or(target),
-//RS                         diags,
-//RS                     );
-//RS                 }
-//RS                 for trait_impl in &e.trait_impls {
-//RS                     for method in &trait_impl.methods {
-//RS                         check_app_body(
-//RS                             &method.body,
-//RS                             method
-//RS                                 .web_marker
-//RS                                 .map(|marker| marker.bucket().name())
-//RS                                 .unwrap_or(target),
-//RS                             diags,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     check_app_items(
-//RS                         body,
-//RS                         module
-//RS                             .web_target
-//RS                             .map(|bucket| bucket.name())
-//RS                             .unwrap_or(target),
-//RS                         diags,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => check_app_items(&module.body, target, diags),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn check_app_body(body: &[Stmt], target: &str, diags: &mut Vec<Diagnostic>) {
-//RS     for original in body {
-//RS         let mut stmt = original.clone();
-//RS         stmt.for_each_expr_mut(|expr| {
-//RS             let Expr::MethodCall {
-//RS                 recv_type: Some(receiver_type),
-//RS                 method,
-//RS                 method_span,
-//RS                 ..
-//RS             } = expr
-//RS             else {
-//RS                 return;
-//RS             };
-//RS             if receiver_type.as_str() != "App" {
-//RS                 return;
-//RS             }
-//RS             let Some(required) = jet_foundation::App::app_capability_target(method.as_str()) else {
-//RS                 return;
-//RS             };
-//RS             if jet_foundation::App::app_target_supports(required, target) {
-//RS                 return;
-//RS             }
-//RS             diags.push(Diagnostic::from_row(
-//RS                 "E-APP-TARGET-FEATURE",
-//RS                 &[
-//RS                     ("feature", method.as_str()),
-//RS                     ("required", required),
-//RS                     ("target", target),
-//RS                 ],
-//RS                 Some(*method_span),
-//RS             ));
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn check_items_signatures(
-//RS     items: &[Item],
-//RS     gate_of_type: &HashMap<String, OS>,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(f) => check_func_sig(f, None, gate_of_type, diags),
-//RS             Item::Impl(i) => {
-//RS                 for m in &i.methods {
-//RS                     check_func_sig(m, i.os_target, gate_of_type, diags);
-//RS                 }
-//RS             }
-//RS             Item::Struct(s) => {
-//RS                 for m in &s.methods {
-//RS                     check_func_sig(m, None, gate_of_type, diags);
-//RS                 }
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 for m in &e.methods {
-//RS                     check_func_sig(m, None, gate_of_type, diags);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn check_func_sig(
-//RS     f: &Func,
-//RS     own_gate: Option<OS>,
-//RS     gate_of_type: &HashMap<String, OS>,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     let mut flag = |type_name: &str| {
-//RS         // `self`'s placeholder type is `Type::Named("")` (S27) — never a real
-//RS         // gated type name, so a method's own receiver never self-triggers.
-//RS         if type_name.is_empty() {
-//RS             return;
-//RS         }
-//RS         let Some(&os) = gate_of_type.get(type_name) else {
-//RS             return;
-//RS         };
-//RS         if own_gate == Some(os) {
-//RS             return;
-//RS         }
-//RS         diags.push(Syntax::os_target_unmatched_call(
-//RS             &f.name,
-//RS             type_name,
-//RS             os,
-//RS             Some(f.name_span),
-//RS         ));
-//RS     };
-//RS     for p in &f.params {
-//RS         if let Type::Named(n) = &p.ty {
-//RS             flag(n);
-//RS         }
-//RS     }
-//RS     if let Some(Type::Named(n)) = &f.return_type {
-//RS         flag(n);
-//RS     }
-//RS }
-// END-PORT-PENDING 0436 crates/jet-sema/src/Sema/OSTarget.rs:1-736
+// Native OS gating folds the selected build fact, never the compiler host.
+use jet_foundation.[Diagnostic, Span, BinOp, Expr, Func, Item, LambdaBody, Pattern,
+    ProgramBundle, Stmt, StrPart, SwitchArm, Type, OSTarget, BuildFactSnapshot, BuildFactValue,
+    expr_span, type_name, os_target_build_context, os_target_dispatch_arm,
+    os_target_dispatch_exhaustive, os_target_mixed_axis, os_target_unmatched_call,
+    build_setting_key, app_capability_target, app_target_supports, ASTExprVisitor, ast_stmt_for_each_expr]
+use jet_sema.[resolved_app_target]
 
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:27
+pub fn desugar_os_switches(bundle: &ProgramBundle) -> [Diagnostic] Never! {
+    // GATE #4483: use the selected target stored by bundle construction.
+    active :: if bundle.active_os == { .Linux -> OSTarget.Linux .MacOS -> OSTarget.MacOS .Windows -> OSTarget.Windows }
+    diags := [Diagnostic]{}
+    loop index in 0..<bundle.modules.len() {
+        desugar_items(&bundle.modules[index].items, active, bundle.build_facts, &diags)
+    }
+    diags
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:40
+fn desugar_items(items: &[Item], active: OSTarget, build_facts: BuildFactSnapshot, diags: &[Diagnostic]) Never! {
+    loop index in 0..<items.len() {
+        if items[index] == {
+            .Func(f) -> desugar_stmts(&f.body, active, build_facts, &diags)
+            .Struct(s) -> {
+                loop method in &s.methods { desugar_stmts(&method.body, active, build_facts, &diags) }
+                loop block in &s.trait_impls {
+                    loop method in &block.methods { desugar_stmts(&method.body, active, build_facts, &diags) }
+                }
+            }
+            .Enum(e) -> { loop method in &e.methods { desugar_stmts(&method.body, active, build_facts, &diags) } }
+            .Impl(i) -> { loop method in &i.methods { desugar_stmts(&method.body, active, build_facts, &diags) } }
+            .CodeModule(module) -> { if module.body == .Val(body) -> desugar_items(&body, active, build_facts, &diags) }
+            .GenericModule(module) -> desugar_items(&module.body, active, build_facts, &diags)
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:85
+fn desugar_stmts(stmts: &[Stmt], active: OSTarget, build_facts: BuildFactSnapshot, diags: &[Diagnostic]) Never! {
+    loop index in 0..<stmts.len() {
+        if stmts[index] == .ComptimeSwitch(_, arms, else_body, _) {
+            loop arm in &arms { desugar_stmts(&arm.body, active, build_facts, &diags) }
+            if else_body == .Val(body) -> desugar_stmts(&body, active, build_facts, &diags)
+            taken :: core.mem.replace(&stmts[index], Stmt.Break{span: Span.new(0, 0)})
+            stmts[index] = fold_switch(^taken, active, build_facts, &diags)
+        } else {
+            desugar_child_blocks(&stmts[index], active, build_facts, &diags)
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:116
+fn desugar_child_blocks(stmt: &Stmt, active: OSTarget, build_facts: BuildFactSnapshot, diags: &[Diagnostic]) Never! {
+    if stmt == {
+        .Expr(e) | .Yield(e, _) | .DeferClose(e, _) -> desugar_expr(&e, active, build_facts, &diags)
+        .Val(binding) -> desugar_expr(&binding.init, active, build_facts, &diags)
+        .Assign(_, _, _, value) -> desugar_expr(&value, active, build_facts, &diags)
+        .Return(.Val(e), _) -> desugar_expr(&e, active, build_facts, &diags)
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) -> desugar_stmts(&body, active, build_facts, &diags)
+        .Switch(_, arms, else_body, _) -> {
+            loop arm in &arms { desugar_stmts(&arm.body, active, build_facts, &diags) }
+            if else_body == .Val(body) -> desugar_stmts(&body, active, build_facts, &diags)
+        }
+        .CountedLoop(_, _, step, body, _, _, _) -> {
+            if step == .Val(value) -> desugar_child_blocks(&value, active, build_facts, &diags)
+            desugar_stmts(&body, active, build_facts, &diags)
+        }
+        .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) |
+        .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
+        .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) |
+        .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) |
+        .Live(body, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .ContextBlock(_, body, _) ->
+            desugar_stmts(&body, active, build_facts, &diags)
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            desugar_stmts(&then_body, active, build_facts, &diags)
+            if else_body == .Val(body) -> desugar_stmts(&body, active, build_facts, &diags)
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:179
+fn desugar_expr(e: &Expr, active: OSTarget, build_facts: BuildFactSnapshot, diags: &[Diagnostic]) Never! {
+    if e == {
+        .Lambda(lambda) -> { if lambda.body == .Block(body) -> desugar_stmts(&body, active, build_facts, &diags) }
+        .If(_, then_body, _, else_body, _, _) -> {
+            desugar_stmts(&then_body, active, build_facts, &diags)
+            desugar_stmts(&else_body, active, build_facts, &diags)
+        }
+        .Paren(inner, _) -> desugar_expr(&inner, active, build_facts, &diags)
+        else -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:207
+fn fold_switch(sw: ^Stmt, active: OSTarget, build_facts: BuildFactSnapshot, diags: &[Diagnostic]) -> Stmt Never! {
+    if ^sw == .ComptimeSwitch(subject, arms, else_body, span) {
+        subject_path :: expr_path(subject)
+        if subject_path == Val("$build.os") -> return fold_os_switch(^subject, ^arms, ^else_body, span, active, &diags)
+        key :: build_setting_key(subject_path ?? {
+            &diags.push(os_target_build_context(Val(expr_span(subject))))
+            return empty_stmt(span)
+        }) ?? {
+            &diags.push(os_target_build_context(Val(expr_span(subject))))
+            return empty_stmt(span)
+        }
+        setting :: build_facts.settings.get(key) ?? {
+            &diags.push(Diagnostic.error("E0302", "`$build.settings.{key}` is undeclared",
+                "a setting must be declared with a type and default before it can be read",
+                "add `{key}: Type = default` to the package `settings: {{ … }}` block", Val(expr_span(subject))))
+            return empty_stmt(span)
+        }
+        arm_matches := [(Bool, [Stmt], Span)]{}
+        loop arm in ^arms {
+            matches :: setting_arm_matches(arm.cond, subject, setting.value) ?? {
+                &diags.push(Diagnostic.error("E0302", "invalid arm for `$build.settings.{key}`",
+                    "typed settings dispatch compares one setting with a literal value",
+                    "use a literal arm or compare `{key}` with a Bool, Int, Char, String, or enum value", Val(arm.span)))
+                return empty_stmt(span)
+            }
+            &arm_matches.push((matches, ^arm.body, arm.span))
+        }
+        tail := ^else_body
+        loop !arm_matches.is_empty() {
+            (matches, body, arm_span) :: &arm_matches.pop() ?? panic("nonempty arm list")
+            node :: Stmt.ComptimeIf{cond: Expr.Bool{value: matches, span: arm_span}, cond_span: arm_span,
+                then_body: ^body, else_body: ^tail, span: arm_span, selected_then: None}
+            tail = Val([Stmt]{^node})
+        }
+        if ^tail == .Val(body) -> return &body.pop() ?? empty_stmt(span)
+        return empty_stmt(span)
+    }
+    panic("fold_switch only called on ComptimeSwitch")
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:279
+fn fold_os_switch(subject: ^Expr, arms: ^[SwitchArm], else_body: ^[Stmt]?, span: Span, active: OSTarget, diags: &[Diagnostic]) -> Stmt Never! {
+    arm_os := [(OSTarget, [Stmt], Span)]{}
+    seen := [OSTarget]{}
+    had_error := false
+    loop arm in ^arms {
+        if arm_variant(arm) == .Val(os) {
+            if !seen.contains(os) {
+                &seen.push(os)
+                &arm_os.push((os, ^arm.body, arm.span))
+            } else {
+                &diags.push(os_target_dispatch_arm(".{os.name()}", Val(arm.span)))
+                had_error = true
+            }
+        } else {
+            &diags.push(os_target_dispatch_arm(arm_head_text(arm.cond), Val(arm.span)))
+            had_error = true
+        }
+    }
+    if had_error -> return empty_stmt(span)
+    if else_body == None {
+        missing := [String]{}
+        loop os in [OSTarget]{.Linux, .MacOS, .Windows} {
+            if !seen.contains(os) -> &missing.push(os.name())
+        }
+        if !missing.is_empty() {
+            &diags.push(os_target_dispatch_exhaustive(missing, Val(span)))
+            return empty_stmt(span)
+        }
+    }
+    tail := ^else_body
+    loop !arm_os.is_empty() {
+        (os, body, arm_span) :: &arm_os.pop() ?? panic("nonempty OS arm list")
+        node :: Stmt.ComptimeIf{cond: Expr.Bool{value: os == active, span: arm_span}, cond_span: arm_span,
+            then_body: ^body, else_body: ^tail, span: arm_span, selected_then: None}
+        tail = Val([Stmt]{^node})
+    }
+    if ^tail == .Val(body) -> return &body.pop() ?? empty_stmt(span)
+    empty_stmt(span)
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:351
+fn expr_path(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _) | .ComptimeName(name, _, _) -> Val(~name)
+        .Field(base, member, _) -> {
+            path :: expr_path(base) ?? return None
+            Val("{path}.{member}")
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:359
+fn setting_arm_matches(cond: Expr, subject: Expr, value: BuildFactValue) -> Bool? Never! {
+    if cond == {
+        .Binary(op, lhs, rhs, _) && (op == .Eq || op == .Ne) -> {
+            if expr_path(lhs) != expr_path(subject) -> return None
+            literal :: setting_literal(rhs) ?? return None
+            equal :: setting_values_equal(literal, value) ?? return None
+            Val(if op == .Eq -> equal else -> !equal)
+        }
+        .PatternTest(lhs, .Variant(variant, bindings, _, _), _) && expr_path(lhs) == expr_path(subject) && bindings.is_empty() -> {
+            if value == { .Enum(_, actual) -> Val(variant == actual) else -> None }
+        }
+        else -> {
+            literal :: setting_literal(cond) ?? return None
+            setting_values_equal(literal, value)
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:389
+fn setting_literal(expr: Expr) -> BuildFactValue? Never! {
+    if expr == {
+        .Bool(value, _) -> Val(BuildFactValue.Bool{value: value})
+        .Int(value, _, _, _) -> Val(BuildFactValue.Int{value: value})
+        .Char(value, _) -> {
+            scalar :: value.chars().next() ?? return None
+            Val(BuildFactValue.Char{value: scalar})
+        }
+        .Str(parts, _) -> {
+            loop part in parts { if part != .Lit(_) -> return None }
+            text := String.new()
+            loop part in parts { if part == .Lit(fragment) -> &text.push_str(fragment) }
+            Val(BuildFactValue.Text{value: text})
+        }
+        .EnumLit(type_name, variant, _, args, _, _) && args.is_empty() -> Val(BuildFactValue.Enum{type_name: ~type_name, variant: ~variant})
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:417
+fn setting_values_equal(left: BuildFactValue, right: BuildFactValue) -> Bool? Never! {
+    if (left, right) == {
+        (.Bool(lhs), .Bool(rhs)) -> Val(lhs == rhs)
+        (.Int(lhs), .Int(rhs)) -> Val(lhs == rhs)
+        (.Char(lhs), .Char(rhs)) -> Val(lhs == rhs)
+        (.Text(lhs), .Text(rhs)) -> Val(lhs == rhs)
+        (.Enum(left_type, lhs), .Enum(right_type, rhs)) && (left_type.is_empty() || right_type.is_empty() || left_type == right_type) -> Val(lhs == rhs)
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:456
+fn arm_variant(arm: SwitchArm) -> OSTarget? Never! {
+    if arm.cond == .PatternTest(_, .Variant(variant, bindings, _, _), _) && bindings.is_empty() -> return OSTarget.parse(variant)
+    None
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:473
+fn arm_head_text(cond: Expr) -> String Never! {
+    if cond == {
+        .PatternTest(_, pattern, _) -> if pattern == { .Variant(variant, _, _, _) -> ".{variant}" else -> "this pattern" }
+        else -> "this arm head"
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:483
+fn empty_stmt(span: Span) -> Stmt Never! { Stmt.ComptimeBlock{body: [], is_template_loop: false, span: span} }
+
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:507
+pub fn check_os_target(bundle: ProgramBundle, no_os: Bool) -> [Diagnostic] Never! {
+    diags := [Diagnostic]{}
+    gate_of_type := [String:OSTarget]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item != .Impl(_) -> next
+            if item == .Impl(i) {
+                gate_name :: i.os_target ?? next
+                os :: OSTarget.parse(gate_name) ?? next
+                gate_of_type[~i.type_name] = os
+                if module.web_target_ceiling == .Val(bucket) {
+                    label :: if i.trait_name == { .Val(t) -> "{i.type_name}.{t}" else -> ~i.type_name }
+                    &diags.push(os_target_mixed_axis(label, os, bucket.name(), Val(i.type_span)))
+                }
+            }
+        }
+    }
+    if !gate_of_type.is_empty() {
+        loop module in bundle.modules { check_items_signatures(module.items, gate_of_type, &diags) }
+    }
+    check_app_capabilities(bundle, no_os, &diags)
+    diags
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:545
+fn check_app_capabilities(bundle: ProgramBundle, no_os: Bool, diags: &[Diagnostic]) Never! {
+    loop index in 0..<bundle.modules.len() {
+        target :: resolved_app_target(bundle, index, no_os)
+        check_app_items(bundle.modules[index].items, target, &diags)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:552
+fn check_app_items(items: [Item], target: String, diags: &[Diagnostic]) Never! {
+    loop item in items {
+        if item == {
+            .Func(f) -> {
+                own_target :: if f.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                check_app_body(f.body, own_target, &diags)
+            }
+            .Impl(i) -> {
+                loop method in i.methods {
+                    own_target :: if method.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                    check_app_body(method.body, own_target, &diags)
+                }
+            }
+            .Struct(s) -> {
+                loop method in s.methods {
+                    own_target :: if method.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                    check_app_body(method.body, own_target, &diags)
+                }
+                loop trait_impl in s.trait_impls {
+                    loop method in trait_impl.methods {
+                        own_target :: if method.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                        check_app_body(method.body, own_target, &diags)
+                    }
+                }
+            }
+            .Enum(e) -> {
+                loop method in e.methods {
+                    own_target :: if method.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                    check_app_body(method.body, own_target, &diags)
+                }
+                loop trait_impl in e.trait_impls {
+                    loop method in trait_impl.methods {
+                        own_target :: if method.web_marker == { .Val(marker) -> marker.bucket().name() else -> target }
+                        check_app_body(method.body, own_target, &diags)
+                    }
+                }
+            }
+            .CodeModule(module) -> {
+                if module.body == .Val(body) {
+                    own_target :: if module.web_target == { .Val(bucket) -> bucket.name() else -> target }
+                    check_app_items(body, own_target, &diags)
+                }
+            }
+            .GenericModule(module) -> check_app_items(module.body, target, &diags)
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:640
+fn check_app_body(body: [Stmt], target: String, diags: &[Diagnostic]) Never! {
+    // Read-only canonical visitor avoids Rust's whole-statement clone.
+    visitor := OSTargetAppVisitor{target: target, diags: &diags}
+    loop original in body { ast_stmt_for_each_expr<OSTargetAppVisitor>(original, &visitor) }
+}
+struct OSTargetAppVisitor { target: String, diags: &[Diagnostic] }
+impl OSTargetAppVisitor.ASTExprVisitor {
+    fn visit(&self, expr: Expr) Never! {
+        if expr == .MethodCall(_, method, method_span, _, _, _, .Val(receiver_type), _, _, _) {
+            if receiver_type != "App" -> return
+            required :: app_capability_target(method) ?? return
+            if app_target_supports(required, self.target) -> return
+            &self.diags.push(Diagnostic.from_row("E-APP-TARGET-FEATURE",
+                [("feature", method), ("required", required), ("target", self.target)], Val(method_span)))
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:675
+fn check_items_signatures(items: [Item], gate_of_type: [String:OSTarget], diags: &[Diagnostic]) Never! {
+    loop item in items {
+        if item == {
+            .Func(f) -> check_func_sig(f, None, gate_of_type, &diags)
+            .Impl(i) -> {
+                own_gate := OSTarget?{None}
+                if i.os_target == .Val(name) -> own_gate = OSTarget.parse(name)
+                loop method in i.methods { check_func_sig(method, own_gate, gate_of_type, &diags) }
+            }
+            .Struct(s) -> { loop method in s.methods { check_func_sig(method, None, gate_of_type, &diags) } }
+            .Enum(e) -> { loop method in e.methods { check_func_sig(method, None, gate_of_type, &diags) } }
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/OSTarget.rs:703
+fn check_func_sig(f: Func, own_gate: OSTarget?, gate_of_type: [String:OSTarget], diags: &[Diagnostic]) Never! {
+    flag :: (type_name: String) -> {
+        if type_name.is_empty() -> return
+        os :: gate_of_type.get(type_name) ?? return
+        if own_gate == Val(os) -> return
+        &diags.push(os_target_unmatched_call(f.name, type_name, os, Val(f.name_span)))
+    }
+    loop p in f.params { if p.ty == .Named(n) -> flag(n) }
+    if f.return_type == .Val(.Named(n)) -> flag(n)
+}

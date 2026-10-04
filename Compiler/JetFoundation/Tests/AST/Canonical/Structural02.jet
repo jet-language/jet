@@ -1,0 +1,102 @@
+use JetFoundation.*
+
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1929
+fn op(name: String, index: Int, resource: String, mode: ResourceAccessMode) -> FrameOperation Never! {
+    FrameOperation.new(~name, index).with_access(ResourceAccess.named(~resource, mode))
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1933
+fn temp(name: String, index: Int, resource: String) -> FrameOperation Never! {
+    FrameOperation.new(~name, index).with_access(ResourceAccess.named(~resource, .Write).with_layout(ResourceLayout.new(64, 16, "rgba8", "gpu0")).temporary())
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1942
+#Test("serial_plan_records_read_write_dependency_and_explanation") {
+    schedule :: derive_frame_schedule([op("simulate", 0, "positions", .Write), op("draw", 1, "positions", .Read)])?
+    assert(schedule.dependencies.len() == 1)
+    assert(schedule.explain().contains("dependency: simulate -> draw"))
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1953
+#Test("read_read_is_legal_without_dependency") {
+    schedule :: derive_frame_schedule([op("a", 0, "image", .Read), op("b", 1, "image", .Read)])?
+    assert(schedule.dependencies.is_empty())
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1963
+#Test("overlapping_regions_preserve_source_order") {
+    left :: ResourceAccess.named("image", .Write).with_region(ResourceRegion.bytes(0, 8))
+    right :: ResourceAccess.named("image", .Read).with_region(ResourceRegion.bytes(4, 4))
+    schedule :: derive_frame_schedule([FrameOperation.new("write", 0).with_access(left), FrameOperation.new("read", 1).with_access(right)])?
+    assert(schedule.dependencies.len() == 1)
+    assert(schedule.dependencies[0].resource == "image")
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1978
+#Test("unknown_alias_refuses_parallel_write") {
+    result :: derive_frame_schedule_with_options([FrameOperation.new("a", 0).with_access(ResourceAccess.unknown(.Write)), op("b", 1, "image", .Read)], JetFrameScheduleOptions.parallel())
+    assert(if result == { .Err(.UnknownAlias(_, _)) -> true, else -> false })
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:1991
+#Test("overlapping_writes_refuse_explicit_parallel_demand") {
+    result :: derive_frame_schedule_with_options([op("a", 0, "image", .Write), op("b", 1, "image", .Write)], JetFrameScheduleOptions.parallel())
+    assert(if result == { .Err(.ConflictingAccess(_, _, _, _, _)) -> true, else -> false })
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2003
+#Test("disjoint_regions_can_run_in_parallel") {
+    left :: ResourceAccess.named("image", .Write).with_region(ResourceRegion.bytes(0, 4))
+    right :: ResourceAccess.named("image", .Write).with_region(ResourceRegion.bytes(4, 4))
+    schedule :: derive_frame_schedule_with_options([FrameOperation.new("a", 0).with_access(left), FrameOperation.new("b", 1).with_access(right)], JetFrameScheduleOptions.parallel())?
+    assert(schedule.dependencies.is_empty())
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2020
+#Test("async_owner_is_retained_until_actual_event") {
+    schedule :: derive_frame_schedule([FrameOperation.new("submit", 0).with_access(ResourceAccess.named("image", .Read)).pending("flight"), FrameOperation.new("finish", 1).completion_event("flight"), op("consume", 2, "image", .Read)])?
+    assert(schedule.retentions[0].completion_token == Val("flight"))
+    assert(schedule.dependencies.iter().any(fn(dependency) { dependency.resource == "completion" }))
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2037
+#Test("completion_event_before_submit_is_refused") {
+    result :: derive_frame_schedule([FrameOperation.new("finish", 0).completion_event("flight"), FrameOperation.new("submit", 1).with_access(ResourceAccess.named("image", .Read)).pending("flight")])
+    assert(if result == { .Err(.MissingCompletion(_, _, _)) -> true, else -> false })
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2051
+#Test("missing_async_completion_is_refused") {
+    result :: derive_frame_schedule([FrameOperation.new("submit", 0).with_access(ResourceAccess.named("a", .Write).with_layout(ResourceLayout.new(64, 16, "rgba8", "gpu0")).temporary()).pending("flight"), temp("next", 1, "b")])
+    assert(if result == { .Err(.MissingCompletion(_, _, _)) -> true, else -> false })
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2068
+#Test("canonical_codec_round_trips_complete_schedule") {
+    schedule :: derive_frame_schedule([FrameOperation.new("submit", 0).with_access(ResourceAccess.named("image", .Write).with_region(ResourceRegion.bytes(4, 8)).with_layout(ResourceLayout.new(64, 16, "rgba8", "gpu0")).temporary()).pending("flight"), FrameOperation.new("finish", 1).completion_event("flight"), temp("next", 2, "other")])?
+    encoded :: schedule.canonical_json()
+    decoded :: FrameSchedule.from_canonical_json(encoded)?
+    assert(decoded == schedule)
+    assert(FrameSchedule.decode_canonical(schedule.encode_canonical())? == schedule)
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2091
+#Test("persistent_use_blocks_temporary_reuse") {
+    first :: temp("first", 0, "a")
+    persistent :: op("keep", 1, "a", .Read)
+    next :: temp("next", 2, "b")
+    schedule :: derive_frame_schedule([first, persistent, next])?
+    assert(schedule.reuse.is_empty())
+}
+// Rust: crates/jet-foundation/src/ResourceSchedule.rs:2101
+#Test("matching_temporary_layout_allows_reuse_and_explains_transfer") {
+    schedule :: derive_frame_schedule([temp("first", 0, "a"), temp("second", 1, "b")])?
+    assert(schedule.reuse.len() == 1)
+    assert(schedule.reuse[0].legal)
+    assert(schedule.explain().contains("reuse: a -> b"))
+    transferred :: derive_frame_schedule([FrameOperation.new("cpu", 0).with_access(ResourceAccess.named("image", .Read).with_layout(ResourceLayout.new(64, 16, "rgba8", "cpu"))), FrameOperation.new("gpu", 1).with_access(ResourceAccess.named("image", .Read).with_layout(ResourceLayout.new(64, 16, "rgba8", "gpu")))])?
+    assert(transferred.transfers.len() == 1)
+    assert(transferred.explain().contains("transfer: image cpu -> gpu"))
+}
+// Rust: crates/jet-foundation/src/WebPartition.rs:169
+#Test("abi_safe_scalars") {
+    assert(is_abi_safe_type(.Int))
+    assert(is_abi_safe_type(.String))
+    assert(is_abi_safe_type(.List(.Int)))
+    assert(!is_abi_safe_type(.Named("Point")))
+}
+// Rust: crates/jet-foundation/src/WebPartition.rs:177
+#Test("partition_key_qualified_identities") {
+    assert(partition_key(None, None, "run") == "run")
+    assert(partition_key(Val("left"), None, "helper") == "__jet_left_dhelper")
+    assert(partition_key(None, Val("math"), "double") == "__jet_math_ddouble")
+    assert(partition_key(Val("left"), Val("inner"), "helper") == "__jet_inner_dhelper")
+}

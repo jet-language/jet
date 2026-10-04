@@ -1,0 +1,179 @@
+use jet_foundation.[Program, Item, Type, Stmt, Expr, BinOp, DeriveBodyItem,
+    FixApplicability, FixSafety, Syntax]
+use jet_lexer.[lex, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1361
+fn program(source: String) -> Program {
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    parse(lexed.tokens).expect("parse errors")
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1368
+#Test("clean_preparation_reuses_byte_identical_tokens") {
+    lexed :: lex("fn run() {{ value :: 1 }}\n".bytes())
+    assert(lexed.diagnostics.is_empty())
+    expected := [jet_lexer.Token]{}
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &expected.push(token)
+    }
+    prepared :: prepare_tokens(lexed.tokens).expect("clean source")
+    assert(prepared.fenced_statements.is_empty())
+    assert(prepared.tokens == expected)
+    // GATE #4494: retained read-only descriptor identity, not element equality.
+    assert(core.mem.ptr.eq(prepared.tokens.as_ptr(), lexed.tokens.as_ptr()))
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1382
+#Test("prefix_failure_contracts_cover_nested_type_positions") {
+    parsed :: program("struct Holder {{\noptional: Int?\nunit: !IOError\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: !Never\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! -> value\nfn save() IOError! {{}}\nfn run() {{}}\n")
+    holder :: loop item in parsed.items {
+        if item == .Struct(def) && def.name == "Holder" -> break def
+    } ?? panic("Holder")
+    assert(if holder.fields[0].ty == { .Option(inner) -> inner == Type.Int; _ -> false })
+    assert(if holder.fields[1].ty == {
+        .Result(ok, err) -> ok == Type.Named{name: Syntax.INTERNAL_UNIT_TYPE} && err == Type.Named{name: "IOError"}
+        _ -> false
+    })
+    assert(if holder.fields[2].ty == {
+        .Result(ok, err) -> ok == Type.Int && if err == { .Union(members) -> members.len() == 2; _ -> false }
+        _ -> false
+    })
+    assert(if holder.fields[3].ty == {
+        .Fn(params, ret, _, _, _, _) -> !params.is_empty() && if params[0] == { .Result(_, _) -> true; _ -> false } && if ret == { .Val(ty) -> if ty == { .Result(_, _) -> true; _ -> false }; _ -> false }
+        _ -> false
+    })
+    assert(if holder.fields[4].ty == { .Result(_, err) -> err == Type.Named{name: Syntax.TYPE_NEVER}; _ -> false })
+    formatted :: jet_format_source("fn save() IOError! {{}}\nfn load() -> Int (DbError | TimeoutError)! -> 1\n").source ?? panic("prefix formatter")
+    assert(formatted.contains("fn save() IOError!"))
+    assert(formatted.contains("fn load() -> Int (DbError | TimeoutError)!"))
+    contextual :: jet_format_source("fn load() IOError! -> read()?(\"loading config\")\n").source ?? panic("contextual propagation formatter")
+    assert(contextual.contains("?(\"loading config\")"))
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1447
+#Test("built_in_marker_accepts_positional_string_argument") {
+    parsed :: program("#CLI\nstruct ServeArgs {{\n#Doc(\"port\") port: Int{{3000}}\n}}\nfn run(args: ServeArgs) {{}}\n")
+    field :: loop item in parsed.items {
+        if item == .Struct(def) && !def.fields.is_empty() -> break def.fields[0]
+    } ?? panic("ServeArgs.port")
+    assert(field.serde_markers.len() == 1)
+    assert(field.serde_markers[0].name == "Doc")
+    assert(field.serde_markers[0].arg_labels[0] == None)
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1470
+#Test("retired_failure_surface_never_builds_legacy_ast") {
+    loop code in [String]{"E-ERR-SIGIL", "E-ERR-DEFAULT", "E-TYPE-PREFIX", "E-ERR-UNION", "E-ERR-PROPAGATE"} -> assert(!is_teaching_parse_diag(code))
+    loop source in [String]{
+        "struct Boxed {{ value: Result<Int, IOError> }}\nfn run() {{}}\n",
+        "alias Old :: Int? ! IOError\n", "fn save() ! {{}}\n", "fn save() ! IOError {{}}\n",
+        "fn load() -> Int !IOError {{}}\n", "fn load() -> ?Int {{}}\n", "fn save() !IOError {{}}\n",
+        "fn save() IOError | NetError! {{}}\n", "fn run() {{ value :: read()? }}\n"} {
+        lexed :: lex(source.bytes())
+        assert(lexed.diagnostics.is_empty())
+        assert(parse(lexed.tokens).is_err())
+        assert(parse_for_check(lexed.tokens).is_err())
+        assert(parse_for_fmt(lexed.tokens).is_err())
+        assert(jet_format_source(source).source == None)
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1514
+#Test("dispatch_atom_boolean_group_has_safe_source_edit") {
+    source :: "fn run() {{\n    n :: 48\n    ready :: true\n    if n < {{\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }}\n}}\n"
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    checked :: parse_for_check_with_source(lexed.tokens, source).expect("E0386 should recover the dispatch arm")
+    diagnostic :: loop d in checked.diagnostics { if d.code == "E0386" -> break d } ?? panic("E0386")
+    edit :: diagnostic.edit ?? panic("source edit")
+    assert(source.slice(edit.span.start, edit.span.end) == "48 | 45")
+    assert(edit.new_text == "(48 | 45)")
+    assert(diagnostic.applicability == Val(FixApplicability.Safe))
+    assert(diagnostic.safety == Val(FixSafety.Formatting))
+    fixed :: source.replace("48 | 45", "(48 | 45)")
+    fixed_lexed :: lex(fixed.bytes())
+    assert(fixed_lexed.diagnostics.is_empty())
+    assert(parse(fixed_lexed.tokens).is_ok())
+    loop variant in [String]{source.replace("&&", "||"), source.replace("48 | 45 && ready", "ready && 48 | 45")} {
+        variant_lexed :: lex(variant.bytes())
+        assert(variant_lexed.diagnostics.is_empty())
+        variant_checked :: parse_for_check_with_source(variant_lexed.tokens, variant).expect("Boolean operands should recover with E0386")
+        assert(loop d in variant_checked.diagnostics { if d.code == "E0386" -> break true } ?? false)
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1561
+#Test("missing_function_body_is_e0081_and_recovers_for_check") {
+    source :: "fn host_open(path: String) -[FS]> Int\nfn run() {{}}\n"
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    assert(parse(lexed.tokens).is_err())
+    checked :: parse_for_check(lexed.tokens).expect("E0081 should recover an AST for check/LSP")
+    assert(loop d in checked.diagnostics { if d.code == "E0081" -> break true } ?? false)
+    names := [String]{}
+    loop item in checked.program.items { if item == .Func(func) -> &names.push(func.name) }
+    assert(names.contains("host_open") && names.contains("run"))
+    second :: lex("fn foo() -> Int\nfn bar() {{}}\n".bytes())
+    assert(second.diagnostics.is_empty())
+    recovered :: parse_for_check(second.tokens).expect("missing brace body should recover")
+    assert(loop d in recovered.diagnostics { if d.code == "E0081" -> break true } ?? false)
+    assert(loop item in recovered.program.items { if item == .Func(func) && func.name == "bar" -> break true } ?? false)
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1612
+#Test("spaced_minus_is_subtraction") {
+    parsed :: program("fn run() {{ d :: 5 - 3 }}")
+    func :: loop item in parsed.items { if item == .Func(f) -> break f } ?? panic("a run function")
+    binding :: loop stmt in func.body { if stmt == .Val(b) -> break b } ?? panic("a val binding")
+    assert(if binding.init == { .Binary(op, _, _, _) -> op == BinOp.Sub; _ -> false })
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1636
+#Test("derive_generic_type_holes_stay_in_the_template_ast") {
+    parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param -> ~self.value\n    fn type_name(self) -> String -> T.$name\n}}\n")
+    derive :: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
+    function :: loop body_item in derive.body {
+        if body_item == .Item(item) {
+            if item == .Func(f) && f.name == "get_value" -> break f
+        }
+    } ?? panic("generic derive function")
+    assert(function.return_type == Val(Type.Named{name: "@param"}))
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1675
+#Test("derive_body_rejects_nested_impl_but_generate_keeps_item_blocks") {
+    source :: "\nderive T.Debug {{\n    impl Thing.Debug {{\n        fn debug(self) -> String -> \"nested\"\n    }}\n}}\n"
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    failure :: parse(lexed.tokens).expect_err("a derive body must not repeat its impl header")
+    diagnostics :: if failure == { .Diagnostics(ds) -> ds }
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "E0003")
+    _ :: program("\nfn build(b: BuildContext) {{\n    b.generate(\"made\") {{\n        impl Thing.Debug {{\n            fn debug(self) -> String -> \"generated\"\n        }}\n    }}\n}}\n")
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1706
+#Test("root_template_loop_parses_closed_type_list_and_declarations") {
+    parsed :: program("\nprep loop T in [Point] {{\n    impl T {{\n        fn generated(self) -> String -> \"generated\"\n    }}\n    #Test(\"generated\") {{\n        .measure {{\n            assert(true)\n        }}\n    }}\n}}\n")
+    loop_item :: loop item in parsed.items { if item == .TemplateLoop(value) -> break value } ?? panic("root template loop")
+    assert(loop_item.body.len() == 2)
+    assert(if loop_item.body[0] == { .Item(item) -> if item == { .Impl(_) -> true; _ -> false }; _ -> false })
+    assert(if loop_item.body[1] == { .Item(item) -> if item == { .Test(_) -> true; _ -> false }; _ -> false })
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:1744
+#Test("task_keyword_callable_body_parses_as_spawn") {
+    parsed :: program("fn run() {{\n    task.group g {{\n        h :: task work()\n    }}\n}}\n")
+    run :: loop item in parsed.items { if item == .Func(f) && f.name == "run" -> break f } ?? panic("run")
+    task_group :: loop stmt in run.body { if stmt == .TaskGroup(_, _, _, body, _) -> break body } ?? panic("task group")
+    binding :: loop stmt in task_group { if stmt == .Val(b) -> break b } ?? panic("binding")
+    if binding.init == {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen) -> {
+            assert(method == Syntax.INTERNAL_TASK_SPAWN_METHOD)
+            assert(args.len() == 1)
+            assert(if args[0].expr == { .Lambda(_) -> true; _ -> false })
+        }
+        _ -> panic("expected task work() MethodCall")
+    }
+}

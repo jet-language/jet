@@ -1,0 +1,334 @@
+use JetFoundation.XmlPull.[Event, Part, Error, Reason, Value, Scanner, StreamScanner, StreamWriter, ParseOptions, Limits, EntityPolicy, RenderEncoding, LexicalPolicy, parse_document, parse_document_with, render_document, field, required_text]
+use JetFoundation.XmlPullTests.stream_values
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3050
+fn scan(source: String) -> [Event] Err! {
+    scanner := Scanner.new(source)
+    events := [Event]{}
+    loop {
+        next :: scanner.next() catch error { return Err("{error.offset}:{error.reason}") }
+        if next is Val(event) { events.push(event) } else { return events }
+    }
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3065
+#Test("preserves_order_namespaces_and_lexical_tokens") {
+    source :: "<?xml version=\"1.0\"?><r xmlns='u' xmlns:p='v' a='x&amp;y'>a<!--c--><![CDATA[<x>]]><?go now?><p:c/>z</r>\n"
+    events :: scan(source)
+    assert(events.len() == 12)
+    if !(events[2] is Event.ElementStart{name: name, namespaces: namespaces, attributes: attributes, raw: raw, ..}) -> panic("root start")
+    assert((name.local, name.namespace_uri, raw) == ("r", Val("u"), "<r xmlns='u' xmlns:p='v' a='x&amp;y'>"))
+    assert(namespaces.len() == 2)
+    assert(attributes[0].normalized == Val("x&y"))
+    assert(attributes[0].parts[1] is Part.Entity{name: "amp", resolved: Val("&"), ..})
+    assert(events[4] is Event.Comment{value: "c", ..})
+    assert(events[5] is Event.Cdata{value: "<x>", ..})
+    assert(events[6] is Event.ProcessingInstruction{target: "go", value: "now", ..})
+    if !(events[7] is Event.ElementStart{name: child, empty: true, ..}) -> panic("child start")
+    assert(child.namespace_uri == Val("v"))
+    assert(events[10] is Event.DocumentWhitespace{value: "\n", ..})
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3104
+#Test("rejects_namespace_and_structure_corruption") {
+    loop source in [String]{"<p:r/>", "<r xmlns:p='u' xmlns:q='u' p:a='1' q:a='2'/>", "<r xmlns:p='u' xmlns:p='v'/>", "<r><a></r>", "<r/><s/>", "<r><!-- a--b --></r>", "<r>&missing;</r>", "<r>&#x110000;</r>", "<r a='bad<value'/>", "<r>bad]]>text</r>"} {
+        failed := false
+        _ :: scan(source) catch _ { failed = true }
+        assert(failed, "accepted {source}")
+    }
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3123
+fn stream_error(bytes: [U8], split: Int) -> Error Never! {
+    scanner := StreamScanner.new(4096, ParseOptions.safe())
+    failure := null
+    _ :: scanner.push(bytes[0..<split]) catch error { failure = Val(error) }
+    if failure == null {
+        loop {
+            event :: scanner.next() catch error { failure = Val(error); break }
+            if event == null -> break
+        }
+    }
+    if failure == null { _ :: scanner.push(bytes[split..<bytes.len()]) catch error { failure = Val(error) } }
+    if failure == null { _ :: scanner.finish_input() catch error { failure = Val(error) } }
+    if failure == null {
+        loop {
+            event :: scanner.next() catch error { failure = Val(error); break }
+            if event == null -> panic("stream accepted forbidden XML character at split {split}")
+        }
+    }
+    error :: failure ?? panic("missing stream error")
+    terminal := null
+    _ :: scanner.next() catch next_error { terminal = Val(next_error) }
+    assert(terminal == Val(error), "terminal split {split}")
+    error
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3122
+#Test("xml_10_fifth_edition_char_production_is_exact_and_chunk_invariant") {
+    loop scalar in [Int]{9, 10, 13, 0x20, 0xd7ff, 0xe000, 0xfffd, 0x10000, 0x10ffff} {
+        character :: Char.from_u32(U32{scalar}) ?? panic("scalar")
+        _ :: parse_document("<r>{character}</r>")
+    }
+    loop reference in [String]{"&#9;", "&#xA;", "&#13;", "&#x20;", "&#xD7FF;", "&#xE000;", "&#xFFFD;", "&#x10000;", "&#x10FFFF;"} {
+        _ :: parse_document("<r>{reference}</r>")
+    }
+    loop scalar in [Int]{0, 1, 8, 11, 12, 14, 31, 0xfffe, 0xffff} {
+        character :: Char.from_u32(U32{scalar}) ?? panic("scalar")
+        source :: "<r>{character}</r>"
+        expected := null
+        _ :: parse_document(source) catch error { expected = Val(error) }
+        error :: expected ?? panic("forbidden XML character")
+        assert((error.kind, error.offset, error.line, error.column) == (Reason.Malformed, 3, Val(1), Val(4)))
+        loop split in 0..=source.byte_len() -> assert(stream_error(source.to_bytes(), split) == error, "scalar {scalar} split {split}")
+    }
+    bad :: Char.from_u32(U32{1}) ?? panic("scalar")
+    loop source in [String]{"<r a='{bad}'/>", "<r><!--{bad}--></r>", "<r><![CDATA[{bad}]]></r>", "<r><?p {bad}?></r>", "<!DOCTYPE r [{bad}]><r/>", "<r{bad}/>", "<r></r{bad}>", "<r>&{bad};</r>", "<r/>{bad}"} {
+        expected := null
+        _ :: parse_document(source) catch error { expected = Val(error) }
+        error :: expected ?? panic("forbidden XML token character")
+        assert(error.kind == Reason.Malformed)
+        loop split in 0..=source.byte_len() -> assert(stream_error(source.to_bytes(), split) == error, "token split {split}")
+    }
+    loop reference in [String]{"&#0;", "&#x1;", "&#xB;", "&#xC;", "&#x1F;", "&#xFFFE;", "&#xFFFF;"} {
+        expected := null
+        _ :: parse_document("<r>{reference}</r>") catch error { expected = Val(error) }
+        error :: expected ?? panic("forbidden XML character reference")
+        assert(error.kind == Reason.Entity)
+    }
+    loop (source, offset, column, path) in [(String, Int, Int, String)]{("<r a='&#0;'/>", 6, 7, "$"), ("<r xmlns='&#0;'/>", 10, 11, "$"), ("<r>&#0;</r>", 3, 4, "$/r")} {
+        expected := null
+        _ :: parse_document(source) catch error { expected = Val(error) }
+        error :: expected ?? panic("forbidden numeric reference")
+        assert((error.kind, error.offset, error.line, error.column, error.path) == (Reason.Entity, offset, Val(1), Val(column), path))
+        loop split in 0..=source.byte_len() -> assert(stream_error(source.to_bytes(), split) == error, "reference split {split}")
+    }
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3267
+#Test("xml_10_attribute_whitespace_normalizes_without_losing_lexical_identity") {
+    source :: "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>"
+    events :: scan(source)
+    if !(events[1] is Event.ElementStart{namespaces: namespaces, attributes: attributes, ..}) -> panic("root start")
+    assert(namespaces[0].namespace_uri == "urn: foo bar")
+    assert(attributes[0].normalized == Val("x  y z u v"))
+    assert(attributes[0].parts.len() == 1)
+    assert(attributes[0].parts[0] is Part.Text{value: "x  y z u v", raw: "x\t y\r\nz\ru\nv"})
+    assert(attributes[1].normalized == Val("\r\n\t"))
+    resolved_source :: "<!DOCTYPE r [<!ENTITY ws 'ignored'>]><r xmlns='&ws;' a='&ws;' b='&#xD;&#xA;&#x9;'/>"
+    replacements :: [String:String]{"ws": "urn:\talpha\r\nbeta\rgamma\ndelta"}
+    options :: ParseOptions{entities: EntityPolicy.Resolve(replacements), limits: Limits.safe()}
+    scanner := Scanner.with_options(resolved_source, options)
+    found := false
+    loop {
+        event :: scanner.next() ?? break
+        if event is Event.ElementStart{namespaces: ns, attributes: attrs, ..} {
+            expected :: "urn: alpha beta gamma delta"
+            assert(ns[0].namespace_uri == expected)
+            assert(attrs[0].normalized == Val(expected))
+            assert(attrs[1].normalized == Val("\r\n\t"))
+            assert(attrs[0].parts.len() == 1)
+            assert(attrs[0].parts[0] is Part.Entity{resolved: Val(expected), ..})
+            found = true
+            break
+        }
+    }
+    assert(found, "root start")
+    resolved_tree :: parse_document_with(resolved_source, options)
+    assert(render_document(resolved_tree) == resolved_source)
+    tree :: parse_document(source)
+    assert(render_document(tree) == source)
+    loop split in 0..=source.byte_len() {
+        writer := StreamWriter.new(RenderEncoding.UTF8, LexicalPolicy.PreserveValid)
+        output := [U8]{}
+        loop event in stream_values(source.to_bytes(), split) -> output.extend(writer.write(event))
+        assert(output == source.to_bytes(), "split {split}")
+    }
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3340
+#Test("folds_lossless_tagged_tree_and_round_trips") {
+    source :: "<?xml version='1.0'?>\n<!DOCTYPE r PUBLIC 'pub' 'sys' [<!ENTITY e 'v'>]><r xmlns='u' xmlns:p='v' p:a='x&amp;y'>a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\n"
+    tree :: parse_document(source)
+    assert(field(tree, "$xml") == Val(Value.Text("document")))
+    if !(field(tree, "children") is Val(Value.Array(document_children))) -> panic("document children")
+    assert(document_children.len() == 5)
+    assert(field(document_children[2], "public_id") == Val(Value.Text("pub")))
+    assert(field(document_children[2], "system_id") == Val(Value.Text("sys")))
+    assert(field(document_children[2], "internal_subset") == Val(Value.Text("<!ENTITY e 'v'>")))
+    if !(field(document_children[3], "children") is Val(Value.Array(root_children))) -> panic("root children")
+    tags := [String]{}
+    loop node in root_children -> tags.push(required_text(node, "$xml"))
+    assert(tags == [String]{"text", "entity_ref", "comment", "cdata", "processing_instruction", "element"})
+    assert(render_document(tree) == source)
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3382
+#Test("reports_stable_kind_coordinates_and_path") {
+    failure := null
+    _ :: parse_document("<r>\n <a></b></r>") catch error { failure = Val(error) }
+    error :: failure ?? panic("mismatch")
+    assert(error.kind == Reason.MismatchedTag)
+    assert(error.offset == 8)
+    assert(error.line == Val(2))
+    assert(error.column == Val(5))
+    assert(error.path == "$/r/a")
+    assert(error.reason == "mismatched XML closing tag")
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3393
+#Test("enforces_whole_value_limits_prospectively") {
+    limits := Limits.safe()
+    limits.max_depth = 2
+    limits.max_entity_depth = 2
+    failure := null
+    _ :: parse_document_with("<a><b><c/></b></a>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error :: failure ?? panic("depth budget")
+    assert(error.kind == Reason.Limit)
+    assert((error.offset, error.line, error.column, error.path) == (10, Val(1), Val(11), "$/a/b"))
+    assert(error.reason.contains("max_depth (2)"))
+    limits = Limits.safe()
+    limits.max_nodes = 2
+    failure = null
+    _ :: parse_document_with("<a>x</a>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error_nodes :: failure ?? panic("node budget")
+    assert(error_nodes.kind == Reason.Limit)
+    assert(error_nodes.reason.contains("max_nodes (2)"))
+    limits = Limits.safe()
+    limits.max_attributes_per_element = 1
+    failure = null
+    _ :: parse_document_with("<a x='1' y='2'/>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error_attrs :: failure ?? panic("attribute budget")
+    assert(error_attrs.kind == Reason.Limit)
+    assert(error_attrs.reason.contains("max_attributes_per_element (1)"))
+    limits = Limits.safe()
+    limits.max_name_bytes = 1
+    failure = null
+    _ :: parse_document_with("<ab/>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error_name :: failure ?? panic("name budget")
+    assert(error_name.kind == Reason.Limit)
+    assert(error_name.reason.contains("max_name_bytes (1)"))
+    limits = Limits.safe()
+    limits.max_text_bytes = 1
+    limits.max_entity_replacement_bytes = 1
+    failure = null
+    _ :: parse_document_with("<a>xx</a>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error_text :: failure ?? panic("text budget")
+    assert(error_text.kind == Reason.Limit)
+    assert(error_text.reason.contains("max_text_bytes (1)"))
+    limits = Limits.safe()
+    limits.max_entity_declarations = 1
+    failure = null
+    _ :: parse_document_with("<!DOCTYPE r [<!ENTITY a 'a'><!ENTITY b 'b'>]><r/>", ParseOptions{entities: EntityPolicy.Preserve, limits: limits}) catch error { failure = Val(error) }
+    error_declarations :: failure ?? panic("entity declaration budget")
+    assert(error_declarations.kind == Reason.Limit)
+    assert(error_declarations.reason.contains("max_entity_declarations (1)"))
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3480
+#Test("xml_limits_validate_in_ratified_field_order") {
+    limits := Limits.safe()
+    limits.max_depth = 0
+    limits.max_nodes = 0
+    failure := null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    error :: failure ?? panic("max_depth first")
+    assert(error.kind == Reason.Limit)
+    assert((error.offset, error.line, error.column, error.path) == (0, null, null, ""))
+    assert(error.reason.contains("`max_depth`"))
+    assert(!error.reason.contains("`max_nodes`"))
+    limits = Limits.safe()
+    limits.max_nodes = 0
+    limits.max_attributes_per_element = 1_000_001
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    error_nodes :: failure ?? panic("max_nodes before attributes")
+    assert(error_nodes.reason.contains("`max_nodes`"))
+    assert(!error_nodes.reason.contains("`max_attributes_per_element`"))
+    limits = Limits.safe()
+    limits.max_attributes_per_element = 1_000_001
+    limits.max_name_bytes = 0
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("attributes before name")).reason.contains("`max_attributes_per_element`"))
+    limits = Limits.safe()
+    limits.max_name_bytes = 0
+    limits.max_text_bytes = 1_073_741_825
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("name before text")).reason.contains("`max_name_bytes`"))
+    limits = Limits.safe()
+    limits.max_text_bytes = 1_073_741_825
+    limits.max_entity_declarations = 1_000_001
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("text before entity declarations")).reason.contains("`max_text_bytes`"))
+    limits = Limits.safe()
+    limits.max_entity_declarations = 1_000_001
+    limits.max_entity_depth = 257
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("entity declarations before depth")).reason.contains("`max_entity_declarations`"))
+    limits = Limits.safe()
+    limits.max_entity_depth = 257
+    limits.max_entity_replacement_bytes = 1_073_741_825
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("entity depth before replacement")).reason.contains("`max_entity_depth`"))
+    limits = Limits.safe()
+    limits.max_entity_replacement_bytes = 1_073_741_825
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("replacement range")).reason.contains("`max_entity_replacement_bytes`"))
+    limits = Limits.safe()
+    limits.max_depth = 2
+    limits.max_entity_depth = 3
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    cross_depth :: failure ?? panic("cross-field depth")
+    assert(cross_depth.path == "")
+    assert(cross_depth.reason.contains("`max_entity_depth` exceeds `max_depth`"))
+    limits = Limits.safe()
+    limits.max_text_bytes = 8
+    limits.max_entity_replacement_bytes = 9
+    failure = null
+    _ :: limits.validate() catch error { failure = Val(error) }
+    assert((failure ?? panic("cross-field replacement")).reason.contains("`max_entity_replacement_bytes` exceeds `max_text_bytes`"))
+    _ :: Limits.safe().validate()
+}
+
+// Rust: crates/jet-foundation/src/XmlPull.rs:3562
+#Test("dual_limit_fusion_keeps_stronger_bound_and_names_it") {
+    xml := Limits.safe()
+    xml.max_depth = 8
+    xml.max_entity_depth = 8
+    xml.max_entity_replacement_bytes = 64
+    encoding_depth :: 2
+    encoding_expansion_depth :: 1
+    encoding_expansion_bytes :: 4
+    xml.max_depth = xml.max_depth.min(encoding_depth)
+    xml.max_entity_depth = xml.max_entity_depth.min(encoding_expansion_depth).min(xml.max_depth)
+    xml.max_entity_replacement_bytes = xml.max_entity_replacement_bytes.min(encoding_expansion_bytes).min(xml.max_text_bytes)
+    assert(xml.max_depth == 2)
+    assert(xml.max_entity_depth == 1)
+    assert(xml.max_entity_replacement_bytes == 4)
+    failure := null
+    _ :: parse_document_with("<a><b><c/></b></a>", ParseOptions{entities: EntityPolicy.Preserve, limits: xml}) catch error { failure = Val(error) }
+    depth_error :: failure ?? panic("encoding depth wins")
+    assert(depth_error.kind == Reason.Limit)
+    assert(depth_error.reason.contains("max_depth (2)"))
+    values :: [String:String]{"e": "value"}
+    failure = null
+    _ :: parse_document_with("<!DOCTYPE r [<!ENTITY e 'ignored'>]><r>&e;</r>", ParseOptions{entities: EntityPolicy.Resolve(values), limits: xml}) catch error { failure = Val(error) }
+    expansion_error :: failure ?? panic("encoding expansion wins")
+    assert(expansion_error.kind == Reason.Limit)
+    assert(expansion_error.reason.contains("max_entity_replacement_bytes (4)"), expansion_error.reason)
+    xml_tight := Limits.safe()
+    xml_tight.max_depth = 1
+    encoding_loose :: 256
+    xml_tight.max_depth = xml_tight.max_depth.min(encoding_loose)
+    xml_tight.max_entity_depth = xml_tight.max_entity_depth.min(xml_tight.max_depth)
+    failure = null
+    _ :: parse_document_with("<a><b/></a>", ParseOptions{entities: EntityPolicy.Preserve, limits: xml_tight}) catch error { failure = Val(error) }
+    assert((failure ?? panic("xml depth wins")).reason.contains("max_depth (1)"))
+}

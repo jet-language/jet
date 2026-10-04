@@ -2556,7 +2556,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     build_facts_option :: jet_driver_build_facts(load, request, target_machine, request.authorized_sources.entry_path, &fact_diagnostics)
     loop diagnostic in fact_diagnostics -> &load.diagnostics.push(diagnostic)
     build_facts :: build_facts_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
-    jet_driver_publish_build_facts(load, build_facts)
+    if !jet_driver_publish_build_facts(load, build_facts) -> return jet_driver_compile_internal_result(load, trace, "the folded native BuildFactSnapshot producer is unavailable")
     if request.trace_sink == .Val(sink) -> sink.begin("register", "", -1, -1)
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,

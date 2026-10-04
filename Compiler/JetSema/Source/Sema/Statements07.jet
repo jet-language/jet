@@ -1,1707 +1,770 @@
-// PORT-PENDING 0373 crates-jet-sema-src-sema-checkercore-statements-module-group-slice-3781: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3781-4098
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
-//RS     match kind {
-//RS         ForKind::Range {
-//RS             start,
-//RS             end,
-//RS             step,
-//RS             exclusive,
-//RS         } => {
-//RS             let Expr::Int(start, _, _, _) = start else {
-//RS                 return None;
-//RS             };
-//RS             let Expr::Int(end, _, _, _) = end else {
-//RS                 return None;
-//RS             };
-//RS             let step = match step {
-//RS                 Some(Expr::Int(step, _, _, _)) if *step > 0 => *step as i128,
-//RS                 None => 1,
-//RS                 _ => return None,
-//RS             };
-//RS             // Inclusive `a..b` is empty when b < a; exclusive `a..<b` when a >= b.
-//RS             if *exclusive {
-//RS                 if *end <= *start {
-//RS                     return Some(0);
-//RS                 }
-//RS                 let iterations = ((*end as i128 - *start as i128) + step - 1) / step;
-//RS                 return u64::try_from(iterations).ok();
-//RS             }
-//RS             if end < start {
-//RS                 return Some(0);
-//RS             }
-//RS             let iterations = ((*end as i128 - *start as i128) / step) + 1;
-//RS             u64::try_from(iterations).ok()
-//RS         }
-//RS         ForKind::In {
-//RS             collection: Expr::ListLit(items, _),
-//RS             step,
-//RS         } => {
-//RS             let len = u64::try_from(items.len()).ok()?;
-//RS             let stride = match step {
-//RS                 Some(Expr::Int(stride, _, _, _)) if *stride > 0 => *stride as u64,
-//RS                 None => 1,
-//RS                 _ => return None,
-//RS             };
-//RS             Some(len.div_ceil(stride))
-//RS         }
-//RS         ForKind::In { .. } => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-RANGE-EXCL1=C: only the exact shape `….len()` (no args) ends a range.
-//RS fn range_end_len_root(end: &Expr) -> Option<String> {
-//RS     match end {
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } if method == "len" && args.is_empty() => {
-//RS             collection_root_name(receiver).or_else(|| expr_root_ident(receiver).map(str::to_string))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// True when any statement in `body` indexes the named root with `index_var`.
-//RS fn stmts_index_root_with(body: &[Stmt], root: &str, index_var: &str) -> bool {
-//RS     body.iter()
-//RS         .any(|s| stmt_indexes_root_with(s, root, index_var))
-//RS }
-//RS 
-//RS fn stmt_indexes_root_with(stmt: &Stmt, root: &str, index_var: &str) -> bool {
-//RS     match stmt {
-//RS         Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } | Stmt::Return(Some(e), _) => {
-//RS             expr_indexes_root_with(e, root, index_var)
-//RS         }
-//RS         Stmt::Val(b) => expr_indexes_root_with(&b.init, root, index_var),
-//RS         Stmt::Assign { target, value, .. } => {
-//RS             lvalue_indexes_root_with(target, root, index_var)
-//RS                 || expr_indexes_root_with(value, root, index_var)
-//RS         }
-//RS         Stmt::While { cond, body, .. } => {
-//RS             expr_indexes_root_with(cond, root, index_var)
-//RS                 || stmts_index_root_with(body, root, index_var)
-//RS         }
-//RS         Stmt::For { kind, body, .. } => {
-//RS             let kind_hits = match kind {
-//RS                 ForKind::Range {
-//RS                     start, end, step, ..
-//RS                 } => {
-//RS                     expr_indexes_root_with(start, root, index_var)
-//RS                         || expr_indexes_root_with(end, root, index_var)
-//RS                         || step
-//RS                             .as_ref()
-//RS                             .is_some_and(|s| expr_indexes_root_with(s, root, index_var))
-//RS                 }
-//RS                 ForKind::In { collection, step } => {
-//RS                     expr_indexes_root_with(collection, root, index_var)
-//RS                         || step
-//RS                             .as_ref()
-//RS                             .is_some_and(|s| expr_indexes_root_with(s, root, index_var))
-//RS                 }
-//RS             };
-//RS             kind_hits || stmts_index_root_with(body, root, index_var)
-//RS         }
-//RS         Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => {
-//RS             stmts_index_root_with(body, root, index_var)
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             expr_indexes_root_with(&init.init, root, index_var)
-//RS                 || expr_indexes_root_with(cond, root, index_var)
-//RS                 || step
-//RS                     .as_ref()
-//RS                     .is_some_and(|s| stmt_indexes_root_with(s, root, index_var))
-//RS                 || stmts_index_root_with(body, root, index_var)
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             expr_indexes_root_with(subject, root, index_var)
-//RS                 || arms.iter().any(|a| {
-//RS                     expr_indexes_root_with(&a.cond, root, index_var)
-//RS                         || stmts_index_root_with(&a.body, root, index_var)
-//RS                 })
-//RS                 || else_body
-//RS                     .as_ref()
-//RS                     .is_some_and(|b| stmts_index_root_with(b, root, index_var))
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn lvalue_indexes_root_with(lv: &LValue, root: &str, index_var: &str) -> bool {
-//RS     match lv {
-//RS         LValue::Index { base, index, .. } => {
-//RS             (expr_root_ident(base) == Some(root) && expr_is_ident(index, index_var))
-//RS                 || expr_indexes_root_with(base, root, index_var)
-//RS                 || expr_indexes_root_with(index, root, index_var)
-//RS         }
-//RS         LValue::Local { .. } => false,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn expr_is_ident(expr: &Expr, name: &str) -> bool {
-//RS     matches!(expr, Expr::Ident(n, _) if n == name)
-//RS }
-//RS 
-//RS fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
-//RS     match expr {
-//RS         Expr::Index { base, index, .. } => {
-//RS             (expr_root_ident(base) == Some(root) && expr_is_ident(index, index_var))
-//RS                 || expr_indexes_root_with(base, root, index_var)
-//RS                 || expr_indexes_root_with(index, root, index_var)
-//RS         }
-//RS         Expr::Str(parts, _) => parts.iter().any(|p| match p {
-//RS             StrPart::Interp(inner, _) => expr_indexes_root_with(inner, root, index_var),
-//RS             StrPart::Lit(_) => false,
-//RS         }),
-//RS         Expr::Call(c) => c
-//RS             .args
-//RS             .iter()
-//RS             .any(|a| expr_indexes_root_with(&a.expr, root, index_var)),
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             expr_indexes_root_with(callee, root, index_var)
-//RS                 || args
-//RS                     .iter()
-//RS                     .any(|a| expr_indexes_root_with(&a.expr, root, index_var))
-//RS         }
-//RS         Expr::MethodCall { receiver, args, .. } => {
-//RS             expr_indexes_root_with(receiver, root, index_var)
-//RS                 || args
-//RS                     .iter()
-//RS                     .any(|a| expr_indexes_root_with(&a.expr, root, index_var))
-//RS         }
-//RS         Expr::Field(inner, _, _)
-//RS         | Expr::Spread(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Place(inner, _, _)
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Tainted(inner, _, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _) => expr_indexes_root_with(inner, root, index_var),
-//RS         Expr::Try(inner, _, _, note) => {
-//RS             expr_indexes_root_with(inner, root, index_var)
-//RS                 || note
-//RS                     .as_deref()
-//RS                     .is_some_and(|note| expr_indexes_root_with(note, root, index_var))
-//RS         }
-//RS         Expr::Binary(_, left, right, _) => {
-//RS             expr_indexes_root_with(left, root, index_var)
-//RS                 || expr_indexes_root_with(right, root, index_var)
-//RS         }
-//RS         Expr::ListLit(items, _) => items
-//RS             .iter()
-//RS             .any(|e| expr_indexes_root_with(e, root, index_var)),
-//RS         Expr::TupleLit(items, _, _) => items
-//RS             .iter()
-//RS             .any(|(_, e)| expr_indexes_root_with(e, root, index_var)),
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             expr_indexes_root_with(base, root, index_var)
-//RS                 || range.as_deref().map_or_else(
-//RS                     || {
-//RS                         expr_indexes_root_with(start, root, index_var)
-//RS                             || expr_indexes_root_with(end, root, index_var)
-//RS                     },
-//RS                     |range| expr_indexes_root_with(range, root, index_var),
-//RS                 )
-//RS         }
-//RS         Expr::OrFallback { value, .. } => expr_indexes_root_with(value, root, index_var),
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             expr_indexes_root_with(cond, root, index_var)
-//RS                 || stmts_index_root_with(then_body, root, index_var)
-//RS                 || expr_indexes_root_with(then_value, root, index_var)
-//RS                 || stmts_index_root_with(else_body, root, index_var)
-//RS                 || expr_indexes_root_with(else_value, root, index_var)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// S17 / L0503: `place = place op rhs` → prefer `place op= rhs`.
-//RS /// Indexed places are excluded (compound assign there is E0164).
-//RS fn prefer_compound_assign(
-//RS     target: &LValue,
-//RS     value: &Expr,
-//RS ) -> Option<(String, crate::AST::BinOp, &'static str)> {
-//RS     if matches!(target, LValue::Index { .. }) {
-//RS         return None;
-//RS     }
-//RS     let Expr::Binary(op, left, _right, _) = value.without_parens() else {
-//RS         return None;
-//RS     };
-//RS     let compound = op.compound_spell()?;
-//RS     if !lvalue_same_place(target, left) {
-//RS         return None;
-//RS     }
-//RS     Some((lvalue_spell(target)?, *op, compound))
-//RS }
-//RS 
-//RS fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
-//RS     match (lv, expr.without_parens()) {
-//RS         (LValue::Local { name, .. }, Expr::Ident(n, _)) => name == n,
-//RS         (LValue::Field { base, field, .. }, Expr::Field(b, f, _)) => {
-//RS             field == f && expr_same_place(base, b)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn expr_same_place(a: &Expr, b: &Expr) -> bool {
-//RS     match (a.without_parens(), b.without_parens()) {
-//RS         (Expr::Ident(n1, _), Expr::Ident(n2, _)) => n1 == n2,
-//RS         (Expr::Field(b1, f1, _), Expr::Field(b2, f2, _)) => f1 == f2 && expr_same_place(b1, b2),
-//RS         (
-//RS             Expr::Index {
-//RS                 base: b1,
-//RS                 index: i1,
-//RS                 ..
-//RS             },
-//RS             Expr::Index {
-//RS                 base: b2,
-//RS                 index: i2,
-//RS                 ..
-//RS             },
-//RS         ) => expr_same_place(b1, b2) && expr_same_place(i1, i2),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn lvalue_spell(lv: &LValue) -> Option<String> {
-//RS     match lv {
-//RS         LValue::Local { name, .. } => Some(name.clone()),
-//RS         LValue::Field { base, field, .. } => Some(format!("{}.{}", expr_place_spell(base)?, field)),
-//RS         LValue::Index { .. } => None,
-//RS     }
-//RS }
-//RS 
-//RS fn expr_place_spell(expr: &Expr) -> Option<String> {
-//RS     match expr.without_parens() {
-//RS         Expr::Ident(name, _) => Some(name.clone()),
-//RS         Expr::Field(base, field, _) => Some(format!("{}.{}", expr_place_spell(base)?, field)),
-//RS         Expr::Index { base, index, .. } => Some(format!(
-//RS             "{}[{}]",
-//RS             expr_place_spell(base)?,
-//RS             expr_place_spell(index).unwrap_or_else(|| "…".to_string())
-//RS         )),
-//RS         _ => None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0373 crates/jet-sema/src/Sema/CheckerCore/statements.rs:3781-4098
+// Private continuation of Sema.Statements; registration and bundle pipeline helpers.
+use jet_foundation.[Expr, Stmt, LValue, ForKind, StrPart, Type, BinOp, Span, Diagnostic, Severity, AccessConvention, CallArg, CallArgFlags, ParamZone, FuncSig, Call, ViewProvenanceCell, CallablePolicyChain, Item, ImplDef, TestDef, FactDecl, Func, ImportDecl, ForeignNamespace, ProgramBundle, CanonicalPass]
+use jet_foundation.[Syntax, CoreModuleExports, PackageEdition, CompilerStack, Registry]
+use jet_sema.Sema.[Checker, ModuleState, CompileMode, IncrementalSemaCache, json_ty, effect_row_var, parse_effect_name]
+use jet_sema.Sema.Diagnostics.[expr_root_ident, collection_root_name, type_fix_hint, builtin_type_from_ident]
+use jet_sema.Sema.CheckerCoreLib.alloc_ptrs.[e3101, ptr_type]
+use jet_sema.Sema.CheckerCoreLib.serde_diags.[unknown_core_item]
+use jet_sema.Sema.CheckerCoreLib.[core_type_known, is_math_type]
+use jet_sema.Sema.Bundle.[fn_types_compatible, name_defined, defined_twice, register_enum]
+use jet_sema.Sema.Bundle.Completion.[complete_bundle_check]
+use jet_sema.Sema.Bundle.ImplHeads.[normalize_qualified_impl_heads]
+use jet_sema.Sema.Bundle.InlineImports.[resolve_inline_module_imports]
+use jet_sema.Sema.Bundle.CheckInner.[check_bundle_opts_for_output_inner]
+use jet_sema.Sema.CheckerValidate.[process_validate_blocks]
+use jet_sema.Sema.Registration.[comptime_context_from_items]
+use jet_sema.Sema.ScopeMembers.[statement_bodies]
+use jet_sema.Sema.CallBinder.[BindParam, bind_call_args]
+use jet_sema.Sema.Effects.[SemIndexEffectFacts]
+use jet_sema.Policy.[GateSet]
+use jet_comptime.[expand_template_body, ambient_runtime_snapshot, with_ambient_runtime_snapshot, ambient_hooks, with_ambient]
+use jet_lexer.[terminator_driver, with_terminator_driver]
+use jet_collections.[is_reserved_type]
 
-// PORT-PENDING 0373 crates-jet-sema-src-sema-checkercore-statements-module-group-slice-3781: crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs:1-190
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::alloc_ptrs::{e3101, ptr_type};
-//RS use super::serde_diags::unknown_core_item;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Sema::{json_ty, Checker};
-//RS use crate::Syntax;
-//RS use crate::AST::{Expr, Type};
-//RS impl<'a> Checker<'a> {
-//RS     pub(crate) fn infer_core_field(
-//RS         &mut self,
-//RS         alias: &str,
-//RS         module: &str,
-//RS         name: &str,
-//RS         alias_span: Span,
-//RS         span: Span,
-//RS     ) -> Option<Type> {
-//RS         // Direct type imports (`use core.encoding.[DataTree, DataEvent]`)
-//RS         // bind the type name as an alias to the owning Core module. Resolve
-//RS         // its constructors here instead of treating `DataTree.Text` as a
-//RS         // module item lookup.
-//RS         if module == "core.encoding"
-//RS             && alias == "DataTree"
-//RS             && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object")
-//RS         {
-//RS             self.record_import_alias_reference(alias, alias_span);
-//RS             return Some(json_ty());
-//RS         }
-//RS         if module == "core.encoding"
-//RS             && matches!(alias, "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-//RS             && self
-//RS                 .resolve_enum_variants_cloned(alias)
-//RS                 .is_some_and(|variants| variants.contains_key(name))
-//RS         {
-//RS             self.record_import_alias_reference(alias, alias_span);
-//RS             return Some(Type::Named(alias.to_string()));
-//RS         }
-//RS         // Canonical Core enum imports (`use core.compute.[ComputeError]`,
-//RS         // etc.) keep the imported item alongside its module alias. Resolve
-//RS         // dotted variants through the generated leaf-kind/variant tables
-//RS         // rather than treating the variant as a module member.
-//RS         if let Some(item) = self.core_item_imports.get(alias).cloned() {
-//RS             let is_core_enum = matches!(
-//RS                 jet_foundation::CoreModuleExports::core_leaf_kind(module, &item),
-//RS                 Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
-//RS             );
-//RS             if is_core_enum
-//RS                 && self
-//RS                     .resolve_enum_variants_cloned(&item)
-//RS                     .is_some_and(|variants| variants.contains_key(name))
-//RS             {
-//RS                 self.record_import_alias_reference(alias, alias_span);
-//RS                 return Some(Type::Named(item));
-//RS             }
-//RS         }
-//RS 
-//RS         let result = match (module, name) {
-//RS             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
-//RS             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,
-//RS             // `mem.Pool`, `mem.Fixed` — accessed as a field on the `core.mem` alias,
-//RS             // then `.new()` is called on the sentinel type to construct the allocator.
-//RS             ("core.mem", "Arena") => Some(Type::Named(Syntax::MEM_ARENA.to_string())),
-//RS             ("core.mem", "Bump") => Some(Type::Named(Syntax::MEM_BUMP.to_string())),
-//RS             ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
-//RS             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
-//RS             ("core.mem", "AllocError") => Some(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-//RS             // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
-//RS             ("core.compute.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
-//RS             // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
-//RS             // `game.Replay.record` and `game.Backend.headless`.
-//RS             ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),
-//RS             ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
-//RS             ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
-//RS             ("core.net.tls", "ClientConfig") => {
-//RS                 Some(Type::Named("TLSClientConfigType".to_string()))
-//RS             }
-//RS             ("core.http.client", "Client") => Some(Type::Named("HTTPClientType".to_string())),
-//RS             ("core.http.client", "Proxy") => Some(Type::Named("HTTPProxy".to_string())),
-//RS             ("core.http.client", "RedirectPolicy") => {
-//RS                 Some(Type::Named("HTTPRedirectPolicy".to_string()))
-//RS             }
-//RS             ("core.http.client", "CookieJar") => Some(Type::Named("HTTPCookieJar".to_string())),
-//RS             ("core.net.tls", "RootCertificates") => {
-//RS                 Some(Type::Named("TLSRootCertificatesType".to_string()))
-//RS             }
-//RS             ("core.net.tls", "ClientIdentity") => {
-//RS                 Some(Type::Named("TLSClientIdentityType".to_string()))
-//RS             }
-//RS             ("core.net.tls", "TLSVersion") => Some(Type::Named("TLSVersion".to_string())),
-//RS             // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
-//RS             ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
-//RS             // D-ENCSTREAM-SURFACE1=A: shared encoding values are module fields on
-//RS             // `core.encoding`, then unit/payload constructors attach as Field/Call.
-//RS             ("core.encoding", "DataEvent") => Some(Type::Named("DataEvent".to_string())),
-//RS             ("core.encoding", "EncodingLimits") => Some(Type::Named("EncodingLimits".to_string())),
-//RS             ("core.encoding", "EncodingError") => Some(Type::Named("EncodingError".to_string())),
-//RS             ("core.encoding", "EncodingCause") => Some(Type::Named("EncodingCause".to_string())),
-//RS             ("core.encoding", "EncodingErrorKind") => {
-//RS                 Some(Type::Named("EncodingErrorKind".to_string()))
-//RS             }
-//RS             ("core.encoding", "EncodingFormat") => {
-//RS                 Some(Type::Named("EncodingFormat".to_string()))
-//RS             }
-//RS             ("core.encoding.json", "JSONReader" | "JSONWriter") => {
-//RS                 Some(Type::Named(name.to_string()))
-//RS             }
-//RS             ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") => {
-//RS                 Some(Type::Named(name.to_string()))
-//RS             }
-//RS             ("core.encoding.csv", "CSVReader" | "CSVWriter" | "CSVRow") => {
-//RS                 Some(Type::Named(name.to_string()))
-//RS             }
-//RS             ("core.encoding.xml", "XMLReader" | "XMLWriter") => Some(Type::Named(name.to_string())),
-//RS             ("core.encoding.cbor", "CBORReader" | "CBORWriter") => {
-//RS                 Some(Type::Named(name.to_string()))
-//RS             }
-//RS             _ => {
-//RS                 self.diags.push(unknown_core_item(module, name, span));
-//RS                 let _ = alias_span;
-//RS                 None
-//RS             }
-//RS         };
-//RS         if result.is_some() {
-//RS             self.record_import_alias_reference(alias, alias_span);
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`
-//RS     /// (E3102) and an enclosing `#Unsafe` block (E3101). Returns `Ptr<T>`.
-//RS     pub(crate) fn infer_ptr_from_addr(
-//RS         &mut self,
-//RS         alias: &str,
-//RS         alias_span: Span,
-//RS         elem: &Type,
-//RS         addr: &mut Expr,
-//RS         span: Span,
-//RS     ) -> Option<Type> {
-//RS         // E3102: the discovery gate — the alias must be a `core.mem` import.
-//RS         let is_mem = self
-//RS             .core_imports
-//RS             .get(alias)
-//RS             .map(|m| m == Syntax::CORE_MEM_MODULE)
-//RS             .unwrap_or(false);
-//RS         if !is_mem {
-//RS             self.diags.push(self.e3102(alias, alias_span));
-//RS             self.infer(addr);
-//RS             return None;
-//RS         }
-//RS         // E3101: pointer construction is a low-level operation; it needs the
-//RS         // audit gate.
-//RS         if Syntax::core_mem_requires_audit(Syntax::MEM_FROM_ADDR) && !self.in_unsafe {
-//RS             self.diags.push(e3101(Syntax::MEM_FROM_ADDR, span));
-//RS         }
-//RS         // The address is a plain Int.
-//RS         if let Some(t) = self.infer(addr) {
-//RS             if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     format!(
-//RS                         "`{}` needs an Int address, not {}",
-//RS                         Syntax::MEM_FROM_ADDR,
-//RS                         t.show()
-//RS                     ),
-//RS                     "a pointer is built from a numeric machine address".to_string(),
-//RS                     "pass an Int, e.g. from `mem.address_of(x)`".to_string(),
-//RS                     Some(addr.span()),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Some(ptr_type(elem.clone()))
-//RS     }
-//RS 
-//RS     /// E3102: a `core.mem` item was named without `use core.mem`.
-//RS     pub(crate) fn e3102(&self, alias: &str, span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E3102",
-//RS             format!("`{}` is part of the low-level tier", Syntax::TYPE_PTR),
-//RS             format!(
-//RS                 "naming `{}`, `{}`, or an allocator needs the discovery gate",
-//RS                 Syntax::TYPE_PTR,
-//RS                 Syntax::MEM_VOLATILE_READ
-//RS             ),
-//RS             format!(
-//RS                 "add `use {};` and call through `{}.…`",
-//RS                 Syntax::CORE_MEM_MODULE,
-//RS                 alias
-//RS             ),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS }
-// END-PORT-PENDING 0373 crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs:1-190
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3781
+pub fn statically_bounded_for_iterations(kind: ForKind) -> U64? {
+    return if kind == {
+        .Range(start, end, step, exclusive) -> {
+            if start != .Int(a, ..) -> return None
+            if end != .Int(b, ..) -> return None
+            stride: I128 :: if step == {
+                .Val(.Int(s, ..)) if s > 0 -> s as I128
+                .None -> 1
+                _ -> return None
+            }
+            if exclusive {
+                if b <= a -> return Val(0)
+                return U64.try_from(((b as I128 - a as I128) + stride - 1) / stride).ok()
+            }
+            if b < a -> return Val(0)
+            U64.try_from(((b as I128 - a as I128) / stride) + 1).ok()
+        }
+        .In(.ListLit(items, _), step) -> {
+            len :: U64.try_from(items.len()).ok()?
+            stride: U64 :: if step == {
+                .Val(.Int(s, ..)) if s > 0 -> s as U64
+                .None -> 1
+                _ -> return None
+            }
+            Val(len.div_ceil(stride))
+        }
+        .In(..) -> None
+    }
+}
 
-// PORT-PENDING 0373 crates-jet-sema-src-sema-checkercore-statements-module-group-slice-3781: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:1-415
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Sema::Bundle::fn_types_compatible;
-//RS use crate::Sema::Checker;
-//RS use crate::Sema::Diagnostics::type_fix_hint;
-//RS use crate::AST::{AccessConvention, Expr, StrPart, Type};
-//RS 
-//RS fn is_inline_compute_transform(checker: &Checker<'_>, expr: &Expr) -> bool {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) => is_inline_compute_transform(checker, inner),
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } if matches!(
-//RS             method.as_str(),
-//RS             "gradient" | "value_and_gradient" | "vjp" | "jvp"
-//RS         ) && checker
-//RS             .core_module_path_from_receiver(receiver)
-//RS             .is_some_and(|(module, _, _)| module == "core.compute")
-//RS             && args
-//RS                 .iter()
-//RS                 .skip(1)
-//RS                 .all(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == "wrt")) =>
-//RS         {
-//RS             true
-//RS         }
-//RS         Expr::CallValue { callee, .. } => is_inline_compute_transform(checker, callee),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
-//RS         crate::AST::CallArg {
-//RS             convention: AccessConvention::Read,
-//RS             expr: Expr::Str(vec![StrPart::Lit(value)], span),
-//RS             span,
-//RS             flags: Default::default(),
-//RS             label: None,
-//RS             spread: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn type_arg_name(t: &Type) -> String {
-//RS         match t {
-//RS             Type::Named(n) => n.clone(),
-//RS             Type::Apply { name, args } if args.is_empty() => name.clone(),
-//RS             _ => t.show(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(in crate::Sema::CheckerInfer) fn core_module_path_from_receiver(
-//RS         &self,
-//RS         receiver: &Expr,
-//RS     ) -> Option<(String, String, Span)> {
-//RS         match receiver {
-//RS             Expr::Ident(alias, span) if self.lookup(alias).is_none() => self
-//RS                 .core_imports
-//RS                 .get(alias)
-//RS                 .cloned()
-//RS                 .map(|module| (module, alias.clone(), *span)),
-//RS             Expr::Field(base, leaf, _) => {
-//RS                 let (module, alias, span) = self.core_module_path_from_receiver(base)?;
-//RS                 let submodule = format!("{module}.{leaf}");
-//RS                 crate::Syntax::is_known_core_module(&submodule).then_some((submodule, alias, span))
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_call_value(
-//RS         &mut self,
-//RS         callee: &mut Box<Expr>,
-//RS         args: &mut Vec<crate::AST::CallArg>,
-//RS         span: Span,
-//RS     ) -> Option<Type> {
-//RS         if is_inline_compute_transform(self, callee) {
-//RS             self.diags.push(Diagnostic::lint(
-//RS                     "L1141",
-//RS                     "an autodiff transform result is called inline".to_string(),
-//RS                     "the transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested".to_string(),
-//RS                     "bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`".to_string(),
-//RS                     Some(span),
-//RS                 ));
-//RS         }
-//RS         let inline_loop = matches!(
-//RS             callee.as_ref(),
-//RS             Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
-//RS         );
-//RS         let mut call_access = self.call_access_frame();
-//RS         let Some(callee_ty) = self.with_call_access(&mut call_access, |checker| {
-//RS             if !inline_loop {
-//RS                 checker.check_call_receiver_evaluation(callee, callee.span());
-//RS             }
-//RS             let saved_escapes = checker.lambda_escapes;
-//RS             if inline_loop {
-//RS                 checker.lambda_escapes = false;
-//RS             }
-//RS             let inferred = checker.infer(callee);
-//RS             checker.lambda_escapes = saved_escapes;
-//RS             if !inline_loop {
-//RS                 checker.check_call_argument_captures(callee);
-//RS             }
-//RS             inferred
-//RS         }) else {
-//RS             return None;
-//RS         };
-//RS         // D-CALLBACK-ABI: ordinary function values expose the effective
-//RS         // executable carrier at the call boundary. A collecting loop and an
-//RS         // open `(loop { … break value })` are immediately evaluated values
-//RS         // (TIR lowers them to an inline block of their source type), so keep
-//RS         // their inferred source type. A finite result loop retains the
-//RS         // effective carrier until its written `??` exhaustion route consumes
-//RS         // it (`infer_value_loop_fallback`).
-//RS         let callee_ty = if matches!(
-//RS             callee.as_ref(),
-//RS             Expr::Lambda(lam) if lam.meta.collecting_loop
-//RS                 || (lam.meta.result_loop && !lam.meta.requires_exhaustion_route)
-//RS         ) {
-//RS             callee_ty
-//RS         } else {
-//RS             callee_ty.with_effective_fn_returns()
-//RS         };
-//RS         let Type::Fn {
-//RS             params,
-//RS             ret,
-//RS             effect_bound,
-//RS             param_contract,
-//RS             call_metadata,
-//RS             ..
-//RS         } = callee_ty.clone()
-//RS         else {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0803",
-//RS                 format!("this is {}, not a function", callee_ty.show()),
-//RS                 "only a function value can be called with `.call(…)`".to_string(),
-//RS                 "call a defined `fn` by name, or store a lambda in a binding before `.call(…)`"
-//RS                     .to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             for a in args.iter_mut() {
-//RS                 self.infer(&mut a.expr);
-//RS             }
-//RS             return None;
-//RS         };
-//RS         if let Expr::Ident(name, _) = callee.as_ref() {
-//RS             if let Some(sig) = self.funcs.get(name).cloned() {
-//RS                 if let Some(dep) = sig.deprecation.as_ref() {
-//RS                     self.check_deprecation(name, dep, span);
-//RS                 }
-//RS                 self.check_foreign_transaction_call(&sig, name, span);
-//RS             }
-//RS         }
-//RS         match effect_bound {
-//RS             // A yielding loop uses a compiler-private immediately evaluated
-//RS             // carrier. Its body already records effects in the enclosing
-//RS             // context; it is not an unknown function-value call.
-//RS             _ if inline_loop => {}
-//RS             None if !matches!(
-//RS                 callee.as_ref(),
-//RS                 Expr::Ident(name, _)
-//RS                     if self.lookup(name).is_some_and(|info| info.param_conv.is_some())
-//RS             ) =>
-//RS             {
-//RS                 self.record_maximal(span);
-//RS             }
-//RS             None => {}
-//RS             Some(row) => {
-//RS                 for (effect, _) in row {
-//RS                     if crate::Sema::effect_row_var(&effect).is_none()
-//RS                         && crate::Sema::parse_effect_name(&effect).is_some()
-//RS                     {
-//RS                         self.record_effect(&effect, span);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-APILABEL1=A: every function value call goes through the one
-//RS         // binder. An absent contract is an unlabelled function type, so
-//RS         // the empty contract still rejects a written label as E0764 while
-//RS         // leaving bare arguments in their ordinary positional shape.
-//RS         let metadata = call_metadata.as_ref();
-//RS         let bind: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..params.len())
-//RS             .map(|index| {
-//RS                 let (label, zone) = param_contract
-//RS                     .as_deref()
-//RS                     .and_then(|contract| contract.get(index))
-//RS                     .map(|(label, zone)| (label.as_str(), *zone))
-//RS                     .unwrap_or(("", crate::AST::ParamZone::Either));
-//RS                 crate::Sema::CallBinder::BindParam {
-//RS                     label,
-//RS                     name: metadata
-//RS                         .and_then(|meta| meta.names.get(index))
-//RS                         .map(String::as_str)
-//RS                         .unwrap_or(label),
-//RS                     zone,
-//RS                     default: metadata
-//RS                         .and_then(|meta| meta.defaults.get(index))
-//RS                         .and_then(|default| default.as_ref()),
-//RS                     convention: metadata
-//RS                         .and_then(|meta| meta.conventions.get(index))
-//RS                         .copied()
-//RS                         .unwrap_or(AccessConvention::Read),
-//RS                     ty: params.get(index),
-//RS                     variadic: metadata
-//RS                         .and_then(|meta| meta.variadic.get(index))
-//RS                         .copied()
-//RS                         .unwrap_or(false),
-//RS                     core_default: None,
-//RS                 }
-//RS             })
-//RS             .collect();
-//RS         let callee_name = match callee.as_ref() {
-//RS             Expr::Ident(name, _) => name.clone(),
-//RS             _ => "this function value".to_string(),
-//RS         };
-//RS         let bound = crate::Sema::CallBinder::bind_call_args(
-//RS             &callee_name,
-//RS             &bind,
-//RS             args,
-//RS             span,
-//RS             &mut self.diags,
-//RS         );
-//RS         self.register_binder_refs(args);
-//RS         if bound.is_none() {
-//RS             for arg in args.iter_mut() {
-//RS                 self.infer(&mut arg.expr);
-//RS             }
-//RS             return ret.map(|r| *r);
-//RS         }
-//RS         if metadata.is_some_and(|meta| meta.variadic.last().copied().unwrap_or(false)) {
-//RS             let fake_sig = crate::AST::FuncSig {
-//RS                 params: params
-//RS                     .iter()
-//RS                     .cloned()
-//RS                     .enumerate()
-//RS                     .map(|(index, ty)| {
-//RS                         (
-//RS                             metadata
-//RS                                 .and_then(|meta| meta.conventions.get(index))
-//RS                                 .copied()
-//RS                                 .unwrap_or(AccessConvention::Read),
-//RS                             ty,
-//RS                         )
-//RS                     })
-//RS                     .collect(),
-//RS                 root_param: false,
-//RS                 return_type: ret.as_deref().cloned(),
-//RS                 deprecation: None,
-//RS                 return_view_provenance: crate::AST::ViewProvenanceCell::new(),
-//RS                 is_extern: false,
-//RS                 is_unsafe: false,
-//RS                 is_pure: false,
-//RS                 memo_bound: None,
-//RS                 is_foreign_thread_safe: false,
-//RS                 is_sanitizer: false,
-//RS                 is_must_use: false,
-//RS                 is_c_abi: false,
-//RS                 c_abi_name: None,
-//RS                 callback_transport: None,
-//RS                 callback_plan_digest: None,
-//RS                 callback_identity: None,
-//RS                 foreign_effect_root: None,
-//RS                 undo: None,
-//RS                 param_info: (0..params.len())
-//RS                     .map(|index| {
-//RS                         (
-//RS                             metadata
-//RS                                 .and_then(|meta| meta.names.get(index))
-//RS                                 .cloned()
-//RS                                 .or_else(|| {
-//RS                                     param_contract
-//RS                                         .as_deref()
-//RS                                         .and_then(|contract| contract.get(index))
-//RS                                         .map(|(label, _)| label.clone())
-//RS                                 })
-//RS                                 .unwrap_or_default(),
-//RS                             metadata
-//RS                                 .and_then(|meta| meta.defaults.get(index))
-//RS                                 .is_some_and(|default| default.is_some()),
-//RS                         )
-//RS                     })
-//RS                     .collect(),
-//RS                 param_call: param_contract.clone().unwrap_or_default(),
-//RS                 defaults: metadata
-//RS                     .map(|meta| meta.defaults.clone())
-//RS                     .unwrap_or_else(|| vec![None; params.len()]),
-//RS                 param_variadic: metadata
-//RS                     .map(|meta| meta.variadic.clone())
-//RS                     .unwrap_or_else(|| vec![false; params.len()]),
-//RS                 variadic_bounds: None,
-//RS                 param_view_from_names: Vec::new(),
-//RS                 callable_policies: crate::AST::CallablePolicyChain::default(),
-//RS             };
-//RS             let mut packed = crate::AST::Call {
-//RS                 name: callee_name.clone(),
-//RS                 name_span: span,
-//RS                 type_args: Vec::new(),
-//RS                 args: std::mem::take(args),
-//RS                 resolved_ret: None,
-//RS                 range_checked: false,
-//RS                 widen_approx: false,
-//RS             };
-//RS             self.normalize_variadic_call(&mut packed, &fake_sig);
-//RS             *args = packed.args;
-//RS         }
-//RS         if args.len() != params.len() {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0104",
-//RS                 format!(
-//RS                     "this function wants {} argument{}, got {}",
-//RS                     params.len(),
-//RS                     if params.len() == 1 { "" } else { "s" },
-//RS                     args.len()
-//RS                 ),
-//RS                 "every argument must match a parameter".to_string(),
-//RS                 "check how many values this function expects".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         for (i, arg) in args.iter_mut().enumerate() {
-//RS             if let Some(param_ty) = params.get(i) {
-//RS                 let param_convention = metadata
-//RS                     .and_then(|meta| meta.conventions.get(i))
-//RS                     .copied()
-//RS                     .unwrap_or(AccessConvention::Read);
-//RS                 let saved = self.expected_type.clone();
-//RS                 let saved_borrow = self.borrow_ctx;
-//RS                 self.expected_type = Some(param_ty.clone());
-//RS                 // A `&name` argument grants the place itself, and a write
-//RS                 // parameter is a borrow slot; never copy either.
-//RS                 self.borrow_ctx = arg.convention == AccessConvention::Write
-//RS                     || param_convention == AccessConvention::Write
-//RS                     || (param_convention == AccessConvention::Read && !param_ty.is_scalar());
-//RS                 let got = self.with_call_access(&mut call_access, |checker| {
-//RS                     checker.check_call_argument_access(arg, param_convention, param_ty, true);
-//RS                     let inferred = checker.infer(&mut arg.expr);
-//RS                     checker.check_call_argument_captures(&arg.expr);
-//RS                     inferred
-//RS                 });
-//RS                 self.expected_type = saved;
-//RS                 self.borrow_ctx = saved_borrow;
-//RS                 if let Some(got) = got {
-//RS                     let got =
-//RS                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
-//RS                     let got =
-//RS                         self.lift_optional_argument(&mut arg.expr, got, param_ty, param_convention);
-//RS                     let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
-//RS                     let callable_shape_compatible = matches!(param_ty, Type::Fn { .. })
-//RS                         && matches!(&got, Type::Fn { .. })
-//RS                         && fn_types_compatible(param_ty, &got);
-//RS                     // An absent contract is structurally unconstrained, but it
-//RS                     // cannot satisfy an explicit positional-only or label-only
-//RS                     // requirement. Keep this in sync with the E0771 guard in
-//RS                     // `check_type_assignable` for the function-value-call path.
-//RS                     let missing_strict_contract = callable_shape_compatible
-//RS                         && matches!(
-//RS                             (param_ty, &got),
-//RS                             (
-//RS                                 Type::Fn {
-//RS                                     param_contract: Some(required),
-//RS                                     ..
-//RS                                 },
-//RS                                 Type::Fn {
-//RS                                     param_contract: None,
-//RS                                     ..
-//RS                                 }
-//RS                             ) if required.iter().any(|(_, zone)| matches!(
-//RS                                 zone,
-//RS                                 crate::AST::ParamZone::PositionalOnly
-//RS                                     | crate::AST::ParamZone::LabelOnly
-//RS                             ))
-//RS                         );
-//RS                     let callable_compatible = callable_shape_compatible
-//RS                         && Type::obligations_satisfy(param_ty, &got)
-//RS                         && !missing_strict_contract;
-//RS                     if boxes_as_trait {
-//RS                         self.note_move_if_direct_ident(&arg.expr, "the call");
-//RS                     }
-//RS                     let type_mismatch =
-//RS                         if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
-//RS                             !callable_compatible
-//RS                         } else {
-//RS                             !Type::compute_tensor_compatible(param_ty, &got)
-//RS                         };
-//RS                     if type_mismatch && !boxes_as_trait {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!(
-//RS                                 "argument {} should be {}, not {}",
-//RS                                 i + 1,
-//RS                                 param_ty.show(),
-//RS                                 got.show()
-//RS                             ),
-//RS                             "every argument must match its parameter's type".to_string(),
-//RS                             type_fix_hint(param_ty, &got),
-//RS                             Some(arg.expr.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 self.check_callable_argument_ownership(
-//RS                     &callee_name,
-//RS                     i,
-//RS                     param_convention,
-//RS                     param_ty,
-//RS                     arg,
-//RS                 );
-//RS             } else {
-//RS                 self.infer(&mut arg.expr);
-//RS             }
-//RS         }
-//RS         ret.map(|r| *r)
-//RS     }
-//RS }
-// END-PORT-PENDING 0373 crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:1-415
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3831
+pub fn range_end_len_root(end: Expr) -> String? {
+    return if end == {
+        .MethodCall{receiver, method, args, ..} if method == "len" && args.is_empty() ->
+            collection_root_name(receiver).or_else(() -> expr_root_ident(receiver).map(name -> ~name))
+        _ -> None
+    }
+}
 
-// PORT-PENDING 0373 crates-jet-sema-src-sema-checkercore-statements-module-group-slice-3781: crates/jet-sema/src/Sema/Bundle/Parallel.rs:1-56
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Parallel sema work: a bounded pool of compiler-stack workers that see the
-//RS //! same thread-local compiler context as the checking thread.
-//RS //!
-//RS //! Callers hand in independent jobs and get the results back in job order,
-//RS //! then merge them serially in source order. That keeps every diagnostic,
-//RS //! fact and checked body identical to a serial run; `JET_CHECK_THREADS=1`
-//RS //! runs the same jobs inline, in order, for debugging and for comparing the
-//RS //! two.
-//RS 
-//RS /// Default upper bound on sema workers. Each worker holds a full checker and
-//RS /// may lower whole-module comptime fragments, so the peak grows with the
-//RS /// worker count; `JET_CHECK_THREADS` sets a different count explicitly.
-//RS const MAX_CHECK_WORKERS: usize = 8;
-//RS 
-//RS /// Workers for `jobs` independent jobs: `JET_CHECK_THREADS` when set to a
-//RS /// positive number, otherwise the machine's available parallelism, capped by
-//RS /// the job count and `MAX_CHECK_WORKERS`. The setting only changes how the
-//RS /// work is scheduled, never its result, so it is read directly rather than
-//RS /// through `CheckReads` (it is not an input of the checked program).
-//RS pub(crate) fn check_worker_count(jobs: usize) -> usize {
-//RS     let requested = std::env::var("JET_CHECK_THREADS")
-//RS         .ok()
-//RS         .and_then(|value| value.trim().parse::<usize>().ok())
-//RS         .filter(|threads| *threads > 0);
-//RS     let threads = requested.unwrap_or_else(|| {
-//RS         std::thread::available_parallelism()
-//RS             .map(std::num::NonZeroUsize::get)
-//RS             .unwrap_or(1)
-//RS             .min(MAX_CHECK_WORKERS)
-//RS     });
-//RS     threads.min(jobs).max(1)
-//RS }
-//RS 
-//RS /// Run `work` on every job with `check_worker_count` workers and return the
-//RS /// results in job order. Each worker runs with the checking thread's package
-//RS /// edition, comptime ambient hooks and terminator-pass driver, the
-//RS /// thread-local context body checking reads.
-//RS pub(crate) fn map_checked<T: Send, R: Send>(
-//RS     jobs: Vec<T>,
-//RS     work: impl Fn(T) -> R + Sync,
-//RS ) -> Vec<R> {
-//RS     let workers = check_worker_count(jobs.len());
-//RS     if workers <= 1 {
-//RS         return jobs.into_iter().map(work).collect();
-//RS     }
-//RS     let edition = jet_foundation::PackageEdition::package_edition();
-//RS     let ambient = crate::Comptime::ambient_runtime_snapshot();
-//RS     let terminator_driver = crate::Lexer::terminator_driver();
-//RS     jet_foundation::CompilerStack::map_on_compiler_workers(jobs, workers, |job| {
-//RS         jet_foundation::PackageEdition::with_package_edition(&edition, || {
-//RS             crate::Lexer::with_terminator_driver(terminator_driver.clone(), || {
-//RS                 crate::Comptime::with_ambient_runtime_snapshot(ambient.clone(), || work(job))
-//RS             })
-//RS         })
-//RS     })
-//RS }
-// END-PORT-PENDING 0373 crates/jet-sema/src/Sema/Bundle/Parallel.rs:1-56
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3846
+pub fn stmts_index_root_with(body: [Stmt], root: String, index_var: String) -> Bool {
+    return body.iter().any(s -> stmt_indexes_root_with(s, root, index_var))
+}
 
-// PORT-PENDING 0373 crates-jet-sema-src-sema-checkercore-statements-module-group-slice-3781: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:1-708
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use jet_foundation::CanonicalPass;
-//RS use super::super::CheckerValidate::process_validate_blocks;
-//RS 
-//RS mod Completion;
-//RS mod FailureUnion;
-//RS mod ImplHeads;
-//RS mod InlineImports;
-//RS use Completion::complete_bundle_check;
-//RS use ImplHeads::normalize_qualified_impl_heads;
-//RS use InlineImports::resolve_inline_module_imports;
-//RS 
-//RS /// D-STRUCT-ONCE1=A: expand root declaration loops through the same typed
-//RS /// comptime body used by derives and marker declarations. The expansion is
-//RS /// deliberately before registration, so every generated impl, conversion,
-//RS /// and test is an ordinary item for the rest of sema.
-//RS fn expand_item_template_loops(
-//RS     items: &mut Vec<Item>,
-//RS     base_dir: &std::path::Path,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     if !items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::TemplateLoop(_)))
-//RS     {
-//RS         return;
-//RS     }
-//RS     let (funcs_owned, _externs, globals) =
-//RS         super::super::Registration::comptime_context_from_items(items);
-//RS     let funcs = funcs_owned
-//RS         .iter()
-//RS         .map(|(name, function)| (name.clone(), function))
-//RS         .collect::<HashMap<_, _>>();
-//RS     let source_items = std::mem::take(items);
-//RS     let mut expanded_items = Vec::with_capacity(source_items.len());
-//RS     for item in source_items {
-//RS         let Item::TemplateLoop(loop_item) = item else {
-//RS             expanded_items.push(item);
-//RS             continue;
-//RS         };
-//RS         let template = crate::AST::DeriveBodyItem::Loop {
-//RS             var: loop_item.var,
-//RS             var_span: loop_item.var_span,
-//RS             source: loop_item.source,
-//RS             body: loop_item.body,
-//RS             span: loop_item.span,
-//RS         };
-//RS         match crate::Comptime::expand_template_body(
-//RS             std::slice::from_ref(&template),
-//RS             &globals,
-//RS             &funcs,
-//RS             base_dir,
-//RS         ) {
-//RS             Ok(generated) => expanded_items.extend(generated),
-//RS             Err(diagnostic) => diags.push(diagnostic),
-//RS         }
-//RS     }
-//RS     *items = expanded_items;
-//RS }
-//RS 
-//RS /// E0301: an `impl` names a type this program cannot extend. The header echoes
-//RS /// what the user wrote (`impl Money.Mul`, not `impl Money`); the Why and Fix
-//RS /// separate a built-in target, which never takes user methods (D-OPDEF1; an
-//RS /// operator hook on a built-in type belongs to the package that declares the
-//RS /// other operand type, D-OPMIX1), from a name that is simply not declared.
-//RS fn e0301_impl_target(i: &crate::AST::ImplDef) -> Diagnostic {
-//RS     let type_name = i.type_name.as_str();
-//RS     let header = match &i.trait_name {
-//RS         Some(trait_name) => format!("{type_name}.{trait_name}"),
-//RS         None => type_name.to_string(),
-//RS     };
-//RS     let (leaf_ns, leaf) = type_name
-//RS         .rsplit_once('.')
-//RS         .map_or((None, type_name), |(ns, leaf)| (Some(ns), leaf));
-//RS     let built_in = leaf_ns.is_none()
-//RS         && (crate::Sema::Diagnostics::builtin_type_from_ident(leaf).is_some()
-//RS             || crate::Sema::CheckerCoreLib::core_type_known(leaf)
-//RS             || crate::Sema::CheckerCoreLib::is_math_type(leaf)
-//RS             || crate::Collections::is_reserved_type(leaf));
-//RS     let (why, fix) = if built_in {
-//RS         (
-//RS             format!(
-//RS                 "`{type_name}` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program"
-//RS             ),
-//RS             match i.trait_name.as_deref() {
-//RS                 Some(
-//RS                     trait_name @ (crate::Syntax::TRAIT_ADD
-//RS                     | crate::Syntax::TRAIT_SUB
-//RS                     | crate::Syntax::TRAIT_MUL
-//RS                     | crate::Syntax::TRAIT_DIV
-//RS                     | crate::Syntax::TRAIT_EQUATABLE
-//RS                     | crate::Syntax::TRAIT_COMPARABLE),
-//RS                 ) => format!(
-//RS                     "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type, D-OPMIX1)"
-//RS                 ),
-//RS                 Some(trait_name) => format!(
-//RS                     "implement `{trait_name}` on a struct or distinct type of your own, or wrap `{type_name}` in one"
-//RS                 ),
-//RS                 None => format!(
-//RS                     "call a named method, or wrap `{type_name}` in a struct or distinct type of your own and implement the methods there"
-//RS                 ),
-//RS             },
-//RS         )
-//RS     } else {
-//RS         (
-//RS             format!(
-//RS                 "no struct, enum, or distinct type named `{type_name}` is declared here, and an `impl` only extends a declared type"
-//RS             ),
-//RS             match leaf_ns {
-//RS                 Some(ns) => format!(
-//RS                     "export `{leaf}` from `{ns}` as a struct, enum, or distinct type, or check the spelling"
-//RS                 ),
-//RS                 None => format!(
-//RS                     "declare `struct {leaf}`, `enum {leaf}`, or `{leaf} :: distinct …` first, or check the spelling"
-//RS                 ),
-//RS             },
-//RS         )
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E0301",
-//RS         format!("`impl {header}` needs a user-defined type"),
-//RS         why,
-//RS         fix,
-//RS         Some(i.type_span),
-//RS     )
-//RS }
-//RS 
-//RS fn impl_target_is_builtin(type_name: &str) -> bool {
-//RS     let (leaf_ns, leaf) = type_name
-//RS         .rsplit_once('.')
-//RS         .map_or((None, type_name), |(ns, leaf)| (Some(ns), leaf));
-//RS     leaf_ns.is_none()
-//RS         && (crate::Sema::Diagnostics::builtin_type_from_ident(leaf).is_some()
-//RS             || crate::Sema::CheckerCoreLib::core_type_known(leaf)
-//RS             || crate::Sema::CheckerCoreLib::is_math_type(leaf)
-//RS             || crate::Collections::is_reserved_type(leaf))
-//RS }
-//RS 
-//RS fn is_operator_trait_name(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         crate::Syntax::TRAIT_ADD
-//RS             | crate::Syntax::TRAIT_SUB
-//RS             | crate::Syntax::TRAIT_MUL
-//RS             | crate::Syntax::TRAIT_DIV
-//RS             | crate::Syntax::TRAIT_EQUATABLE
-//RS             | crate::Syntax::TRAIT_COMPARABLE
-//RS     )
-//RS }
-//RS 
-//RS fn module_declares_named_type(items: &[Item], name: &str) -> bool {
-//RS     items.iter().any(|item| match item {
-//RS         Item::Struct(definition) => definition.name == name,
-//RS         Item::Enum(definition) => definition.name == name,
-//RS         Item::Distinct(definition) => definition.name == name,
-//RS         Item::TypeAlias(definition) => definition.name == name,
-//RS         _ => false,
-//RS     })
-//RS }
-//RS 
-//RS /// D-OPMIX1: an operator hook on a built-in type belongs to the package that
-//RS /// declares the other operand. `impl Int.Mul(Price)` is legal when `Price` is
-//RS /// a type this module declares.
-//RS fn opmix_allows_builtin_impl(implementation: &crate::AST::ImplDef, items: &[Item]) -> bool {
-//RS     if !impl_target_is_builtin(&implementation.type_name) {
-//RS         return false;
-//RS     }
-//RS     if !implementation
-//RS         .trait_name
-//RS         .as_deref()
-//RS         .is_some_and(is_operator_trait_name)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     match &implementation.operator_rhs {
-//RS         Some(Type::Named(rhs)) => {
-//RS             rhs != &implementation.type_name && module_declares_named_type(items, rhs)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Register one test after a template expansion has materialized its static
-//RS /// name. Root loops reach the ordinary item pass directly; marker and derive
-//RS /// bodies use this helper when their generated items are appended later.
-//RS fn register_test_item(
-//RS     test: &crate::AST::TestDef,
-//RS     state: &mut crate::Sema::ModuleState,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     let Some(name) = &test.name else {
-//RS         return;
-//RS     };
-//RS     if name_defined(name, &state.funcs, &state.registry, &state.consts)
-//RS         || state.tests.contains_key(name)
-//RS     {
-//RS         diags.push(defined_twice(
-//RS             name,
-//RS             "every test needs a unique name so failures are easy to find",
-//RS             test.name_span,
-//RS         ));
-//RS     } else {
-//RS         state.tests.insert(name.clone(), test.name_span);
-//RS     }
-//RS }
-//RS /// Register one source fact declaration in the bundle-local fact ledger.
-//RS ///
-//RS /// Every declaration maps to one effective fact identity (`@name` when it is
-//RS /// a plain string, otherwise its source name); duplicates remain diagnostics.
-//RS fn fact_identity(declaration: &crate::AST::FactDecl) -> String {
-//RS     declaration
-//RS         .params
-//RS         .iter()
-//RS         .find(|parameter| parameter.name == "$name")
-//RS         .and_then(|parameter| parameter.value.as_deref())
-//RS         .and_then(|value| match value {
-//RS             crate::AST::Expr::Str(parts, _) => {
-//RS                 let mut identity = String::new();
-//RS                 for part in parts {
-//RS                     match part {
-//RS                         crate::AST::StrPart::Lit(value) => identity.push_str(value),
-//RS                         crate::AST::StrPart::Interp(..) => return None,
-//RS                     }
-//RS                 }
-//RS                 Some(identity)
-//RS             }
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or_else(|| declaration.name.clone())
-//RS }
-//RS 
-//RS fn register_fact_declaration(
-//RS     declaration: &crate::AST::FactDecl,
-//RS     module_idx: usize,
-//RS     declarations: &mut HashMap<String, (usize, Span, String)>,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     let identity = fact_identity(declaration);
-//RS     if let Some((first_module, first_span, first_source)) = declarations.get(&identity) {
-//RS         diags.push(
-//RS             Diagnostic::error(
-//RS                 "E0105",
-//RS                 format!(
-//RS                     "fact `{identity}` is declared twice (spans {}..{} and {}..{})",
-//RS                     first_span.start,
-//RS                     first_span.end,
-//RS                     declaration.name_span.start,
-//RS                     declaration.name_span.end,
-//RS                 ),
-//RS                 "one fact name must resolve to one declaration in the loaded bundle"
-//RS                     .to_string(),
-//RS                 "rename or remove one of the fact declarations".to_string(),
-//RS                 Some(declaration.name_span),
-//RS             )
-//RS             .with_detail(format!(
-//RS                 "first declaration `{first_source}`: module {first_module}, span {}..{}\nsecond declaration `{}`: module {module_idx}, span {}..{}",
-//RS                 first_span.start,
-//RS                 first_span.end,
-//RS                 declaration.name,
-//RS                 declaration.name_span.start,
-//RS                 declaration.name_span.end,
-//RS             )),
-//RS         );
-//RS         return;
-//RS     }
-//RS     declarations.insert(
-//RS         identity,
-//RS         (module_idx, declaration.name_span, declaration.name.clone()),
-//RS     );
-//RS }
-//RS 
-//RS fn register_generated_union_enums(
-//RS     items: &[Item],
-//RS     state: &mut crate::Sema::ModuleState,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Enum(definition)
-//RS                 if definition.name.starts_with("__JetUnion_")
-//RS                     && !state.registry.contains(&definition.name) =>
-//RS             {
-//RS                 register_enum(
-//RS                     definition,
-//RS                     &mut state.registry,
-//RS                     diags,
-//RS                     &state.funcs,
-//RS                     &state.consts,
-//RS                 );
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     register_generated_union_enums(body, state, diags);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn existing_member_span(items: &[crate::AST::Item], type_name: &str, member: &str) -> Option<Span> {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(def) if def.name == type_name => {
-//RS                 if let Some(field) = def.fields.iter().find(|field| field.name == member) {
-//RS                     return Some(field.name_span);
-//RS                 }
-//RS                 if let Some(method) = def.methods.iter().find(|method| method.name == member) {
-//RS                     return Some(method.name_span);
-//RS                 }
-//RS             }
-//RS             Item::Enum(def) if def.name == type_name => {
-//RS                 if let Some(method) = def.methods.iter().find(|method| method.name == member) {
-//RS                     return Some(method.name_span);
-//RS                 }
-//RS             }
-//RS             Item::Impl(def) if def.type_name == type_name => {
-//RS                 if let Some(method) = def.methods.iter().find(|method| method.name == member) {
-//RS                     return Some(method.name_span);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn block_source(
-//RS     source: &str,
-//RS     body: &[crate::AST::Stmt],
-//RS     block_spans: &[Span],
-//RS     outer: Span,
-//RS ) -> String {
-//RS     let candidate = if let (Some(first), Some(last)) = (body.first(), body.last()) {
-//RS         block_spans
-//RS             .iter()
-//RS             .filter(|span| {
-//RS                 span.start > outer.start
-//RS                     && span.end < outer.end
-//RS                     && span.start <= first.span().start
-//RS                     && span.end >= last.span().end
-//RS             })
-//RS             .max_by_key(|span| span.end.saturating_sub(span.start))
-//RS     } else {
-//RS         block_spans
-//RS             .iter()
-//RS             .filter(|span| span.start > outer.start && span.end < outer.end)
-//RS             .min_by_key(|span| span.start)
-//RS     };
-//RS     candidate
-//RS         .and_then(|span| source.get(span.start..span.end))
-//RS         .unwrap_or_default()
-//RS         .to_string()
-//RS }
-//RS 
-//RS fn collect_declared_text_blocks(
-//RS     statements: &[crate::AST::Stmt],
-//RS     source: &str,
-//RS     block_spans: &[Span],
-//RS     blocks: &mut Vec<(String, String, Span)>,
-//RS ) {
-//RS     for statement in statements {
-//RS         if let crate::AST::Stmt::ScopeMember {
-//RS             name,
-//RS             body,
-//RS             dsl: true,
-//RS             span,
-//RS             ..
-//RS         } = statement
-//RS         {
-//RS             blocks.push((
-//RS                 name.clone(),
-//RS                 block_source(source, body, block_spans, *span),
-//RS                 *span,
-//RS             ));
-//RS         }
-//RS         for child in super::super::ScopeMembers::statement_bodies(statement) {
-//RS             collect_declared_text_blocks(child, source, block_spans, blocks);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn collect_item_declared_text_blocks(
-//RS     item: &crate::AST::Item,
-//RS     source: &str,
-//RS     block_spans: &[Span],
-//RS     blocks: &mut Vec<(String, String, Span)>,
-//RS ) {
-//RS     match item {
-//RS         Item::Func(function) => {
-//RS             collect_declared_text_blocks(&function.body, source, block_spans, blocks)
-//RS         }
-//RS         Item::Test(test) => collect_declared_text_blocks(&test.body, source, block_spans, blocks),
-//RS         Item::Impl(implementation) => {
-//RS             for method in &implementation.methods {
-//RS                 collect_declared_text_blocks(&method.body, source, block_spans, blocks);
-//RS             }
-//RS         }
-//RS         Item::Struct(definition) => {
-//RS             for method in &definition.methods {
-//RS                 collect_declared_text_blocks(&method.body, source, block_spans, blocks);
-//RS             }
-//RS             for implementation in &definition.trait_impls {
-//RS                 for method in &implementation.methods {
-//RS                     collect_declared_text_blocks(&method.body, source, block_spans, blocks);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Item::Enum(definition) => {
-//RS             for method in &definition.methods {
-//RS                 collect_declared_text_blocks(&method.body, source, block_spans, blocks);
-//RS             }
-//RS             for implementation in &definition.trait_impls {
-//RS                 for method in &implementation.methods {
-//RS                     collect_declared_text_blocks(&method.body, source, block_spans, blocks);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Item::CodeModule(module) => {
-//RS             if let Some(body) = &module.body {
-//RS                 for item in body {
-//RS                     collect_item_declared_text_blocks(item, source, block_spans, blocks);
-//RS                 }
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn derive_member_collision(
-//RS     derive_name: &str,
-//RS     type_name: &str,
-//RS     method: &crate::AST::Func,
-//RS     existing_site: &str,
-//RS     existing_span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0105",
-//RS         format!(
-//RS             "generated method `{}` from `derive T.{}` collides with {}",
-//RS             method.name, derive_name, existing_site
-//RS         ),
-//RS         format!(
-//RS             "`derive T.{}` and {} both define a member named `{}` on `{}`",
-//RS             derive_name, existing_site, method.name, type_name
-//RS         ),
-//RS         format!(
-//RS             "rename the generated member in `derive T.{}`, or rename the colliding member",
-//RS             derive_name
-//RS         ),
-//RS         Some(method.name_span),
-//RS     )
-//RS     .with_detail(format!(
-//RS         "generated member `{}` from `derive T.{}` at span {}..{}\n{} at span {}..{}",
-//RS         method.name,
-//RS         derive_name,
-//RS         method.name_span.start,
-//RS         method.name_span.end,
-//RS         existing_site,
-//RS         existing_span.start,
-//RS         existing_span.end,
-//RS     ))
-//RS }
-//RS 
-//RS fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
-//RS     let mut diagnostics = Vec::new();
-//RS     let mut seen = HashSet::new();
-//RS     let mut seen_aliases: HashMap<(usize, Option<String>), HashSet<String>> = HashMap::new();
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         for (scope, import) in crate::AST::walk_imports(module) {
-//RS             if !seen.insert((module_idx, import.span)) {
-//RS                 continue;
-//RS             }
-//RS             let foreign = match import.foreign_imports() {
-//RS                 Ok(foreign) => foreign,
-//RS                 Err(error) => {
-//RS                     diagnostics.push(error.diagnostic());
-//RS                     continue;
-//RS                 }
-//RS             };
-//RS             if foreign.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             let aliases = seen_aliases
-//RS                 .entry((module_idx, scope.map(str::to_owned)))
-//RS                 .or_default();
-//RS             for (_, alias) in foreign {
-//RS                 if aliases.insert(alias.clone()) {
-//RS                     continue;
-//RS                 }
-//RS                 diagnostics.push(Diagnostic::error(
-//RS                     "E0105",
-//RS                     format!("the import name `{alias}` is used twice"),
-//RS                     "each import needs a unique namespace name in this file".to_string(),
-//RS                     format!("rename one with `{} alias`", Syntax::KW_AS),
-//RS                     Some(import.alias_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     diagnostics
-//RS }
-//RS 
-//RS fn foreign_imports_after_validation(
-//RS     import: &crate::AST::ImportDecl,
-//RS ) -> Vec<(crate::AST::ForeignNamespace, String)> {
-//RS     import.foreign_imports().unwrap_or_else(|error| {
-//RS         unreachable!(
-//RS             "invalid foreign import reached sema after validation: {}",
-//RS             error.path
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn is_c_import_after_validation(import: &crate::AST::ImportDecl) -> bool {
-//RS     import.is_c_import().unwrap_or_else(|error| {
-//RS         unreachable!(
-//RS             "invalid foreign import reached sema after validation: {}",
-//RS             error.path
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn check_bundle_opts_for_output(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     explicit_output: Option<&str>,
-//RS     incremental: Option<&mut IncrementalSemaCache>,
-//RS ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
-//RS     check_bundle_opts_for_output_with_context(
-//RS         bundle,
-//RS         mode,
-//RS         no_os,
-//RS         gates,
-//RS         explicit_output,
-//RS         incremental,
-//RS         false,
-//RS     )
-//RS }
-//RS 
-//RS /// Checking is an unbounded-depth recursive descent over user syntax, so the
-//RS /// frame requirement is per source-nesting level, not per program size. This is
-//RS /// the narrowest point every public `check_bundle*` shares, so the sized
-//RS /// stack is installed here instead of being chased caller by caller:
-//RS /// `Sema::check_bundle` and its siblings are public API, and an embedder
-//RS /// holding its own bundle — or a 2 MiB libtest worker — would otherwise run
-//RS /// the descent on whatever stack it happens to have, aborting the process on
-//RS /// overflow.
-//RS ///
-//RS /// The re-entrancy flag is shared in `jet-foundation`, so an outer boundary
-//RS /// already on the worker (a driver funnel, a JIT public entry, the loader)
-//RS /// makes this run inline: the check comes *first*, so the inline path does no
-//RS /// capture and no spawn.
-//RS ///
-//RS /// Thread-locals across the spawn. `PACKAGE_EDITION` is established *inside*
-//RS /// the worker from `bundle.edition`, so `with_package_edition` stays under the
-//RS /// boundary rather than over it. The comptime ambient hooks are the one piece
-//RS /// of caller-established state the check reads back (derive/comptime folding
-//RS /// reaches them through `MirBridge`), so they are carried across explicitly —
-//RS /// the same carry `jet_driver::run_compiler_work` performs. `MirBridge`'s own
-//RS /// hooks are a process-global `OnceLock`, not thread-local, so they need no
-//RS /// carry.
-//RS pub(super) fn check_bundle_opts_for_output_with_context(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     explicit_output: Option<&str>,
-//RS     incremental: Option<&mut IncrementalSemaCache>,
-//RS     allow_compiler_api: bool,
-//RS ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
-//RS     if jet_foundation::CompilerStack::on_compiler_worker() {
-//RS         return check_bundle_opts_for_output_on_stack(
-//RS             bundle,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             explicit_output,
-//RS             incremental,
-//RS             allow_compiler_api,
-//RS         );
-//RS     }
-//RS     let (ambient_core_call, ambient_handle, ambient_extern_call) = crate::Comptime::ambient_hooks();
-//RS     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-//RS         crate::Comptime::with_ambient(
-//RS             ambient_core_call,
-//RS             ambient_handle,
-//RS             ambient_extern_call,
-//RS             || {
-//RS                 check_bundle_opts_for_output_on_stack(
-//RS                     bundle,
-//RS                     mode,
-//RS                     no_os,
-//RS                     gates,
-//RS                     explicit_output,
-//RS                     incremental,
-//RS                     allow_compiler_api,
-//RS                 )
-//RS             },
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn check_bundle_opts_for_output_on_stack(
-//RS     bundle: &mut ProgramBundle,
-//RS     mode: CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     explicit_output: Option<&str>,
-//RS     incremental: Option<&mut IncrementalSemaCache>,
-//RS     allow_compiler_api: bool,
-//RS ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
-//RS     let edition = bundle.edition.clone();
-//RS     let (diags, facts) = super::super::Edition::with_package_edition(&edition, || {
-//RS         check_bundle_opts_for_output_inner(
-//RS             bundle,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             explicit_output,
-//RS             incremental,
-//RS             allow_compiler_api,
-//RS         )
-//RS     });
-//RS     (summarize_dependency_reports(bundle, diags), facts)
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: a dependency package is checked as its own package, so an
-//RS /// importer never repeats its reports. A dependency with errors still fails
-//RS /// the importer, once per dependency package (E0626), naming the check that
-//RS /// owns those errors.
-//RS fn summarize_dependency_reports(bundle: &ProgramBundle, diags: Vec<Diagnostic>) -> Vec<Diagnostic> {
-//RS     if bundle.dep_roots.is_empty() {
-//RS         return diags;
-//RS     }
-//RS     let owner_of = |diagnostic: &Diagnostic| {
-//RS         let path = std::path::Path::new(&diagnostic.origin()?.path);
-//RS         bundle
-//RS             .dep_roots
-//RS             .iter()
-//RS             .filter(|(_, root)| path.starts_with(root))
-//RS             .max_by_key(|(_, root)| root.components().count())
-//RS     };
-//RS     let mut failing: std::collections::BTreeMap<&str, &std::path::Path> =
-//RS         std::collections::BTreeMap::new();
-//RS     let mut kept = Vec::with_capacity(diags.len());
-//RS     for diagnostic in diags {
-//RS         match owner_of(&diagnostic) {
-//RS             Some((name, root)) => {
-//RS                 if diagnostic.severity == crate::Diagnostics::Severity::Error {
-//RS                     failing.insert(name.as_str(), root.as_path());
-//RS                 }
-//RS             }
-//RS             None => kept.push(diagnostic),
-//RS         }
-//RS     }
-//RS     for (package, root) in failing {
-//RS         let root = root
-//RS             .strip_prefix(&bundle.project_root)
-//RS             .unwrap_or(root)
-//RS             .display()
-//RS             .to_string();
-//RS         kept.push(Diagnostic::from_row(
-//RS             "E0626",
-//RS             &[("package", package), ("root", root.as_str())],
-//RS             None,
-//RS         ));
-//RS     }
-//RS     kept
-//RS }
-//RS 
-//RS mod CheckInner;
-//RS use CheckInner::check_bundle_opts_for_output_inner;
-//RS /// D-STRUCT-PLANE1=A / I2 / I3: the fact law is a front-end invariant. Keep
-//RS /// the registry guard in sema so no downstream engine can become the first
-//RS /// place that notices a structure row lost its direction or gate.
-//RS fn guard_fact_registry_law() {
-//RS     if let Some(violation) = jet_foundation::Registry::law_violations()
-//RS         .into_iter()
-//RS         .next()
-//RS     {
-//RS         jet_foundation::ice!(None, "fact registry law violation: {violation}");
-//RS     }
-//RS }
-//RS 
-//RS /// D-FAIL-EXIT1=A: every explicit `fn run` gets the default fallible entry
-//RS /// carrier before registration and body inference. The source may omit the
-//RS /// return clause; the checked AST still carries one canonical `Result<(), Err>`
-//RS /// contract through sema, TIR, AOT, JIT, and the interpreter.
-//RS fn default_entry_return(bundle: &mut ProgramBundle) {
-//RS     let Some(module) = bundle.modules.get_mut(bundle.entry) else {
-//RS         return;
-//RS     };
-//RS     let Some(run) = module.items.iter_mut().find_map(|item| match item {
-//RS         Item::Func(function) if function.name == "run" => Some(function),
-//RS         _ => None,
-//RS     }) else {
-//RS         return;
-//RS     };
-//RS     if run.return_type.is_none() {
-//RS         run.return_type = Some(Type::Result {
-//RS             ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS             err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-//RS         });
-//RS     }
-//RS }
-// END-PORT-PENDING 0373 crates/jet-sema/src/Sema/Bundle/Pipeline.rs:1-708
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3851
+pub fn stmt_indexes_root_with(stmt: Stmt, root: String, index_var: String) -> Bool {
+    return if stmt == {
+        .Expr(e) | .DeferClose{close: e, ..} | .Return(.Val(e), _) -> expr_indexes_root_with(e, root, index_var)
+        .Val(b) -> expr_indexes_root_with(b.init, root, index_var)
+        .Assign{target, value, ..} -> lvalue_indexes_root_with(target, root, index_var) || expr_indexes_root_with(value, root, index_var)
+        .While{cond, body, ..} -> expr_indexes_root_with(cond, root, index_var) || stmts_index_root_with(body, root, index_var)
+        .For{kind, body, ..} -> {
+            kind_hits :: if kind == {
+                .Range(start, end, step, _) -> expr_indexes_root_with(start, root, index_var) || expr_indexes_root_with(end, root, index_var) || step.is_some_and(s -> expr_indexes_root_with(s, root, index_var))
+                .In(collection, step) -> expr_indexes_root_with(collection, root, index_var) || step.is_some_and(s -> expr_indexes_root_with(s, root, index_var))
+            }
+            kind_hits || stmts_index_root_with(body, root, index_var)
+        }
+        .Loop{body, ..} | .Unsafe{body, ..} | .Region{body, ..} -> stmts_index_root_with(body, root, index_var)
+        .CountedLoop{init, cond, step, body, ..} ->
+            expr_indexes_root_with(init.init, root, index_var) || expr_indexes_root_with(cond, root, index_var) || step.is_some_and(s -> stmt_indexes_root_with(s, root, index_var)) || stmts_index_root_with(body, root, index_var)
+        .Switch{subject, arms, else_body, ..} | .ComptimeSwitch{subject, arms, else_body, ..} ->
+            expr_indexes_root_with(subject, root, index_var) || arms.iter().any(a -> expr_indexes_root_with(a.cond, root, index_var) || stmts_index_root_with(a.body, root, index_var)) || else_body.is_some_and(b -> stmts_index_root_with(b, root, index_var))
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3927
+pub fn lvalue_indexes_root_with(lv: LValue, root: String, index_var: String) -> Bool {
+    return if lv == {
+        .Index{base, index, ..} -> (expr_root_ident(base) == Val(root) && expr_is_ident(index, index_var)) || expr_indexes_root_with(base, root, index_var) || expr_indexes_root_with(index, root, index_var)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3939
+pub fn expr_is_ident(expr: Expr, name: String) -> Bool {
+    return if expr == { .Ident(n, _) -> n == name; _ -> false }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:3943
+pub fn expr_indexes_root_with(expr: Expr, root: String, index_var: String) -> Bool {
+    return if expr == {
+        .Index{base, index, ..} -> (expr_root_ident(base) == Val(root) && expr_is_ident(index, index_var)) || expr_indexes_root_with(base, root, index_var) || expr_indexes_root_with(index, root, index_var)
+        .Str(parts, _) -> parts.iter().any(p -> if p == {
+            .Interp(inner, _) -> expr_indexes_root_with(inner, root, index_var)
+            .Lit(_) -> false
+        })
+        .Call(c) -> c.args.iter().any(a -> expr_indexes_root_with(a.expr, root, index_var))
+        .CallValue{callee, args, ..} -> expr_indexes_root_with(callee, root, index_var) || args.iter().any(a -> expr_indexes_root_with(a.expr, root, index_var))
+        .MethodCall{receiver, args, ..} -> expr_indexes_root_with(receiver, root, index_var) || args.iter().any(a -> expr_indexes_root_with(a.expr, root, index_var))
+        .Field(inner, _, _) | .Spread(inner, _) | .Copy(inner, _) | .RawOf(inner, _) | .Place(inner, _, _) | .Present(inner, _) | .Tainted(inner, _, _) | .Ok(inner, _) | .Err(inner, _) -> expr_indexes_root_with(inner, root, index_var)
+        .Try(inner, _, _, note) -> expr_indexes_root_with(inner, root, index_var) || note.is_some_and(n -> expr_indexes_root_with(n, root, index_var))
+        .Binary(_, left, right, _) -> expr_indexes_root_with(left, root, index_var) || expr_indexes_root_with(right, root, index_var)
+        .ListLit(items, _) -> items.iter().any(e -> expr_indexes_root_with(e, root, index_var))
+        .TupleLit(items, _, _) -> items.iter().any(pair -> expr_indexes_root_with(pair.1, root, index_var))
+        .Slice{base, start, end, range, ..} -> expr_indexes_root_with(base, root, index_var) || (if range == {
+            .Val(r) -> expr_indexes_root_with(r, root, index_var)
+            .None -> expr_indexes_root_with(start, root, index_var) || expr_indexes_root_with(end, root, index_var)
+        })
+        .OrFallback{value, ..} -> expr_indexes_root_with(value, root, index_var)
+        .If{cond, then_body, then_value, else_body, else_value, ..} ->
+            expr_indexes_root_with(cond, root, index_var) || stmts_index_root_with(then_body, root, index_var) || expr_indexes_root_with(then_value, root, index_var) || stmts_index_root_with(else_body, root, index_var) || expr_indexes_root_with(else_value, root, index_var)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4032
+pub fn prefer_compound_assign(target: LValue, value: Expr) -> (String, BinOp, String)? {
+    if target == .Index{..} -> return None
+    if value.without_parens() != .Binary(op, left, _, _) -> return None
+    compound :: op.compound_spell()?
+    if !lvalue_same_place(target, left) -> return None
+    return Val((lvalue_spell(target)?, op, compound))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4049
+pub fn lvalue_same_place(lv: LValue, expr: Expr) -> Bool {
+    return if (lv, expr.without_parens()) == {
+        (.Local{name, ..}, .Ident(n, _)) -> name == n
+        (.Field{base, field, ..}, .Field(b, f, _)) -> field == f && expr_same_place(base, b)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4059
+pub fn expr_same_place(a: Expr, b: Expr) -> Bool {
+    return if (a.without_parens(), b.without_parens()) == {
+        (.Ident(n1, _), .Ident(n2, _)) -> n1 == n2
+        (.Field(b1, f1, _), .Field(b2, f2, _)) -> f1 == f2 && expr_same_place(b1, b2)
+        (.Index{base: b1, index: i1, ..}, .Index{base: b2, index: i2, ..}) -> expr_same_place(b1, b2) && expr_same_place(i1, i2)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4079
+pub fn lvalue_spell(lv: LValue) -> String? {
+    return if lv == {
+        .Local{name, ..} -> Val(~name)
+        .Field{base, field, ..} -> Val("{expr_place_spell(base)?}.{field}")
+        .Index{..} -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:4087
+pub fn expr_place_spell(expr: Expr) -> String? {
+    return if expr.without_parens() == {
+        .Ident(name, _) -> Val(~name)
+        .Field(base, field, _) -> Val("{expr_place_spell(base)?}.{field}")
+        .Index{base, index, ..} -> Val("{expr_place_spell(base)?}[{expr_place_spell(index).unwrap_or_else(() -> "…")}]")
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs:8
+pub fn infer_core_field(self: &Checker, alias: String, module: String, name: String, alias_span: Span, span: Span) -> Type? {
+    if module == "core.encoding" && alias == "DataTree" && ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"].contains(name) {
+        self.record_import_alias_reference(alias, alias_span)
+        return Val(json_ty())
+    }
+    if module == "core.encoding" && ["DataEvent", "EncodingErrorKind", "EncodingFormat"].contains(alias) && self.resolve_enum_variants_cloned(alias).is_some_and(variants -> variants.contains_key(name)) {
+        self.record_import_alias_reference(alias, alias_span)
+        return Val(Type.Named(~alias))
+    }
+    if self.core_item_imports.get(alias) == .Val(item) {
+        core_enum :: if CoreModuleExports.core_leaf_kind(module, item) == {
+            .Val(.Enum(_)) -> true
+            _ -> false
+        }
+        if core_enum && self.resolve_enum_variants_cloned(item).is_some_and(variants -> variants.contains_key(name)) {
+            self.record_import_alias_reference(alias, alias_span)
+            return Val(Type.Named(~item))
+        }
+    }
+    result :: if (module, name) == {
+        ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") -> Val(Type.Float)
+        ("core.mem", "Arena") -> Val(Type.Named(Syntax.MEM_ARENA))
+        ("core.mem", "Bump") -> Val(Type.Named(Syntax.MEM_BUMP))
+        ("core.mem", "Pool") -> Val(Type.Named(Syntax.MEM_POOL))
+        ("core.mem", "Fixed") -> Val(Type.Named(Syntax.MEM_FIXED))
+        ("core.mem", "AllocError") -> Val(Type.Named(Syntax.TYPE_ALLOC_ERROR))
+        ("core.compute.solve", "Solver") -> Val(Type.Named(Syntax.SOLVER_TYPE))
+        ("core.game", "Scene") -> Val(Type.Named("GameSceneType"))
+        ("core.game", "Replay") -> Val(Type.Named("GameReplayType"))
+        ("core.game", "Backend") -> Val(Type.Named("GameBackendType"))
+        ("core.net.tls", "ClientConfig") -> Val(Type.Named("TLSClientConfigType"))
+        ("core.http.client", "Client") -> Val(Type.Named("HTTPClientType"))
+        ("core.http.client", "Proxy") -> Val(Type.Named("HTTPProxy"))
+        ("core.http.client", "RedirectPolicy") -> Val(Type.Named("HTTPRedirectPolicy"))
+        ("core.http.client", "CookieJar") -> Val(Type.Named("HTTPCookieJar"))
+        ("core.net.tls", "RootCertificates") -> Val(Type.Named("TLSRootCertificatesType"))
+        ("core.net.tls", "ClientIdentity") -> Val(Type.Named("TLSClientIdentityType"))
+        ("core.net.tls", "TLSVersion") -> Val(Type.Named("TLSVersion"))
+        ("core.perf", "Perf") -> Val(Type.Named("Perf"))
+        ("core.encoding", "DataEvent" | "EncodingLimits" | "EncodingError" | "EncodingCause" | "EncodingErrorKind" | "EncodingFormat") -> Val(Type.Named(~name))
+        ("core.encoding.json", "JSONReader" | "JSONWriter") -> Val(Type.Named(~name))
+        ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") -> Val(Type.Named(~name))
+        ("core.encoding.csv", "CSVReader" | "CSVWriter" | "CSVRow") -> Val(Type.Named(~name))
+        ("core.encoding.xml", "XMLReader" | "XMLWriter") -> Val(Type.Named(~name))
+        ("core.encoding.cbor", "CBORReader" | "CBORWriter") -> Val(Type.Named(~name))
+        _ -> {
+            &self.diags.push(unknown_core_item(module, name, span))
+            None
+        }
+    }
+    if result.is_some() -> self.record_import_alias_reference(alias, alias_span)
+    return ^result
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs:129
+pub fn infer_ptr_from_addr(self: &Checker, alias: String, alias_span: Span, elem: Type, addr: &Expr, span: Span) -> Type? {
+    is_mem :: self.core_imports.get(alias).is_some_and(m -> m == Syntax.CORE_MEM_MODULE)
+    if !is_mem {
+        &self.diags.push(e3102(self, alias, alias_span))
+        _ :: self.infer(&addr)
+        return None
+    }
+    if Syntax.core_mem_requires_audit(Syntax.MEM_FROM_ADDR) && !self.in_unsafe -> &self.diags.push(e3101(Syntax.MEM_FROM_ADDR, span))
+    if self.infer(&addr) == .Val(t) {
+        valid :: if t == { .Int | .InlineRange{..} -> true; _ -> false }
+        if !valid -> &self.diags.push(Diagnostic.error("E0112", "`{Syntax.MEM_FROM_ADDR}` needs an Int address, not {t.show()}", "a pointer is built from a numeric machine address", "pass an Int, e.g. from `mem.address_of(x)`", Val(addr.span())))
+    }
+    return Val(ptr_type(~elem))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs:173
+pub fn e3102(self: Checker, alias: String, span: Span) -> Diagnostic {
+    return Diagnostic.error("E3102", "`{Syntax.TYPE_PTR}` is part of the low-level tier", "naming `{Syntax.TYPE_PTR}`, `{Syntax.MEM_VOLATILE_READ}`, or an allocator needs the discovery gate", "add `use {Syntax.CORE_MEM_MODULE};` and call through `{alias}.…`", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:7
+pub fn is_inline_compute_transform(checker: Checker, expr: Expr) -> Bool {
+    return if expr == {
+        .Paren(inner, _) -> is_inline_compute_transform(checker, inner)
+        .MethodCall{receiver, method, args, ..} ->
+            ["gradient", "value_and_gradient", "vjp", "jvp"].contains(method) && core_module_path_from_receiver(checker, receiver).is_some_and(path -> path.0 == "core.compute") && args.iter().skip(1).all(arg -> arg.label.is_some_and(label -> label.0 == "wrt"))
+        .CallValue{callee, ..} -> is_inline_compute_transform(checker, callee)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:34
+pub fn synthesized_string_arg(value: String, span: Span) -> CallArg {
+    return CallArg{convention: AccessConvention.Read, expr: Expr.Str([StrPart.Lit(^value)], span), span: span, flags: CallArgFlags.default(), label: None, spread: false}
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:45
+pub fn type_arg_name(t: Type) -> String {
+    return if t == {
+        .Named(n) -> ~n
+        .Apply{name, args} if args.is_empty() -> ~name
+        _ -> t.show()
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:53
+pub fn core_module_path_from_receiver(self: Checker, receiver: Expr) -> (String, String, Span)? {
+    return if receiver == {
+        .Ident(alias, span) if self.lookup(alias).is_none() -> self.core_imports.get(alias).map(module -> (~module, ~alias, span))
+        .Field(base, leaf, _) -> {
+            (module, alias, span) :: core_module_path_from_receiver(self, base)?
+            submodule :: "{module}.{leaf}"
+            if Syntax.is_known_core_module(submodule) -> Val((^submodule, ^alias, span)) else -> None
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs:72
+pub fn infer_call_value(self: &Checker, callee: &Expr, args: &[CallArg], span: Span) -> Type? {
+    if is_inline_compute_transform(self, callee) {
+        &self.diags.push(Diagnostic.lint("L1141", "an autodiff transform result is called inline", "the transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested", "bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`", Val(span)))
+    }
+    inline_loop :: if callee == { .Lambda(lam) -> lam.meta.collecting_loop || lam.meta.result_loop; _ -> false }
+    call_access := self.call_access_frame()
+    callee_ty := self.with_call_access(&call_access, checker -> {
+        if !inline_loop -> checker.check_call_receiver_evaluation(callee, callee.span())
+        saved_escapes :: checker.lambda_escapes
+        if inline_loop -> checker.lambda_escapes = false
+        inferred :: checker.infer(&callee)
+        checker.lambda_escapes = saved_escapes
+        if !inline_loop -> checker.check_call_argument_captures(callee)
+        return ^inferred
+    })?
+    // Immediately evaluated collecting/open loops retain their source carrier.
+    source_carrier :: if callee == {
+        .Lambda(lam) -> lam.meta.collecting_loop || (lam.meta.result_loop && !lam.meta.requires_exhaustion_route)
+        _ -> false
+    }
+    if !source_carrier -> callee_ty = callee_ty.with_effective_fn_returns()
+    if callee_ty != .Fn{params, ret, effect_bound, param_contract, call_metadata, ..} {
+        &self.diags.push(Diagnostic.error("E0803", "this is {callee_ty.show()}, not a function", "only a function value can be called with `.call(…)`", "call a defined `fn` by name, or store a lambda in a binding before `.call(…)`", Val(span)))
+        for arg in &args -> _ :: self.infer(&arg.expr)
+        return None
+    }
+    if callee == .Ident(name, _) && self.funcs.get(name) == .Val(sig) {
+        if sig.deprecation == .Val(dep) -> self.check_deprecation(name, dep, span)
+        self.check_foreign_transaction_call(sig, name, span)
+    }
+    if !inline_loop {
+        if effect_bound == {
+            .None -> {
+                param_call :: if callee == { .Ident(name, _) -> self.lookup(name).is_some_and(info -> info.param_conv.is_some()); _ -> false }
+                if !param_call -> self.record_maximal(span)
+            }
+            .Val(row) -> {
+                for (effect, _) in row {
+                    if effect_row_var(effect).is_none() && parse_effect_name(effect).is_some() -> self.record_effect(effect, span)
+                }
+            }
+        }
+    }
+    metadata :: call_metadata
+    bind: [BindParam] := []
+    for index in 0..<params.len() {
+        (label, zone) :: param_contract.and_then(contract -> contract.get(index)).unwrap_or(("", ParamZone.Either))
+        &bind.push(BindParam{
+            label: label,
+            name: metadata.and_then(meta -> meta.names.get(index)).unwrap_or(label),
+            zone: zone,
+            default: metadata.and_then(meta -> meta.defaults.get(index)).and_then(value -> value),
+            convention: metadata.and_then(meta -> meta.conventions.get(index)).unwrap_or(AccessConvention.Read),
+            ty: params.get(index),
+            variadic: metadata.and_then(meta -> meta.variadic.get(index)).unwrap_or(false),
+            core_default: None,
+        })
+    }
+    callee_name :: if callee == { .Ident(name, _) -> ~name; _ -> "this function value" }
+    bound :: bind_call_args(callee_name, bind, &args, span, &self.diags)
+    self.register_binder_refs(args)
+    if bound.is_none() {
+        for arg in &args -> _ :: self.infer(&arg.expr)
+        return ret.map(r -> ~r)
+    }
+    if metadata.is_some_and(meta -> meta.variadic.last().unwrap_or(false)) {
+        sig_params: [(AccessConvention, Type)] := []
+        param_info: [(String, Bool)] := []
+        for index in 0..<params.len() {
+            convention :: metadata.and_then(meta -> meta.conventions.get(index)).unwrap_or(AccessConvention.Read)
+            &sig_params.push((convention, ~params[index]))
+            name :: metadata.and_then(meta -> meta.names.get(index)).map(n -> ~n).or_else(() -> param_contract.and_then(contract -> contract.get(index)).map(pair -> ~pair.0)).unwrap_or("")
+            has_default :: metadata.and_then(meta -> meta.defaults.get(index)).is_some_and(value -> value.is_some())
+            &param_info.push((^name, has_default))
+        }
+        fake_sig :: FuncSig{
+            params: ^sig_params, root_param: false, return_type: ret.map(r -> ~r), deprecation: None,
+            return_view_provenance: ViewProvenanceCell.new(),
+            is_extern: false, is_unsafe: false, is_pure: false, memo_bound: None,
+            is_foreign_thread_safe: false, is_sanitizer: false, is_must_use: false, is_c_abi: false,
+            c_abi_name: None, callback_transport: None, callback_plan_digest: None, callback_identity: None,
+            foreign_effect_root: None, undo: None, param_info: ^param_info,
+            param_call: param_contract.map(contract -> ~contract).unwrap_or([]),
+            defaults: metadata.map(meta -> ~meta.defaults).unwrap_or_else(() -> [None; params.len()]),
+            param_variadic: metadata.map(meta -> ~meta.variadic).unwrap_or_else(() -> [false; params.len()]),
+            variadic_bounds: None, param_view_from_names: [], callable_policies: CallablePolicyChain.default(),
+        }
+        packed := Call{name: ~callee_name, name_span: span, type_args: [], args: args.take(), resolved_ret: None, range_checked: false, widen_approx: false}
+        self.normalize_variadic_call(&packed, fake_sig)
+        args = ^packed.args
+    }
+    if args.len() != params.len() {
+        plural :: if params.len() == 1 -> "" else -> "s"
+        &self.diags.push(Diagnostic.error("E0104", "this function wants {params.len()} argument{plural}, got {args.len()}", "every argument must match a parameter", "check how many values this function expects", Val(span)))
+    }
+    for (i, arg) in args.iter_mut().enumerate() {
+        if params.get(i) == .Val(param_ty) {
+            param_convention :: metadata.and_then(meta -> meta.conventions.get(i)).unwrap_or(AccessConvention.Read)
+            saved :: self.expected_type.take()
+            saved_borrow :: self.borrow_ctx
+            self.expected_type = Val(~param_ty)
+            self.borrow_ctx = arg.convention == AccessConvention.Write || param_convention == AccessConvention.Write || (param_convention == AccessConvention.Read && !param_ty.is_scalar())
+            inferred :: self.with_call_access(&call_access, checker -> {
+                checker.check_call_argument_access(arg, param_convention, param_ty, true)
+                result :: checker.infer(&arg.expr)
+                checker.check_call_argument_captures(arg.expr)
+                return ^result
+            })
+            self.expected_type = ^saved
+            self.borrow_ctx = saved_borrow
+            if inferred == .Val(got_initial) {
+                widened :: self.widen_numeric_argument(&arg.expr, ^got_initial, param_ty, param_convention)
+                got :: self.lift_optional_argument(&arg.expr, ^widened, param_ty, param_convention)
+                boxes_as_trait :: self.trait_slot_accepts(param_ty, got)
+                both_callable :: if (param_ty, got) == { (.Fn{..}, .Fn{..}) -> true; _ -> false }
+                callable_shape_compatible :: both_callable && fn_types_compatible(param_ty, got)
+                missing_strict_contract :: callable_shape_compatible && (if (param_ty, got) == {
+                    (.Fn{param_contract: .Val(required), ..}, .Fn{param_contract: .None, ..}) -> required.iter().any(pair -> pair.1 == ParamZone.PositionalOnly || pair.1 == ParamZone.LabelOnly)
+                    _ -> false
+                })
+                callable_compatible :: callable_shape_compatible && Type.obligations_satisfy(param_ty, got) && !missing_strict_contract
+                if boxes_as_trait -> self.note_move_if_direct_ident(arg.expr, "the call")
+                type_mismatch :: if both_callable -> !callable_compatible else -> !Type.compute_tensor_compatible(param_ty, got)
+                if type_mismatch && !boxes_as_trait -> &self.diags.push(Diagnostic.error("E0112", "argument {i + 1} should be {param_ty.show()}, not {got.show()}", "every argument must match its parameter's type", type_fix_hint(param_ty, got), Val(arg.expr.span())))
+            }
+            self.check_callable_argument_ownership(callee_name, i, param_convention, param_ty, arg)
+        } else {
+            _ :: self.infer(&arg.expr)
+        }
+    }
+    return ret.map(r -> ~r)
+}
+
+// Workers return job order; callers merge serially in source order.
+// Rust: crates/jet-sema/src/Sema/Bundle/Parallel.rs:13
+MAX_CHECK_WORKERS: USize :: 8
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Parallel.rs:20
+pub fn check_worker_count(jobs: USize) -> USize {
+    // GATE #4494: scheduling-only environment and native parallelism primitives.
+    requested :: std.env.var("JET_CHECK_THREADS").ok().and_then(value -> {
+        text := value.trim() // #4303
+        return text.parse<USize>().ok()
+    }).filter(threads -> threads > 0)
+    threads :: requested.unwrap_or_else(() -> std.thread.available_parallelism().map(value -> value.get()).unwrap_or(1).min(MAX_CHECK_WORKERS))
+    return threads.min(jobs).max(1)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Parallel.rs:38
+pub fn map_checked<T, R>(jobs: [T], work: fn(T) -> R) -> [R] {
+    workers :: check_worker_count(jobs.len())
+    if workers <= 1 -> return jobs.into_iter().map(work).collect()
+    edition :: PackageEdition.package_edition()
+    ambient :: ambient_runtime_snapshot()
+    driver :: terminator_driver()
+    // GATE #4494: compiler-stack workers and scoped TLS context propagation.
+    return CompilerStack.map_on_compiler_workers(^jobs, workers, job ->
+        PackageEdition.with_package_edition(edition, () ->
+            with_terminator_driver(~driver, () ->
+                with_ambient_runtime_snapshot(~ambient, () -> work(^job)))))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:17
+pub fn expand_item_template_loops(items: &[Item], base_dir: OSPath, diags: &[Diagnostic]) {
+    has_loops :: items.iter().any(item -> if item == { .TemplateLoop(_) -> true; _ -> false })
+    if !has_loops -> return
+    (funcs_owned, _, globals) :: comptime_context_from_items(items)
+    funcs :: funcs_owned.iter().map(pair -> (~pair.0, pair.1)).collect()
+    source_items :: items.take()
+    expanded_items: [Item] := []
+    &expanded_items.reserve(source_items.len())
+    for item in source_items {
+        if item != .TemplateLoop(loop_item) {
+            &expanded_items.push(^item)
+            continue
+        }
+        template :: jet_foundation.DeriveBodyItem.Loop{
+            var: ^loop_item.var, var_span: loop_item.var_span, source: ^loop_item.source,
+            body: ^loop_item.body, span: loop_item.span,
+        }
+        if expand_template_body([template], globals, funcs, base_dir) == {
+            .Ok(generated) -> &expanded_items.extend(^generated)
+            .Err(diagnostic) -> &diags.push(^diagnostic)
+        }
+    }
+    items = ^expanded_items
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:66
+pub fn e0301_impl_target(i: ImplDef) -> Diagnostic {
+    type_name :: i.type_name
+    header :: i.trait_name.map(trait_name -> "{type_name}.{trait_name}").unwrap_or_else(() -> ~type_name)
+    (leaf_ns, leaf) :: type_name.rsplit_once('.').map(pair -> (Val(pair.0), pair.1)).unwrap_or((None, type_name))
+    built_in :: leaf_ns.is_none() && (builtin_type_from_ident(leaf).is_some() || core_type_known(leaf) || is_math_type(leaf) || is_reserved_type(leaf))
+    (why, fix) :: if built_in {
+        why :: "`{type_name}` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program"
+        fix :: if i.trait_name == {
+            .Val(trait_name) if is_operator_trait_name(trait_name) -> "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type, D-OPMIX1)"
+            .Val(trait_name) -> "implement `{trait_name}` on a struct or distinct type of your own, or wrap `{type_name}` in one"
+            .None -> "call a named method, or wrap `{type_name}` in a struct or distinct type of your own and implement the methods there"
+        }
+        (^why, ^fix)
+    } else {
+        why :: "no struct, enum, or distinct type named `{type_name}` is declared here, and an `impl` only extends a declared type"
+        fix :: if leaf_ns == {
+            .Val(ns) -> "export `{leaf}` from `{ns}` as a struct, enum, or distinct type, or check the spelling"
+            .None -> "declare `struct {leaf}`, `enum {leaf}`, or `{leaf} :: distinct …` first, or check the spelling"
+        }
+        (^why, ^fix)
+    }
+    return Diagnostic.error("E0301", "`impl {header}` needs a user-defined type", ^why, ^fix, Val(i.type_span))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:128
+pub fn impl_target_is_builtin(type_name: String) -> Bool {
+    (leaf_ns, leaf) :: type_name.rsplit_once('.').map(pair -> (Val(pair.0), pair.1)).unwrap_or((None, type_name))
+    return leaf_ns.is_none() && (builtin_type_from_ident(leaf).is_some() || core_type_known(leaf) || is_math_type(leaf) || is_reserved_type(leaf))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:139
+pub fn is_operator_trait_name(name: String) -> Bool {
+    return name == Syntax.TRAIT_ADD || name == Syntax.TRAIT_SUB || name == Syntax.TRAIT_MUL || name == Syntax.TRAIT_DIV || name == Syntax.TRAIT_EQUATABLE || name == Syntax.TRAIT_COMPARABLE
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:151
+pub fn module_declares_named_type(items: [Item], name: String) -> Bool {
+    return items.iter().any(item -> if item == {
+        .Struct(definition) -> definition.name == name
+        .Enum(definition) -> definition.name == name
+        .Distinct(definition) -> definition.name == name
+        .TypeAlias(definition) -> definition.name == name
+        _ -> false
+    })
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:164
+pub fn opmix_allows_builtin_impl(implementation: ImplDef, items: [Item]) -> Bool {
+    if !impl_target_is_builtin(implementation.type_name) -> return false
+    if !implementation.trait_name.is_some_and(is_operator_trait_name) -> return false
+    return if implementation.operator_rhs == {
+        .Val(.Named(rhs)) -> rhs != implementation.type_name && module_declares_named_type(items, rhs)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:186
+pub fn register_test_item(test: TestDef, state: &ModuleState, diags: &[Diagnostic]) {
+    if test.name != .Val(name) -> return
+    if name_defined(name, state.funcs, state.registry, state.consts) || state.tests.contains_key(name) {
+        &diags.push(defined_twice(name, "every test needs a unique name so failures are easy to find", test.name_span))
+    } else {
+        &state.tests.insert(~name, test.name_span)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:210
+pub fn fact_identity(declaration: FactDecl) -> String {
+    identity :: declaration.params.iter().find(parameter -> parameter.name == "$name").and_then(parameter -> parameter.value).and_then(value -> {
+        if value != .Str(parts, _) -> return None
+        text := ""
+        for part in parts {
+            if part == {
+                .Lit(value) -> &text.push_str(value)
+                .Interp(..) -> return None
+            }
+        }
+        return Val(^text)
+    })
+    return identity.unwrap_or_else(() -> ~declaration.name)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:232
+pub fn register_fact_declaration(declaration: FactDecl, module_idx: USize, declarations: &[String:(USize, Span, String)], diags: &[Diagnostic]) {
+    identity :: fact_identity(declaration)
+    if declarations.get(identity) == .Val((first_module, first_span, first_source)) {
+        &diags.push(Diagnostic.error("E0105", "fact `{identity}` is declared twice (spans {first_span.start}..{first_span.end} and {declaration.name_span.start}..{declaration.name_span.end})", "one fact name must resolve to one declaration in the loaded bundle", "rename or remove one of the fact declarations", Val(declaration.name_span))
+            .with_detail("first declaration `{first_source}`: module {first_module}, span {first_span.start}..{first_span.end}\nsecond declaration `{declaration.name}`: module {module_idx}, span {declaration.name_span.start}..{declaration.name_span.end}"))
+        return
+    }
+    &declarations.insert(^identity, (module_idx, declaration.name_span, ~declaration.name))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:272
+pub fn register_generated_union_enums(items: [Item], state: &ModuleState, diags: &[Diagnostic]) {
+    for item in items {
+        if item == {
+            .Enum(definition) if definition.name.starts_with("__JetUnion_") && !state.registry.contains(definition.name) ->
+                register_enum(definition, &state.registry, &diags, state.funcs, state.consts)
+            .CodeModule(module) -> {
+                if module.body == .Val(body) -> register_generated_union_enums(body, &state, &diags)
+            }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:301
+pub fn existing_member_span(items: [Item], type_name: String, member: String) -> Span? {
+    for item in items {
+        if item == {
+            .Struct(def) if def.name == type_name -> {
+                if def.fields.iter().find(field -> field.name == member) == .Val(field) -> return Val(field.name_span)
+                if def.methods.iter().find(method -> method.name == member) == .Val(method) -> return Val(method.name_span)
+            }
+            .Enum(def) if def.name == type_name -> {
+                if def.methods.iter().find(method -> method.name == member) == .Val(method) -> return Val(method.name_span)
+            }
+            .Impl(def) if def.type_name == type_name -> {
+                if def.methods.iter().find(method -> method.name == member) == .Val(method) -> return Val(method.name_span)
+            }
+            _ -> {}
+        }
+    }
+    return None
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:328
+pub fn block_source(source: String, body: [Stmt], block_spans: [Span], outer: Span) -> String {
+    candidate :: if (body.first(), body.last()) == {
+        (.Val(first), .Val(last)) -> block_spans.iter().filter(span -> span.start > outer.start && span.end < outer.end && span.start <= first.span().start && span.end >= last.span().end).max_by_key(span -> span.end.saturating_sub(span.start))
+        _ -> block_spans.iter().filter(span -> span.start > outer.start && span.end < outer.end).min_by_key(span -> span.start)
+    }
+    return candidate.and_then(span -> source.get(span.start..<span.end)).unwrap_or("").to_string()
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:356
+pub fn collect_declared_text_blocks(statements: [Stmt], source: String, block_spans: [Span], blocks: &[(String, String, Span)]) {
+    for statement in statements {
+        if statement == .ScopeMember{name, body, dsl: true, span, ..} -> &blocks.push((~name, block_source(source, body, block_spans, span), span))
+        for child in statement_bodies(statement) -> collect_declared_text_blocks(child, source, block_spans, &blocks)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:383
+pub fn collect_item_declared_text_blocks(item: Item, source: String, block_spans: [Span], blocks: &[(String, String, Span)]) {
+    if item == {
+        .Func(function) -> collect_declared_text_blocks(function.body, source, block_spans, &blocks)
+        .Test(test) -> collect_declared_text_blocks(test.body, source, block_spans, &blocks)
+        .Impl(implementation) -> {
+            for method in implementation.methods -> collect_declared_text_blocks(method.body, source, block_spans, &blocks)
+        }
+        .Struct(definition) -> {
+            for method in definition.methods -> collect_declared_text_blocks(method.body, source, block_spans, &blocks)
+            for implementation in definition.trait_impls {
+                for method in implementation.methods -> collect_declared_text_blocks(method.body, source, block_spans, &blocks)
+            }
+        }
+        .Enum(definition) -> {
+            for method in definition.methods -> collect_declared_text_blocks(method.body, source, block_spans, &blocks)
+            for implementation in definition.trait_impls {
+                for method in implementation.methods -> collect_declared_text_blocks(method.body, source, block_spans, &blocks)
+            }
+        }
+        .CodeModule(module) -> {
+            if module.body == .Val(body) {
+                for child in body -> collect_item_declared_text_blocks(child, source, block_spans, &blocks)
+            }
+        }
+        _ -> {}
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:430
+pub fn derive_member_collision(derive_name: String, type_name: String, method: Func, existing_site: String, existing_span: Span) -> Diagnostic {
+    return Diagnostic.error("E0105", "generated method `{method.name}` from `derive T.{derive_name}` collides with {existing_site}", "`derive T.{derive_name}` and {existing_site} both define a member named `{method.name}` on `{type_name}`", "rename the generated member in `derive T.{derive_name}`, or rename the colliding member", Val(method.name_span))
+        .with_detail("generated member `{method.name}` from `derive T.{derive_name}` at span {method.name_span.start}..{method.name_span.end}\n{existing_site} at span {existing_span.start}..{existing_span.end}")
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:465
+pub fn validate_foreign_imports(bundle: ProgramBundle) -> [Diagnostic] {
+    diagnostics: [Diagnostic] := []
+    seen: [(USize, Span):Bool] := [:]
+    seen_aliases: [(USize, String?):[String:Bool]] := [:]
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for (scope, import) in jet_foundation.walk_imports(module) {
+            identity :: (module_idx, import.span)
+            if seen.contains_key(identity) -> continue
+            &seen.insert(identity, true)
+            foreign :: if import.foreign_imports() == {
+                .Ok(foreign) -> ^foreign
+                .Err(error) -> {
+                    &diagnostics.push(error.diagnostic())
+                    continue
+                }
+            }
+            if foreign.is_empty() -> continue
+            aliases :: &seen_aliases.entry((module_idx, scope.map(name -> ~name))).or_insert([:])
+            for (_, alias) in foreign {
+                if !aliases.contains_key(alias) {
+                    &aliases.insert(^alias, true)
+                    continue
+                }
+                &diagnostics.push(Diagnostic.error("E0105", "the import name `{alias}` is used twice", "each import needs a unique namespace name in this file", "rename one with `{Syntax.KW_AS} alias`", Val(import.alias_span)))
+            }
+        }
+    }
+    return ^diagnostics
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:504
+pub fn foreign_imports_after_validation(import: ImportDecl) -> [(ForeignNamespace, String)] {
+    return import.foreign_imports().unwrap_or_else(error -> panic("invalid foreign import reached sema after validation: {error.path}"))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:515
+pub fn is_c_import_after_validation(import: ImportDecl) -> Bool {
+    return import.is_c_import().unwrap_or_else(error -> panic("invalid foreign import reached sema after validation: {error.path}"))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:524
+pub fn check_bundle_opts_for_output(bundle: &ProgramBundle, mode: CompileMode, no_os: Bool, gates: GateSet, explicit_output: String?, incremental: &IncrementalSemaCache?) -> ([Diagnostic], SemIndexEffectFacts) {
+    return check_bundle_opts_for_output_with_context(&bundle, mode, no_os, gates, explicit_output, &incremental, false)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:565
+pub fn check_bundle_opts_for_output_with_context(bundle: &ProgramBundle, mode: CompileMode, no_os: Bool, gates: GateSet, explicit_output: String?, incremental: &IncrementalSemaCache?, allow_compiler_api: Bool) -> ([Diagnostic], SemIndexEffectFacts) {
+    // Re-entrancy is checked before any capture/spawn.
+    // GATE #4494: native compiler-stack and ambient TLS boundary.
+    if CompilerStack.on_compiler_worker() -> return check_bundle_opts_for_output_on_stack(&bundle, mode, no_os, gates, explicit_output, &incremental, allow_compiler_api)
+    (ambient_core_call, ambient_handle, ambient_extern_call) :: ambient_hooks()
+    return CompilerStack.run_on_compiler_stack(() ->
+        with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, () ->
+            check_bundle_opts_for_output_on_stack(&bundle, mode, no_os, gates, explicit_output, &incremental, allow_compiler_api)))
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:606
+pub fn check_bundle_opts_for_output_on_stack(bundle: &ProgramBundle, mode: CompileMode, no_os: Bool, gates: GateSet, explicit_output: String?, incremental: &IncrementalSemaCache?, allow_compiler_api: Bool) -> ([Diagnostic], SemIndexEffectFacts) {
+    edition :: ~bundle.edition
+    (diags, facts) :: PackageEdition.with_package_edition(edition, () ->
+        check_bundle_opts_for_output_inner(&bundle, mode, no_os, gates, explicit_output, &incremental, allow_compiler_api))
+    return (summarize_dependency_reports(bundle, ^diags), ^facts)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:634
+pub fn summarize_dependency_reports(bundle: ProgramBundle, diags: [Diagnostic]) -> [Diagnostic] {
+    if bundle.dep_roots.is_empty() -> return ^diags
+    failing: [String:OSPath] := [:]
+    kept: [Diagnostic] := []
+    &kept.reserve(diags.len())
+    for diagnostic in diags {
+        owner :: diagnostic.origin().and_then(origin -> {
+            path :: OSPath.new(origin.path)
+            return bundle.dep_roots.iter().filter(pair -> path.starts_with(pair.1)).max_by_key(pair -> pair.1.components().count())
+        })
+        if owner == {
+            .Val((name, root)) -> {
+                if diagnostic.severity == Severity.Error -> &failing.insert(~name, ~root)
+            }
+            .None -> &kept.push(^diagnostic)
+        }
+    }
+    packages := failing.keys().collect()
+    &packages.sort()
+    for package in packages {
+        root :: failing[package]
+        displayed :: root.strip_prefix(bundle.project_root).unwrap_or(root).display().to_string()
+        &kept.push(Diagnostic.from_row("E0626", [("package", package), ("root", displayed)], None))
+    }
+    return ^kept
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:679
+pub fn guard_fact_registry_law() {
+    if Registry.law_violations().into_iter().next() == .Val(violation) -> jet_foundation.ice(None, "fact registry law violation: {violation}")
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline.rs:692
+pub fn default_entry_return(bundle: &ProgramBundle) {
+    if bundle.modules.get_mut(bundle.entry) != .Val(module) -> return
+    for item in &module.items {
+        if item == .Func(function) && function.name == "run" {
+            if function.return_type.is_none() -> function.return_type = Val(Type.Result{ok: Type.Named(Syntax.INTERNAL_UNIT_TYPE), err: Type.Named(Syntax.TYPE_ERR)})
+            return
+        }
+    }
+}
 

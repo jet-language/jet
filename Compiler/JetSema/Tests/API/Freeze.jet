@@ -1,6 +1,6 @@
 use jet_foundation.[AccessConvention, EffectRowEntry, Expr, Func, Item, Measure, NamedSpan, Param, ParamZone, Program, Span, Type, TypeParam, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, ViewProvenance, ViewProvenanceEntry, ViewProvenanceMap, ViewSource, ViewSourcePath, ViewSourceProjection, ast_func, dimension_base, dimension_divide, foundation_embedded_core, foundation_member_name, jet_target_machine_hosted]
 use jet_parser.[parse_source]
-use jet_sema.[API_SNAPSHOT_VERSION, APIFreezeError, APIProjection, APISnapshot, APIUnitDimensions, FrozenFn, SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, api_snapshot_capability_digest, api_snapshot_parse, api_snapshot_write, canonical_api_type_name, canonical_type_params, collect_api_unit_dimensions, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature, normalized_public_effect_row, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_public_api_from_checked, sema_registration_prepare_graph, signature_without_effect_row, snapshot_from_items, snapshot_from_items_with_effects]
+use jet_sema.[API_SNAPSHOT_VERSION, APIFreezeError, APIProjection, APISnapshot, APIUnitDimensions, FrozenFn, SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, api_snapshot_capability_digest, api_snapshot_parse, api_snapshot_write, canonical_api_type_name, canonical_type_params, collect_api_unit_dimensions, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature, normalized_public_effect_row, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_public_api_from_checked, sema_test_prepare_graph, signature_without_effect_row, snapshot_from_items, snapshot_from_items_with_effects]
 use core.files.host.retained_descriptor as api_test_native
 use core.files.runtime.kernel_path_components as api_test_path
 
@@ -251,7 +251,7 @@ fn api_test_checked(source: String) -[Env, FS]> APIProjection Never! {
     inputs :: [SemaRegistrationModuleInput]{api_test_module(^original, "main", "api.jet", "api"), api_test_module(^effects, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
     build :: SemaBuildFacts{package_name: "api", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "api-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    registration :: sema_registration_prepare_graph(inputs, [], "api", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    registration :: sema_test_prepare_graph(inputs, [], "api", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
     stage :: sema_collect_comptime_declarations(registration, [], None)
     project_root :: api_test_native.canonicalize(api_test_path.from_text(".", api_test_path.PathPlatform.Unix)) ?? panic("API fixture requires its actual working directory")
     checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)

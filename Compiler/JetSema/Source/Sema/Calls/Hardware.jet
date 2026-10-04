@@ -460,3 +460,26 @@ pub fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args:
     synthetic := sema_tir_expr(Type.Named{name: "__JetHardwareReceiver"}, TExprKind.Unit, expr_span(receiver))
     sema_call_try_hardware_method(receiver, synthetic, method, args, transfer_fact, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:8400
+fn checker_hardware_path_append(expr: Expr, &path: [String]) -> Bool Never! {
+    if expr == {
+        .Ident(name, _) -> { path.push(name); true }
+        .Field(base, member, _) -> {
+            if !checker_hardware_path_append(base, &path) -> return false
+            path.push(member)
+            true
+        }
+        .Paren(inner, _) -> checker_hardware_path_append(inner, &path)
+        else -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:8396
+fn checker_hardware_path(expr: Expr, core_imports: [String:String]) -> [String]? Never! {
+    path := [String]{}
+    if !checker_hardware_path_append(expr, &path) -> return None
+    alias :: path.first() ?? return None
+    module :: core_imports.get(alias) ?? return None
+    if !module.starts_with("board.") -> return None
+    Val(^path)
+}

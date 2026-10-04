@@ -5,7 +5,7 @@ use core.files.host.retained_descriptor as effect_test_native
 use core.files.runtime.kernel_path_components as effect_test_path
 use jet_foundation.[DIAGNOSTIC_ERROR, Program, TFunc, foundation_embedded_core, jet_target_machine_hosted]
 use jet_parser.[parse_source]
-use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_effect_trait_contracts, sema_finalize_registration_graph, sema_registration_prepare_graph]
+use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_effect_trait_contracts, sema_finalize_registration_graph, sema_test_prepare_graph]
 
 fn effect_producer_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
     SemaRegistrationModuleInput{package_identity: package, module_identity: identity,
@@ -25,7 +25,7 @@ fn effect_producer_registration(source: String) -> SemaRegistrationGraph Never! 
     build :: SemaBuildFacts{package_name: "facts", package_version: "1.0.0", os: "linux", profile: "test",
         stamp_git: None, stamp_dirty: false, stamp_toolchain: "effect-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    registration :: sema_registration_prepare_graph(inputs, [], "facts", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    registration :: sema_test_prepare_graph(inputs, [], "facts", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
     registration
 }
 fn effect_producer_checked(source: String, inspect: Bool) -> SemaGraphResult Never! {

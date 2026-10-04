@@ -1,6 +1,8 @@
 // Sole loaded AST ownership seam. Driver identity/provenance stays outside
 // Foundation; Program snapshots are immutable parser/check lookup products.
-use jet_foundation.[ApplicationAuthority, AppliedRuleApplication, BuildFactSnapshot, CFfi, DebugTraceSite, DevtoolsRegistry, ElseArmSpan, FencedStatement, LoadedModule, MIROSTarget, PackageGuarantees, Program, ProgramBundle, ast_program, name_ledger_new, name_ledger_record_import_target, name_ledger_set_module, name_ledger_set_module_namespace]
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
+use jet_sema.[SemaBuildFacts, SemaSourceOrigin]
+use jet_foundation.[ApplicationAuthority, AppliedRuleApplication, BuildFactSnapshot, DebugTraceSite, ElseArmSpan, FencedStatement, LoadedModule, PackageGuarantees, Program, ProgramBundle, ast_program, name_ledger_record_import_target, name_ledger_set_module, name_ledger_set_module_namespace]
 
 struct JetDriverParseMetadata {
     fenced_statements: [FencedStatement]
@@ -12,8 +14,8 @@ struct JetDriverParseMetadata {
 fn jet_driver_parse_metadata(program: Program) -> JetDriverParseMetadata Never! {
     JetDriverParseMetadata{fenced_statements: program.fenced_statements, applied_rules: program.applied_rules, else_arms: program.else_arms, used_import_names: program.used_import_names, debug_sites: program.debug_sites}
 }
-fn jet_driver_loaded_ast(unit: JetDriverSourceUnit, source: String, program: ^Program) -> LoadedModule Never! {
-    path :: unit.physical_path ?? compiler_driver_os_path.from_text(unit.path, compiler_driver_os_path.PathPlatform.Unix)
+fn jet_driver_loaded_ast(unit: JetDriverSourceUnit, source: String, platform: compiler_driver_os_path.PathPlatform, program: ^Program) -> LoadedModule Never! {
+    path :: unit.physical_path ?? compiler_driver_os_path.from_text(unit.path, platform)
     LoadedModule.from_program(path, if unit.source_origin == SemaSourceOrigin.CompilerGenerated -> unit.relative_path else -> unit.path, source, unit.alias, ^program)
 }
 // Read-only COW view of the retained object for existing parser metadata
@@ -74,7 +76,7 @@ fn jet_driver_seed_bundle(load: JetDriverLoadResult, roots: View<JetDriverAuthor
             guarantees.lints_deny = policy.lints_deny
         }
         guarantees.dependency_names = Rank.from(names)
-        guarantees.memory_denials = loop right in package.authority_deny ?? [String]{} { if right.starts_with("Mem.") -> right }
+        guarantees.memory_denials = loop right in package.authority_deny ?? [String]{} { if right == "Mem.Rc" || jet_driver_is_allocation_denial(right) -> right }
         guarantees.authority_needs = package.authority_needs
         guarantees.application_authority = if package.manifest_path == None -> ApplicationAuthority.ambient_basics() else -> ApplicationAuthority.from_policy(package.authority_allow, package.authority_deny, "package.jet")
         permit.value.package_guarantees = guarantees
@@ -82,12 +84,27 @@ fn jet_driver_seed_bundle(load: JetDriverLoadResult, roots: View<JetDriverAuthor
     }
 }
 
+// Rust Loader::package_guarantees_for_manifest uses exactly Mem.Rc and the
+// Effects::memory_allocation_bound grammar, not every Mem.* authority leaf.
+fn jet_driver_is_allocation_denial(name: String) -> Bool Never! {
+    if name == "Mem.Alloc" -> return true
+    if !name.starts_with("Mem.Alloc(") || !name.ends_with(")") -> return false
+    // #4303: retained string-view bindings use the approved mutable spelling.
+    arguments := name.after("Mem.Alloc(")
+    if arguments.after(")") != "" -> return false
+    body := arguments.before(")").trim()
+    if !body.starts_with("above:") -> return false
+    amount := body.after("above:").trim()
+    bytes :: U64.parse(amount) ?? return false
+    bytes > 0
+}
+
 fn jet_driver_append_loaded_module(bundle: &ProgramBundle, unit: JetDriverSourceUnit, unit_index: Int, source: String, program: ^Program) -> JetDriverModuleFacts Never! {
     metadata :: jet_driver_parse_metadata(program)
     index := Int?{None}
     if unit.bundle_module {
         index = Val(bundle.modules.len())
-        &bundle.modules.push(jet_driver_loaded_ast(unit, source, ^program))
+        &bundle.modules.push(jet_driver_loaded_ast(unit, source, bundle.project_root.platform, ^program))
     }
     JetDriverModuleFacts{source_unit_index: unit_index, source_identity: jet_driver_source_identity(unit.package_identity, jet_driver_source_unit_identity_label(unit)), package_identity: unit.package_identity, module_identity: jet_driver_unit_module_identity(unit), module_name: unit.module_name, bundle_index: index, parse_metadata: metadata}
 }
@@ -105,4 +122,12 @@ fn jet_driver_reorder_bundle(load: &JetDriverLoadResult) Never! {
         load.modules[index].bundle_index = Val(permit.value.modules.len())
         &permit.value.modules.push(^module)
     }
+}
+
+fn jet_driver_publish_build_facts(load: JetDriverLoadResult, facts: SemaBuildFacts) -> Bool Never! {
+    snapshot :: facts.snapshot ?? return false
+    permit := load.bundle.guard_edit()
+    permit.value.build_facts = snapshot
+    permit.value.active_os = snapshot.os
+    true
 }

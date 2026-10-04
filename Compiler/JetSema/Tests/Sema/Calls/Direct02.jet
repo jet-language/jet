@@ -1,0 +1,33 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:395-410 (behavioral control; no inline Rust tests)
+#Test("freeze_requires_one_snapshot_source") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: freeze(1, 2) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" && d.what == "`freeze` takes exactly one value, got 2" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:460-471 (behavioral control)
+#Test("apply_requires_a_callable_even_for_an_empty_policy_chain") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: apply() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" && d.what == "`apply` needs a callable value" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:625-653 (behavioral control)
+#Test("approx_rejects_a_string_instead_of_inventing_a_conversion") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: approx(\"text\") }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0109" && d.what.contains("needs a whole number") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:757-776 (behavioral control)
+#Test("measurement_uncertainty_label_is_semantic") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: measurement(1.0, 0.1) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" && d.what == "`measurement` needs a value and labeled uncertainty" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:790-845 (behavioral control)
+#Test("empty_channel_does_not_guess_its_element_type") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: channel() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0904" && d.what == "`channel` needs a type argument to infer the element type" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:876-1069 (behavioral control)
+#Test("ordinary_argument_pins_generic_type_before_callback") {
+    diagnostics :: statements05_diagnostics("fn identity<T>(value: T) -> T Never! {{ value }}\nfn run() {{ value: Int :: identity(4)\n _ :: value }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}

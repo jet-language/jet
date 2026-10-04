@@ -1,1202 +1,502 @@
-// PORT-PENDING 0359 crates-jet-sema-src-sema-bundle-targetmachine: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1-1198
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::AST::ProgramBundle;
-//RS use crate::Sema::{effect_covers, effect_root};
-//RS use jet_foundation::RingLayer::classify_prelude_closure;
-//RS use jet_foundation::TargetMachine::{
-//RS     RegisterWidth, TargetDmaOperation, TargetDmaOperationFact, TargetDmaOwner, TargetHardwareFacts,
-//RS     TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact,
-//RS     TargetMachine, TargetMachineError, TargetRegisterAccessFact, TargetMachineUse,
-//RS };
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS 
-//RS /// Project the complete sema-owned Prelude closure into target requirements.
-//RS ///
-//RS /// `used_core` contains direct calls and sema-generated roots. The target pass
-//RS /// must see the transitive closure, not only imports visible to one checker, so
-//RS /// it expands the same RingLayer graph before validating target facts.
-//RS pub fn target_machine_use(bundle: &ProgramBundle) -> TargetMachineUse {
-//RS     let mut used_core = bundle.used_core.clone();
-//RS     let hardware = target_hardware_use(bundle);
-//RS     if !hardware.register_accesses.is_empty()
-//RS         || !hardware.interrupt_handlers.is_empty()
-//RS         || !hardware.dma_operations.is_empty()
-//RS         || !hardware.unresolved_references.is_empty()
-//RS     {
-//RS         used_core.insert("core.hardware".to_string());
-//RS     }
-//RS     let closure = classify_prelude_closure(used_core.iter());
-//RS     let mut usage = TargetMachineUse::from_core_apis(closure.keys());
-//RS     usage.core_apis = closure.into_keys().collect();
-//RS     usage
-//RS }
-//RS /// Return the selected target profile's immutable hardware facts.
-//RS ///
-//RS /// A board import is the source-level profile selector.  The profile is
-//RS /// resolved here, before any backend sees the package, so register widths,
-//RS /// interrupt vectors, and DMA ownership cannot be reconstructed per tier.
-//RS pub fn target_hardware_profile(bundle: &ProgramBundle) -> Option<TargetHardwareFacts> {
-//RS     selected_hardware_profile(bundle).map(|(_, facts)| facts)
-//RS }
-//RS 
-//RS /// Return the exact profile identity selected by a board import or file target.
-//RS pub fn target_hardware_profile_id(bundle: &ProgramBundle) -> Option<String> {
-//RS     selected_hardware_profile(bundle).map(|(id, _)| id)
-//RS }
-//RS 
-//RS /// Return generated capability identifiers for the selected immutable profile.
-//RS pub fn target_hardware_capabilities(bundle: &ProgramBundle) -> Vec<String> {
-//RS     let Some((_, facts)) = selected_hardware_profile(bundle) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut capabilities = Vec::new();
-//RS     for block in &facts.register_blocks {
-//RS         for register in &block.registers {
-//RS             capabilities.push(format!("register.{}.{}", block.name, register.name));
-//RS         }
-//RS     }
-//RS     for interrupt in &facts.interrupts {
-//RS         capabilities.push(format!("interrupt.{}", interrupt.name));
-//RS     }
-//RS     for channel in &facts.dma_channels {
-//RS         capabilities.push(format!("dma.{}", channel.name));
-//RS     }
-//RS     capabilities
-//RS }
-//RS 
-//RS /// Project all source-level board operations into the shared hardware fact
-//RS /// plane.  This is deliberately a sema projection: no target pointer, host
-//RS /// callback, or tier-specific operation is created here.
-//RS pub fn target_hardware_use(bundle: &ProgramBundle) -> TargetHardwareUse {
-//RS     project_target_hardware(bundle, None)
-//RS }
-//RS 
-//RS /// Project hardware operations with the effect solver's transitive handler
-//RS /// facts.  The plain API remains useful to tooling that has only an AST;
-//RS /// the driver uses this form so an interrupt calling an allocating helper is
-//RS /// rejected by the same target boundary as a direct allocation.
-//RS pub fn target_hardware_use_with_effect_facts(
-//RS     bundle: &ProgramBundle,
-//RS     effects: &crate::Sema::SemIndexEffectFacts,
-//RS ) -> TargetHardwareUse {
-//RS     project_target_hardware(bundle, Some(effects))
-//RS }
-//RS 
-//RS fn selected_hardware_profile(bundle: &ProgramBundle) -> Option<(String, TargetHardwareFacts)> {
-//RS     let entry = bundle.modules.get(bundle.entry)?;
-//RS     for (_, import) in crate::AST::walk_imports(entry) {
-//RS         if let Some(profile) = crate::AST::target_profile_path(import) {
-//RS             if let Some(facts) = hardware_facts_for_profile(&profile) {
-//RS                 return Some((profile, facts));
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(profile) = entry.default_target.as_deref() {
-//RS         if let Some(facts) = hardware_facts_for_profile(profile) {
-//RS             return Some((profile.to_string(), facts));
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn hardware_facts_for_profile(profile: &str) -> Option<TargetHardwareFacts> {
-//RS     match profile {
-//RS         "board.sensor_v1" => Some(TargetMachine::board_sensor_v1().hardware),
-//RS         "board.virt_aarch64" => Some(TargetMachine::board_virt_aarch64().hardware),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn project_target_hardware(
-//RS     bundle: &ProgramBundle,
-//RS     effect_facts: Option<&crate::Sema::SemIndexEffectFacts>,
-//RS ) -> TargetHardwareUse {
-//RS     let mut hardware = TargetHardwareUse::default();
-//RS     for module in &bundle.modules {
-//RS         let aliases = profile_aliases(module);
-//RS         let profile_facts = aliases
-//RS             .values()
-//RS             .find_map(|profile| hardware_facts_for_profile(profile));
-//RS         for item in &module.items {
-//RS             match item {
-//RS                 crate::AST::Item::Func(function) => project_function(
-//RS                     function,
-//RS                     &module.alias,
-//RS                     &aliases,
-//RS                     profile_facts.as_ref(),
-//RS                     effect_facts,
-//RS                     &mut hardware,
-//RS                 ),
-//RS                 crate::AST::Item::Struct(definition) => {
-//RS                     for function in &definition.methods {
-//RS                         project_function(
-//RS                             function,
-//RS                             &module.alias,
-//RS                             &aliases,
-//RS                             profile_facts.as_ref(),
-//RS                             effect_facts,
-//RS                             &mut hardware,
-//RS                         );
-//RS                     }
-//RS                     for implementation in &definition.trait_impls {
-//RS                         for function in &implementation.methods {
-//RS                             project_function(
-//RS                                 function,
-//RS                                 &module.alias,
-//RS                                 &aliases,
-//RS                                 profile_facts.as_ref(),
-//RS                                 effect_facts,
-//RS                                 &mut hardware,
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 crate::AST::Item::Enum(definition) => {
-//RS                     for function in &definition.methods {
-//RS                         project_function(
-//RS                             function,
-//RS                             &module.alias,
-//RS                             &aliases,
-//RS                             profile_facts.as_ref(),
-//RS                             effect_facts,
-//RS                             &mut hardware,
-//RS                         );
-//RS                     }
-//RS                     for implementation in &definition.trait_impls {
-//RS                         for function in &implementation.methods {
-//RS                             project_function(
-//RS                                 function,
-//RS                                 &module.alias,
-//RS                                 &aliases,
-//RS                                 profile_facts.as_ref(),
-//RS                                 effect_facts,
-//RS                                 &mut hardware,
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 crate::AST::Item::Impl(implementation) => {
-//RS                     for function in &implementation.methods {
-//RS                         project_function(
-//RS                             function,
-//RS                             &module.alias,
-//RS                             &aliases,
-//RS                             profile_facts.as_ref(),
-//RS                             effect_facts,
-//RS                             &mut hardware,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     hardware.unresolved_references.sort();
-//RS     hardware.unresolved_references.dedup();
-//RS     hardware
-//RS }
-//RS 
-//RS fn profile_aliases(module: &crate::AST::LoadedModule) -> BTreeMap<String, String> {
-//RS     crate::AST::walk_imports(module)
-//RS         .into_iter()
-//RS         .filter_map(|(_, import)| {
-//RS             crate::AST::target_profile_path(import).map(|profile| (import.import_alias(), profile))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn project_function(
-//RS     function: &crate::AST::Func,
-//RS     module_alias: &str,
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     effect_facts: Option<&crate::Sema::SemIndexEffectFacts>,
-//RS     hardware: &mut TargetHardwareUse,
-//RS ) {
-//RS     for marker in &function.markers {
-//RS         if marker.name != crate::Syntax::MARKER_INTERRUPT {
-//RS             continue;
-//RS         }
-//RS         let Some(interrupt) = marker
-//RS             .expr_arg(0)
-//RS             .and_then(|expr| {
-//RS                 interrupt_name(
-//RS                     expr,
-//RS                     aliases,
-//RS                     profile_facts,
-//RS                     &mut hardware.unresolved_references,
-//RS                 )
-//RS             })
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let mut effects = declared_or_direct_effects(
-//RS             function,
-//RS             module_alias,
-//RS             effect_facts,
-//RS         );
-//RS         let forbidden_effects = marker_effect_row(marker);
-//RS         let mut handler = TargetInterruptHandlerFact::new(
-//RS             interrupt,
-//RS             function.name.clone(),
-//RS             std::mem::take(&mut effects),
-//RS             true,
-//RS         );
-//RS         handler.forbidden_effects = forbidden_effects;
-//RS         hardware.interrupt_handlers.push(handler);
-//RS     }
-//RS 
-//RS     let mut transfers = BTreeMap::<String, (String, String)>::new();
-//RS     let mut in_flight = BTreeMap::<String, String>::new();
-//RS     for statement in &function.body {
-//RS         let mut moved = BTreeSet::new();
-//RS         statement.for_each_expr(|expr| {
-//RS             if let Some((_, buffer, convention)) = dma_start(
-//RS                 expr,
-//RS                 aliases,
-//RS                 profile_facts,
-//RS                 &mut hardware.unresolved_references,
-//RS             ) {
-//RS                 if convention == crate::AST::AccessConvention::Move {
-//RS                     moved.insert(buffer);
-//RS                 }
-//RS             }
-//RS         });
-//RS         if let crate::AST::Stmt::Val(binding) = statement {
-//RS             if let Some((channel, buffer, _)) = dma_start(
-//RS                 &binding.init,
-//RS                 aliases,
-//RS                 profile_facts,
-//RS                 &mut hardware.unresolved_references,
-//RS             ) {
-//RS                 if !binding.name.is_empty() {
-//RS                     transfers.insert(binding.name.clone(), (channel, buffer));
-//RS                 }
-//RS             }
-//RS         }
-//RS         statement.for_each_expr(|expr| {
-//RS             project_hardware_expr(
-//RS                 expr,
-//RS                 aliases,
-//RS                 profile_facts,
-//RS                 &moved,
-//RS                 &mut transfers,
-//RS                 &mut in_flight,
-//RS                 hardware,
-//RS             );
-//RS         });
-//RS     }
-//RS 
-//RS }
-//RS fn declared_or_direct_effects(
-//RS     function: &crate::AST::Func,
-//RS     module_alias: &str,
-//RS     effect_facts: Option<&crate::Sema::SemIndexEffectFacts>,
-//RS ) -> jet_foundation::Effects::EffectSet {
-//RS     let mut effects = jet_foundation::Effects::EffectSet::new();
-//RS     if let Some(declared) = &function.declared_effects {
-//RS         effects.extend(declared.iter().map(|(effect, _)| effect.clone()));
-//RS     }
-//RS     for statement in &function.body {
-//RS         statement.for_each_expr(|expr| collect_direct_effect(expr, &mut effects));
-//RS     }
-//RS     if let Some(facts) = effect_facts {
-//RS         let qualified = format!("{module_alias}::{}", function.name);
-//RS         if let Some(solved) = facts.solved.get(&qualified).or_else(|| facts.solved.get(&function.name)) {
-//RS             effects.extend(solved.iter().cloned());
-//RS         }
-//RS     }
-//RS     effects
-//RS }
-//RS 
-//RS fn collect_direct_effect(
-//RS     expr: &crate::AST::Expr,
-//RS     effects: &mut jet_foundation::Effects::EffectSet,
-//RS ) {
-//RS     match expr {
-//RS         crate::AST::Expr::Call(call) => match call.name.as_str() {
-//RS             "alloc" | "try_alloc" => {
-//RS                 effects.insert("Mem.Alloc".to_string());
-//RS             }
-//RS             "wait" => {
-//RS                 effects.insert("Time.Wait".to_string());
-//RS             }
-//RS             "sleep" => {
-//RS                 effects.insert("Time.Sleep".to_string());
-//RS             }
-//RS             _ => {}
-//RS         },
-//RS         crate::AST::Expr::MethodCall { method, .. } => {
-//RS             if method == "alloc" || method == "try_alloc" {
-//RS                 effects.insert("Mem.Alloc".to_string());
-//RS             } else if method == "wait" {
-//RS                 effects.insert("Time.Wait".to_string());
-//RS             } else if method == "sleep" {
-//RS                 effects.insert("Time.Sleep".to_string());
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn marker_effect_row(marker: &crate::AST::Marker) -> jet_foundation::Effects::EffectSet {
-//RS     marker
-//RS         .args
-//RS         .get(1)
-//RS         .and_then(|arg| match arg {
-//RS             crate::AST::MarkerCallArg::EffectRow { effects, .. } => Some(effects),
-//RS             crate::AST::MarkerCallArg::Expr(_) => None,
-//RS         })
-//RS         .into_iter()
-//RS         .flatten()
-//RS         .map(|(effect, _)| effect.trim_start_matches('!').to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS fn project_hardware_expr(
-//RS     expr: &crate::AST::Expr,
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     moved: &BTreeSet<String>,
-//RS     transfers: &mut BTreeMap<String, (String, String)>,
-//RS     in_flight: &mut BTreeMap<String, String>,
-//RS     hardware: &mut TargetHardwareUse,
-//RS ) {
-//RS     match expr {
-//RS         crate::AST::Expr::Ident(name, _) => {
-//RS             if in_flight.contains_key(name) && !moved.contains(name) {
-//RS                 hardware
-//RS                     .dma_operations
-//RS                     .push(TargetDmaOperationFact::use_buffer(name.clone()));
-//RS             }
-//RS         }
-//RS         crate::AST::Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } => {
-//RS             if let Some((channel, buffer, convention)) = dma_start(
-//RS                 expr,
-//RS                 aliases,
-//RS                 profile_facts,
-//RS                 &mut hardware.unresolved_references,
-//RS             ) {
-//RS                 let mut operation = TargetDmaOperationFact::start(channel.clone(), buffer.clone());
-//RS                 if convention != crate::AST::AccessConvention::Move {
-//RS                     operation.owner = TargetDmaOwner::Device;
-//RS                 }
-//RS                 hardware.dma_operations.push(operation);
-//RS                 in_flight.insert(buffer, channel);
-//RS                 return;
-//RS             }
-//RS             if method == "wait" {
-//RS                 if let crate::AST::Expr::Ident(transfer, _) = receiver.as_ref() {
-//RS                     if let Some((channel, buffer)) = transfers.get(transfer).cloned() {
-//RS                         hardware
-//RS                             .dma_operations
-//RS                             .push(TargetDmaOperationFact::wait(channel, buffer.clone()));
-//RS                         in_flight.remove(&buffer);
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if let Some(path) = expr_path(receiver) {
-//RS                 if let Some((block, register, width)) = register_for_path(
-//RS                     &path,
-//RS                     aliases,
-//RS                     profile_facts,
-//RS                     &mut hardware.unresolved_references,
-//RS                 ) {
-//RS                     let operation = match method.as_str() {
-//RS                         "read" => Some(TargetRegisterAccessFact::read(block, register, width)),
-//RS                         "write" | "set" | "clear" => {
-//RS                             Some(TargetRegisterAccessFact::write(block, register, width))
-//RS                         }
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(operation) = operation {
-//RS                         hardware.register_accesses.push(operation);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             // Keep the ordinary recursive visitor in control of nested
-//RS             // arguments; only a move argument is exempted at the statement
-//RS             // level above.
-//RS             let _ = args;
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn dma_start(
-//RS     expr: &crate::AST::Expr,
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     unresolved: &mut Vec<TargetHardwareUnresolvedReference>,
-//RS ) -> Option<(String, String, crate::AST::AccessConvention)> {
-//RS     let crate::AST::Expr::MethodCall {
-//RS         receiver,
-//RS         method,
-//RS         args,
-//RS         ..
-//RS     } = expr
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if method != "start"
-//RS         || !matches!(receiver.as_ref(), crate::AST::Expr::Ident(name, _) if name == "dma")
-//RS         || args.len() < 2
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let channel_path = expr_path(&args[0].expr)?;
-//RS     let channel = channel_for_path(&channel_path, aliases, profile_facts, unresolved)?;
-//RS     let buffer = expr_name(&args[1].expr)?;
-//RS     Some((channel, buffer, args[1].convention))
-//RS }
-//RS 
-//RS fn channel_for_path(
-//RS     path: &[String],
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     unresolved: &mut Vec<TargetHardwareUnresolvedReference>,
-//RS ) -> Option<String> {
-//RS     if path.len() < 3 || !aliases.contains_key(&path[0]) {
-//RS         return None;
-//RS     }
-//RS     let requested = format!("{}_{}", path[1].to_ascii_uppercase(), path[2].to_ascii_uppercase());
-//RS     let Some(facts) = profile_facts else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::DmaChannel {
-//RS             channel: requested,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     let Some(channel) = facts
-//RS         .dma_channels
-//RS         .iter()
-//RS         .find(|channel| channel.name.eq_ignore_ascii_case(&requested))
-//RS     else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::DmaChannel {
-//RS             channel: requested,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     Some(channel.name.clone())
-//RS }
-//RS 
-//RS fn interrupt_name(
-//RS     expr: &crate::AST::Expr,
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     unresolved: &mut Vec<TargetHardwareUnresolvedReference>,
-//RS ) -> Option<String> {
-//RS     let path = expr_path(expr)?;
-//RS     if path.len() < 2 || !aliases.contains_key(&path[0]) {
-//RS         return None;
-//RS     }
-//RS     let requested = path.last()?.clone();
-//RS     let Some(facts) = profile_facts else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::Interrupt {
-//RS             interrupt: requested,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     let Some(interrupt) = facts
-//RS         .interrupts
-//RS         .iter()
-//RS         .find(|interrupt| interrupt.name.eq_ignore_ascii_case(&requested))
-//RS     else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::Interrupt {
-//RS             interrupt: requested,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     Some(interrupt.name.clone())
-//RS }
-//RS 
-//RS fn register_for_path(
-//RS     path: &[String],
-//RS     aliases: &BTreeMap<String, String>,
-//RS     profile_facts: Option<&TargetHardwareFacts>,
-//RS     unresolved: &mut Vec<TargetHardwareUnresolvedReference>,
-//RS ) -> Option<(String, String, RegisterWidth)> {
-//RS     if path.len() < 3 || !aliases.contains_key(&path[0]) {
-//RS         return None;
-//RS     }
-//RS     let requested_block = path[1].to_ascii_uppercase();
-//RS     let requested_register = path[2].clone();
-//RS     let Some(facts) = profile_facts else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::RegisterBlock {
-//RS             block: requested_block,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     let Some(block) = facts
-//RS         .register_blocks
-//RS         .iter()
-//RS         .find(|block| block.name.eq_ignore_ascii_case(&requested_block))
-//RS     else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::RegisterBlock {
-//RS             block: requested_block,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     let Some(register) = block
-//RS         .register(&requested_register)
-//RS         .or_else(|| {
-//RS             block
-//RS                 .registers
-//RS                 .iter()
-//RS                 .find(|register| register.name.eq_ignore_ascii_case(&requested_register))
-//RS         })
-//RS     else {
-//RS         unresolved.push(TargetHardwareUnresolvedReference::Register {
-//RS             block: block.name.clone(),
-//RS             register: requested_register,
-//RS         });
-//RS         return None;
-//RS     };
-//RS     Some((block.name.clone(), register.name.clone(), register.width))
-//RS }
-//RS 
-//RS fn expr_path(expr: &crate::AST::Expr) -> Option<Vec<String>> {
-//RS     match expr {
-//RS         crate::AST::Expr::Ident(name, _) => Some(vec![name.clone()]),
-//RS         crate::AST::Expr::Field(base, member, _) => {
-//RS             let mut path = expr_path(base)?;
-//RS             path.push(member.clone());
-//RS             Some(path)
-//RS         }
-//RS         crate::AST::Expr::Paren(inner, _) => expr_path(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn expr_name(expr: &crate::AST::Expr) -> Option<String> {
-//RS     match expr {
-//RS         crate::AST::Expr::Ident(name, _) => Some(name.clone()),
-//RS         crate::AST::Expr::Paren(inner, _) => expr_name(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Admit a selected target before codegen. TargetMachine remains the typed fact
-//RS /// validator; this seam projects its data errors through registered sema rows
-//RS /// so human and machine output share one diagnostic contract.
-//RS pub fn check_target_machine(machine: &TargetMachine, usage: &TargetMachineUse) -> Vec<Diagnostic> {
-//RS     machine
-//RS         .validate(usage)
-//RS         .iter()
-//RS         .map(|error| diagnostic_for_error(machine, error))
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Validate the target-profile hardware fact plane at the sema boundary.
-//RS ///
-//RS /// Register operations are checked against generated width/access/volatile
-//RS /// facts by `TargetMachine`. Handler effects come from the existing effect
-//RS /// solver, and DMA operations consume the existing ownership projection. The
-//RS /// result is intentionally a normal target diagnostic; no parser, Prelude, or
-//RS /// backend adapter is implied by this boundary.
-//RS #[allow(dead_code)]
-//RS pub fn validate_target_hardware(
-//RS     machine: &TargetMachine,
-//RS     hardware: &TargetHardwareUse,
-//RS ) -> Vec<Diagnostic> {
-//RS     let mut errors = machine.validate_hardware(hardware);
-//RS     validate_interrupt_handlers(machine, hardware, &mut errors);
-//RS     validate_dma_operations(machine, hardware, &mut errors);
-//RS     errors
-//RS         .iter()
-//RS         .map(|error| diagnostic_for_error(machine, error))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn validate_interrupt_handlers(
-//RS     machine: &TargetMachine,
-//RS     hardware: &TargetHardwareUse,
-//RS     errors: &mut Vec<TargetMachineError>,
-//RS ) {
-//RS     for handler in &hardware.interrupt_handlers {
-//RS         let Some(interrupt) = machine.hardware.interrupt(&handler.interrupt) else {
-//RS             errors.push(TargetMachineError::UnknownInterrupt {
-//RS                 interrupt: handler.interrupt.clone(),
-//RS             });
-//RS             continue;
-//RS         };
-//RS         if interrupt.bounded && !handler.bounded {
-//RS             errors.push(TargetMachineError::InterruptHandlerUnbounded {
-//RS                 interrupt: interrupt.name.clone(),
-//RS                 handler: handler.handler.clone(),
-//RS             });
-//RS         }
-//RS 
-//RS         for effect in &handler.effects {
-//RS             let baseline_forbidden = effect_is_allocation(effect) || effect_is_wait(effect);
-//RS             let profile_forbidden = interrupt
-//RS                 .forbidden_effects
-//RS                 .iter()
-//RS                 .chain(handler.forbidden_effects.iter())
-//RS                 .any(|bound| effect_covers(bound, effect));
-//RS             if baseline_forbidden || profile_forbidden {
-//RS                 errors.push(TargetMachineError::InterruptEffectForbidden {
-//RS                     interrupt: interrupt.name.clone(),
-//RS                     handler: handler.handler.clone(),
-//RS                     effect: effect.clone(),
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn effect_is_allocation(effect: &str) -> bool {
-//RS     effect == "Mem" || effect == "Mem.Alloc" || effect.starts_with("Mem.Alloc(")
-//RS }
-//RS 
-//RS fn effect_is_wait(effect: &str) -> bool {
-//RS     if effect == "Time" {
-//RS         return true;
-//RS     }
-//RS     if effect == "Time.Wait" || effect.starts_with("Time.Wait.") {
-//RS         return true;
-//RS     }
-//RS     if effect == "Time.Sleep" || effect.starts_with("Time.Sleep.") {
-//RS         return true;
-//RS     }
-//RS     effect_root(effect) == "Time" && effect.ends_with(".Wait")
-//RS }
-//RS 
-//RS fn validate_dma_operations(
-//RS     machine: &TargetMachine,
-//RS     hardware: &TargetHardwareUse,
-//RS     errors: &mut Vec<TargetMachineError>,
-//RS ) {
-//RS     let mut in_flight = BTreeMap::<String, String>::new();
-//RS     for operation in &hardware.dma_operations {
-//RS         match operation.operation {
-//RS             TargetDmaOperation::UseBuffer => {
-//RS                 if operation.owner != TargetDmaOwner::Cpu {
-//RS                     errors.push(TargetMachineError::DmaOwnershipMismatch {
-//RS                         channel: operation.channel.clone(),
-//RS                         buffer: operation.buffer.clone(),
-//RS                         expected: TargetDmaOwner::Cpu,
-//RS                         actual: operation.owner,
-//RS                     });
-//RS                 }
-//RS                 if let Some(channel) = in_flight.get(&operation.buffer) {
-//RS                     errors.push(TargetMachineError::DmaBufferUnavailable {
-//RS                         channel: channel.clone(),
-//RS                         buffer: operation.buffer.clone(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS             TargetDmaOperation::Start | TargetDmaOperation::Wait => {
-//RS                 let Some(channel) = machine.hardware.dma_channel(&operation.channel) else {
-//RS                     errors.push(TargetMachineError::UnknownDmaChannel {
-//RS                         channel: operation.channel.clone(),
-//RS                     });
-//RS                     continue;
-//RS                 };
-//RS                 if channel.ownership != jet_foundation::TargetMachine::TargetDmaOwnership::Transfer
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 match operation.operation {
-//RS                     TargetDmaOperation::Start => {
-//RS                         if operation.owner != TargetDmaOwner::Cpu {
-//RS                             errors.push(TargetMachineError::DmaOwnershipMismatch {
-//RS                                 channel: channel.name.clone(),
-//RS                                 buffer: operation.buffer.clone(),
-//RS                                 expected: TargetDmaOwner::Cpu,
-//RS                                 actual: operation.owner,
-//RS                             });
-//RS                         }
-//RS                         if in_flight
-//RS                             .insert(operation.buffer.clone(), channel.name.clone())
-//RS                             .is_some()
-//RS                         {
-//RS                             errors.push(TargetMachineError::DmaStartWhileInFlight {
-//RS                                 channel: channel.name.clone(),
-//RS                                 buffer: operation.buffer.clone(),
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                     TargetDmaOperation::Wait => {
-//RS                         if operation.owner != TargetDmaOwner::Device {
-//RS                             errors.push(TargetMachineError::DmaOwnershipMismatch {
-//RS                                 channel: channel.name.clone(),
-//RS                                 buffer: operation.buffer.clone(),
-//RS                                 expected: TargetDmaOwner::Device,
-//RS                                 actual: operation.owner,
-//RS                             });
-//RS                         }
-//RS                         match in_flight.get(&operation.buffer) {
-//RS                             None => errors.push(TargetMachineError::DmaWaitWithoutTransfer {
-//RS                                 channel: channel.name.clone(),
-//RS                                 buffer: operation.buffer.clone(),
-//RS                             }),
-//RS                             Some(active) if active != &channel.name => {
-//RS                                 errors.push(TargetMachineError::DmaWaitChannelMismatch {
-//RS                                     channel: channel.name.clone(),
-//RS                                     buffer: operation.buffer.clone(),
-//RS                                 });
-//RS                             }
-//RS                             Some(_) => {
-//RS                                 in_flight.remove(&operation.buffer);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     TargetDmaOperation::UseBuffer => unreachable!(),
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn diagnostic_for_error(machine: &TargetMachine, error: &TargetMachineError) -> Diagnostic {
-//RS     let target = target_name(machine);
-//RS     match error {
-//RS         TargetMachineError::CoreApiUnavailable {
-//RS             api,
-//RS             required,
-//RS             available,
-//RS         } => {
-//RS             let required = required.as_str();
-//RS             let available = available.as_str();
-//RS             Diagnostic::from_row(
-//RS                 "E3310",
-//RS                 &[
-//RS                     ("api", api),
-//RS                     ("required", required),
-//RS                     ("available", available),
-//RS                     ("target", target),
-//RS                 ],
-//RS                 None,
-//RS             )
-//RS         }
-//RS         TargetMachineError::HeapRequiresAllocator | TargetMachineError::MissingAllocatorPolicy => {
-//RS             Diagnostic::from_row("E3303", &[], None)
-//RS         }
-//RS         TargetMachineError::MissingTargetCapability { capability }
-//RS         | TargetMachineError::HostedCapabilityRequiresOs { capability } => Diagnostic::from_row(
-//RS             "E3311",
-//RS             &[("target", target), ("capability", capability)],
-//RS             None,
-//RS         ),
-//RS         TargetMachineError::InvalidProviderContract {
-//RS             capability,
-//RS             provider,
-//RS             sha256,
-//RS         } => Diagnostic::from_row(
-//RS             "E3312",
-//RS             &[
-//RS                 ("target", target),
-//RS                 ("capability", capability),
-//RS                 ("provider", provider),
-//RS                 ("sha256", sha256),
-//RS             ],
-//RS             None,
-//RS         ),
-//RS         TargetMachineError::MmioOutsideRegion {
-//RS             address,
-//RS             size_bytes,
-//RS         } => {
-//RS             let detail = format!(
-//RS                 "address 0x{address:X} ({size_bytes} bytes) is outside a declared MMIO region"
-//RS             );
-//RS             mmio_diagnostic(target, &detail)
-//RS         }
-//RS         TargetMachineError::MmioMissingUnsafeGate { address } => {
-//RS             let detail = format!("address 0x{address:X} has no #Unsafe gate");
-//RS             mmio_diagnostic(target, &detail)
-//RS         }
-//RS         TargetMachineError::MmioEmptyUnsafeReason { address } => {
-//RS             let detail = format!("address 0x{address:X} has an empty #Unsafe reason");
-//RS             mmio_diagnostic(target, &detail)
-//RS         }
-//RS         _ => {
-//RS             let (fact, detail) = generic_detail(error);
-//RS             Diagnostic::from_row(
-//RS                 "E3314",
-//RS                 &[
-//RS                     ("target", target),
-//RS                     ("fact", fact),
-//RS                     ("detail", detail.as_str()),
-//RS                 ],
-//RS                 None,
-//RS             )
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn target_name(machine: &TargetMachine) -> &str {
-//RS     if machine.name.trim().is_empty() {
-//RS         &machine.triple
-//RS     } else {
-//RS         &machine.name
-//RS     }
-//RS }
-//RS 
-//RS fn mmio_diagnostic(target: &str, detail: &str) -> Diagnostic {
-//RS     Diagnostic::from_row("E3313", &[("target", target), ("detail", detail)], None)
-//RS }
-//RS 
-//RS fn generic_detail(error: &TargetMachineError) -> (&'static str, String) {
-//RS     match error {
-//RS         TargetMachineError::MissingTargetTriple => {
-//RS             ("target triple", "the selected target triple is empty".to_string())
-//RS         }
-//RS         TargetMachineError::MissingMemoryKind { kind } => (
-//RS             "memory",
-//RS             format!("the target is missing a {} memory region", memory_kind_name(*kind)),
-//RS         ),
-//RS         TargetMachineError::DuplicateMemoryRegion { name } => {
-//RS             ("memory", format!("memory region `{name}` is declared more than once"))
-//RS         }
-//RS         TargetMachineError::EmptyMemoryRegion { name } => {
-//RS             ("memory", format!("memory region `{name}` has zero size"))
-//RS         }
-//RS         TargetMachineError::MemoryAddressOverflow { name } => {
-//RS             ("memory", format!("memory region `{name}` overflows the address space"))
-//RS         }
-//RS         TargetMachineError::OverlappingMemoryRegions { first, second } => (
-//RS             "memory",
-//RS             format!("memory regions `{first}` and `{second}` overlap"),
-//RS         ),
-//RS         TargetMachineError::MissingLinkerInput => {
-//RS             ("linker", "the no-OS target has no linker input".to_string())
-//RS         }
-//RS         TargetMachineError::LinkerFileMissingPath => {
-//RS             ("linker", "the linker file path is empty".to_string())
-//RS         }
-//RS         TargetMachineError::LinkerFileMissingHash { path } => (
-//RS             "linker",
-//RS             format!("linker file `{path}` has no valid sha256 provenance"),
-//RS         ),
-//RS         TargetMachineError::AllocatorRegionUnknown { region } => (
-//RS             "allocator",
-//RS             format!("allocator region `{region}` does not exist"),
-//RS         ),
-//RS         TargetMachineError::AllocatorRegionNotRam { region } => (
-//RS             "allocator",
-//RS             format!("allocator region `{region}` is not RAM"),
-//RS         ),
-//RS         TargetMachineError::AllocatorRegionTooSmall {
-//RS             region,
-//RS             requested_bytes,
-//RS             available_bytes,
-//RS         } => (
-//RS             "allocator",
-//RS             format!(
-//RS                 "allocator region `{region}` has {available_bytes} bytes but needs {requested_bytes}"
-//RS             ),
-//RS         ),
-//RS         TargetMachineError::HostedAllocatorRequiresOs => (
-//RS             "allocator",
-//RS             "a hosted system allocator cannot be selected on a no-OS target".to_string(),
-//RS         ),
-//RS         TargetMachineError::MissingPanicPolicy => (
-//RS             "panic",
-//RS             "the no-OS target has no panic policy".to_string(),
-//RS         ),
-//RS         TargetMachineError::RamOverflow {
-//RS             used_bytes,
-//RS             ram_bytes,
-//RS         } => (
-//RS             "memory",
-//RS             format!("RAM use ({used_bytes} bytes) exceeds {ram_bytes} bytes"),
-//RS         ),
-//RS         TargetMachineError::HostedHasNoLinkerScript => (
-//RS             "linker",
-//RS             "hosted targets do not have a generated linker script".to_string(),
-//RS         ),
-//RS         TargetMachineError::HostedHasNoStartup => (
-//RS             "startup",
-//RS             "hosted targets do not have generated startup glue".to_string(),
-//RS         ),
-//RS         TargetMachineError::UnsupportedStartupTriple { triple } => (
-//RS             "startup",
-//RS             format!("target triple `{triple}` has no startup generator"),
-//RS         ),
-//RS         TargetMachineError::ExecutionTierUnsupported { tier, machine } => (
-//RS             "execution",
-//RS             format!("target machine `{machine}` does not support the `{tier}` tier"),
-//RS         ),
-//RS         TargetMachineError::FirmwareToolchainMissing { tool } => (
-//RS             "toolchain",
-//RS             format!("required firmware tool `{tool}` is unavailable"),
-//RS         ),
-//RS         TargetMachineError::FirmwareBuildFailed { detail } => ("firmware", detail.clone()),
-//RS         TargetMachineError::SizeBudgetExceeded { report } => (
-//RS             "size budget",
-//RS             format!(
-//RS                 "artifact={} flash={} ram={} used_ram={}",
-//RS                 report.artifact_bytes, report.flash_bytes, report.ram_bytes, report.ram_used_bytes
-//RS             ),
-//RS         ),
-//RS         TargetMachineError::HardwareFactsMissingSvd => (
-//RS             "hardware profile",
-//RS             "register, interrupt, or DMA facts require SVD provenance".to_string(),
-//RS         ),
-//RS         TargetMachineError::InvalidHardwareSvd { source, sha256 } => (
-//RS             "hardware profile",
-//RS             format!("SVD `{source}` has invalid sha256 provenance `{sha256}`"),
-//RS         ),
-//RS         TargetMachineError::HardwareFactEmptyName { kind } => (
-//RS             "hardware profile",
-//RS             format!("{kind} fact has an empty name"),
-//RS         ),
-//RS         TargetMachineError::DuplicateRegisterBlock { name } => (
-//RS             "registers",
-//RS             format!("register block `{name}` is declared more than once"),
-//RS         ),
-//RS         TargetMachineError::RegisterBlockEmpty { name } => (
-//RS             "registers",
-//RS             format!("register block `{name}` has zero size"),
-//RS         ),
-//RS         TargetMachineError::RegisterBlockAddressOverflow { name } => (
-//RS             "registers",
-//RS             format!("register block `{name}` overflows the address space"),
-//RS         ),
-//RS         TargetMachineError::RegisterBlockOutsideRegion {
-//RS             name,
-//RS             address,
-//RS             size_bytes,
-//RS         } => (
-//RS             "registers",
-//RS             format!(
-//RS                 "register block `{name}` at 0x{address:X} ({size_bytes} bytes) is outside a declared MMIO region"
-//RS             ),
-//RS         ),
-//RS         TargetMachineError::DuplicateRegister { block, register } => (
-//RS             "registers",
-//RS             format!("register `{register}` is declared more than once in `{block}`"),
-//RS         ),
-//RS         TargetMachineError::RegisterAddressOverflow { block, register } => (
-//RS             "registers",
-//RS             format!("register `{block}.{register}` overflows the address space"),
-//RS         ),
-//RS         TargetMachineError::RegisterOutsideBlock { block, register } => (
-//RS             "registers",
-//RS             format!("register `{block}.{register}` lies outside its block"),
-//RS         ),
-//RS         TargetMachineError::UnknownRegisterBlock { block } => (
-//RS             "registers",
-//RS             format!("register block `{block}` is not in the target SVD"),
-//RS         ),
-//RS         TargetMachineError::UnknownRegister { block, register } => (
-//RS             "registers",
-//RS             format!("register `{block}.{register}` is not in the target SVD"),
-//RS         ),
-//RS         TargetMachineError::RegisterWidthMismatch {
-//RS             block,
-//RS             register,
-//RS             expected,
-//RS             actual,
-//RS         } => (
-//RS             "registers",
-//RS             format!(
-//RS                 "`{block}.{register}` requires {} but operation requested {}",
-//RS                 expected.as_str(),
-//RS                 actual.as_str()
-//RS             ),
-//RS         ),
-//RS         TargetMachineError::RegisterReadDenied { block, register } => (
-//RS             "registers",
-//RS             format!("register `{block}.{register}` is not readable"),
-//RS         ),
-//RS         TargetMachineError::RegisterWriteDenied { block, register } => (
-//RS             "registers",
-//RS             format!("register `{block}.{register}` is not writable"),
-//RS         ),
-//RS         TargetMachineError::DuplicateInterrupt { name } => (
-//RS             "interrupts",
-//RS             format!("interrupt `{name}` is declared more than once"),
-//RS         ),
-//RS         TargetMachineError::DuplicateInterruptVector { vector } => (
-//RS             "interrupts",
-//RS             format!("interrupt vector {vector} is declared more than once"),
-//RS         ),
-//RS         TargetMachineError::InvalidInterruptEffect { interrupt, effect } => (
-//RS             "interrupts",
-//RS             format!("interrupt `{interrupt}` has invalid effect `{effect}`"),
-//RS         ),
-//RS         TargetMachineError::UnknownInterrupt { interrupt } => (
-//RS             "interrupts",
-//RS             format!("interrupt `{interrupt}` is not in the target vector table"),
-//RS         ),
-//RS         TargetMachineError::InterruptEffectForbidden {
-//RS             interrupt,
-//RS             handler,
-//RS             effect,
-//RS         } => (
-//RS             "interrupts",
-//RS             format!("handler `{handler}` for `{interrupt}` uses forbidden effect `{effect}`"),
-//RS         ),
-//RS         TargetMachineError::InterruptHandlerUnbounded { interrupt, handler } => (
-//RS             "interrupts",
-//RS             format!("handler `{handler}` for `{interrupt}` is not bounded"),
-//RS         ),
-//RS         TargetMachineError::DuplicateDmaChannel { name } => (
-//RS             "DMA",
-//RS             format!("DMA channel `{name}` is declared more than once"),
-//RS         ),
-//RS         TargetMachineError::DuplicateDmaChannelNumber { channel } => (
-//RS             "DMA",
-//RS             format!("DMA channel number {channel} is declared more than once"),
-//RS         ),
-//RS         TargetMachineError::DmaTransferSizeZero { channel } => (
-//RS             "DMA",
-//RS             format!("DMA channel `{channel}` has a zero transfer limit"),
-//RS         ),
-//RS         TargetMachineError::UnknownDmaChannel { channel } => (
-//RS             "DMA",
-//RS             format!("DMA channel `{channel}` is not in the target profile"),
-//RS         ),
-//RS         TargetMachineError::DmaOwnershipMismatch {
-//RS             channel,
-//RS             buffer,
-//RS             expected,
-//RS             actual,
-//RS         } => (
-//RS             "DMA",
-//RS             format!(
-//RS                 "DMA `{channel}` buffer `{buffer}` expects {} ownership, got {}",
-//RS                 dma_owner_name(*expected),
-//RS                 dma_owner_name(*actual)
-//RS             ),
-//RS         ),
-//RS         TargetMachineError::DmaStartWhileInFlight { channel, buffer } => (
-//RS             "DMA",
-//RS             format!("DMA `{channel}` cannot start while buffer `{buffer}` is in flight"),
-//RS         ),
-//RS         TargetMachineError::DmaWaitWithoutTransfer { channel, buffer } => (
-//RS             "DMA",
-//RS             format!("DMA `{channel}` cannot wait for buffer `{buffer}` before start"),
-//RS         ),
-//RS         TargetMachineError::DmaBufferUnavailable { channel, buffer } => (
-//RS             "DMA",
-//RS             format!("buffer `{buffer}` is unavailable while DMA `{channel}` owns it"),
-//RS         ),
-//RS         TargetMachineError::DmaWaitChannelMismatch { channel, buffer } => (
-//RS             "DMA",
-//RS             format!("DMA `{channel}` does not own in-flight buffer `{buffer}`"),
-//RS         ),
-//RS         _ => ("target", "the selected target fact is invalid".to_string()),
-//RS     }
-//RS }
-//RS 
-//RS fn memory_kind_name(kind: jet_foundation::TargetMachine::MemoryKind) -> &'static str {
-//RS     match kind {
-//RS         jet_foundation::TargetMachine::MemoryKind::Flash => "flash",
-//RS         jet_foundation::TargetMachine::MemoryKind::Ram => "RAM",
-//RS         jet_foundation::TargetMachine::MemoryKind::Mmio => "MMIO",
-//RS         jet_foundation::TargetMachine::MemoryKind::Reserved => "reserved",
-//RS     }
-//RS }
-//RS 
-//RS fn dma_owner_name(owner: jet_foundation::TargetMachine::TargetDmaOwner) -> &'static str {
-//RS     match owner {
-//RS         jet_foundation::TargetMachine::TargetDmaOwner::Cpu => "CPU",
-//RS         jet_foundation::TargetMachine::TargetDmaOwner::Device => "device",
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use jet_foundation::TargetMachine::{
-//RS         ByteSize, ClockPolicy, MmioAccess, ProviderContract, TargetCapability, UnsafeGate,
-//RS     };
-//RS 
-//RS     fn row<'a>(diagnostics: &'a [Diagnostic], code: &str) -> &'a Diagnostic {
-//RS         diagnostics
-//RS             .iter()
-//RS             .find(|diagnostic| diagnostic.code == code)
-//RS             .unwrap_or_else(|| panic!("missing {code} diagnostic: {diagnostics:?}"))
-//RS     }
-//RS 
-//RS     fn assert_row(diagnostics: &[Diagnostic], code: &str, what: &str, why: &str, fix: &str) {
-//RS         let diagnostic = row(diagnostics, code);
-//RS         assert_eq!(diagnostic.what, what);
-//RS         assert_eq!(diagnostic.why, why);
-//RS         assert_eq!(diagnostic.fix, fix);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn target_machine_rows_are_registered_and_stable() {
-//RS         let machine = TargetMachine::wasm_no_os();
-//RS         let diagnostics =
-//RS             check_target_machine(&machine, &TargetMachineUse::from_core_apis(["core.files"]));
-//RS         assert_row(
-//RS             &diagnostics,
-//RS             "E3310",
-//RS             "Prelude part `core.files` needs the `hosted` runtime layer, but target `wasm.no-os` provides `core`.",
-//RS             "The complete semantic Prelude closure includes `core.files`; a target cannot emit a higher layer or substitute a second Prelude.",
-//RS             "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.",
-//RS         );
-//RS 
-//RS         let usage = TargetMachineUse {
-//RS             required_capabilities: vec![TargetCapability::TimeWall],
-//RS             ..TargetMachineUse::default()
-//RS         };
-//RS         assert_row(
-//RS             &check_target_machine(&machine, &usage),
-//RS             "E3311",
-//RS             "Target `wasm.no-os` lacks the required `Time.Wall` capability.",
-//RS             "The selected target profile must state each machine service separately; a target triple cannot imply a UART, clock, entropy source, scheduler, allocator, startup provider, or MMIO device.",
-//RS             "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.",
-//RS         );
-//RS 
-//RS         let mut invalid_provider = machine.clone();
-//RS         invalid_provider.monotonic_clock = ClockPolicy::Provider {
-//RS             provider: ProviderContract::new("", "not-a-digest"),
-//RS         };
-//RS         assert_row(
-//RS             &check_target_machine(
-//RS                 &invalid_provider,
-//RS                 &TargetMachineUse {
-//RS                     required_capabilities: vec![TargetCapability::TimeMonotonic],
-//RS                     ..TargetMachineUse::default()
-//RS                 },
-//RS             ),
-//RS             "E3312",
-//RS             "Provider `` for `Time.Monotonic` on target `wasm.no-os` has invalid digest `not-a-digest`.",
-//RS             "Every selected provider needs a stable identity and sha256 provenance so artifacts cannot reuse changed target behavior.",
-//RS             "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.",
-//RS         );
-//RS 
-//RS         assert_row(
-//RS             &check_target_machine(
-//RS                 &machine,
-//RS                 &TargetMachineUse {
-//RS                     mmio: vec![MmioAccess {
-//RS                         address: 0x10,
-//RS                         size: ByteSize::bytes(4),
-//RS                         unsafe_gate: Some(UnsafeGate {
-//RS                             reason: "probe".to_string(),
-//RS                         }),
-//RS                     }],
-//RS                     ..TargetMachineUse::default()
-//RS                 },
-//RS             ),
-//RS             "E3313",
-//RS             "Target `wasm.no-os` has an MMIO fact failure: address 0x10 (4 bytes) is outside a declared MMIO region.",
-//RS             "MMIO addresses must lie inside a declared MMIO region and every access must carry a nonempty `#Unsafe` reason.",
-//RS             "Declare a matching MMIO provider and region, then place the access inside `#Unsafe(\"reason\")`.",
-//RS         );
-//RS 
-//RS         let broken = TargetMachine::bare_metal("broken", "");
-//RS         assert_row(
-//RS             &check_target_machine(&broken, &TargetMachineUse::default()),
-//RS             "E3314",
-//RS             "Target `broken` has an invalid `target triple` fact: the selected target triple is empty.",
-//RS             "Target memory, linker, allocator, panic, startup, and execution facts are explicit inputs to sema and cannot be recovered safely from a triple.",
-//RS             "Select a complete typed target profile and correct the `target triple` declaration.",
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 0359 crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1-1198
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1
+use jet_sema.Diagnostics.[Diagnostic]
+use jet_sema.AST.[ProgramBundle, LoadedModule, Item, Func, Expr, Stmt, Marker, MarkerCallArg, AccessConvention, walk_imports, target_profile_path]
+use jet_sema.Sema.[effect_covers, effect_root, SemIndexEffectFacts]
+use jet_sema.Syntax.[MARKER_INTERRUPT]
+use jet_foundation.RingLayer.[classify_prelude_closure]
+use jet_foundation.Effects.[EffectSet]
+use jet_foundation.TargetMachine.[RegisterWidth, TargetDmaOperation, TargetDmaOperationFact, TargetDmaOwner, TargetDmaOwnership, TargetHardwareFacts, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetMachine, TargetMachineError, TargetRegisterAccessFact, TargetMachineUse, MemoryKind]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:17
+// Expand the same Prelude graph as sema, including generated hardware roots.
+pub fn target_machine_use(bundle: ProgramBundle) -> TargetMachineUse Never! {
+    used_core := bundle.used_core.clone()
+    hardware :: target_hardware_use(bundle)
+    if !hardware.register_accesses.is_empty() || !hardware.interrupt_handlers.is_empty() || !hardware.dma_operations.is_empty() || !hardware.unresolved_references.is_empty() {
+        _ :: used_core.insert("core.hardware")
+    }
+    closure :: classify_prelude_closure(used_core.iter())
+    usage := TargetMachineUse.from_core_apis(closure.keys())
+    usage.core_apis = closure.keys().collect()
+    ^usage
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:37
+pub fn target_hardware_profile(bundle: ProgramBundle) -> TargetHardwareFacts? Never! {
+    selected :: selected_hardware_profile(bundle) ?? return None
+    Val(selected.1)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:42
+pub fn target_hardware_profile_id(bundle: ProgramBundle) -> String? Never! {
+    selected :: selected_hardware_profile(bundle) ?? return None
+    Val(selected.0)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:47
+pub fn target_hardware_capabilities(bundle: ProgramBundle) -> [String] Never! {
+    selected :: selected_hardware_profile(bundle) ?? return [String]{}
+    facts :: selected.1
+    capabilities := [String]{}
+    loop block in facts.register_blocks {
+        loop register in block.registers { capabilities.push("register.{block.name}.{register.name}") }
+    }
+    loop interrupt in facts.interrupts { capabilities.push("interrupt.{interrupt.name}") }
+    loop channel in facts.dma_channels { capabilities.push("dma.{channel.name}") }
+    ^capabilities
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:69
+pub fn target_hardware_use(bundle: ProgramBundle) -> TargetHardwareUse Never! {
+    project_target_hardware(bundle, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:77
+pub fn target_hardware_use_with_effect_facts(bundle: ProgramBundle, effects: SemIndexEffectFacts) -> TargetHardwareUse Never! {
+    project_target_hardware(bundle, Val(effects))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:84
+fn selected_hardware_profile(bundle: ProgramBundle) -> (String, TargetHardwareFacts)? Never! {
+    entry :: bundle.modules.get(bundle.entry) ?? return None
+    loop (_, import) in walk_imports(entry) {
+        if target_profile_path(import) == .Val(profile) {
+            if hardware_facts_for_profile(profile) == .Val(facts) -> return Val((profile, facts))
+        }
+    }
+    if entry.default_target == .Val(profile) {
+        if hardware_facts_for_profile(profile) == .Val(facts) -> return Val((profile, facts))
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:101
+fn hardware_facts_for_profile(profile: String) -> TargetHardwareFacts? Never! {
+    if profile == {
+        "board.sensor_v1" -> Val(TargetMachine.board_sensor_v1().hardware)
+        "board.virt_aarch64" -> Val(TargetMachine.board_virt_aarch64().hardware)
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:109
+fn project_target_hardware(bundle: ProgramBundle, effect_facts: SemIndexEffectFacts?) -> TargetHardwareUse Never! {
+    hardware := TargetHardwareUse.default()
+    loop module in bundle.modules {
+        aliases :: profile_aliases(module)
+        alias_keys := aliases.keys().collect()
+        alias_keys.sort()
+        profile_facts := None as TargetHardwareFacts?
+        loop key in alias_keys {
+            if hardware_facts_for_profile(aliases[key]) == .Val(facts) { profile_facts = Val(facts); break }
+        }
+        loop item in module.items {
+            if item == {
+                .Func(function) -> project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware)
+                .Struct(definition) -> {
+                    loop function in definition.methods { project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware) }
+                    loop implementation in definition.trait_impls {
+                        loop function in implementation.methods { project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware) }
+                    }
+                }
+                .Enum(definition) -> {
+                    loop function in definition.methods { project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware) }
+                    loop implementation in definition.trait_impls {
+                        loop function in implementation.methods { project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware) }
+                    }
+                }
+                .Impl(implementation) -> {
+                    loop function in implementation.methods { project_function(function, module.alias, aliases, profile_facts, effect_facts, &hardware) }
+                }
+                _ -> {}
+            }
+        }
+    }
+    hardware.unresolved_references.sort()
+    hardware.unresolved_references.dedup()
+    ^hardware
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:198
+fn profile_aliases(module: LoadedModule) -> [String:String] Never! {
+    aliases := [String:String]{}
+    loop (_, import) in walk_imports(module) {
+        if target_profile_path(import) == .Val(profile) { aliases[import.import_alias()] = profile }
+    }
+    ^aliases
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:207
+fn project_function(function: Func, module_alias: String, aliases: [String:String], profile_facts: TargetHardwareFacts?, effect_facts: SemIndexEffectFacts?, hardware: &TargetHardwareUse) Never! {
+    loop marker in function.markers {
+        if marker.name != MARKER_INTERRUPT -> continue
+        argument :: marker.expr_arg(0) ?? continue
+        interrupt :: interrupt_name(argument, aliases, profile_facts, &hardware.unresolved_references) ?? continue
+        effects := declared_or_direct_effects(function, module_alias, effect_facts)
+        handler := TargetInterruptHandlerFact.new(interrupt, function.name.clone(), ^effects, true)
+        handler.forbidden_effects = marker_effect_row(marker)
+        hardware.interrupt_handlers.push(^handler)
+    }
+    transfers := [String:(String, String)]{}
+    in_flight := [String:String]{}
+    loop statement in function.body {
+        moved := [String:Bool]{}
+        statement.for_each_expr(fn(expr: Expr) Never! {
+            if dma_start(expr, aliases, profile_facts, &hardware.unresolved_references) == .Val(start) {
+                if start.2 == AccessConvention.Move { moved[start.1] = true }
+            }
+        })
+        if statement == .Val(binding) {
+            if dma_start(binding.init, aliases, profile_facts, &hardware.unresolved_references) == .Val(start) {
+                if !binding.name.is_empty() { transfers[binding.name.clone()] = (start.0, start.1) }
+            }
+        }
+        statement.for_each_expr(fn(expr: Expr) Never! {
+            project_hardware_expr(expr, aliases, profile_facts, moved, &transfers, &in_flight, hardware)
+        })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:290
+fn declared_or_direct_effects(function: Func, module_alias: String, effect_facts: SemIndexEffectFacts?) -> EffectSet Never! {
+    effects := EffectSet.new()
+    if function.declared_effects == .Val(declared) {
+        loop (effect, _) in declared { _ :: effects.insert(effect.clone()) }
+    }
+    loop statement in function.body {
+        statement.for_each_expr(fn(expr: Expr) Never! { collect_direct_effect(expr, &effects) })
+    }
+    if effect_facts == .Val(facts) {
+        qualified :: "{module_alias}::{function.name}"
+        solved :: facts.solved.get(qualified).or_else(fn() -> EffectSet? Never! { facts.solved.get(function.name) })
+        if solved == .Val(row) { loop effect in row { _ :: effects.insert(effect.clone()) } }
+    }
+    ^effects
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:311
+fn collect_direct_effect(expr: Expr, effects: &EffectSet) Never! {
+    if expr == {
+        .Call(call) -> {
+            if call.name == {
+                "alloc" | "try_alloc" -> { _ :: effects.insert("Mem.Alloc") }
+                "wait" -> { _ :: effects.insert("Time.Wait") }
+                "sleep" -> { _ :: effects.insert("Time.Sleep") }
+                _ -> {}
+            }
+        }
+        .MethodCall(_, method, ..) -> {
+            if method == "alloc" || method == "try_alloc" { _ :: effects.insert("Mem.Alloc") }
+            else if method == "wait" { _ :: effects.insert("Time.Wait") }
+            else if method == "sleep" { _ :: effects.insert("Time.Sleep") }
+        }
+        _ -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:341
+fn marker_effect_row(marker: Marker) -> EffectSet Never! {
+    effects := EffectSet.new()
+    argument :: marker.args.get(1) ?? return ^effects
+    if argument == .EffectRow(row, ..) {
+        loop (effect, _) in row {
+            name := effect.trim_start_matches('!') // #4303
+            _ :: effects.insert(name.to_string())
+        }
+    }
+    ^effects
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:355
+fn project_hardware_expr(expr: Expr, aliases: [String:String], profile_facts: TargetHardwareFacts?, moved: [String:Bool], transfers: &[String:(String, String)], in_flight: &[String:String], hardware: &TargetHardwareUse) Never! {
+    if expr == {
+        .Ident(name, _) -> {
+            if in_flight.contains_key(name) && !moved.contains_key(name) {
+                hardware.dma_operations.push(TargetDmaOperationFact.use_buffer(name.clone()))
+            }
+        }
+        .MethodCall(receiver, method, _, _, _, args, ..) -> {
+            if dma_start(expr, aliases, profile_facts, &hardware.unresolved_references) == .Val(start) {
+                (channel, buffer, convention) :: start
+                operation := TargetDmaOperationFact.start(channel.clone(), buffer.clone())
+                if convention != AccessConvention.Move { operation.owner = TargetDmaOwner.Device }
+                hardware.dma_operations.push(^operation)
+                in_flight[buffer] = channel
+                return
+            }
+            if method == "wait" {
+                if receiver == .Ident(transfer, _) {
+                    if transfers.get(transfer) == .Val(active) {
+                        (channel, buffer) :: active
+                        hardware.dma_operations.push(TargetDmaOperationFact.wait(channel.clone(), buffer.clone()))
+                        _ :: in_flight.remove(buffer)
+                        return
+                    }
+                }
+            }
+            if expr_path(receiver) == .Val(path) {
+                if register_for_path(path, aliases, profile_facts, &hardware.unresolved_references) == .Val(register_fact) {
+                    (block, register, width) :: register_fact
+                    if method == {
+                        "read" -> hardware.register_accesses.push(TargetRegisterAccessFact.read(block, register, width))
+                        "write" | "set" | "clear" -> hardware.register_accesses.push(TargetRegisterAccessFact.write(block, register, width))
+                        _ -> {}
+                    }
+                }
+            }
+            // The ordinary recursive visitor owns nested arguments. Only moved
+            // arguments are exempted at the statement level.
+            _ :: args
+        }
+        _ -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:431
+fn dma_start(expr: Expr, aliases: [String:String], profile_facts: TargetHardwareFacts?, unresolved: &[TargetHardwareUnresolvedReference]) -> (String, String, AccessConvention)? Never! {
+    if expr == .MethodCall(receiver, method, _, _, _, args, ..) {
+        if method != "start" || args.len() < 2 -> return None
+        if receiver == { .Ident(name, _) -> { if name != "dma" -> return None } _ -> return None }
+        channel_path :: expr_path(args[0].expr) ?? return None
+        channel :: channel_for_path(channel_path, aliases, profile_facts, unresolved) ?? return None
+        buffer :: expr_name(args[1].expr) ?? return None
+        return Val((channel, buffer, args[1].convention))
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:458
+fn channel_for_path(path: [String], aliases: [String:String], profile_facts: TargetHardwareFacts?, unresolved: &[TargetHardwareUnresolvedReference]) -> String? Never! {
+    if path.len() < 3 || !aliases.contains_key(path[0]) -> return None
+    requested :: "{path[1].to_ascii_uppercase()}_{path[2].to_ascii_uppercase()}"
+    if profile_facts == .Val(facts) {
+        loop channel in facts.dma_channels {
+            if channel.name.eq_ignore_ascii_case(requested) -> return Val(channel.name.clone())
+        }
+    }
+    unresolved.push(TargetHardwareUnresolvedReference.DmaChannel{channel: requested})
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:487
+fn interrupt_name(expr: Expr, aliases: [String:String], profile_facts: TargetHardwareFacts?, unresolved: &[TargetHardwareUnresolvedReference]) -> String? Never! {
+    path :: expr_path(expr) ?? return None
+    if path.len() < 2 || !aliases.contains_key(path[0]) -> return None
+    requested :: (path.last() ?? return None).clone()
+    if profile_facts == .Val(facts) {
+        loop interrupt in facts.interrupts {
+            if interrupt.name.eq_ignore_ascii_case(requested) -> return Val(interrupt.name.clone())
+        }
+    }
+    unresolved.push(TargetHardwareUnresolvedReference.Interrupt{interrupt: requested})
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:517
+fn register_for_path(path: [String], aliases: [String:String], profile_facts: TargetHardwareFacts?, unresolved: &[TargetHardwareUnresolvedReference]) -> (String, String, RegisterWidth)? Never! {
+    if path.len() < 3 || !aliases.contains_key(path[0]) -> return None
+    requested_block :: path[1].to_ascii_uppercase()
+    requested_register :: path[2]
+    if profile_facts == .Val(facts) {
+        loop block in facts.register_blocks {
+            if !block.name.eq_ignore_ascii_case(requested_block) -> continue
+            if block.register(requested_register) == .Val(register) -> return Val((block.name.clone(), register.name.clone(), register.width))
+            loop register in block.registers {
+                if register.name.eq_ignore_ascii_case(requested_register) -> return Val((block.name.clone(), register.name.clone(), register.width))
+            }
+            unresolved.push(TargetHardwareUnresolvedReference.Register{block: block.name.clone(), register: requested_register.clone()})
+            return None
+        }
+    }
+    unresolved.push(TargetHardwareUnresolvedReference.RegisterBlock{block: requested_block})
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:562
+fn expr_path(expr: Expr) -> [String]? Never! {
+    if expr == {
+        .Ident(name, _) -> Val([String]{name.clone()})
+        .Field(base, member, _) -> {
+            path := expr_path(base) ?? return None
+            path.push(member.clone())
+            Val(^path)
+        }
+        .Paren(inner, _) -> expr_path(inner)
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:575
+fn expr_name(expr: Expr) -> String? Never! {
+    if expr == { .Ident(name, _) -> Val(name.clone()) .Paren(inner, _) -> expr_name(inner) _ -> None }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:586
+pub fn check_target_machine(machine: TargetMachine, usage: TargetMachineUse) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    loop error in machine.validate(usage) { diagnostics.push(diagnostic_for_error(machine, error)) }
+    ^diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:602
+pub fn validate_target_hardware(machine: TargetMachine, hardware: TargetHardwareUse) -> [Diagnostic] Never! {
+    errors := machine.validate_hardware(hardware)
+    validate_interrupt_handlers(machine, hardware, &errors)
+    validate_dma_operations(machine, hardware, &errors)
+    diagnostics := [Diagnostic]{}
+    loop error in errors { diagnostics.push(diagnostic_for_error(machine, error)) }
+    ^diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:615
+fn validate_interrupt_handlers(machine: TargetMachine, hardware: TargetHardwareUse, errors: &[TargetMachineError]) Never! {
+    loop handler in hardware.interrupt_handlers {
+        interrupt :: machine.hardware.interrupt(handler.interrupt) ?? {
+            errors.push(TargetMachineError.UnknownInterrupt{interrupt: handler.interrupt.clone()})
+            continue
+        }
+        if interrupt.bounded && !handler.bounded {
+            errors.push(TargetMachineError.InterruptHandlerUnbounded{interrupt: interrupt.name.clone(), handler: handler.handler.clone()})
+        }
+        loop effect in handler.effects {
+            baseline_forbidden :: effect_is_allocation(effect) || effect_is_wait(effect)
+            profile_forbidden := false
+            loop bound in interrupt.forbidden_effects { if effect_covers(bound, effect) { profile_forbidden = true; break } }
+            if !profile_forbidden {
+                loop bound in handler.forbidden_effects { if effect_covers(bound, effect) { profile_forbidden = true; break } }
+            }
+            if baseline_forbidden || profile_forbidden {
+                errors.push(TargetMachineError.InterruptEffectForbidden{interrupt: interrupt.name.clone(), handler: handler.handler.clone(), effect: effect.clone()})
+            }
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:652
+fn effect_is_allocation(effect: String) -> Bool Never! {
+    effect == "Mem" || effect == "Mem.Alloc" || effect.starts_with("Mem.Alloc(")
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:656
+fn effect_is_wait(effect: String) -> Bool Never! {
+    if effect == "Time" -> return true
+    if effect == "Time.Wait" || effect.starts_with("Time.Wait.") -> return true
+    if effect == "Time.Sleep" || effect.starts_with("Time.Sleep.") -> return true
+    effect_root(effect) == "Time" && effect.ends_with(".Wait")
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:669
+fn validate_dma_operations(machine: TargetMachine, hardware: TargetHardwareUse, errors: &[TargetMachineError]) Never! {
+    in_flight := [String:String]{}
+    loop operation in hardware.dma_operations {
+        if operation.operation == {
+            .UseBuffer -> {
+                if operation.owner != TargetDmaOwner.Cpu {
+                    errors.push(TargetMachineError.DmaOwnershipMismatch{channel: operation.channel.clone(), buffer: operation.buffer.clone(), expected: .Cpu, actual: operation.owner})
+                }
+                if in_flight.get(operation.buffer) == .Val(channel) {
+                    errors.push(TargetMachineError.DmaBufferUnavailable{channel: channel.clone(), buffer: operation.buffer.clone()})
+                }
+            }
+            .Start | .Wait -> {
+                channel :: machine.hardware.dma_channel(operation.channel) ?? {
+                    errors.push(TargetMachineError.UnknownDmaChannel{channel: operation.channel.clone()})
+                    continue
+                }
+                if channel.ownership != TargetDmaOwnership.Transfer -> continue
+                if operation.operation == {
+                    .Start -> {
+                        if operation.owner != TargetDmaOwner.Cpu {
+                            errors.push(TargetMachineError.DmaOwnershipMismatch{channel: channel.name.clone(), buffer: operation.buffer.clone(), expected: .Cpu, actual: operation.owner})
+                        }
+                        already_active :: in_flight.contains_key(operation.buffer)
+                        in_flight[operation.buffer.clone()] = channel.name.clone()
+                        if already_active {
+                            errors.push(TargetMachineError.DmaStartWhileInFlight{channel: channel.name.clone(), buffer: operation.buffer.clone()})
+                        }
+                    }
+                    .Wait -> {
+                        if operation.owner != TargetDmaOwner.Device {
+                            errors.push(TargetMachineError.DmaOwnershipMismatch{channel: channel.name.clone(), buffer: operation.buffer.clone(), expected: .Device, actual: operation.owner})
+                        }
+                        if in_flight.get(operation.buffer) == {
+                            .None -> errors.push(TargetMachineError.DmaWaitWithoutTransfer{channel: channel.name.clone(), buffer: operation.buffer.clone()})
+                            .Val(active) -> {
+                                if active != channel.name {
+                                    errors.push(TargetMachineError.DmaWaitChannelMismatch{channel: channel.name.clone(), buffer: operation.buffer.clone()})
+                                } else { _ :: in_flight.remove(operation.buffer) }
+                            }
+                        }
+                    }
+                    .UseBuffer -> unreachable()
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:756
+fn diagnostic_for_error(machine: TargetMachine, error: TargetMachineError) -> Diagnostic Never! {
+    target :: target_name(machine)
+    if error == {
+        .CoreApiUnavailable(api, required, available) -> Diagnostic.from_row("E3310", [(String, String)]{("api", api), ("required", required.as_str()), ("available", available.as_str()), ("target", target)}, None)
+        .HeapRequiresAllocator | .MissingAllocatorPolicy -> Diagnostic.from_row("E3303", [(String, String)]{}, None)
+        .MissingTargetCapability(capability) | .HostedCapabilityRequiresOs(capability) -> Diagnostic.from_row("E3311", [(String, String)]{("target", target), ("capability", capability)}, None)
+        .InvalidProviderContract(capability, provider, sha256) -> Diagnostic.from_row("E3312", [(String, String)]{("target", target), ("capability", capability), ("provider", provider), ("sha256", sha256)}, None)
+        .MmioOutsideRegion(address, size_bytes) -> mmio_diagnostic(target, "address 0x{address:X} ({size_bytes} bytes) is outside a declared MMIO region")
+        .MmioMissingUnsafeGate(address) -> mmio_diagnostic(target, "address 0x{address:X} has no #Unsafe gate")
+        .MmioEmptyUnsafeReason(address) -> mmio_diagnostic(target, "address 0x{address:X} has an empty #Unsafe reason")
+        _ -> {
+            (fact, detail) :: generic_detail(error)
+            Diagnostic.from_row("E3314", [(String, String)]{("target", target), ("fact", fact), ("detail", detail)}, None)
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:832
+fn target_name(machine: TargetMachine) -> String from machine {
+    name := machine.name.trim() // #4303
+    if name.is_empty() -> machine.triple else -> machine.name
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:840
+fn mmio_diagnostic(target: String, detail: String) -> Diagnostic Never! {
+    Diagnostic.from_row("E3313", [(String, String)]{("target", target), ("detail", detail)}, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:844
+fn generic_detail(error: TargetMachineError) -> (String, String) Never! {
+    if error == {
+        .MissingTargetTriple -> ("target triple", "the selected target triple is empty")
+        .MissingMemoryKind(kind) -> ("memory", "the target is missing a {memory_kind_name(kind)} memory region")
+        .DuplicateMemoryRegion(name) -> ("memory", "memory region `{name}` is declared more than once")
+        .EmptyMemoryRegion(name) -> ("memory", "memory region `{name}` has zero size")
+        .MemoryAddressOverflow(name) -> ("memory", "memory region `{name}` overflows the address space")
+        .OverlappingMemoryRegions(first, second) -> ("memory", "memory regions `{first}` and `{second}` overlap")
+        .MissingLinkerInput -> ("linker", "the no-OS target has no linker input")
+        .LinkerFileMissingPath -> ("linker", "the linker file path is empty")
+        .LinkerFileMissingHash(path) -> ("linker", "linker file `{path}` has no valid sha256 provenance")
+        .AllocatorRegionUnknown(region) -> ("allocator", "allocator region `{region}` does not exist")
+        .AllocatorRegionNotRam(region) -> ("allocator", "allocator region `{region}` is not RAM")
+        .AllocatorRegionTooSmall(region, requested_bytes, available_bytes) -> ("allocator", "allocator region `{region}` has {available_bytes} bytes but needs {requested_bytes}")
+        .HostedAllocatorRequiresOs -> ("allocator", "a hosted system allocator cannot be selected on a no-OS target")
+        .MissingPanicPolicy -> ("panic", "the no-OS target has no panic policy")
+        .RamOverflow(used_bytes, ram_bytes) -> ("memory", "RAM use ({used_bytes} bytes) exceeds {ram_bytes} bytes")
+        .HostedHasNoLinkerScript -> ("linker", "hosted targets do not have a generated linker script")
+        .HostedHasNoStartup -> ("startup", "hosted targets do not have generated startup glue")
+        .UnsupportedStartupTriple(triple) -> ("startup", "target triple `{triple}` has no startup generator")
+        .ExecutionTierUnsupported(tier, machine) -> ("execution", "target machine `{machine}` does not support the `{tier}` tier")
+        .FirmwareToolchainMissing(tool) -> ("toolchain", "required firmware tool `{tool}` is unavailable")
+        .FirmwareBuildFailed(detail) -> ("firmware", detail.clone())
+        .SizeBudgetExceeded(report) -> ("size budget", "artifact={report.artifact_bytes} flash={report.flash_bytes} ram={report.ram_bytes} used_ram={report.ram_used_bytes}")
+        .HardwareFactsMissingSvd -> ("hardware profile", "register, interrupt, or DMA facts require SVD provenance")
+        .InvalidHardwareSvd(source, sha256) -> ("hardware profile", "SVD `{source}` has invalid sha256 provenance `{sha256}`")
+        .HardwareFactEmptyName(kind) -> ("hardware profile", "{kind} fact has an empty name")
+        .DuplicateRegisterBlock(name) -> ("registers", "register block `{name}` is declared more than once")
+        .RegisterBlockEmpty(name) -> ("registers", "register block `{name}` has zero size")
+        .RegisterBlockAddressOverflow(name) -> ("registers", "register block `{name}` overflows the address space")
+        .RegisterBlockOutsideRegion(name, address, size_bytes) -> ("registers", "register block `{name}` at 0x{address:X} ({size_bytes} bytes) is outside a declared MMIO region")
+        .DuplicateRegister(block, register) -> ("registers", "register `{register}` is declared more than once in `{block}`")
+        .RegisterAddressOverflow(block, register) -> ("registers", "register `{block}.{register}` overflows the address space")
+        .RegisterOutsideBlock(block, register) -> ("registers", "register `{block}.{register}` lies outside its block")
+        .UnknownRegisterBlock(block) -> ("registers", "register block `{block}` is not in the target SVD")
+        .UnknownRegister(block, register) -> ("registers", "register `{block}.{register}` is not in the target SVD")
+        .RegisterWidthMismatch(block, register, expected, actual) -> ("registers", "`{block}.{register}` requires {expected.as_str()} but operation requested {actual.as_str()}")
+        .RegisterReadDenied(block, register) -> ("registers", "register `{block}.{register}` is not readable")
+        .RegisterWriteDenied(block, register) -> ("registers", "register `{block}.{register}` is not writable")
+        .DuplicateInterrupt(name) -> ("interrupts", "interrupt `{name}` is declared more than once")
+        .DuplicateInterruptVector(vector) -> ("interrupts", "interrupt vector {vector} is declared more than once")
+        .InvalidInterruptEffect(interrupt, effect) -> ("interrupts", "interrupt `{interrupt}` has invalid effect `{effect}`")
+        .UnknownInterrupt(interrupt) -> ("interrupts", "interrupt `{interrupt}` is not in the target vector table")
+        .InterruptEffectForbidden(interrupt, handler, effect) -> ("interrupts", "handler `{handler}` for `{interrupt}` uses forbidden effect `{effect}`")
+        .InterruptHandlerUnbounded(interrupt, handler) -> ("interrupts", "handler `{handler}` for `{interrupt}` is not bounded")
+        .DuplicateDmaChannel(name) -> ("DMA", "DMA channel `{name}` is declared more than once")
+        .DuplicateDmaChannelNumber(channel) -> ("DMA", "DMA channel number {channel} is declared more than once")
+        .DmaTransferSizeZero(channel) -> ("DMA", "DMA channel `{channel}` has a zero transfer limit")
+        .UnknownDmaChannel(channel) -> ("DMA", "DMA channel `{channel}` is not in the target profile")
+        .DmaOwnershipMismatch(channel, buffer, expected, actual) -> ("DMA", "DMA `{channel}` buffer `{buffer}` expects {dma_owner_name(expected)} ownership, got {dma_owner_name(actual)}")
+        .DmaStartWhileInFlight(channel, buffer) -> ("DMA", "DMA `{channel}` cannot start while buffer `{buffer}` is in flight")
+        .DmaWaitWithoutTransfer(channel, buffer) -> ("DMA", "DMA `{channel}` cannot wait for buffer `{buffer}` before start")
+        .DmaBufferUnavailable(channel, buffer) -> ("DMA", "buffer `{buffer}` is unavailable while DMA `{channel}` owns it")
+        .DmaWaitChannelMismatch(channel, buffer) -> ("DMA", "DMA `{channel}` does not own in-flight buffer `{buffer}`")
+        _ -> ("target", "the selected target fact is invalid")
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1089
+fn memory_kind_name(kind: MemoryKind) -> String Never! {
+    if kind == { .Flash -> "flash" .Ram -> "RAM" .Mmio -> "MMIO" .Reserved -> "reserved" }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/TargetMachine.rs:1098
+fn dma_owner_name(owner: TargetDmaOwner) -> String Never! {
+    if owner == { .Cpu -> "CPU" .Device -> "device" }
+}

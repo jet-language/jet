@@ -1,0 +1,25 @@
+use JetParser.Parser.Entry.[parse_source]
+// Rust: crates/jet-parser/src/Parser/Items/marker_groups.rs:1-2183 has no inline tests.
+// Behavioral controls for the retained registry/site/diagnostic branches.
+#Test("marker signed derive rejects unsupported negation") {
+    parsed :: parse_source("#!Job fn task() {}".as_bytes().to_list())
+    assert(parsed.diagnostics.iter().any(fn(d) { d.code == "E0931" }))
+}
+#Test("marker bracket group teaches single marker canonical form") {
+    parsed :: parse_source("#[MustUse] fn value() Int { 1 }".as_bytes().to_list())
+    assert(parsed.diagnostics.iter().any(fn(d) { d.code == "E0999" }))
+}
+#Test("unsafe marker requires a reason") {
+    parsed :: parse_source("#Unsafe fn unsafe_call() {}".as_bytes().to_list())
+    assert(parsed.diagnostics.iter().any(fn(d) { d.code == "E3112" }))
+}
+#Test("tag policy rejects repeated fields and empty deny") {
+    repeated :: parse_source("tag Secret { deny: [Log], deny: [Network] }".as_bytes().to_list())
+    assert(repeated.diagnostics.iter().any(fn(d) { d.code == "E0734" }))
+    empty :: parse_source("tag Secret { deny: [] }".as_bytes().to_list())
+    assert(empty.diagnostics.iter().any(fn(d) { d.code == "E0734" }))
+}
+#Test("registered marker rejects wrong context field") {
+    parsed :: parse_source("fn context() { #Context(unknown: 1) {} }".as_bytes().to_list())
+    assert(parsed.diagnostics.iter().any(fn(d) { d.code == "E0761" }))
+}

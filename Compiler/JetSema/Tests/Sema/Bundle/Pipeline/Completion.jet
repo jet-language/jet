@@ -1,0 +1,24 @@
+use JetSema.Sema.Bundle.Pipeline.Completion.[attach_known_cause_links, preserve_inline_foreign_caller_path]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs:1006 (behavioral control)
+#Test("attach_known_cause_links_requires_same_span_and_call_root") {
+    same :: Span.new(10, 20)
+    other :: Span.new(30, 40)
+    diagnostics := [Diagnostic]{
+        Diagnostic.error("E0104", "call", "", "", Val(same)),
+        Diagnostic.error("E2404", "failure", "", "", Val(same)),
+        Diagnostic.error("E2404", "other failure", "", "", Val(other)),
+        Diagnostic.error("E0112", "argument", "", "", Val(same))
+    }
+    attach_known_cause_links(&diagnostics)
+    assert(!diagnostics[1].cause.is_empty())
+    assert(diagnostics[2].cause.is_empty())
+    assert(diagnostics[3].cause.is_empty())
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs:256 (behavioral control)
+#Test("preserve_inline_foreign_caller_path_exact_codes") {
+    loop code in [String]{"E3102", "E3215", "E3222", "E3223"} -> assert(preserve_inline_foreign_caller_path(Diagnostic.error(code, "", "", "", None)))
+    assert(!preserve_inline_foreign_caller_path(Diagnostic.error("E0104", "", "", "", None)))
+}

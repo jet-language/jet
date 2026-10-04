@@ -2,6 +2,7 @@
 // computed_build_contribution_records_lock_and_matches_explain_golden, plus
 // Driver::seed_build_facts_from_stamp validation boundaries. Actual loader,
 // PackageModel, registration and Sema; no handwritten resolved setting facts.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, JetDriverCheckScope, jet_driver_compiler_check, jet_driver_embedded_core_sources]
 use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
 use jet_foundation.[FactContribution, FactValue, ContributionLayer, SourceScope, TComptimeValue, GateSet, PolicyKey, gate_set_allow, fact_contribution_new, fact_contribution_with_reason, foundation_embedded_core]
@@ -20,7 +21,7 @@ fn settings_request(manifest: String?, source: String) -> JetDriverCompileReques
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: settings_path("/settings"), identity: "settings-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "settings-root", entry_path: settings_path("/settings/Main.jet")},
         canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("jet@0.1.0#settings-test"), build_stamp: Val(BuildStamp{git: Val("abc123"), dirty: true, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("jet@0.1.0#settings-test"), build_stamp: Val(BuildStamp{git: Val("abc123"), dirty: true, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

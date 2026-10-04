@@ -1,0 +1,62 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, foundation_embedded_core, jet_target_machine_hosted]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_test_prepare_graph]
+use core.files.host.retained_descriptor as native
+use core.files.runtime.kernel_path_components as paths
+
+// Actual canonical parser/registration/body-check producer; no fake Checker.
+fn statements05_diagnostics(source: String) -> [Diagnostic] Never! {
+    parsed :: parse_source(source.bytes())
+    assert(parsed.diagnostics.is_empty(), "{parsed.diagnostics:?}")
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.is_empty())
+    inputs :: [
+        SemaRegistrationModuleInput{package_identity: "statements05", module_identity: "main", module_name: "main", module_path: "statements05.jet", source_file: "statements05.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^parsed.program, foreign_handles: []},
+        SemaRegistrationModuleInput{package_identity: "jet:canonical-prelude", module_identity: "effects", module_name: "effects", module_path: "Prelude/Effects.jet", source_file: "Prelude/Effects.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^effects.program, foreign_handles: []}
+    ]
+    build :: SemaBuildFacts{package_name: "statements05", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "statements05-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_test_prepare_graph(inputs, [], "statements05", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    // GATE #4494: actual fixture-root canonicalization, not a fake path provider.
+    project_root :: native.canonicalize(paths.from_text(".", paths.PathPlatform.Unix)) ?? panic("cannot resolve statement fixture root")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)
+    assert(checked.complete || !checked.diagnostics.is_empty())
+    checked.diagnostics
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:1468-1539 (behavioral controls; no inline Rust tests)
+#Test("immutable_assignment_reports_the_binding_sigil_repair") {
+    diagnostics :: statements05_diagnostics("fn run() {{\n    value :: 1\n    value = 2\n}}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0111" && d.what.contains("can't change") && d.fix.contains(":=") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:1595-1628 (behavioral control)
+#Test("fixed_list_index_assignment_is_a_resolved_list_place") {
+    diagnostics :: statements05_diagnostics("fn run() {{\n    values := [Int#2]{{1, 2}}\n    values[0] = 3\n}}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2152-2164 (behavioral control)
+#Test("explicit_discard_requires_a_nonempty_reason") {
+    diagnostics :: statements05_diagnostics("fn run() {{\n    (1).drop(\"\")\n}}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0407" && d.what == "`.drop()` reason must not be empty" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2307-2386 (behavioral control)
+#Test("authored_yield_outside_stream_reports_generator_contract") {
+    diagnostics :: statements05_diagnostics("fn run() {{ yield 1 }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0805" && d.what.contains("outside a generator") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2487-2524 (behavioral control)
+#Test("range_loop_stride_rejects_zero") {
+    diagnostics :: statements05_diagnostics("fn run() {{ loop i in 0..10, 0 {{}} }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0123" && d.what == "a range loop stride must be positive, not 0" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2590-2611 (behavioral control)
+#Test("source_loop_stride_rejects_zero_count") {
+    diagnostics :: statements05_diagnostics("fn run() {{\n    values :: [Int]{{1, 2}}\n    loop value in values, 0 {{}}\n}}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0123" && d.what == "a source loop stride must be positive" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/statements.rs:2950-2955 (behavioral control)
+#Test("next_without_a_loop_reports_control_boundary") {
+    diagnostics :: statements05_diagnostics("fn run() {{ next }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR && d.what.contains("loop") }))
+}

@@ -1,1154 +1,462 @@
-// PORT-PENDING 0368 crates-jet-sema-src-sema-checkercore-bindings-slice-1519: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1519-2668
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn check_binding(&mut self, b: &mut Binding) {
-//RS         if let Some(meta) = &mut b.meta {
-//RS             self.check_meta_attr(meta);
-//RS         }
-//RS         // D-FAIL-BIND1=A: a user binding with the ambient spelling remains
-//RS         // legal, but it is easy to mistake for the fallback report and is
-//RS         // shadowed by that report inside a fallible `??` fallback.
-//RS         if b.name == Syntax::AMBIENT_ERR {
-//RS             self.diags.push(Diagnostic::lint(
-//RS                     "L0511",
-//RS                     "binding `err` shadows the fallback's ambient failure report".to_string(),
-//RS                     "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there".to_string(),
-//RS                     "rename the binding, or use it outside a fallback".to_string(),
-//RS                     Some(b.name_span),
-//RS                 ));
-//RS         }
-//RS         // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
-//RS         let prev_binding_name = self.current_binding_name.take();
-//RS         self.current_binding_name = Some(b.name.clone());
-//RS         if matches!(&b.pattern, Some(BindPattern::Refutable { .. })) {
-//RS             self.check_refutable_binding(b);
-//RS             self.current_binding_name = prev_binding_name;
-//RS             return;
-//RS         }
-//RS         if b.pattern.is_some() {
-//RS             self.check_destructuring_binding(b);
-//RS             self.current_binding_name = prev_binding_name;
-//RS             return;
-//RS         }
-//RS         if b.uninit {
-//RS             self.check_uninit_binding(b);
-//RS             self.current_binding_name = prev_binding_name;
-//RS             return;
-//RS         }
-//RS         let mut annot_valid = true;
-//RS         // An unannotated binding takes its initializer's own type: the
-//RS         // expectation of an enclosing value (a value-if arm, a block tail)
-//RS         // never reaches it. Only a written annotation gives the initializer
-//RS         // an expected type.
-//RS         let saved_expected = self.expected_type.take();
-//RS         if let (Some(ty), Some(span)) = (&mut b.ty, b.ty_span) {
-//RS             let t = self.resolve_type(ty.clone());
-//RS             *ty = t.clone();
-//RS             self.expected_type = Some(t.clone());
-//RS             let before = self.diags.len();
-//RS             self.check_declared_type(&t, span);
-//RS             if self.diags.len() > before {
-//RS                 annot_valid = false;
-//RS             }
-//RS         }
-//RS         if !b.mutable {
-//RS             if let Expr::Ident(n, nspan) = &mut b.init {
-//RS                 if let Some(info) = self.lookup(n) {
-//RS                     if !info.ty.is_scalar()
-//RS                         && matches!(
-//RS                             info.param_conv,
-//RS                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                         )
-//RS                     {
-//RS                         let source_ty = info.ty.clone();
-//RS                         let diagnostic = Diagnostic::error(
-//RS                             "E0120",
-//RS                             format!(
-//RS                                 "`{}` was not moved here, so it cannot be taken with the move marker `^`",
-//RS                                 n
-//RS                             ),
-//RS                             "this function has read access only and does not own the value"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "copy it instead: `{} {} {}{}`",
-//RS                                 b.name,
-//RS                                 if b.mutable {
-//RS                                     Syntax::SIGIL_BIND_MUT
-//RS                                 } else {
-//RS                                     Syntax::SIGIL_BIND_IMMUT
-//RS                                 },
-//RS                                 Syntax::SIGIL_COPY,
-//RS                                 n
-//RS                             ),
-//RS                             Some(*nspan),
-//RS                         );
-//RS                         self.diags.push(self.with_ownership_copy_edit(
-//RS                             diagnostic,
-//RS                             *nspan,
-//RS                             Some(&source_ty),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let saved_esc = self.lambda_escapes;
-//RS         let saved_bind = self.lambda_binding.clone();
-//RS         if let Expr::Lambda(lambda) = &b.init {
-//RS             // S47: a local callable borrowed by direct calls can retain mutable
-//RS             // capture borrows; keep the owning clone only when a later use can
-//RS             // retain or move the callable.
-//RS             self.lambda_escapes = self.bound_lambda_escapes(&b.name, lambda);
-//RS             self.lambda_binding = Some(b.name.clone());
-//RS         }
-//RS         // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an
-//RS         // ordinary read of a marked name; set
-//RS         // `in_comptime` before `infer()` so the RHS types in the compile-time
-//RS         // world (the evaluator runs after, independently).
-//RS         if b.is_comptime {
-//RS             self.in_comptime = true;
-//RS         }
-//RS         // D-SHAPE-PLACE1=A: a bare maximal place bound locally is a checked
-//RS         // read window, never an implicit move/copy. Decide this before
-//RS         // `infer`'s owning-position rewrite (#642).
-//RS         //
-//RS         // The field carve-out below is root-sensitive, because the two laws
-//RS         // that meet here answer for different roots:
-//RS         //
-//RS         //   * Rooted in a LOCAL owned value, `s :: p.name` is an owning
-//RS         //     position and materializes, so the generated Rust never moves
-//RS         //     a field out of its struct (`field_read_clones_instead_of_
-//RS         //     moving`, `owning_nonscalar_field_read_clones` — the latter
-//RS         //     pins the emit byte-exactly and runs it).
-//RS         //   * Rooted in a READ/WRITE PARAMETER, the projection lives inside
-//RS         //     a borrow, and spec.md:338-339 promises that a read call is
-//RS         //     "allocation-free for every non-scalar shape" while
-//RS         //     spec.md:339-340 and 438-439 say a bare `::` binding of a
-//RS         //     place — "a name followed by its maximal field, index, or
-//RS         //     range projection" — stays a read window. Materializing there
-//RS         //     allocates off the borrow and drops the loan on the owner.
-//RS         //
-//RS         // This is the same `param_conv` fact `infer_checked`'s
-//RS         // `borrowed_param_place` and `implicit_copy_target` already use to
-//RS         // separate a borrowed projection from an ordinary owning read; the
-//RS         // binding path was the one place that did not consult it.
-//RS         // Excluding `Shared<T>` is not a carve-out for convenience: under
-//RS         // D-CONC-SHARE1=A a field read on a shared handle IS a locked read
-//RS         // (`desugar_shared_field_read` rewrites it during inference), so it
-//RS         // never was a window and must not be wrapped as one.
-//RS         let borrowed_param_place =
-//RS             crate::Sema::Diagnostics::expr_root_ident(&b.init).is_some_and(|root| {
-//RS                 self.lookup(root).is_some_and(|info| {
-//RS                     matches!(
-//RS                         info.param_conv,
-//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                     ) && !self.type_contains_shared(&info.ty)
-//RS                 })
-//RS             });
-//RS         // A `Copy` field is not a window. `type_is_copy` names the types
-//RS         // every execution tier duplicates on read (scalars, `Char`, `U8`,
-//RS         // `Complex`, `Range`), so a field of one of those has no storage to
-//RS         // keep borrowed and no allocation to avoid — the read IS the copy.
-//RS         // Keeping it as a window records the owned value as a live borrow of
-//RS         // the receiver, which is why `step :: self.step` could no longer
-//RS         // cross into a task (E1102) even though it is an `Int`: the fact,
-//RS         // not the type, refused it. `infer_checked`'s twin
-//RS         // `borrowed_param_place` already carries this `!type_is_copy` gate,
-//RS         // and before the window was restored for read-parameter projections
-//RS         // `field_read_to_clone` kept every field read out of the wrap; this
-//RS         // narrows the restoration back to the shapes a window is for.
-//RS         //
-//RS         // Only a FIELD projection or a bare name is judged here, because only
-//RS         // there is the type exact: `compound_expr_type`'s index arm answers
-//RS         // with the element type even when the index is a range (`xs[band]`),
-//RS         // which is a real window over many elements. A bare name matters for
-//RS         // write parameters: `held :: a` with `a: &Int` copies the Int, so it
-//RS         // must not stay a live read view that blocks the later `a = b`.
-//RS         let copy_field_read = match &b.init {
-//RS             Expr::Field(..) => self
-//RS                 .compound_expr_type(&b.init)
-//RS                 .is_some_and(|ty| crate::Sema::Diagnostics::type_is_copy(&ty)),
-//RS             Expr::Ident(name, _) => self
-//RS                 .lookup(name)
-//RS                 .is_some_and(|info| crate::Sema::Diagnostics::type_is_copy(&info.ty)),
-//RS             _ => false,
-//RS         };
-//RS         if !b.mutable
-//RS             && !copy_field_read
-//RS             && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
-//RS             && self.place_from_expr(&b.init).is_some()
-//RS             && (borrowed_param_place || !field_read_to_clone(&b.init, self.registry, self.imports))
-//RS         {
-//RS             let span = b.init.span();
-//RS             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
-//RS             b.init = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
-//RS         }
-//RS         // `g :: param.field ?? fallback` reads the payload through the same
-//RS         // non-owning window as `o :: param.field` then `g :: o ?? fallback`:
-//RS         // a read view of the borrowed parameter, not an owned copy.
-//RS         if !b.mutable {
-//RS             if let Expr::OrFallback { value, .. } = &mut b.init {
-//RS                 let place: &Expr = value;
-//RS                 let borrowed_view = matches!(place, Expr::Field(..) | Expr::Index { .. })
-//RS                     && crate::Sema::Diagnostics::expr_root_ident(place).is_some_and(|root| {
-//RS                         self.lookup(root).is_some_and(|info| {
-//RS                             matches!(
-//RS                                 info.param_conv,
-//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                             ) && !self.type_contains_shared(&info.ty)
-//RS                         })
-//RS                     })
-//RS                     && self.place_from_expr(place).is_some();
-//RS                 if borrowed_view {
-//RS                     let span = value.span();
-//RS                     let inner = std::mem::replace(&mut **value, Expr::Absent(span));
-//RS                     **value = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
-//RS                 }
-//RS             }
-//RS         }
-//RS         let saved_fixed_constructor = self.allow_fixed_constructor;
-//RS         self.allow_fixed_constructor = direct_fixed_constructor(&b.init);
-//RS         if let Expr::CallValue { callee, .. } = &mut b.init {
-//RS             if let Expr::Lambda(lambda) = callee.as_mut() {
-//RS                 if lambda.meta.result_loop || lambda.meta.collecting_loop {
-//RS                     lambda.meta.loop_label = Some((b.name.clone(), b.name_span));
-//RS                 }
-//RS             }
-//RS         }
-//RS         // Capture allocator provenance before inference when the receiver's
-//RS         // binding type is already available. Inference also records the
-//RS         // canonical allocator receiver type, so the post-inference fallback
-//RS         // below covers the producer's resolved shape.
-//RS         let arena_alloc_source = self.arena_alloc_source(&b.init);
-//RS         let diagnostics_before_init = self.diags.len();
-//RS         let invalid_reads_before_init = self.invalid_binding_reads;
-//RS         // An immutable `::` binding is a read window. Let the existing
-//RS         // field-read clone rule inspect the selected type without treating
-//RS         // the read as an owning escape; the clone is inserted immediately
-//RS         // after inference when the field is duplicable. Mutable bindings
-//RS         // and all other owning positions use the default materialization
-//RS         // path; `copies: .Explicit` keeps the refusal.
-//RS         let implicit_field_read = !b.mutable
-//RS             && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
-//RS             && field_read_to_clone(&b.init, self.registry, self.imports);
-//RS         let saved_borrow_ctx = self.borrow_ctx;
-//RS         if implicit_field_read {
-//RS             self.borrow_ctx = true;
-//RS         }
-//RS         // A distinct-range constructor's Result must stay visible until the
-//RS         // binding-level admission below can distinguish a runtime value from
-//RS         // a compile-time literal; ordinary call propagation would rewrite it
-//RS         // to `Try` first.
-//RS         let distinct_range_constructor = matches!(
-//RS             &b.init,
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } if args.len() == 1
-//RS                 && Syntax::numeric_conversion_source(method).is_some()
-//RS                 && matches!(
-//RS                     receiver.as_ref(),
-//RS                     Expr::Ident(type_name, _)
-//RS                         if self.registry.distinct_range(type_name).is_some()
-//RS                 )
-//RS         );
-//RS         // D-MEM-COPYSEM1: a value-if is not a maximal place. When it feeds a
-//RS         // non-view binding, its arm tails occupy the same owning destination
-//RS         // as the conditional result; route them through `infer_owning_value`.
-//RS         // A declared `View`/`ViewMut` result keeps the view path unchanged.
-//RS         let owning_if_value = matches!(b.init.without_parens(), Expr::If { .. })
-//RS             && !matches!(
-//RS                 b.ty.as_ref(),
-//RS                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
-//RS             );
-//RS         let mut it = if distinct_range_constructor {
-//RS             self.infer_without_auto_propagation(&mut b.init)
-//RS         } else if b.mutable || owning_if_value {
-//RS             self.infer_owning_value(&mut b.init)
-//RS         } else {
-//RS             self.infer(&mut b.init)
-//RS         };
-//RS         self.borrow_ctx = saved_borrow_ctx;
-//RS         let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
-//RS         if implicit_field_read
-//RS             && it
-//RS                 .as_ref()
-//RS                 .is_some_and(|ty| self.is_cloneable_type(ty))
-//RS         {
-//RS             let span = b.init.span();
-//RS             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
-//RS             b.init = Expr::Copy(Box::new(inner), span);
-//RS         }
-//RS         let init_has_error = self.diags[diagnostics_before_init..]
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.severity == Severity::Error);
-//RS         self.allow_fixed_constructor = saved_fixed_constructor;
-//RS         if let (
-//RS             Some(Type::Result { ok, .. }),
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             },
-//RS         ) = (&it, &b.init)
-//RS         {
-//RS             if let Type::Named(type_name) = ok.as_ref() {
-//RS                 if self.registry.distinct_range(type_name).is_some()
-//RS                     && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == type_name)
-//RS                     && Syntax::numeric_conversion_source(method).is_some()
-//RS                     && args.len() == 1
-//RS                 {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0136",
-//RS                             format!("making a `{type_name}` from a runtime value can fail"),
-//RS                             "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
-//RS                             format!("write `{type_name}.{method}(raw)?` and handle the failure"),
-//RS                             Some(args[0].expr.span()),
-//RS                         ));
-//RS                     it = Some(Type::Named(type_name.clone()));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let inline_target = match &it {
-//RS             Some(Type::Result { ok, .. }) => match ok.as_ref() {
-//RS                 Type::InlineRange { lo, hi, .. } => Some((*lo, *hi, ok.as_ref().clone())),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         };
-//RS         if let Some((lo, hi, target)) = inline_target {
-//RS             if let Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } = &b.init
-//RS             {
-//RS                 let descriptor = matches!(receiver.as_ref(), Expr::Call(call)
-//RS                         if call.resolved_ret.as_ref().is_some_and(|ty| ty == &target));
-//RS                 if descriptor
-//RS                     && method.as_str() == Syntax::conversion_method_for_source("Int")
-//RS                     && args.len() == 1
-//RS                 {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::inline_range_runtime_conversion(
-//RS                             lo,
-//RS                             hi,
-//RS                             method,
-//RS                             args[0].expr.span(),
-//RS                         ));
-//RS                     it = Some(target);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if b.is_comptime {
-//RS             self.in_comptime = false;
-//RS         }
-//RS         self.lambda_escapes = saved_esc;
-//RS         self.lambda_binding = saved_bind;
-//RS         self.expected_type = saved_expected;
-//RS         self.reject_borrowed_param_subplace(&mut b.init, it.as_ref(), "be stored in a binding");
-//RS         if it
-//RS             .as_ref()
-//RS             .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
-//RS         {
-//RS             self.diags.push(Diagnostic::error(
-//RS                     "E0201",
-//RS                     "an ExpiringSecret loan cannot be stored".to_string(),
-//RS                     "the callback parameter is a temporary read-only loan that ends when `.with` returns".to_string(),
-//RS                     "use the loan inside the callback and store only a non-secret result".to_string(),
-//RS                     Some(b.init.span()),
-//RS                 ));
-//RS         }
-//RS 
-//RS         // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
-//RS         // .lines()` — is a loop-source-only value. It may only be consumed
-//RS         // directly by `loop line in handle.lines()`; binding it to a name lets it
-//RS         // escape loop position, where there is no meaningful lowering. (Codegen
-//RS         // previously emitted a placeholder that rustc rejected — an I2 hole. This
-//RS         // moves the guarantee into sema, c109/I3.)
-//RS         if let Some(Type::Named(n)) = &it {
-//RS             if n == "FileLines" || n == "StdinLines" || n == "ProcessLines" {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E2502",
-//RS                         "a line stream can only be used directly in a loop".to_string(),
-//RS                         "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use".to_string(),
-//RS                         format!(
-//RS                             "iterate it directly: `loop {} in handle.lines() {{ … }}`",
-//RS                             if b.name.is_empty() { "line" } else { b.name.as_str() }
-//RS                         ),
-//RS                         Some(b.init.span()),
-//RS                     ));
-//RS             }
-//RS         }
-//RS 
-//RS         if let Expr::Lambda(lam) = &b.init {
-//RS             if lam.meta.escapes {
-//RS                 for name in &lam.meta.mut_captures {
-//RS                     self.lambda_mut_borrow_stack
-//RS                         .last_mut()
-//RS                         .unwrap()
-//RS                         .insert(name.clone());
-//RS                 }
-//RS                 for name in &lam.meta.moved_captures {
-//RS                     self.mark_moved_exact(name.clone(), lam.span, "an escaping lambda");
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // `a :: b` moves `b` when the type isn't a scalar (M2 model:
-//RS         // assignment moves). Borrowed parameters can't be moved at all.
-//RS         if let Expr::Ident(n, nspan) = &b.init {
-//RS             if let Some(info) = self.lookup(n) {
-//RS                 if !info.ty.is_scalar() {
-//RS                     if info.param_conv.is_none() {
-//RS                         self.mark_moved(n.clone(), *nspan, format!("the binding `{}`", b.name));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // Poison a binding when inference has no usable type, including a
-//RS         // recovery type produced by an initializer type error (E0801/E3203).
-//RS         // Ownership, sendability, and contract errors still leave the
-//RS         // binding well-typed, so later reports about that name survive:
-//RS         // `.detach()` on an unsendable task (E1103/E1106, D-DETACH1) and an
-//RS         // unchecked `.join()` (E0402) are exactly such secondary reports.
-//RS         let initializer_type_error = self.diags[diagnostics_before_init..]
-//RS             .iter()
-//RS             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0801" | "E3203"));
-//RS         // A read of an invalid binding infers nothing without a new
-//RS         // diagnostic. An initializer that yields no type after such a read
-//RS         // is that earlier error's cascade: poison this binding as well, so
-//RS         // later uses of it stay silent instead of reporting `Unknown`.
-//RS         let init_read_invalid = self.invalid_binding_reads != invalid_reads_before_init;
-//RS         let init_type_unusable = (b.ty.is_none()
-//RS             && it.is_none()
-//RS             && (init_has_error || init_read_invalid))
-//RS             || (init_has_error && initializer_type_error);
-//RS         if b.ty.is_none() && it.is_none() && !init_has_error && !init_read_invalid {
-//RS             if let Expr::MethodCall {
-//RS                 method,
-//RS                 method_span,
-//RS                 ..
-//RS             } = b.init.without_parens()
-//RS             {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0116",
-//RS                     format!("`.{method}()` doesn't hand back a value"),
-//RS                     "a call is a value only when its function declares a result after the parameter list"
-//RS                         .to_string(),
-//RS                     format!(
-//RS                         "put `{method}` on its own line, or declare a result after the parameter list"
-//RS                     ),
-//RS                     Some(*method_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let mut final_ty = match (&b.ty, it) {
-//RS             (Some(_), Some(actual)) if !annot_valid => actual,
-//RS             (Some(annot), Some(actual)) => {
-//RS                 let annot = self.resolve_type(annot.clone());
-//RS                 let mut actual = self.resolve_type(actual.clone());
-//RS                 let preserve_clock_provenance = crate::Sema::Diagnostics::is_clock_type(&annot)
-//RS                     && (crate::Sema::Diagnostics::is_deterministic_clock_type(&actual)
-//RS                         || crate::Sema::Diagnostics::is_system_clock_type(&actual));
-//RS                 if annot != actual && self.implicitly_convert_unit(&mut b.init, &annot, &actual) {
-//RS                     actual = annot.clone();
-//RS                 }
-//RS                 // D-OPT-LIFT1=A: a written `T?` annotation is a slot; a plain
-//RS                 // payload fills it.
-//RS                 if let Some(lifted) = self.lift_optional_slot(&annot, &actual, &mut b.init) {
-//RS                     actual = lifted;
-//RS                 }
-//RS                 // D-SG9: a fixed-width literal is range-checked and re-typed in
-//RS                 // `infer` (E1003), so it arrives matching `annot`. A non-literal
-//RS                 // width mismatch falls to E0108 below — no implicit narrowing or
-//RS                 // widening between integer widths.
-//RS                 if annot != actual {
-//RS                     // D-DIST1/D-DIST3 (E0128): distinct-type coercion is never implicit.
-//RS                     let distinct_name = if let Type::Named(n) = &annot {
-//RS                         if self.registry.is_distinct(n) {
-//RS                             Some(n.clone())
-//RS                         } else {
-//RS                             None
-//RS                         }
-//RS                     } else {
-//RS                         None
-//RS                     };
-//RS                     if let Some(dt) = distinct_name {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0128",
-//RS                                 format!("a `{}` can't be used where a `{}` is expected", actual.name(), dt),
-//RS                                 format!("`{}` and `{}` are different types — even though `{}` is built on `{}`, one is never accepted in place of the other", dt, actual.name(), dt, self.registry.distinct_base(&dt).map(|t| t.name()).unwrap_or_default()),
-//RS                                 format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
-//RS                                 Some(b.init.span()),
-//RS                             ));
-//RS                     } else if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
-//RS                         &annot,
-//RS                         &actual,
-//RS                         b.init.span(),
-//RS                     ) {
-//RS                         self.diags.push(diag);
-//RS                     } else {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0108",
-//RS                             format!(
-//RS                                 "`{}` says its type is {}, but the value is {}",
-//RS                                 b.name,
-//RS                                 annot.show(),
-//RS                                 actual.show()
-//RS                             ),
-//RS                             "the type written after `:` must match the value".to_string(),
-//RS                             type_fix_hint(&annot, &actual),
-//RS                             Some(b.init.span()),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 if preserve_clock_provenance {
-//RS                     actual
-//RS                 } else {
-//RS                     annot
-//RS                 }
-//RS             }
-//RS             (Some(annot), None) => self.resolve_type(annot.clone()),
-//RS             (None, Some(actual)) => actual,
-//RS             // Keep an unresolved binding explicitly unknown after the
-//RS             // initializer's diagnostic; never invent Int and leak it into TIR.
-//RS             (None, None) => Type::Named("Unknown".to_string()),
-//RS         };
-//RS         if contains_taskgroup(&final_ty)
-//RS             && !matches!(&final_ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
-//RS         {
-//RS             self.diags.push(Diagnostic::error(
-//RS                     "E1110",
-//RS                     "`Group` cannot be stored inside another value".to_string(),
-//RS                     "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
-//RS                         .to_string(),
-//RS                     "pass `group: Group` directly to a helper function or method and use it there"
-//RS                         .to_string(),
-//RS                     Some(b.name_span),
-//RS                 ));
-//RS         }
-//RS         if b.ty.is_none() {
-//RS             b.ty = Some(final_ty.clone());
-//RS         }
-//RS         self.report_lending_view_escape(&b.init, "be stored in a binding");
-//RS         // D-DECIMAL1: default-on float-money lint for money-like binding names.
-//RS         if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
-//RS             self.diags.push(Diagnostic::lint(
-//RS                 "L0504",
-//RS                 format!("binding `{}` looks like money but has type `Float`", b.name),
-//RS                 "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
-//RS                 "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`".to_string(),
-//RS                 Some(b.name_span),
-//RS             ));
-//RS         }
-//RS         if !self.defer_ct_evaluation
-//RS             && b.is_comptime
-//RS             && !crate::Comptime::check_build_time_io(&b.init, self.ct_base_dir, &mut self.diags)
-//RS         {
-//RS             // D-CTIO1: the path law already reported against the call.
-//RS         } else if !self.defer_ct_evaluation && b.is_comptime {
-//RS             let is_patch_binding =
-//RS                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
-//RS             let globals = self.current_ct_globals().into_owned();
-//RS             let binding_types = self.current_ct_binding_types(&globals);
-//RS             // D-META-EFFECT1: pass core_imports so the interpreter can
-//RS             // resolve effect-approved Core calls (e.g. `math.sqrt(x)`).
-//RS             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
-//RS             // start with the gate already open.
-//RS             let mut mutated = std::collections::HashMap::new();
-//RS             let checked_nominals = self.checked_comptime_nominals();
-//RS             let ct_checked_funcs = self.ct_checked_funcs_for_evaluation();
-//RS             let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-//RS                 &b.init,
-//RS                 ct_checked_funcs,
-//RS                 self.ct_externs,
-//RS                 self.ct_base_dir,
-//RS                 &globals,
-//RS                 &binding_types,
-//RS                 self.core_imports,
-//RS                 self.gates,
-//RS                 self.ct_impure_depth,
-//RS                 self.ct_items,
-//RS                 checked_nominals,
-//RS                 Some(&mut mutated),
-//RS             );
-//RS             self.apply_ct_mutations(mutated);
-//RS             match folded {
-//RS                 Ok((v, inputs)) => {
-//RS                     // A compile-time initializer reading other `@` names infers
-//RS                     // no type while it is checked in compile-time context (the
-//RS                     // evaluator reads those names). The evaluated value is the
-//RS                     // binding's type then, the same fallback a later read of
-//RS                     // the name uses, so `@ratio :: @LIMIT /% @BASE` is an Int.
-//RS                     if matches!(&final_ty, Type::Named(name) if name == "Unknown") {
-//RS                         final_ty = v.jet_type();
-//RS                         if matches!(&b.ty, Some(Type::Named(name)) if name == "Unknown") {
-//RS                             b.ty = Some(final_ty.clone());
-//RS                         }
-//RS                     }
-//RS                     // A value codegen cannot write back out must not become
-//RS                     // literal data.
-//RS                     if self.ct_value_fits_binding(&v, &final_ty) {
-//RS                         b.ct = Some(v.clone());
-//RS                     }
-//RS                     if !is_patch_binding {
-//RS                         self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
-//RS                     }
-//RS                     // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
-//RS                     self.ct_embed_inputs.extend(inputs);
-//RS                 }
-//RS                 Err(d) => self.diags.push(d),
-//RS             }
-//RS         }
-//RS         if b.name == "_" {
-//RS             if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
-//RS                 self.diags
-//RS                     .push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
-//RS                         "this task",
-//RS                         "discarding it into `_` skips the join before the task finishes",
-//RS                         b.name_span,
-//RS                     ));
-//RS             } else if self.type_is_single_use(&final_ty) {
-//RS                 self.diags
-//RS                     .push(crate::Sema::CheckerOwnership::e0140_discarded_wildcard(
-//RS                         b.name_span,
-//RS                     ));
-//RS             }
-//RS             // An ordinary fallible call already propagates its failure in
-//RS             // statement position. Its Unit success has nothing to bind.
-//RS             if !init_has_error
-//RS                 && !b.is_comptime
-//RS                 && matches!(&final_ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-//RS                 && matches!(
-//RS                     b.init.without_parens(),
-//RS                     Expr::Try(inner, ..)
-//RS                         if matches!(
-//RS                             inner.without_parens(),
-//RS                             Expr::Call(..) | Expr::MethodCall { .. }
-//RS                         )
-//RS                 )
-//RS             {
-//RS                 self.diags
-//RS                     .push(Diagnostic::from_row("L0531", &[], Some(b.name_span)));
-//RS             }
-//RS             self.current_binding_name = prev_binding_name;
-//RS             return;
-//RS         }
-//RS         let binding_sendable = if let Expr::Lambda(lam) = &b.init {
-//RS             self.lambda_value_sendable(lam, &final_ty)
-//RS         } else {
-//RS             self.sendability_problem(&final_ty, true).is_none()
-//RS         };
-//RS         let interrupt_sendable = if !matches!(&final_ty, Type::Fn { .. }) {
-//RS             false
-//RS         } else {
-//RS             if let Some(name) = interrupt_callback_name(&b.init) {
-//RS                 self.lookup(name)
-//RS                     .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
-//RS                     .unwrap_or_else(|| {
-//RS                         self.funcs.contains_key(name)
-//RS                             || self.unqualified.contains_key(name)
-//RS                             || self.unqualified_file.contains_key(name)
-//RS                     })
-//RS             } else if let Some(lambda) = interrupt_callback_lambda(&b.init) {
-//RS                 self.lambda_interrupt_sendable(lambda, &final_ty)
-//RS             } else {
-//RS                 false
-//RS             }
-//RS         };
-//RS         // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
-//RS         // consume it exactly once. The duty transfers on `y :: x` (the move marks
-//RS         // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
-//RS         let single_use_span = if self.type_is_single_use(&final_ty) {
-//RS             Some(b.name_span)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
-//RS         // `arena`. Flag the binding for codegen (it lowers to a `&mut T`, read
-//RS         // through a deref); register the fact after declaration so its binding
-//RS         // identity is available to E0631 / E0632. E0631: a binding whose
-//RS         // *initializer is itself a view name* (`y :: x`) would move the view to
-//RS         // a new — possibly longer-lived — binding; reject it (views are
-//RS         // non-reassignable non-escaping locals, I8).
-//RS         if arena_alloc_source.is_some() {
-//RS             b.arena_view = true;
-//RS         } else if let Expr::Ident(src, src_span) = &b.init {
-//RS             if self.is_arena_view(src) || self.is_fixed_backing_view(src) {
-//RS                 self.report_view_escape(src, "be stored in another binding", *src_span);
-//RS             }
-//RS         }
-//RS         if matches!(&final_ty, Type::Named(name) if name == "Fixed") {
-//RS             if let Some(owner) = self.fixed_backing_source(&b.init) {
-//RS                 self.record_fixed_backing(&b.name, owner, b.name_span);
-//RS             }
-//RS         }
-//RS         let direct_mutable_view =
-//RS             matches!(&final_ty, Type::Apply { name, .. } if name == "ViewMut");
-//RS         let transferred_view_root = direct_mutable_view
-//RS             .then(|| self.mutable_view_aggregate_root(&b.init))
-//RS             .flatten();
-//RS         // D-SHAPE-PLACE1: `x :: list[a..b]` makes `x` a scope-bound window
-//RS         // into `list`. E2305 fires the same way E0631 does for arena views —
-//RS         // rebinding a live view to a second name is itself an escape (views
-//RS         // are non-reassignable non-escaping locals, I8), not re-tracked.
-//RS         for (output_path, place, kind, access) in self.view_call_sources(&b.init) {
-//RS             let access = if direct_mutable_view && output_path.is_empty() {
-//RS                 crate::Sema::ViewAccess::Write
-//RS             } else {
-//RS                 access
-//RS             };
-//RS             self.record_list_view(
-//RS                 &b.name,
-//RS                 output_path,
-//RS                 place,
-//RS                 kind,
-//RS                 access,
-//RS                 b.name_span,
-//RS                 &final_ty,
-//RS                 transferred_view_root.as_deref(),
-//RS             );
-//RS         }
-//RS         self.finish_mutable_view_aggregate_transfer(
-//RS             transferred_view_root.as_deref(),
-//RS             b.init.span(),
-//RS             format!("the binding `{}`", b.name),
-//RS         );
-//RS         if let Expr::Ident(src, src_span) = &b.init {
-//RS             let _ = src_span;
-//RS             self.transfer_named_view(&b.name, src, b.name_span);
-//RS         }
-//RS         // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
-//RS         // s.before(sep)` makes `x` a scope-bound string view into `s` — the
-//RS         // same E2305 reasoning as `View<T>`, reported as E2307 since `String`
-//RS         // has no distinct view type for codegen to key off (`b.string_view`
-//RS         // flags the binding itself instead). Immutable (`::`) only, matching
-//RS         // "views are non-reassignable non-escaping locals" (I8) — a `:=`
-//RS         // binding can be reassigned to an ordinary owned `String` later, and
-//RS         // codegen's `&str` place has nowhere to put that; fall back to the
-//RS         // ordinary eager/owned lowering for `:=` (unchanged pre-S5 behavior).
-//RS         if !b.mutable {
-//RS             if let Some(owner) = self.string_view_call_source(&b.init) {
-//RS                 b.string_view = true;
-//RS                 self.record_string_view(&b.name, owner, b.name_span);
-//RS             }
-//RS         }
-//RS         // No dedicated "rebound to another binding" check here — the general
-//RS         // E2307 check on `Expr::Ident` reads (this binding's init was already
-//RS         // inferred above) already caught `y :: d` for a live view `d`; a
-//RS         // second check here would double-report the same span.
-//RS         let concrete_unit_value = (!b.mutable)
-//RS             .then(|| self.concrete_unit_value(&b.init))
-//RS             .flatten();
-//RS         let normalized_path_source =
-//RS             (!b.mutable && !init_has_error && matches!(&final_ty, Type::String))
-//RS                 .then(|| self.normalized_path_string_source(&b.init))
-//RS                 .flatten();
-//RS         self.declare_with_sendability(
-//RS             &b.name,
-//RS             b.name_span,
-//RS             LocalInfo {
-//RS                 def_span: b.name_span,
-//RS                 binding_sigil_span: if b.is_comptime { None } else { b.sigil_span },
-//RS                 ty: final_ty.clone(),
-//RS                 mutable: b.mutable && !b.is_comptime,
-//RS                 param_conv: None,
-//RS                 decl_loop_depth: self.loop_depth,
-//RS                 interrupt_sendable,
-//RS                 reactive_local: b.reactive_local(),
-//RS                 reactive_shared: b.reactive_shared(),
-//RS                 single_use_span,
-//RS                 invalid: init_type_unusable,
-//RS             },
-//RS             binding_sendable,
-//RS         );
-//RS         if let Some(source) = normalized_path_source {
-//RS             self.flow.path_strings.set_at(
-//RS                 &b.name,
-//RS                 self.scope_depth(),
-//RS                 crate::Sema::FlowFacts::PathStringFact { source },
-//RS             );
-//RS         }
-//RS         if let Some(arena) = arena_alloc_source {
-//RS             self.record_arena_view(&b.name, arena, b.name_span);
-//RS         }
-//RS         if b.track() && !b.name.is_empty() {
-//RS             let depth = self
-//RS                 .flow
-//RS                 .origins
-//RS                 .depth_of(&b.name)
-//RS                 .unwrap_or_else(|| self.scope_depth());
-//RS             let (line, column) = crate::Diagnostics::span_line_col(&self.source, b.name_span.start);
-//RS             self.flow.origins.set_at(
-//RS                 &b.name,
-//RS                 depth,
-//RS                 crate::Sema::FlowFacts::OriginFact {
-//RS                     tracked: true,
-//RS                     source: Some(b.name.clone()),
-//RS                     line: Some(line),
-//RS                     column: Some(column),
-//RS                     ambiguity: false,
-//RS                 },
-//RS             );
-//RS         }
-//RS         // D-CONC-FREEZE1=A: publish the freeze provenance in the shared
-//RS         // flow store after the declaration owns the new binding.
-//RS         if let Some(site) = self.frozen_expr_site(&b.init) {
-//RS             let depth = self
-//RS                 .binding_fact_depth(&b.name)
-//RS                 .unwrap_or_else(|| self.scope_depth());
-//RS             self.flow.frozen.set_at(&b.name, depth, site);
-//RS         }
-//RS         if b.reactive_shared() && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
-//RS             self.note_reactive_upgrade(&b.name, &final_ty, "#Shared pin");
-//RS             b.reactive_upgrade = true;
-//RS         }
-//RS         if let Some(value) = concrete_unit_value {
-//RS             self.concrete_unit_values
-//RS                 .last_mut()
-//RS                 .expect("binding scope exists")
-//RS                 .insert(b.name.clone(), value);
-//RS         }
-//RS         self.current_binding_name = prev_binding_name;
-//RS     }
-//RS 
-//RS     /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`)
-//RS     /// or a list (`[a, b]`). Each bound name is declared separately; move and
-//RS     /// mutability follow the per-name M2 rules. Struct destructuring is
-//RS     /// irrefutable (you may bind any subset of fields); list destructuring is
-//RS     /// guarded by a runtime length check in codegen, and a literal of the wrong
-//RS     /// length is caught here (E0315).
-//RS     pub(crate) fn check_destructuring_binding(&mut self, b: &mut Binding) {
-//RS         let inferred = self.infer(&mut b.init);
-//RS         let pattern = b
-//RS             .pattern
-//RS             .clone()
-//RS             .expect("destructuring binding has a pattern");
-//RS         let Some(it) = inferred else {
-//RS             // The initializer itself didn't type-check; declare error
-//RS             // placeholders so the bound names don't cascade into E0107.
-//RS             for n in pattern.names() {
-//RS                 self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable, b.sigil_span);
-//RS             }
-//RS             return;
-//RS         };
-//RS         let it = self.resolve_type(it);
-//RS         match &pattern {
-//RS             BindPattern::Struct {
-//RS                 type_name,
-//RS                 type_span,
-//RS                 fields,
-//RS                 rest,
-//RS                 span: pat_span,
-//RS             } => {
-//RS                 let display_type_name = self.display_type_name(type_name, None);
-//RS                 let actual = match &it {
-//RS                     Type::Named(n) => Some(n.clone()),
-//RS                     Type::Apply { name, .. } => Some(name.clone()),
-//RS                     _ => None,
-//RS                 };
-//RS                 let is_struct = actual.as_deref().is_some_and(|n| {
-//RS                     let (import_ns, lookup_name) = self.struct_type_name_parts(n);
-//RS                     self.struct_owner_module(lookup_name, import_ns)
-//RS                         .and_then(|m| self.struct_fields_of(m, lookup_name))
-//RS                         .is_some()
-//RS                 });
-//RS                 if !is_struct {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0313",
-//RS                         format!(
-//RS                             "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
-//RS                             display_type_name,
-//RS                             display_type_name,
-//RS                             it.show()
-//RS                         ),
-//RS                         "destructuring with `{ }` pulls fields out of a struct value".to_string(),
-//RS                         format!(
-//RS                             "destructure a `{}`, or bind the whole value with a name",
-//RS                             display_type_name
-//RS                         ),
-//RS                         Some(*type_span),
-//RS                     ));
-//RS                     for n in pattern.names() {
-//RS                         self.declare_bound(
-//RS                             n.local_name(),
-//RS                             n.span,
-//RS                             Type::Int,
-//RS                             b.mutable,
-//RS                             b.sigil_span,
-//RS                         );
-//RS                     }
-//RS                     return;
-//RS                 }
-//RS                 let actual = actual.unwrap();
-//RS                 let pattern_matches = match &it {
-//RS                     Type::Apply {
-//RS                         name: actual_name, ..
-//RS                     } => {
-//RS                         let (pattern_ns, pattern_name) = self.struct_type_name_parts(type_name);
-//RS                         let (actual_ns, actual_name) = self.struct_type_name_parts(actual_name);
-//RS                         pattern_name == actual_name
-//RS                             && matches!(
-//RS                                 (
-//RS                                     self.struct_owner_module(pattern_name, pattern_ns),
-//RS                                     self.struct_owner_module(actual_name, actual_ns),
-//RS                                 ),
-//RS                                 (Some(pattern_owner), Some(actual_owner))
-//RS                                     if pattern_owner == actual_owner
-//RS                             )
-//RS                     }
-//RS                     _ => self.nominal_type_identity(&Type::Named(type_name.clone()), &it),
-//RS                 };
-//RS                 if !pattern_matches {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0313",
-//RS                         format!(
-//RS                             "this value is a `{}`, not a `{}`",
-//RS                             actual, display_type_name
-//RS                         ),
-//RS                         "the type named before `{ }` must match the value you destructure"
-//RS                             .to_string(),
-//RS                         format!("write `{} {{ … }}` to match the value", actual),
-//RS                         Some(*type_span),
-//RS                     ));
-//RS                     for n in pattern.names() {
-//RS                         self.declare_bound(
-//RS                             n.local_name(),
-//RS                             n.span,
-//RS                             Type::Int,
-//RS                             b.mutable,
-//RS                             b.sigil_span,
-//RS                         );
-//RS                     }
-//RS                     return;
-//RS                 }
-//RS                 for f in fields {
-//RS                     // `field_type` resolves the field's type and reports E0302
-//RS                     // with a suggestion if the field name is unknown.
-//RS                     let fty = self.field_type(&it, &f.name, f.span).unwrap_or(Type::Int);
-//RS                     self.declare_bound(f.local_name(), f.span, fty, b.mutable, b.sigil_span);
-//RS                 }
-//RS                 // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
-//RS                 // name every field, and redundant when it already does.
-//RS                 let (import_ns, lookup_name) = self.struct_type_name_parts(&actual);
-//RS                 let total_fields = self
-//RS                     .struct_owner_module(lookup_name, import_ns)
-//RS                     .and_then(|m| self.struct_fields_of(m, lookup_name))
-//RS                     .map(|fs| fs.len());
-//RS                 if let Some(total) = total_fields {
-//RS                     let partial = fields.len() < total;
-//RS                     if partial && rest.is_none() {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0326",
-//RS                                 format!("this pattern leaves out fields of `{}`", display_type_name),
-//RS                                 "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
-//RS                                 "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
-//RS                                 Some(*pat_span),
-//RS                             ));
-//RS                     } else if !partial {
-//RS                         if let Some(rest_span) = rest {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E0327",
-//RS                                     format!("`..` is redundant — this pattern already names every field of `{}`", display_type_name),
-//RS                                     "a trailing `..` only makes sense when some fields are left unnamed".to_string(),
-//RS                                     "remove the `..`".to_string(),
-//RS                                     Some(*rest_span),
-//RS                                 ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             BindPattern::List { elems, span } => {
-//RS                 let (elem_ty, fixed_len) = match &it {
-//RS                     Type::List(inner) => ((**inner).clone(), None),
-//RS                     // S76: [T#N] can be destructured; E0963 if count doesn't match.
-//RS                     Type::FixedList { elem, len } => {
-//RS                         ((**elem).clone(), Some(len.require_literal()))
-//RS                     }
-//RS                     _ => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0313",
-//RS                             format!(
-//RS                                 "`[ … ]` can only destructure a list, but this is {}",
-//RS                                 it.show()
-//RS                             ),
-//RS                             "destructuring with `[ ]` pulls elements out of a list value"
-//RS                                 .to_string(),
-//RS                             "destructure a list, or bind the whole value with a name".to_string(),
-//RS                             Some(*span),
-//RS                         ));
-//RS                         for n in pattern.names() {
-//RS                             self.declare_bound(
-//RS                                 n.local_name(),
-//RS                                 n.span,
-//RS                                 Type::Int,
-//RS                                 b.mutable,
-//RS                                 b.sigil_span,
-//RS                             );
-//RS                         }
-//RS                         return;
-//RS                     }
-//RS                 };
-//RS                 // E0963: destructure count must match the fixed-size length.
-//RS                 if let Some(fixed) = fixed_len {
-//RS                     if elems.len() as u64 != fixed {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0963",
-//RS                                 format!(
-//RS                                     "destructuring with {} name{}, but this fixed-size list has {} element{}",
-//RS                                     elems.len(),
-//RS                                     if elems.len() == 1 { "" } else { "s" },
-//RS                                     fixed,
-//RS                                     if fixed == 1 { "" } else { "s" }
-//RS                                 ),
-//RS                                 "a fixed-size list `[T#N]` has a known length — the pattern must match exactly".to_string(),
-//RS                                 format!(
-//RS                                     "use {} name{} in the pattern",
-//RS                                     fixed,
-//RS                                     if fixed == 1 { "" } else { "s" }
-//RS                                 ),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 // A list literal has a known length: a mismatch is a compile
-//RS                 // error rather than a runtime length failure.
-//RS                 if let Expr::ListLit(items, _) = &b.init {
-//RS                     if items.len() != elems.len() {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0315",
-//RS                             format!(
-//RS                                 "this pattern binds {} item{}, but the list has {}",
-//RS                                 elems.len(),
-//RS                                 if elems.len() == 1 { "" } else { "s" },
-//RS                                 items.len()
-//RS                             ),
-//RS                             "a list pattern must name exactly as many items as the list holds"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "name {} item{} to match the list",
-//RS                                 items.len(),
-//RS                                 if items.len() == 1 { "" } else { "s" }
-//RS                             ),
-//RS                             Some(*span),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 for e in elems {
-//RS                     self.declare_bound(&e.name, e.span, elem_ty.clone(), b.mutable, b.sigil_span);
-//RS                 }
-//RS             }
-//RS             BindPattern::Tuple { elems, span } => {
-//RS                 if let Type::Apply { name, args } = &it {
-//RS                     // The applied run is the reserved generic `VjpRun<T>` even
-//RS                     // when resolution qualified its head through the
-//RS                     // non-generic source-owned `core.compute` record.
-//RS                     if Self::split_type_name(name).1 == "VJPRun" && args.len() == 1 && elems.len() == 2 {
-//RS                         let pull_ty = Type::Fn {
-//RS                             params: vec![Type::Named("Tensor".to_string())],
-//RS                             ret: Some(Box::new(args[0].clone())),
-//RS                             effect_bound: None,
-//RS                             param_contract: None,
-//RS                             call_metadata: None,
-//RS                             return_view_provenance: None,
-//RS                         };
-//RS                         let types = [Type::Named("Tensor".to_string()), pull_ty];
-//RS                         for (element, ty) in elems.iter().zip(types.iter()) {
-//RS                             self.declare_bound(
-//RS                                 &element.name,
-//RS                                 element.span,
-//RS                                 ty.clone(),
-//RS                                 b.mutable,
-//RS                                 b.sigil_span,
-//RS                             );
-//RS                         }
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS                 let Type::Tuple(fields) = &it else {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0313",
-//RS                         format!(
-//RS                             "`( … )` can only destructure a tuple, but this is {}",
-//RS                             it.show()
-//RS                         ),
-//RS                         "destructuring with `( )` pulls named members out of a tuple value"
-//RS                             .to_string(),
-//RS                         "destructure a tuple, or bind the whole value with a name".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     for n in pattern.names() {
-//RS                         self.declare_bound(
-//RS                             n.local_name(),
-//RS                             n.span,
-//RS                             Type::Int,
-//RS                             b.mutable,
-//RS                             b.sigil_span,
-//RS                         );
-//RS                     }
-//RS                     return;
-//RS                 };
-//RS                 if elems.len() != fields.len() {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0315",
-//RS                         format!(
-//RS                             "this pattern binds {} member{}, but the tuple has {}",
-//RS                             elems.len(),
-//RS                             if elems.len() == 1 { "" } else { "s" },
-//RS                             fields.len()
-//RS                         ),
-//RS                         "a tuple pattern must name exactly as many members as the tuple holds"
-//RS                             .to_string(),
-//RS                         format!(
-//RS                             "name {} member{} to match the tuple",
-//RS                             fields.len(),
-//RS                             if fields.len() == 1 { "" } else { "s" }
-//RS                         ),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 } else if let Expr::TupleLit(items, _, _) = &b.init {
-//RS                     if items.len() != elems.len() {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0315",
-//RS                                 format!(
-//RS                                     "this pattern binds {} member{}, but the tuple literal has {}",
-//RS                                     elems.len(),
-//RS                                     if elems.len() == 1 { "" } else { "s" },
-//RS                                     items.len()
-//RS                                 ),
-//RS                                 "a tuple pattern must name exactly as many members as the literal holds"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "name {} member{} to match the tuple",
-//RS                                     items.len(),
-//RS                                     if items.len() == 1 { "" } else { "s" }
-//RS                                 ),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 for (e, (_, fty)) in elems.iter().zip(fields.iter()) {
-//RS                     self.declare_bound(&e.name, e.span, (**fty).clone(), b.mutable, b.sigil_span);
-//RS                 }
-//RS             }
-//RS             BindPattern::Refutable { .. } => {
-//RS                 unreachable!("refutable bindings use check_refutable_binding")
-//RS             }
-//RS         }
-//RS         // Move the initializer when it's an owned, non-scalar local (M2): the
-//RS         // whole value is consumed to produce the bound parts.
-//RS         if let Expr::Ident(n, nspan) = &b.init {
-//RS             if let Some(info) = self.lookup(n) {
-//RS                 if !info.ty.is_scalar() && info.param_conv.is_none() {
-//RS                     self.mark_moved(n.clone(), *nspan, "the destructuring binding");
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0368 crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1519-2668
+// Private continuation of Sema.Statements: binding admission and destructuring.
+// Existing sema_stmt_check_binding/prepared_binding/destructure remain canonical
+// TIR owners; the Rust admission paths below supply their missing checker logic.
+use jet_foundation.[Binding, BindPattern, Expr, Type, Span, Diagnostic, Severity, AccessConvention, PlaceAccess, expr_span, AMBIENT_ERR, SIGIL_BIND_MUT, SIGIL_BIND_IMMUT, SIGIL_COPY, INTERNAL_UNIT_TYPE, TYPE_TASKGROUP, numeric_conversion_source, conversion_method_for_source, span_line_col, is_money_like_name]
+use jet_sema.Sema.[Checker, LocalInfo, ViewAccess]
+use jet_sema.Sema.FlowFacts.[PathStringFact, OriginFact]
+use jet_sema.Sema.Diagnostics.[expr_root_ident, type_is_copy, inline_range_runtime_conversion, contains_expiring_secret_loan, is_clock_type, is_deterministic_clock_type, is_system_clock_type, typed_text_mismatch]
+use jet_sema.Sema.CheckerOwnership.[l1101_unjoined_task, e0140_discarded_wildcard]
+use jet_sema.Sema.CheckerInfer.[is_reactive_handle_ty]
+use jet_sema.Sema.Statements.[field_read_to_clone, direct_fixed_constructor, type_fix_hint, contains_taskgroup, is_task_type, interrupt_callback_name, interrupt_callback_lambda]
+use jet_comptime.[check_build_time_io, evaluate_owned_with_imports_opts_collecting_items, CtValue]
 
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1519
+pub fn check_binding(self: &Checker, b: &Binding) {
+    if b.meta == .Val(meta) -> self.check_meta_attr(&meta)
+    if b.name == AMBIENT_ERR {
+        &self.diags.push(Diagnostic.lint("L0511", "binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "rename the binding, or use it outside a fallback", Val(b.name_span)))
+    }
+    prev_binding_name :: self.current_binding_name.take()
+    self.current_binding_name = Val(~b.name)
+    if b.pattern == .Val(.Refutable(..)) {
+        self.check_refutable_binding(&b)
+        self.current_binding_name = ^prev_binding_name
+        return
+    }
+    if b.pattern.is_some() {
+        check_destructuring_binding(&self, &b)
+        self.current_binding_name = ^prev_binding_name
+        return
+    }
+    if b.uninit {
+        self.check_uninit_binding(&b)
+        self.current_binding_name = ^prev_binding_name
+        return
+    }
+    annot_valid := true
+    // An enclosing tail's expectation never flows into an unannotated local.
+    saved_expected :: self.expected_type.take()
+    if b.ty == .Val(ty) && b.ty_span == .Val(span) {
+        resolved :: self.resolve_type(~ty)
+        ty = ~resolved
+        self.expected_type = Val(~resolved)
+        before :: self.diags.len()
+        self.check_declared_type(resolved, span)
+        if self.diags.len() > before -> annot_valid = false
+    }
+    if !b.mutable && b.init == .Ident(name, name_span) {
+        if self.lookup(name) == .Val(info) {
+            if !info.ty.is_scalar() && (info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)) {
+                source_ty :: ~info.ty
+                sigil :: if b.mutable -> SIGIL_BIND_MUT else -> SIGIL_BIND_IMMUT
+                diagnostic :: Diagnostic.error("E0120", "`{name}` was not moved here, so it cannot be taken with the move marker `^`", "this function has read access only and does not own the value", "copy it instead: `{b.name} {sigil} {SIGIL_COPY}{name}`", Val(name_span))
+                &self.diags.push(self.with_ownership_copy_edit(diagnostic, name_span, Val(source_ty)))
+            }
+        }
+    }
+    saved_esc :: self.lambda_escapes
+    saved_bind :: ~self.lambda_binding
+    if b.init == .Lambda(lambda) {
+        self.lambda_escapes = self.bound_lambda_escapes(b.name, lambda)
+        self.lambda_binding = Val(~b.name)
+    }
+    if b.is_comptime -> self.in_comptime = true
+    borrowed_param_place :: expr_root_ident(b.init).is_some_and(root -> self.lookup(root).is_some_and(info ->
+        (info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)) && !self.type_contains_shared(info.ty)))
+    // Copy fields/names have no live storage loan; range indices remain windows.
+    copy_field_read :: if b.init == {
+        .Field(..) -> self.compound_expr_type(b.init).is_some_and(type_is_copy)
+        .Ident(name, _) -> self.lookup(name).is_some_and(info -> type_is_copy(info.ty))
+        _ -> false
+    }
+    explicit_copy_or_place :: if b.init == {
+        .Copy(..) | .Place(..) -> true
+        _ -> false
+    }
+    if !b.mutable && !copy_field_read && !explicit_copy_or_place
+        && self.place_from_expr(b.init).is_some()
+        && (borrowed_param_place || !field_read_to_clone(b.init, self.registry, self.imports)) {
+        span :: expr_span(b.init)
+        inner :: b.init.replace(Expr.Absent{span: span})
+        b.init = Expr.Place{value: ^inner, access: PlaceAccess.Read, span: span}
+    }
+    if !b.mutable && b.init == .OrFallback(value, ..) {
+        projection :: if value == {
+            .Field(..) | .Index(..) -> true
+            _ -> false
+        }
+        borrowed_view :: projection && expr_root_ident(value).is_some_and(root -> self.lookup(root).is_some_and(info ->
+            (info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)) && !self.type_contains_shared(info.ty))) && self.place_from_expr(value).is_some()
+        if borrowed_view {
+            span :: expr_span(value)
+            inner :: value.replace(Expr.Absent{span: span})
+            value = Expr.Place{value: ^inner, access: PlaceAccess.Read, span: span}
+        }
+    }
+    saved_fixed_constructor :: self.allow_fixed_constructor
+    self.allow_fixed_constructor = direct_fixed_constructor(b.init)
+    if b.init == .CallValue(callee, ..) && callee == .Lambda(lambda) {
+        if lambda.meta.result_loop || lambda.meta.collecting_loop -> lambda.meta.loop_label = Val((~b.name, b.name_span))
+    }
+    arena_alloc_source := self.arena_alloc_source(b.init)
+    diagnostics_before_init :: self.diags.len()
+    invalid_reads_before_init :: self.invalid_binding_reads
+    explicit_init :: if b.init == {
+        .Copy(..) | .Place(..) -> true
+        _ -> false
+    }
+    implicit_field_read :: !b.mutable && !explicit_init && field_read_to_clone(b.init, self.registry, self.imports)
+    saved_borrow_ctx :: self.borrow_ctx
+    if implicit_field_read -> self.borrow_ctx = true
+    distinct_range_constructor :: if b.init == {
+        .MethodCall(receiver, method, _, _, _, args, ..) -> args.len() == 1 && numeric_conversion_source(method).is_some() && (if receiver == {
+            .Ident(type_name, _) -> self.registry.distinct_range(type_name).is_some()
+            _ -> false
+        })
+        _ -> false
+    }
+    if_initializer :: if b.init.without_parens() == {
+        .If(..) -> true
+        _ -> false
+    }
+    view_annotation :: if b.ty == {
+        .Val(.Apply(name, _)) -> name == "View" || name == "ViewMut"
+        _ -> false
+    }
+    owning_if_value :: if_initializer && !view_annotation
+    it := if distinct_range_constructor -> self.infer_without_auto_propagation(&b.init)
+        else if b.mutable || owning_if_value -> self.infer_owning_value(&b.init)
+        else -> self.infer(&b.init)
+    self.borrow_ctx = saved_borrow_ctx
+    arena_alloc_source = arena_alloc_source.or_else(() -> self.arena_alloc_source(b.init))
+    if implicit_field_read && it.is_some_and(ty -> self.is_cloneable_type(ty)) {
+        span :: expr_span(b.init)
+        inner :: b.init.replace(Expr.Absent{span: span})
+        b.init = Expr.Copy{value: ^inner, span: span}
+    }
+    init_has_error :: self.diags[diagnostics_before_init..<self.diags.len()].any(diagnostic -> diagnostic.severity == Severity.Error)
+    self.allow_fixed_constructor = saved_fixed_constructor
+    if it == .Val(.Result(ok, _)) && b.init == .MethodCall(receiver, method, _, _, _, args, ..) {
+        if ok == .Named(type_name) {
+            same_receiver :: if receiver == {
+                .Ident(name, _) -> name == type_name
+                _ -> false
+            }
+            if self.registry.distinct_range(type_name).is_some() && same_receiver && numeric_conversion_source(method).is_some() && args.len() == 1 {
+                &self.diags.push(Diagnostic.error("E0136", "making a `{type_name}` from a runtime value can fail", "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled", "write `{type_name}.{method}(raw)?` and handle the failure", Val(expr_span(args[0].expr))))
+                it = Val(Type.Named{name: ~type_name})
+            }
+        }
+    }
+    inline_target :: if it == {
+        .Val(.Result(ok, _)) -> if ok == {
+            .InlineRange(lo, hi, _) -> Val((lo, hi, ~ok))
+            _ -> None
+        }
+        _ -> None
+    }
+    if inline_target == .Val((lo, hi, target)) && b.init == .MethodCall(receiver, method, _, _, _, args, ..) {
+        descriptor :: if receiver == {
+            .Call(call) -> call.resolved_ret.is_some_and(ty -> ty == target)
+            _ -> false
+        }
+        if descriptor && method == conversion_method_for_source("Int") && args.len() == 1 {
+            &self.diags.push(inline_range_runtime_conversion(lo, hi, method, expr_span(args[0].expr)))
+            it = Val(^target)
+        }
+    }
+    if b.is_comptime -> self.in_comptime = false
+    self.lambda_escapes = saved_esc
+    self.lambda_binding = ^saved_bind
+    self.expected_type = ^saved_expected
+    self.reject_borrowed_param_subplace(&b.init, it, "be stored in a binding")
+    if it.is_some_and(contains_expiring_secret_loan) {
+        &self.diags.push(Diagnostic.error("E0201", "an ExpiringSecret loan cannot be stored", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and store only a non-secret result", Val(expr_span(b.init))))
+    }
+    if it == .Val(.Named(name)) && (name == "FileLines" || name == "StdinLines" || name == "ProcessLines") {
+        variable :: if b.name.is_empty() -> "line" else -> b.name
+        &self.diags.push(Diagnostic.error("E2502", "a line stream can only be used directly in a loop", "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use", "iterate it directly: `loop {variable} in handle.lines() {{ … }}`", Val(expr_span(b.init))))
+    }
+    if b.init == .Lambda(lambda) && lambda.meta.escapes {
+        loop name in lambda.meta.mut_captures -> self.lambda_mut_borrow_stack.last_mut().unwrap().insert(~name)
+        loop name in lambda.meta.moved_captures -> self.mark_moved_exact(~name, lambda.span, "an escaping lambda")
+    }
+    if b.init == .Ident(name, span) {
+        if self.lookup(name) == .Val(info) {
+            if !info.ty.is_scalar() && info.param_conv.is_none() -> self.mark_moved(~name, span, "the binding `{b.name}`")
+        }
+    }
+    initializer_type_error :: self.diags[diagnostics_before_init..<self.diags.len()].any(diagnostic -> diagnostic.code == "E0801" || diagnostic.code == "E3203")
+    init_read_invalid :: self.invalid_binding_reads != invalid_reads_before_init
+    init_type_unusable :: (b.ty.is_none() && it.is_none() && (init_has_error || init_read_invalid)) || (init_has_error && initializer_type_error)
+    if b.ty.is_none() && it.is_none() && !init_has_error && !init_read_invalid {
+        if b.init.without_parens() == .MethodCall(_, method, method_span, ..) {
+            &self.diags.push(Diagnostic.error("E0116", "`.{method}()` doesn't hand back a value", "a call is a value only when its function declares a result after the parameter list", "put `{method}` on its own line, or declare a result after the parameter list", Val(method_span)))
+        }
+    }
+    final_ty := if (b.ty, it) == {
+        (.Val(_), .Val(actual)) if !annot_valid -> actual
+        (.Val(annotated), .Val(inferred)) -> {
+            annot :: self.resolve_type(~annotated)
+            actual := self.resolve_type(~inferred)
+            preserve_clock_provenance :: is_clock_type(annot) && (is_deterministic_clock_type(actual) || is_system_clock_type(actual))
+            if annot != actual && self.implicitly_convert_unit(&b.init, annot, actual) -> actual = ~annot
+            if self.lift_optional_slot(annot, actual, &b.init) == .Val(lifted) -> actual = ^lifted
+            if annot != actual {
+                distinct_name :: if annot == {
+                    .Named(name) -> if self.registry.is_distinct(name) -> Val(~name) else -> None
+                    _ -> None
+                }
+                if distinct_name == .Val(dt) {
+                    base :: self.registry.distinct_base(dt).map(ty -> ty.name()) ?? ""
+                    &self.diags.push(Diagnostic.error("E0128", "a `{actual.name()}` can't be used where a `{dt}` is expected", "`{dt}` and `{actual.name()}` are different types — even though `{dt}` is built on `{base}`, one is never accepted in place of the other", "construct a `{dt}`: `{dt}(expr)`", Val(expr_span(b.init))))
+                } else if typed_text_mismatch(annot, actual, expr_span(b.init)) == .Val(diag) {
+                    &self.diags.push(^diag)
+                } else {
+                    &self.diags.push(Diagnostic.error("E0108", "`{b.name}` says its type is {annot.show()}, but the value is {actual.show()}", "the type written after `:` must match the value", type_fix_hint(annot, actual), Val(expr_span(b.init))))
+                }
+            }
+            if preserve_clock_provenance -> actual else -> annot
+        }
+        (.Val(annot), .None) -> self.resolve_type(~annot)
+        (.None, .Val(actual)) -> actual
+        (.None, .None) -> Type.Named{name: "Unknown"}
+    }
+    direct_group :: if final_ty == {
+        .Named(name) -> name == TYPE_TASKGROUP
+        _ -> false
+    }
+    if contains_taskgroup(final_ty) && !direct_group {
+        &self.diags.push(Diagnostic.error("E1110", "`Group` cannot be stored inside another value", "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner", "pass `group: Group` directly to a helper function or method and use it there", Val(b.name_span)))
+    }
+    if b.ty.is_none() -> b.ty = Val(~final_ty)
+    self.report_lending_view_escape(b.init, "be stored in a binding")
+    if final_ty.is_float() && is_money_like_name(b.name) {
+        &self.diags.push(Diagnostic.lint("L0504", "binding `{b.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`", Val(b.name_span)))
+    }
+    if !self.defer_ct_evaluation && b.is_comptime {
+        if check_build_time_io(b.init, self.ct_base_dir, &self.diags) {
+            is_patch_binding :: if final_ty == {
+                .Named(name) -> name.ends_with(".Patch")
+                _ -> false
+            }
+            globals :: self.current_ct_globals().into_owned()
+            binding_types :: self.current_ct_binding_types(globals)
+            mutated := [String:CtValue]{}
+            checked_nominals :: self.checked_comptime_nominals()
+            ct_checked_funcs :: self.ct_checked_funcs_for_evaluation()
+            folded :: evaluate_owned_with_imports_opts_collecting_items(b.init, ct_checked_funcs, self.ct_externs, self.ct_base_dir, globals, binding_types, self.core_imports, self.gates, self.ct_impure_depth, self.ct_items, checked_nominals, Val(&mutated))
+            self.apply_ct_mutations(^mutated)
+            if folded == {
+                .Ok((value, inputs)) -> {
+                    if final_ty == .Named("Unknown") {
+                        final_ty = value.jet_type()
+                        if b.ty == .Val(.Named("Unknown")) -> b.ty = Val(~final_ty)
+                    }
+                    if self.ct_value_fits_binding(value, final_ty) -> b.ct = Val(~value)
+                    if !is_patch_binding -> self.ct_scopes.last_mut().unwrap().insert(~b.name, ^value)
+                    &self.ct_embed_inputs.extend(^inputs)
+                }
+                .Err(diagnostic) -> &self.diags.push(^diagnostic)
+            }
+        }
+    }
+    if b.name == "_" {
+        if is_task_type(final_ty) && !self.in_taskgroup_spawn {
+            &self.diags.push(l1101_unjoined_task("this task", "discarding it into `_` skips the join before the task finishes", b.name_span))
+        } else if self.type_is_single_use(final_ty) -> &self.diags.push(e0140_discarded_wildcard(b.name_span))
+        propagated_call :: if b.init.without_parens() == {
+            .Try(inner, ..) -> if inner.without_parens() == {
+                .Call(..) | .MethodCall(..) -> true
+                _ -> false
+            }
+            _ -> false
+        }
+        unit_success :: if final_ty == {
+            .Named(name) -> name == INTERNAL_UNIT_TYPE
+            _ -> false
+        }
+        if !init_has_error && !b.is_comptime && unit_success && propagated_call -> &self.diags.push(Diagnostic.from_row("L0531", [], Val(b.name_span)))
+        self.current_binding_name = ^prev_binding_name
+        return
+    }
+    binding_sendable :: if b.init == {
+        .Lambda(lambda) -> self.lambda_value_sendable(lambda, final_ty)
+        _ -> self.sendability_problem(final_ty, true).is_none()
+    }
+    function_type :: if final_ty == {
+        .Fn(..) -> true
+        _ -> false
+    }
+    interrupt_sendable := false
+    if function_type {
+        if interrupt_callback_name(b.init) == .Val(name) {
+            interrupt_sendable = if self.lookup(name) == {
+                .Val(info) -> info.param_conv.is_none() && info.interrupt_sendable
+                .None -> self.funcs.contains_key(name) || self.unqualified.contains_key(name) || self.unqualified_file.contains_key(name)
+            }
+        } else if interrupt_callback_lambda(b.init) == .Val(lambda) -> interrupt_sendable = self.lambda_interrupt_sendable(lambda, final_ty)
+    }
+    single_use_span :: if self.type_is_single_use(final_ty) -> Val(b.name_span) else -> None
+    if arena_alloc_source.is_some() -> b.arena_view = true
+    else if b.init == .Ident(src, span) {
+        if self.is_arena_view(src) || self.is_fixed_backing_view(src) -> self.report_view_escape(src, "be stored in another binding", span)
+    }
+    if final_ty == .Named("Fixed") {
+        if self.fixed_backing_source(b.init) == .Val(owner) -> self.record_fixed_backing(b.name, owner, b.name_span)
+    }
+    direct_mutable_view :: if final_ty == {
+        .Apply(name, _) -> name == "ViewMut"
+        _ -> false
+    }
+    transferred_view_root :: if direct_mutable_view -> self.mutable_view_aggregate_root(b.init) else -> None
+    loop (output_path, place, kind, original_access) in self.view_call_sources(b.init) {
+        access :: if direct_mutable_view && output_path.is_empty() -> ViewAccess.Write else -> original_access
+        self.record_list_view(b.name, output_path, place, kind, access, b.name_span, final_ty, transferred_view_root)
+    }
+    self.finish_mutable_view_aggregate_transfer(transferred_view_root, expr_span(b.init), "the binding `{b.name}`")
+    if b.init == .Ident(src, _) -> self.transfer_named_view(b.name, src, b.name_span)
+    if !b.mutable && self.string_view_call_source(b.init) == .Val(owner) {
+        b.string_view = true
+        self.record_string_view(b.name, owner, b.name_span)
+    }
+    concrete_unit_value :: if !b.mutable -> self.concrete_unit_value(b.init) else -> None
+    normalized_path_source :: if !b.mutable && !init_has_error && final_ty == Type.String -> self.normalized_path_string_source(b.init) else -> None
+    self.declare_with_sendability(b.name, b.name_span, LocalInfo{
+        def_span: b.name_span, binding_sigil_span: if b.is_comptime -> None else -> b.sigil_span,
+        ty: ~final_ty, mutable: b.mutable && !b.is_comptime, param_conv: None,
+        decl_loop_depth: self.loop_depth, interrupt_sendable: interrupt_sendable,
+        reactive_local: b.reactive_local(), reactive_shared: b.reactive_shared(),
+        single_use_span: single_use_span, invalid: init_type_unusable,
+    }, binding_sendable)
+    if normalized_path_source == .Val(source) -> self.flow.path_strings.set_at(b.name, self.scope_depth(), PathStringFact{source: source})
+    if arena_alloc_source == .Val(arena) -> self.record_arena_view(b.name, arena, b.name_span)
+    if b.track() && !b.name.is_empty() {
+        depth :: self.flow.origins.depth_of(b.name) ?? self.scope_depth()
+        (line, column) :: span_line_col(self.source, b.name_span.start)
+        self.flow.origins.set_at(b.name, depth, OriginFact{tracked: true, source: Val(~b.name), line: Val(line), column: Val(column), ambiguity: false})
+    }
+    if self.frozen_expr_site(b.init) == .Val(site) {
+        depth :: self.binding_fact_depth(b.name) ?? self.scope_depth()
+        self.flow.frozen.set_at(b.name, depth, site)
+    }
+    if b.reactive_shared() && is_reactive_handle_ty(final_ty) {
+        self.note_reactive_upgrade(b.name, final_ty, "#Shared pin")
+        b.reactive_upgrade = true
+    }
+    if concrete_unit_value == .Val(value) -> self.concrete_unit_values.last_mut().expect("binding scope exists").insert(~b.name, value)
+    self.current_binding_name = ^prev_binding_name
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:2341
+pub fn check_destructuring_binding(self: &Checker, b: &Binding) {
+    inferred :: self.infer(&b.init)
+    pattern :: b.pattern.expect("destructuring binding has a pattern")
+    it :: inferred ?? {
+        loop name in pattern.names() -> self.declare_bound(name.local_name(), name.span, Type.Int, b.mutable, b.sigil_span)
+        return
+    }
+    resolved :: self.resolve_type(it)
+    if pattern == {
+        .Struct(type_name, type_span, fields, rest, pat_span) -> {
+            display_type_name :: self.display_type_name(type_name, None)
+            actual :: if resolved == {
+                .Named(name) | .Apply(name, _) -> Val(~name)
+                _ -> None
+            }
+            is_struct :: actual.is_some_and(name -> {
+                (import_ns, lookup_name) :: self.struct_type_name_parts(name)
+                self.struct_owner_module(lookup_name, import_ns).and_then(owner -> self.struct_fields_of(owner, lookup_name)).is_some()
+            })
+            if !is_struct {
+                &self.diags.push(Diagnostic.error("E0313", "`{display_type_name} {{ … }}` can only destructure a `{display_type_name}` value, but this is {resolved.show()}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{display_type_name}`, or bind the whole value with a name", Val(type_span)))
+                loop name in pattern.names() -> self.declare_bound(name.local_name(), name.span, Type.Int, b.mutable, b.sigil_span)
+                return
+            }
+            actual_name :: actual.unwrap()
+            pattern_matches :: if resolved == {
+                .Apply(head, _) -> {
+                    (pattern_ns, pattern_name) :: self.struct_type_name_parts(type_name)
+                    (actual_ns, actual_head) :: self.struct_type_name_parts(head)
+                    pattern_owner :: self.struct_owner_module(pattern_name, pattern_ns)
+                    actual_owner :: self.struct_owner_module(actual_head, actual_ns)
+                    pattern_name == actual_head && pattern_owner.is_some() && actual_owner.is_some() && pattern_owner == actual_owner
+                }
+                _ -> self.nominal_type_identity(Type.Named{name: ~type_name}, resolved)
+            }
+            if !pattern_matches {
+                &self.diags.push(Diagnostic.error("E0313", "this value is a `{actual_name}`, not a `{display_type_name}`", "the type named before `{{ }}` must match the value you destructure", "write `{actual_name} {{ … }}` to match the value", Val(type_span)))
+                loop name in pattern.names() -> self.declare_bound(name.local_name(), name.span, Type.Int, b.mutable, b.sigil_span)
+                return
+            }
+            loop field in fields {
+                field_ty :: self.field_type(resolved, field.name, field.span) ?? Type.Int
+                self.declare_bound(field.local_name(), field.span, field_ty, b.mutable, b.sigil_span)
+            }
+            (import_ns, lookup_name) :: self.struct_type_name_parts(actual_name)
+            total_fields :: self.struct_owner_module(lookup_name, import_ns).and_then(owner -> self.struct_fields_of(owner, lookup_name)).map(all_fields -> all_fields.len())
+            if total_fields == .Val(total) {
+                partial :: fields.len() < total
+                if partial && rest.is_none() {
+                    &self.diags.push(Diagnostic.error("E0326", "this pattern leaves out fields of `{display_type_name}`", "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining fields", Val(pat_span)))
+                } else if !partial && rest == .Val(rest_span) {
+                    &self.diags.push(Diagnostic.error("E0327", "`..` is redundant — this pattern already names every field of `{display_type_name}`", "a trailing `..` only makes sense when some fields are left unnamed", "remove the `..`", Val(rest_span)))
+                }
+            }
+        }
+        .List(elems, span) -> {
+            (elem_ty, fixed_len) :: if resolved == {
+                .List(inner) -> (~inner, None)
+                .FixedList(elem, len) -> (~elem, Val(len.require_literal()))
+                _ -> {
+                    &self.diags.push(Diagnostic.error("E0313", "`[ … ]` can only destructure a list, but this is {resolved.show()}", "destructuring with `[ ]` pulls elements out of a list value", "destructure a list, or bind the whole value with a name", Val(span)))
+                    loop name in pattern.names() -> self.declare_bound(name.local_name(), name.span, Type.Int, b.mutable, b.sigil_span)
+                    return
+                }
+            }
+            if fixed_len == .Val(fixed) && U64.from_int(elems.len()) != fixed {
+                names_suffix :: if elems.len() == 1 -> "" else -> "s"
+                fixed_suffix :: if fixed == 1 -> "" else -> "s"
+                &self.diags.push(Diagnostic.error("E0963", "destructuring with {elems.len()} name{names_suffix}, but this fixed-size list has {fixed} element{fixed_suffix}", "a fixed-size list `[T#N]` has a known length — the pattern must match exactly", "use {fixed} name{fixed_suffix} in the pattern", Val(span)))
+            }
+            if b.init == .ListLit(items, _) && items.len() != elems.len() {
+                suffix :: if elems.len() == 1 -> "" else -> "s"
+                count_suffix :: if items.len() == 1 -> "" else -> "s"
+                &self.diags.push(Diagnostic.error("E0315", "this pattern binds {elems.len()} item{suffix}, but the list has {items.len()}", "a list pattern must name exactly as many items as the list holds", "name {items.len()} item{count_suffix} to match the list", Val(span)))
+            }
+            loop elem in elems -> self.declare_bound(elem.name, elem.span, ~elem_ty, b.mutable, b.sigil_span)
+        }
+        .Tuple(elems, span) -> {
+            if resolved == .Apply(name, args) {
+                if Checker.split_type_name(name).1 == "VJPRun" && args.len() == 1 && elems.len() == 2 {
+                    pull_ty :: Type.Fn{params: [Type.Named{name: "Tensor"}], ret: Val(~args[0]), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+                    self.declare_bound(elems[0].name, elems[0].span, Type.Named{name: "Tensor"}, b.mutable, b.sigil_span)
+                    self.declare_bound(elems[1].name, elems[1].span, pull_ty, b.mutable, b.sigil_span)
+                    return
+                }
+            }
+            if resolved != .Tuple(fields) {
+                &self.diags.push(Diagnostic.error("E0313", "`( … )` can only destructure a tuple, but this is {resolved.show()}", "destructuring with `( )` pulls named members out of a tuple value", "destructure a tuple, or bind the whole value with a name", Val(span)))
+                loop name in pattern.names() -> self.declare_bound(name.local_name(), name.span, Type.Int, b.mutable, b.sigil_span)
+                return
+            }
+            if elems.len() != fields.len() {
+                suffix :: if elems.len() == 1 -> "" else -> "s"
+                count_suffix :: if fields.len() == 1 -> "" else -> "s"
+                &self.diags.push(Diagnostic.error("E0315", "this pattern binds {elems.len()} member{suffix}, but the tuple has {fields.len()}", "a tuple pattern must name exactly as many members as the tuple holds", "name {fields.len()} member{count_suffix} to match the tuple", Val(span)))
+            } else if b.init == .TupleLit(items, _, _) && items.len() != elems.len() {
+                suffix :: if elems.len() == 1 -> "" else -> "s"
+                count_suffix :: if items.len() == 1 -> "" else -> "s"
+                &self.diags.push(Diagnostic.error("E0315", "this pattern binds {elems.len()} member{suffix}, but the tuple literal has {items.len()}", "a tuple pattern must name exactly as many members as the literal holds", "name {items.len()} member{count_suffix} to match the tuple", Val(span)))
+            }
+            count :: if elems.len() < fields.len() -> elems.len() else -> fields.len()
+            loop index in 0..<count -> self.declare_bound(elems[index].name, elems[index].span, ~fields[index].ty, b.mutable, b.sigil_span)
+        }
+        .Refutable(..) -> panic("refutable bindings use check_refutable_binding")
+    }
+    if b.init == .Ident(name, span) {
+        if self.lookup(name) == .Val(info) {
+            if !info.ty.is_scalar() && info.param_conv.is_none() -> self.mark_moved(~name, span, "the destructuring binding")
+        }
+    }
+}

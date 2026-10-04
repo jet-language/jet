@@ -1,0 +1,15 @@
+use jet_sema.Sema.Bundle.ComptimeReuse.[reads_build_stamp, quoted_names]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/ComptimeReuse.rs:102 (behavioral control)
+#Test("build_stamp_read_detection") {
+    assert(reads_build_stamp("$build . stamp.at"))
+    assert(reads_build_stamp("$build.foo $build.stamp"))
+    assert(!reads_build_stamp("$build.foo"))
+    assert(!reads_build_stamp("build.stamp"))
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/ComptimeReuse.rs:280 (behavioral control)
+#Test("quoted_names_skips_char_quotes_and_keeps_escapes") {
+    assert(quoted_names("node(\"call\", '\"', \"a\\\"b\")".bytes()) == ["call", "a\\\"b"])
+    assert(quoted_names("\"unterminated".bytes()) == ["unterminated"])
+    assert(quoted_names("plain".bytes()).len() == 0)
+}

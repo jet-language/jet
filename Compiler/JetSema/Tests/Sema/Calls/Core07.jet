@@ -1,0 +1,63 @@
+use jet_foundation.[AccessConvention, Type]
+use jet_sema.CheckerCoreLib.[result_ty, u8_ty, json_ty, encoding_error_ty]
+use jet_sema.Edition.[edition_at_least]
+use JetSema.Sema.Calls.Core07.[core_fixed_sig_impl_0387]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2522-2535 (behavioral control; no inline Rust tests)
+#Test("time_units_share_datetime_and_parsing_keeps_time_error") {
+    expected :: Val(([(AccessConvention.Read, Type.Int)], Val(Type.Named("DateTime"))))
+    assert(core_fixed_sig_impl_0387("core.time", "from_unix_seconds") == expected)
+    assert(core_fixed_sig_impl_0387("core.time", "from_unix_microseconds") == expected)
+    assert(core_fixed_sig_impl_0387("core.time", "from_unix_nanoseconds") == expected)
+    assert(core_fixed_sig_impl_0387("core.time", "parse").unwrap().1 == Val(result_ty(Type.Named("LocalDate"), Type.Named("TimeError"))))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2639-2651 (behavioral control)
+#Test("json_canonical_keeps_edition_specific_shape") {
+    signature :: core_fixed_sig_impl_0387("core.encoding.json", "canonical").unwrap()
+    if edition_at_least("2027") {
+        assert(signature.0 == [(AccessConvention.Read, json_ty()), (AccessConvention.Read, Type.Named("EncodingLimits"))])
+        assert(signature.1 == Val(result_ty(Type.String, encoding_error_ty())))
+    } else {
+        assert(signature.0 == [(AccessConvention.Read, json_ty())])
+        assert(signature.1 == Val(Type.String))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2653-2673,3707-3728 (behavioral control)
+#Test("encoding_stream_factories_move_handle_and_read_options") {
+    reader :: core_fixed_sig_impl_0387("core.encoding.json", "reader").unwrap()
+    writer :: core_fixed_sig_impl_0387("core.encoding.json", "writer").unwrap()
+    assert(reader.0 == [(AccessConvention.Move, Type.Named("FileReader")), (AccessConvention.Read, Type.Named("EncodingLimits"))])
+    assert(writer.0 == [(AccessConvention.Move, Type.Named("FileWriter")), (AccessConvention.Read, Type.Named("EncodingLimits")), (AccessConvention.Read, Type.Bool)])
+    assert(reader.1 == Val(result_ty(Type.Named("JSONReader"), encoding_error_ty())))
+    assert(core_fixed_sig_impl_0387("core.encoding.xml", "writer").unwrap().0[2].1 == Type.Named("XMLRenderOptions"))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2878-2888,3164-3189,3306-3324 (behavioral control)
+#Test("mutating_fixed_calls_preserve_write_access_and_callback_metadata") {
+    tensor :: core_fixed_sig_impl_0387("core.compute", "set").unwrap()
+    assert(tensor.0[0] == (AccessConvention.Write, Type.Named("Tensor")))
+    assert(tensor.1 == Val(result_ty(Type.Named("Unit"), Type.Named("ComputeError"))))
+    worker :: core_fixed_sig_impl_0387("core.service", "worker").unwrap()
+    assert(worker.0[2].1 == Type.Fn{params: [], ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    snapshot :: core_fixed_sig_impl_0387("core.service", "set_state_snapshot").unwrap()
+    assert(snapshot.0.len() == 5)
+    assert(snapshot.0[4] == (AccessConvention.Read, Type.String))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:3488-3497,3564-3598 (behavioral control)
+#Test("service_resolution_and_plot_group_types_keep_domain_carriers") {
+    assert(core_fixed_sig_impl_0387("core.service", "directory_resolve").unwrap().1 == Val(result_ty(Type.Named("ServiceEndpoint"), Type.Named("ServiceError"))))
+    assert(core_fixed_sig_impl_0387("core.data", "bar_svg").unwrap().0[0].1 == Type.List(Type.Apply("Group", [Type.String, Type.Int])))
+    line :: core_fixed_sig_impl_0387("core.data", "line_svg").unwrap()
+    assert(line.0[0].1 == Type.List(Type.Apply("Group", [Type.String, Type.Float])))
+    assert(line.0[1].1 == Type.Named("DataLineOptions"))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:3820-3826,3845-3851,4111-4123 (behavioral control)
+#Test("tuple_field_order_and_text_result_categories_are_not_collapsed") {
+    assert(core_fixed_sig_impl_0387("core.net.url", "split_fragment").unwrap().1 == Val(Type.Tuple([("fragment", Type.String), ("url", Type.String)])))
+    assert(core_fixed_sig_impl_0387("core.net.url", "urldefrag").unwrap().1 == Val(Type.Tuple([("url", Type.String), ("fragment", Type.String)])))
+    assert(core_fixed_sig_impl_0387("core.text.parse", "rindex").unwrap().1 == Val(Type.Int))
+    assert(core_fixed_sig_impl_0387("core.text.parse", "startswith").unwrap().1 == Val(Type.Bool))
+    assert(core_fixed_sig_impl_0387("core.text.parse", "strip_prefix").unwrap().1 == Val(Type.String))
+    assert(core_fixed_sig_impl_0387("core.text.parse", "encode").unwrap().1 == Val(Type.List(u8_ty())))
+    assert(core_fixed_sig_impl_0387("core.text.parse", "missing") == None)
+    assert(core_fixed_sig_impl_0387("unknown.module", "encode") == None)
+}

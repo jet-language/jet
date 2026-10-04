@@ -1,0 +1,20 @@
+// Original Terminators.rs has no inline tests; these preserve its event errors.
+// Rust: crates/jet-lexer/src/Lexer/Terminators.rs:208
+#Test("terminator_events_reject_out_of_order_before_mutating") {
+    tokens := [Token{kind: K_IDENT, span: Span{start: 0, end: 1}, payload: empty_payload("x")}, Token{kind: K_EOF, span: Span{start: 1, end: 1}, payload: empty_payload("")}]
+    diagnostics := [Diagnostic]{}
+    events :: [TerminatorEvent.InsertSemi{before: 1, at: 1}, TerminatorEvent.InsertSemi{before: 1, at: 1}]
+    assert(apply_events("x", &tokens, &diagnostics, ^events).expect_err("invalid order") == "terminator event order or byte position is invalid")
+    assert(tokens.len() == 2)
+    assert(diagnostics.is_empty())
+}
+// Rust: crates/jet-lexer/src/Lexer/Terminators.rs:208
+#Test("terminator_event_inserts_zero_width_semi_at_eof") {
+    tokens := [Token{kind: K_IDENT, span: Span{start: 0, end: 1}, payload: empty_payload("x")}, Token{kind: K_EOF, span: Span{start: 1, end: 1}, payload: empty_payload("")}]
+    diagnostics := [Diagnostic]{}
+    apply_events("x", &tokens, &diagnostics, [TerminatorEvent.InsertSemi{before: 1, at: 1}]).expect("valid event")
+    assert(tokens.len() == 3)
+    assert(tokens[1].kind == K_SEMI)
+    assert(tokens[1].span == Span{start: 1, end: 1})
+    assert(tokens[2].kind == K_EOF)
+}

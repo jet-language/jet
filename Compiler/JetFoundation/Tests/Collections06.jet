@@ -1,0 +1,34 @@
+use JetFoundation.Collections.[command_role_file, JET_KEYWORD_LIST, JET_TYPE_LIST, IMPURE_BUILTINS, ADAPTER_RECIPE_NAMES, INTERNAL_VALIDATE_OVER, INTERNAL_RECEIPT_HANDLE, INTERNAL_LIST_QUERY_HANDLE]
+use JetFoundation.Syntax.TEXT_NUL
+
+// Rust: crates/jet-foundation/src/Syntax/package_files.rs:59
+// Behavioral control: the command namespace is closed and case-sensitive.
+#Test("command_role_file_closed_namespace") {
+    assert(command_role_file("run") == Val("@run.jet"))
+    assert(command_role_file("build") == Val("@build.jet"))
+    assert(command_role_file("dev") == Val("@dev.jet"))
+    assert(command_role_file("test") == Val("@test.jet"))
+    loop command in [String]{"", "Run", "package", "module", "debug", "@run.jet"} {
+        assert(command_role_file(command) == null)
+    }
+}
+
+// Rust: crates/jet-foundation/src/Syntax/package_files.rs:464
+#Test("package_keyword_and_type_lists_exclude_teaching_spellings") {
+    loop keyword in [String]{"fn", "priv", "distinct", "migration", "validate", "check"} {
+        assert(JET_KEYWORD_LIST.contains(keyword))
+    }
+    loop keyword in [String]{"comptime", "mutate", "move", "copy", "ref", "Ok", "Err", "Val"} {
+        assert(!JET_KEYWORD_LIST.contains(keyword))
+    }
+    assert(!JET_TYPE_LIST.contains("Result"))
+    assert(IMPURE_BUILTINS == [String]{"print", "eprint", "print", "input", "read_all_input"})
+}
+
+// Rust: crates/jet-foundation/src/Syntax/package_files.rs:233
+#Test("package_internal_handles_retain_nul_prefix") {
+    assert(INTERNAL_VALIDATE_OVER == "{TEXT_NUL}jet.validate.over")
+    assert(INTERNAL_RECEIPT_HANDLE == "{TEXT_NUL}jet.receipt.handle")
+    assert(INTERNAL_LIST_QUERY_HANDLE == "{TEXT_NUL}jet.query.list")
+    assert(ADAPTER_RECIPE_NAMES == [String]{"Recipe.build", "Recipe.prebuilt", "Recipe.copy", "Recipe.cargo", "Recipe.go", "Recipe.node", "Recipe.cmake", "Recipe.make"})
+}

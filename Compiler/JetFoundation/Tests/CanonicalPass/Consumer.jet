@@ -1,5 +1,6 @@
 // Composed original-producer witness, NOT a hand-authored Record. Needs the
 // real Driver/parser/Sema/MIR optimizer closure and #4494 native journal.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, jet_driver_compile, jet_driver_embedded_core_sources]
 use jet_eval.[jet_eval_default_config]
 use core.files.runtime.kernel_path_components as canonical_consumer_path
@@ -26,7 +27,7 @@ impl CanonicalPassConsumerRename.MIRCanonicalPassOperation {
             }}, entry_root_identity: "journal-root", entry_path: path,
         },
         canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("journal-consumer"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("journal-consumer"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

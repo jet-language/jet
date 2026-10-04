@@ -1,0 +1,21 @@
+use jet_foundation.[Stmt, Span, Expr, LValue]
+use jet_sema.CheckerInfer.StdlibLints.LoopLints.[state_loop_can_reach_next_turn, statement_contains_current_continue, expression_writes_name, lvalue_writes_name]
+
+#Test("state_loop_continue_is_another_turn_but_break_is_not") {
+    span :: Span.new(0, 4)
+    assert(state_loop_can_reach_next_turn(&[], None))
+    assert(state_loop_can_reach_next_turn(&[Stmt.Continue(span)], None))
+    assert(!state_loop_can_reach_next_turn(&[Stmt.Break(span)], None))
+    assert(!state_loop_can_reach_next_turn(&[Stmt.Break(span), Stmt.Continue(span)], None))
+    assert(statement_contains_current_continue(&Stmt.ContinueLabel("outer", span), Val("outer")))
+    assert(!statement_contains_current_continue(&Stmt.ContinueLabel("other", span), Val("outer")))
+}
+#Test("loop_write_probes_distinguish_reads_and_write_places") {
+    span :: Span.new(0, 1)
+    ident :: Expr.Ident("state", span)
+    assert(!expression_writes_name(&ident, "state"))
+    assert(expression_writes_name(&Expr.Place(ident.clone(), .Write, span), "state"))
+    assert(!expression_writes_name(&Expr.Place(ident.clone(), .Read, span), "state"))
+    assert(lvalue_writes_name(&LValue.Local{name: "state", span: span}, "state"))
+    assert(!lvalue_writes_name(&LValue.Local{name: "other", span: span}, "state"))
+}

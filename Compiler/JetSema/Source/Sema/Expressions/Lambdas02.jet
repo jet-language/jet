@@ -1,1522 +1,620 @@
-// PORT-PENDING 0367 crates-jet-sema-src-sema-checkercore-bindings-module-group-slice-1: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1-1518
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::helpers::is_pod_uninit_type;
-//RS use crate::AST::{
-//RS     AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt,
-//RS     StrPart, Type,
-//RS };
-//RS use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
-//RS use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures, stmt_refs_name};
-//RS use crate::Sema::Diagnostics::{
-//RS     edit_distance, field_read_to_clone, is_task_type, type_fix_hint,
-//RS };
-//RS use crate::Sema::{Checker, LocalInfo};
-//RS use crate::Syntax;
-//RS use std::collections::{HashMap, HashSet, VecDeque};
-//RS fn core_source_target(modules: &[crate::Sema::ModuleState], module: &str) -> Option<usize> {
-//RS     let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
-//RS     modules
-//RS         .iter()
-//RS         .position(|state| state.module_alias == source.alias)
-//RS }
-//RS 
-//RS fn canonical_fragment_name(
-//RS     owner: usize,
-//RS     name: &str,
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     source_paths: &HashMap<(usize, String), String>,
-//RS     struct_identities: &HashMap<(usize, String), String>,
-//RS     known_identities: &HashSet<String>,
-//RS ) -> Option<String> {
-//RS     if known_identities.contains(name) {
-//RS         return Some(name.to_string());
-//RS     }
-//RS     if let Some(identity) = source_paths.get(&(owner, name.to_string())) {
-//RS         return Some(identity.clone());
-//RS     }
-//RS     if let Some((namespace, leaf)) = name.rsplit_once('.') {
-//RS         let state = modules.get(owner)?;
-//RS         let target = state.imports.get(namespace).copied().or_else(|| {
-//RS             state
-//RS                 .core_imports
-//RS                 .get(namespace)
-//RS                 .and_then(|module| core_source_target(modules, module))
-//RS         });
-//RS         if let Some(target) = target {
-//RS             if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
-//RS                 return Some(identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(state) = modules.get(owner) {
-//RS         if let Some(original) = state.core_item_imports.get(name) {
-//RS             let module = state.core_imports.get(name)?;
-//RS             let target = core_source_target(modules, module)?;
-//RS             let leaf = original
-//RS                 .rsplit_once('.')
-//RS                 .map_or(original.as_str(), |(_, leaf)| leaf);
-//RS             if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
-//RS                 return Some(identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     struct_identities.get(&(owner, name.to_string())).cloned()
-//RS }
-//RS 
-//RS fn canonical_fragment_type(
-//RS     ty: &Type,
-//RS     owner: usize,
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     source_paths: &HashMap<(usize, String), String>,
-//RS     struct_identities: &HashMap<(usize, String), String>,
-//RS     known_identities: &HashSet<String>,
-//RS ) -> Type {
-//RS     let map_name = |name: &str| {
-//RS         canonical_fragment_name(
-//RS             owner,
-//RS             name,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         )
-//RS     };
-//RS     match ty {
-//RS         Type::Named(name) => map_name(name).map_or_else(|| ty.clone(), Type::Named),
-//RS         Type::List(inner) => Type::List(Box::new(canonical_fragment_type(
-//RS             inner,
-//RS             owner,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         ))),
-//RS         Type::Map {
-//RS             key,
-//RS             key_span,
-//RS             value,
-//RS         } => Type::Map {
-//RS             key: Box::new(canonical_fragment_type(
-//RS                 key,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS             key_span: *key_span,
-//RS             value: Box::new(canonical_fragment_type(
-//RS                 value,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS         },
-//RS         Type::Shared(inner) => Type::Shared(Box::new(canonical_fragment_type(
-//RS             inner,
-//RS             owner,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         ))),
-//RS         Type::Option(inner) => Type::Option(Box::new(canonical_fragment_type(
-//RS             inner,
-//RS             owner,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         ))),
-//RS         Type::Result { ok, err } => Type::Result {
-//RS             ok: Box::new(canonical_fragment_type(
-//RS                 ok,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS             err: Box::new(canonical_fragment_type(
-//RS                 err,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS         },
-//RS         Type::Fn {
-//RS             params,
-//RS             ret,
-//RS             effect_bound,
-//RS             param_contract,
-//RS             call_metadata,
-//RS             return_view_provenance,
-//RS         } => Type::Fn {
-//RS             params: params
-//RS                 .iter()
-//RS                 .map(|param| {
-//RS                     canonical_fragment_type(
-//RS                         param,
-//RS                         owner,
-//RS                         modules,
-//RS                         source_paths,
-//RS                         struct_identities,
-//RS                         known_identities,
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS             ret: ret.as_ref().map(|ret| {
-//RS                 Box::new(canonical_fragment_type(
-//RS                     ret,
-//RS                     owner,
-//RS                     modules,
-//RS                     source_paths,
-//RS                     struct_identities,
-//RS                     known_identities,
-//RS                 ))
-//RS             }),
-//RS             effect_bound: effect_bound.clone(),
-//RS             param_contract: param_contract.clone(),
-//RS             call_metadata: call_metadata.clone(),
-//RS             return_view_provenance: return_view_provenance.clone(),
-//RS         },
-//RS         Type::Apply { name, args } => Type::Apply {
-//RS             name: map_name(name).unwrap_or_else(|| name.clone()),
-//RS             args: args
-//RS                 .iter()
-//RS                 .map(|arg| {
-//RS                     canonical_fragment_type(
-//RS                         arg,
-//RS                         owner,
-//RS                         modules,
-//RS                         source_paths,
-//RS                         struct_identities,
-//RS                         known_identities,
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         },
-//RS         Type::Tuple(fields) => Type::Tuple(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, field)| {
-//RS                     (
-//RS                         name.clone(),
-//RS                         Box::new(canonical_fragment_type(
-//RS                             field,
-//RS                             owner,
-//RS                             modules,
-//RS                             source_paths,
-//RS                             struct_identities,
-//RS                             known_identities,
-//RS                         )),
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         Type::FixedList { elem, len } => Type::FixedList {
-//RS             elem: Box::new(canonical_fragment_type(
-//RS                 elem,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS             len: len.clone(),
-//RS         },
-//RS         Type::InlineRange { base, lo, hi } => Type::InlineRange {
-//RS             base: Box::new(canonical_fragment_type(
-//RS                 base,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS             lo: *lo,
-//RS             hi: *hi,
-//RS         },
-//RS         Type::Tagged { marker, inner } => Type::Tagged {
-//RS             marker: marker.clone(),
-//RS             inner: Box::new(canonical_fragment_type(
-//RS                 inner,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS         },
-//RS         Type::Union(members) => crate::AST::canonicalize_union(
-//RS             members
-//RS                 .iter()
-//RS                 .map(|member| {
-//RS                     canonical_fragment_type(
-//RS                         member,
-//RS                         owner,
-//RS                         modules,
-//RS                         source_paths,
-//RS                         struct_identities,
-//RS                         known_identities,
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         Type::Quantity { base, dimension } => Type::Quantity {
-//RS             base: Box::new(canonical_fragment_type(
-//RS                 base,
-//RS                 owner,
-//RS                 modules,
-//RS                 source_paths,
-//RS                 struct_identities,
-//RS                 known_identities,
-//RS             )),
-//RS             dimension: dimension.clone(),
-//RS         },
-//RS         _ => ty.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// The declared signature of `function` in module `owner`, with every nominal
-//RS /// spelled by its canonical identity.
-//RS fn fragment_signature(
-//RS     function: &crate::AST::Func,
-//RS     owner: usize,
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     source_paths: &HashMap<(usize, String), String>,
-//RS     struct_identities: &HashMap<(usize, String), String>,
-//RS     known_identities: &HashSet<String>,
-//RS ) -> crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
-//RS     let canonical = |ty: &Type| {
-//RS         canonical_fragment_type(
-//RS             ty,
-//RS             owner,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         )
-//RS     };
-//RS     crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
-//RS         type_params: function
-//RS             .type_params
-//RS             .iter()
-//RS             .map(|param| param.name.clone())
-//RS             .collect(),
-//RS         params: function
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 let ty = if param.variadic {
-//RS                     Type::List(Box::new(param.ty.clone()))
-//RS                 } else {
-//RS                     param.ty.clone()
-//RS                 };
-//RS                 (param.convention, canonical(&ty))
-//RS             })
-//RS             .collect(),
-//RS         return_type: function.return_type.as_ref().map(|ty| canonical(ty)),
-//RS     }
-//RS }
-//RS 
-//RS /// Signatures of every cross-module call module `owner` can spell, keyed by
-//RS /// (source alias or local name, function name).
-//RS type FragmentImportSignatures =
-//RS     HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
-//RS 
-//RS /// The user-module call surface of module `owner` for a comptime fragment:
-//RS /// its `use` aliases and member-imported functions keyed to the loaded source
-//RS /// rows (a user module's row key is its loader alias), and the declared
-//RS /// signatures of those callees. Core modules keep their own Core route.
-//RS fn fragment_module_imports(
-//RS     owner: usize,
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     source_paths: &HashMap<(usize, String), String>,
-//RS     struct_identities: &HashMap<(usize, String), String>,
-//RS     known_identities: &HashSet<String>,
-//RS ) -> (
-//RS     HashMap<String, String>,
-//RS     HashMap<String, (String, String)>,
-//RS     FragmentImportSignatures,
-//RS ) {
-//RS     let mut module_imports = HashMap::new();
-//RS     let mut imported_functions = HashMap::new();
-//RS     let mut signatures = HashMap::new();
-//RS     let Some(state) = modules.get(owner) else {
-//RS         return (module_imports, imported_functions, signatures);
-//RS     };
-//RS     let user_module = |target: usize| {
-//RS         modules.get(target).filter(|target_state| {
-//RS             jet_foundation::CoreModuleExports::core_source_module_by_alias(
-//RS                 &target_state.module_alias,
-//RS             )
-//RS             .is_none()
-//RS         })
-//RS     };
-//RS     let signature = |function: &crate::AST::Func, target: usize| {
-//RS         fragment_signature(
-//RS             function,
-//RS             target,
-//RS             modules,
-//RS             source_paths,
-//RS             struct_identities,
-//RS             known_identities,
-//RS         )
-//RS     };
-//RS     for (alias, &target) in &state.imports {
-//RS         let Some(target_state) = user_module(target) else {
-//RS             continue;
-//RS         };
-//RS         module_imports.insert(alias.clone(), target_state.module_alias.clone());
-//RS         for item in &target_state.items {
-//RS             if let crate::AST::Item::Func(function) = item {
-//RS                 signatures.insert(
-//RS                     (alias.clone(), function.name.clone()),
-//RS                     signature(function, target),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, (name, target)) in &state.unqualified_file {
-//RS         let Some(target_state) = user_module(*target) else {
-//RS             continue;
-//RS         };
-//RS         let Some(function) = target_state.items.iter().find_map(|item| match item {
-//RS             crate::AST::Item::Func(function) if function.name == *name => Some(function),
-//RS             _ => None,
-//RS         }) else {
-//RS             continue;
-//RS         };
-//RS         imported_functions.insert(
-//RS             local.clone(),
-//RS             (target_state.module_alias.clone(), name.clone()),
-//RS         );
-//RS         signatures.insert((local.clone(), name.clone()), signature(function, *target));
-//RS     }
-//RS     (module_imports, imported_functions, signatures)
-//RS }
-//RS 
-//RS /// Every type spelling a body of user module `owner` can write, to its
-//RS /// canonical identity: its own declarations, member-imported types,
-//RS /// `alias.Type` through its imports, and the identities themselves.
-//RS fn fragment_module_nominals(
-//RS     owner: usize,
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     source_paths: &HashMap<(usize, String), String>,
-//RS     struct_identities: &HashMap<(usize, String), String>,
-//RS     known_identities: &HashSet<String>,
-//RS ) -> HashMap<String, String> {
-//RS     let mut identities = known_identities
-//RS         .iter()
-//RS         .map(|identity| (identity.clone(), identity.clone()))
-//RS         .collect::<HashMap<_, _>>();
-//RS     for ((module, source), path) in source_paths {
-//RS         if *module == owner {
-//RS             identities.insert(source.clone(), path.clone());
-//RS         }
-//RS     }
-//RS     for ((module, leaf), identity) in struct_identities {
-//RS         if *module == owner {
-//RS             identities.insert(leaf.clone(), identity.clone());
-//RS         }
-//RS     }
-//RS     if let Some(state) = modules.get(owner) {
-//RS         for (alias, &target) in &state.imports {
-//RS             for ((module, leaf), identity) in struct_identities {
-//RS                 if *module == target {
-//RS                     identities.insert(format!("{alias}.{leaf}"), identity.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     identities
-//RS }
-//RS 
-//RS /// S47/M2: a bound lambda used only by direct local calls borrows the names it
-//RS /// writes, so every write lands on the owner. Without a written capture, it
-//RS /// owns copyable values at closure creation. Non-copyable/view captures retain
-//RS /// the conservative escape route or the direct borrow route respectively.
-//RS fn stmt_uses_name_only_as_direct_call(stmt: &Stmt, name: &str) -> bool {
-//RS     let mut nested_capture = false;
-//RS     stmt.for_each_expr(|expr| {
-//RS         let Expr::Lambda(lambda) = expr else {
-//RS             return;
-//RS         };
-//RS         if lambda.params.iter().any(|param| param.name == name)
-//RS             || (!lambda.take_names.iter().any(|(capture, _)| capture == name)
-//RS                 && !lambda_body_refs_name(&lambda.body, name))
-//RS         {
-//RS             return;
-//RS         }
-//RS         nested_capture = true;
-//RS     });
-//RS     if nested_capture {
-//RS         return false;
-//RS     }
-//RS 
-//RS     // Remove each direct invocation, then ask the canonical capture walker
-//RS     // whether any use remains. This keeps calls nested in ordinary argument
-//RS     // expressions direct while rejecting passing, storing, field access, and
-//RS     // assignment of the callable itself.
-//RS     let mut residual = stmt.clone();
-//RS     residual.for_each_expr_mut(|expr| {
-//RS         let direct = match expr {
-//RS             Expr::Call(call) => call.name == name,
-//RS             Expr::CallValue { callee, .. } => {
-//RS                 fn is_name(expr: &Expr, name: &str) -> bool {
-//RS                     match expr {
-//RS                         Expr::Ident(candidate, _) => candidate == name,
-//RS                         Expr::Paren(inner, _) => is_name(inner, name),
-//RS                         _ => false,
-//RS                     }
-//RS                 }
-//RS                 is_name(callee, name)
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 receiver, method, ..
-//RS             } if method == "call" => {
-//RS                 fn is_name(expr: &Expr, name: &str) -> bool {
-//RS                     match expr {
-//RS                         Expr::Ident(candidate, _) => candidate == name,
-//RS                         Expr::Paren(inner, _) => is_name(inner, name),
-//RS                         _ => false,
-//RS                     }
-//RS                 }
-//RS                 is_name(receiver, name)
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS         if direct {
-//RS             let span = expr.span();
-//RS             *expr = Expr::Absent(span);
-//RS         }
-//RS     });
-//RS     !stmt_refs_name(&residual, name)
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     /// Read the statement-tail frame installed by `check_block_inner`.
-//RS     /// A null frame means the caller did not provide lexical-use context, so
-//RS     /// retain the safe escaping default.
-//RS     fn bound_lambda_escapes(&self, name: &str, lambda: &Lambda) -> bool {
-//RS         if self.stmt_tail_ptr.is_null() {
-//RS             return true;
-//RS         }
-//RS         let mut saw_direct_use = false;
-//RS         let mut saw_other_use = false;
-//RS         let mut inspect_tail = |tail: &[Stmt]| {
-//RS             for stmt in tail {
-//RS                 if !stmt_refs_name(stmt, name) {
-//RS                     continue;
-//RS                 }
-//RS                 if stmt_uses_name_only_as_direct_call(stmt, name) {
-//RS                     saw_direct_use = true;
-//RS                 } else {
-//RS                     saw_other_use = true;
-//RS                 }
-//RS             }
-//RS         };
-//RS         // SAFETY: these slices point into the live Program AST while checking
-//RS         // the current statement; `check_block_inner` installs and restores
-//RS         // each frame around the recursive check.
-//RS         let tail = unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) };
-//RS         inspect_tail(tail);
-//RS         for &(ptr, len) in self.liveness_frames.iter().rev() {
-//RS             if !ptr.is_null() && len > 0 {
-//RS                 let frame = unsafe { std::slice::from_raw_parts(ptr, len) };
-//RS                 inspect_tail(frame);
-//RS             }
-//RS         }
-//RS         if saw_other_use || !saw_direct_use {
-//RS             return true;
-//RS         }
-//RS 
-//RS         let param_names: HashSet<String> = lambda
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| param.name.clone())
-//RS             .collect();
-//RS         let take_names: HashSet<String> = lambda
-//RS             .take_names
-//RS             .iter()
-//RS             .map(|(capture, _)| capture.clone())
-//RS             .collect();
-//RS         let mut read_caps = HashSet::new();
-//RS         let mut mut_caps = HashSet::new();
-//RS         lambda_collect_captures(&lambda.body, &param_names, &mut read_caps, &mut mut_caps);
-//RS         read_caps.extend(lambda.take_names.iter().map(|(capture, _)| capture.clone()));
-//RS         // A written `:=` local is a mutable borrow of its owner; a copy at
-//RS         // creation would silently discard the write. `Shared<T>` edits go
-//RS         // through the cell, and views already borrow.
-//RS         let written_locals: HashSet<&String> = mut_caps
-//RS             .iter()
-//RS             .filter(|capture| {
-//RS                 !param_names.contains(*capture)
-//RS                     && !take_names.contains(*capture)
-//RS                     && !self.is_view(capture)
-//RS                     && self
-//RS                         .lookup(capture)
-//RS                         .is_some_and(|info| info.mutable && !matches!(&info.ty, Type::Shared(_)))
-//RS             })
-//RS             .collect();
-//RS         for capture in read_caps.iter().chain(mut_caps.iter()) {
-//RS             if param_names.contains(capture) || take_names.contains(capture) {
-//RS                 continue;
-//RS             }
-//RS             // A view is already a deliberate borrow window. Keep direct
-//RS             // invocation on that path; ordinary values below use the
-//RS             // copy-at-creation ownership route.
-//RS             if self.is_view(capture) {
-//RS                 continue;
-//RS             }
-//RS             let cap_ty = self
-//RS                 .lookup(capture)
-//RS                 .map(|info| info.ty.clone())
-//RS                 .or_else(|| self.consts.get(capture).cloned());
-//RS             let Some(cap_ty) = cap_ty else {
-//RS                 continue;
-//RS             };
-//RS             if written_locals.contains(capture) {
-//RS                 continue;
-//RS             }
-//RS             if written_locals.is_empty() && self.is_cloneable_type(&cap_ty) {
-//RS                 return true;
-//RS             }
-//RS             if self.is_resource_type(&cap_ty) && !mut_caps.contains(capture) {
-//RS                 return true;
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS }
-//RS impl<'a> Checker<'a> {
-//RS     /// Snapshot the checked nominal/import rows needed by an isolated
-//RS     /// comptime fragment. The ordinary bundle context already owns these
-//RS     /// rows; the fragment must carry its own projection because it does not
-//RS     /// share that context.
-//RS     pub(super) fn checked_comptime_nominals(
-//RS         &self,
-//RS     ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
-//RS         let modules = self.modules?;
-//RS         checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
-//RS     }
-//RS }
-//RS /// Project the checked nominal/import rows needed by an isolated comptime
-//RS /// fragment before a `Checker` exists for the current module. Derive and
-//RS /// marker expansion runs at that earlier bundle phase, but it must carry the
-//RS /// same declaration identities that body checking later supplies.
-//RS pub(crate) fn checked_comptime_nominals_for_context(
-//RS     modules: &[crate::Sema::ModuleState],
-//RS     module_idx: usize,
-//RS     name_ledger: &jet_foundation::Names::NameLedger,
-//RS ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
-//RS     let current = modules.get(module_idx)?;
-//RS     let reexports = &current.reexports;
-//RS     let mut struct_identities = HashMap::new();
-//RS     let mut known_identities = HashSet::new();
-//RS     for (owner, state) in modules.iter().enumerate() {
-//RS         for item in &state.items {
-//RS             let name = match item {
-//RS                 crate::AST::Item::Struct(def) => &def.name,
-//RS                 crate::AST::Item::Enum(def) => &def.name,
-//RS                 _ => continue,
-//RS             };
-//RS             let Some(identity) = name_ledger.nominal_identity(owner, name) else {
-//RS                 continue;
-//RS             };
-//RS             struct_identities.insert((owner, name.clone()), identity.clone());
-//RS             known_identities.insert(identity);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut source_paths = HashMap::new();
-//RS     for owner in 0..modules.len() {
-//RS         for (source, path) in name_ledger.canonical_paths(owner) {
-//RS             if known_identities.contains(&path) {
-//RS                 source_paths.insert((owner, source), path);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut queue = VecDeque::new();
-//RS     let mut queued = HashSet::new();
-//RS     for &target in current.imports.values() {
-//RS         if queued.insert(target) {
-//RS             queue.push_back(target);
-//RS         }
-//RS     }
-//RS     for (_, (_, target)) in &current.unqualified_file {
-//RS         if queued.insert(*target) {
-//RS             queue.push_back(*target);
-//RS         }
-//RS     }
-//RS     for (_, (_, target)) in reexports {
-//RS         if queued.insert(*target) {
-//RS             queue.push_back(*target);
-//RS         }
-//RS     }
-//RS     for module in current.core_imports.values() {
-//RS         if let Some(target) = core_source_target(modules, module) {
-//RS             if queued.insert(target) {
-//RS                 queue.push_back(target);
-//RS             }
-//RS         }
-//RS     }
-//RS     // D-MOD-CYCLE1=A: a package is one namespace, so a sibling file's
-//RS     // nominals are visible here by bare name. Registration evaluates
-//RS     // compile-time items before imports resolve, so read the loader's
-//RS     // namespace instead of this module's import table.
-//RS     let siblings = name_ledger.namespace_siblings(module_idx);
-//RS     for &sibling in &siblings {
-//RS         if queued.insert(sibling) {
-//RS             queue.push_back(sibling);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
-//RS     for item in &current.items {
-//RS         if let crate::AST::Item::Enum(def) = item {
-//RS             let mut row = def.clone();
-//RS             row.methods.clear();
-//RS             row.trait_impls.clear();
-//RS             row.derives.clear();
-//RS             facts.enums.insert(row.name.clone(), row);
-//RS         }
-//RS     }
-//RS     for (alias, &target) in &current.imports {
-//RS         if let Some(state) = modules.get(target) {
-//RS             facts
-//RS                 .import_modules
-//RS                 .insert(alias.clone(), state.module_alias.clone());
-//RS         }
-//RS     }
-//RS     for (alias, module) in &current.core_imports {
-//RS         if let Some(target) = core_source_target(modules, module) {
-//RS             if let Some(state) = modules.get(target) {
-//RS                 facts
-//RS                     .import_modules
-//RS                     .insert(alias.clone(), state.module_alias.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     while let Some(target) = queue.pop_front() {
-//RS         let Some(state) = modules.get(target) else {
-//RS             continue;
-//RS         };
-//RS         let nested_targets = state
-//RS             .imports
-//RS             .values()
-//RS             .copied()
-//RS             .chain(state.unqualified_file.values().map(|(_, nested)| *nested))
-//RS             .collect::<Vec<_>>();
-//RS         for nested in nested_targets {
-//RS             if queued.insert(nested) {
-//RS                 queue.push_back(nested);
-//RS             }
-//RS         }
-//RS         for module in state.core_imports.values() {
-//RS             if let Some(nested) = core_source_target(modules, module) {
-//RS                 if queued.insert(nested) {
-//RS                     queue.push_back(nested);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if target == module_idx {
-//RS             continue;
-//RS         }
-//RS         let source_module =
-//RS             jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
-//RS         let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
-//RS             alias: state.module_alias.clone(),
-//RS             module_identity: name_ledger
-//RS                 .module_identity(target)
-//RS                 .unwrap_or_else(|| state.module_path.clone()),
-//RS             core_imports: state.core_imports.clone(),
-//RS             functions: HashMap::new(),
-//RS             constants: Vec::new(),
-//RS             module_imports: HashMap::new(),
-//RS             imported_functions: HashMap::new(),
-//RS             import_signatures: HashMap::new(),
-//RS             nominal_identities: HashMap::new(),
-//RS         };
-//RS         for item in &state.items {
-//RS             let function = match item {
-//RS                 crate::AST::Item::Func(function) => function,
-//RS                 crate::AST::Item::Const(constant) => {
-//RS                     body_module.constants.push(constant.clone());
-//RS                     continue;
-//RS                 }
-//RS                 _ => continue,
-//RS             };
-//RS             body_module
-//RS                 .functions
-//RS                 .insert(function.name.clone(), function.clone());
-//RS             let Some(source) = source_module else {
-//RS                 continue;
-//RS             };
-//RS             if !function.is_pub
-//RS                 || !jet_foundation::CoreModuleExports::core_source_owns(
-//RS                     source.module,
-//RS                     &function.name,
-//RS                 )
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             facts.core_source_sigs.insert(
-//RS                 (source.module.to_string(), function.name.clone()),
-//RS                 fragment_signature(
-//RS                     function,
-//RS                     target,
-//RS                     modules,
-//RS                     &source_paths,
-//RS                     &struct_identities,
-//RS                     &known_identities,
-//RS                 ),
-//RS             );
-//RS         }
-//RS         // A Core row is keyed by its Core module path; a user file module's
-//RS         // row by its loader alias, the name its import aliases resolve to.
-//RS         let row_key = match source_module {
-//RS             Some(source) => source.module.to_string(),
-//RS             None => {
-//RS                 let (module_imports, imported_functions, import_signatures) =
-//RS                     fragment_module_imports(
-//RS                         target,
-//RS                         modules,
-//RS                         &source_paths,
-//RS                         &struct_identities,
-//RS                         &known_identities,
-//RS                     );
-//RS                 body_module.module_imports = module_imports;
-//RS                 body_module.imported_functions = imported_functions;
-//RS                 body_module.import_signatures = import_signatures;
-//RS                 body_module.nominal_identities = fragment_module_nominals(
-//RS                     target,
-//RS                     modules,
-//RS                     &source_paths,
-//RS                     &struct_identities,
-//RS                     &known_identities,
-//RS                 );
-//RS                 state.module_alias.clone()
-//RS             }
-//RS         };
-//RS         std::sync::Arc::make_mut(&mut facts.core_source_bodies).insert(row_key, body_module);
-//RS         // A Core module exposes only its public leaves; every nominal of a
-//RS         // user module is declared, since its demanded bodies may name a
-//RS         // private type.
-//RS         let source_leaf_visible = |name: &str| {
-//RS             source_module.is_none_or(|source| {
-//RS                 jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
-//RS             })
-//RS         };
-//RS         for item in &state.items {
-//RS             if let crate::AST::Item::Enum(def) = item {
-//RS                 if !source_leaf_visible(&def.name) {
-//RS                     continue;
-//RS                 }
-//RS                 let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned()
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 let mut row = def.clone();
-//RS                 row.name = identity.clone();
-//RS                 row.methods.clear();
-//RS                 row.trait_impls.clear();
-//RS                 row.derives.clear();
-//RS                 for variant in &mut row.variants {
-//RS                     let canonicalize = |ty: &mut Type| {
-//RS                         *ty = canonical_fragment_type(
-//RS                             ty,
-//RS                             target,
-//RS                             modules,
-//RS                             &source_paths,
-//RS                             &struct_identities,
-//RS                             &known_identities,
-//RS                         );
-//RS                     };
-//RS                     match &mut variant.payload {
-//RS                         crate::AST::VariantPayload::Unit => {}
-//RS                         crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
-//RS                         crate::AST::VariantPayload::Named(fields) => {
-//RS                             for field in fields {
-//RS                                 canonicalize(&mut field.ty);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 facts
-//RS                     .foreign_modules
-//RS                     .insert(identity.clone(), state.module_alias.clone());
-//RS                 facts.enums.entry(identity).or_insert(row);
-//RS                 continue;
-//RS             }
-//RS             let crate::AST::Item::Struct(def) = item else {
-//RS                 continue;
-//RS             };
-//RS             if !source_leaf_visible(&def.name) {
-//RS                 continue;
-//RS             }
-//RS             let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned() else {
-//RS                 continue;
-//RS             };
-//RS             let mut row = def.clone();
-//RS             row.name = identity.clone();
-//RS             row.methods.clear();
-//RS             row.trait_impls.clear();
-//RS             row.derives.clear();
-//RS             for field in &mut row.fields {
-//RS                 field.ty = canonical_fragment_type(
-//RS                     &field.ty,
-//RS                     target,
-//RS                     modules,
-//RS                     &source_paths,
-//RS                     &struct_identities,
-//RS                     &known_identities,
-//RS                 );
-//RS             }
-//RS             facts
-//RS                 .foreign_modules
-//RS                 .insert(identity.clone(), state.module_alias.clone());
-//RS             facts.structs.entry(identity).or_insert(row);
-//RS         }
-//RS     }
-//RS     let (_, imported_functions, import_signatures) = fragment_module_imports(
-//RS         module_idx,
-//RS         modules,
-//RS         &source_paths,
-//RS         &struct_identities,
-//RS         &known_identities,
-//RS     );
-//RS     facts.imported_functions = imported_functions;
-//RS     facts.import_signatures = import_signatures;
-//RS 
-//RS     let foreign_identities: HashSet<String> = facts.foreign_modules.keys().cloned().collect();
-//RS     for identity in &foreign_identities {
-//RS         facts
-//RS             .nominal_identities
-//RS             .insert(identity.clone(), identity.clone());
-//RS     }
-//RS     for (source, path) in name_ledger.canonical_paths(module_idx) {
-//RS         if foreign_identities.contains(&path) {
-//RS             facts.nominal_identities.insert(source, path);
-//RS         }
-//RS     }
-//RS     for (alias, &target) in &current.imports {
-//RS         for ((owner, leaf), identity) in &struct_identities {
-//RS             if *owner == target && foreign_identities.contains(identity) {
-//RS                 facts
-//RS                     .nominal_identities
-//RS                     .insert(format!("{alias}.{leaf}"), identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     for (alias, module) in &current.core_imports {
-//RS         let Some(target) = core_source_target(modules, module) else {
-//RS             continue;
-//RS         };
-//RS         for ((owner, leaf), identity) in &struct_identities {
-//RS             if *owner == target && foreign_identities.contains(identity) {
-//RS                 facts
-//RS                     .nominal_identities
-//RS                     .insert(format!("{alias}.{leaf}"), identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, original) in &current.core_item_imports {
-//RS         let Some(module) = current.core_imports.get(local) else {
-//RS             continue;
-//RS         };
-//RS         let Some(target) = core_source_target(modules, module) else {
-//RS             continue;
-//RS         };
-//RS         let leaf = original
-//RS             .rsplit_once('.')
-//RS             .map_or(original.as_str(), |(_, leaf)| leaf);
-//RS         if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
-//RS             if foreign_identities.contains(identity) {
-//RS                 facts
-//RS                     .nominal_identities
-//RS                     .insert(local.clone(), identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, (original, target)) in &current.unqualified_file {
-//RS         if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
-//RS             if foreign_identities.contains(identity) {
-//RS                 facts
-//RS                     .nominal_identities
-//RS                     .insert(local.clone(), identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     for &sibling in &siblings {
-//RS         let Some(state) = modules.get(sibling) else {
-//RS             continue;
-//RS         };
-//RS         for item in &state.items {
-//RS             let name = match item {
-//RS                 crate::AST::Item::Struct(def) => &def.name,
-//RS                 crate::AST::Item::Enum(def) => &def.name,
-//RS                 _ => continue,
-//RS             };
-//RS             if let Some(identity) = struct_identities.get(&(sibling, name.clone())) {
-//RS                 if foreign_identities.contains(identity) {
-//RS                     facts
-//RS                         .nominal_identities
-//RS                         .entry(name.clone())
-//RS                         .or_insert_with(|| identity.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, (original, target)) in reexports {
-//RS         if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
-//RS             if foreign_identities.contains(identity) {
-//RS                 facts
-//RS                     .nominal_identities
-//RS                     .insert(local.clone(), identity.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     Some(facts)
-//RS }
-//RS 
-//RS fn direct_fixed_constructor(expr: &Expr) -> bool {
-//RS     matches!(
-//RS         expr,
-//RS         Expr::MethodCall { receiver, method, .. }
-//RS             if matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed")
-//RS                 && matches!(method.as_str(), "new" | "over")
-//RS     )
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     fn normalized_path_string_source(&self, expr: &Expr) -> Option<String> {
-//RS         let Expr::MethodCall {
-//RS             receiver: normalized,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } = expr.without_parens()
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if method != "to_string" || !args.is_empty() {
-//RS             return None;
-//RS         }
-//RS         let Expr::MethodCall {
-//RS             receiver: path,
-//RS             method,
-//RS             args,
-//RS             recv_type,
-//RS             ..
-//RS         } = normalized.without_parens()
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if method != "normalize" || !args.is_empty() {
-//RS             return None;
-//RS         }
-//RS         if self.registry.contains("Path") {
-//RS             return None;
-//RS         }
-//RS         // `recv_type` is the normal proof.  The built-in `Path.from` shape is
-//RS         // the same typed proof when the static constructor has not carried its
-//RS         // receiver marker through a nested chain; a user-defined `Path` keeps
-//RS         // the existing registry guard and remains quiet.
-//RS         let direct_path_constructor = matches!(
-//RS             path.without_parens(),
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } if method == "from"
-//RS                 && args.len() == 1
-//RS                 && matches!(receiver.without_parens(), Expr::Ident(name, _) if name == "Path")
-//RS                 && !self.registry.contains("Path")
-//RS         );
-//RS         if recv_type.as_deref() != Some("Path") && !direct_path_constructor {
-//RS             return None;
-//RS         }
-//RS         let start = crate::Sema::source_expr_start(path);
-//RS         let end = crate::Sema::source_expr_end(self.source, normalized)?;
-//RS         self.source.get(start..end).map(str::to_string)
-//RS     }
-//RS }
-//RS 
-//RS fn interrupt_callback_name(expr: &Expr) -> Option<&str> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => Some(name),
-//RS         Expr::Paren(inner, _) => interrupt_callback_name(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn interrupt_callback_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
-//RS     match expr {
-//RS         Expr::Lambda(lambda) => Some(lambda),
-//RS         Expr::Paren(inner, _) => interrupt_callback_lambda(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn contains_taskgroup(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => name == Syntax::TYPE_TASKGROUP,
-//RS         Type::List(inner)
-//RS         | Type::Shared(inner)
-//RS         | Type::Option(inner)
-//RS         | Type::FixedList { elem: inner, .. }
-//RS         | Type::Tagged { inner, .. }
-//RS         | Type::InlineRange { base: inner, .. } => contains_taskgroup(inner),
-//RS         Type::Map { key, value, .. }
-//RS         | Type::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => contains_taskgroup(key) || contains_taskgroup(value),
-//RS         // Function signatures have their own direct Group parameter/return
-//RS         // checks; do not duplicate those diagnostics at the binding site.
-//RS         Type::Fn { .. } => false,
-//RS         Type::Apply { args, .. } | Type::Union(args) => args.iter().any(contains_taskgroup),
-//RS         Type::Tuple(fields) => fields.iter().any(|(_, field)| contains_taskgroup(field)),
-//RS         Type::Int
-//RS         | Type::Float
-//RS         | Type::Bool
-//RS         | Type::String
-//RS         | Type::Char
-//RS         | Type::TraitObject(_)
-//RS         | Type::IntN { .. }
-//RS         | Type::Float32 => false,
-//RS         Type::Quantity { .. } => false,
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
-//RS     let mut diags = Vec::new();
-//RS     let mut seen_category = false;
-//RS     let mut seen_tunable = false;
-//RS     let mut seen_maturity = false;
-//RS     for field in &meta.fields {
-//RS         match field {
-//RS             MetaField::Category { value, span } => {
-//RS                 if seen_category {
-//RS                     diags.push(Diagnostic::error(
-//RS                         "E0346",
-//RS                         "`#Meta` repeats `category`".to_string(),
-//RS                         "`category` has one value; writing it twice would make tooling choose between two labels".to_string(),
-//RS                         "keep one `category: \"...\"` field".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 seen_category = true;
-//RS                 match value {
-//RS                     Expr::Str(parts, _) => match parts.as_slice() {
-//RS                         [StrPart::Lit(s)] if s.is_empty() => diags.push(Diagnostic::error(
-//RS                             "E0348",
-//RS                             "`#Meta` category cannot be empty".to_string(),
-//RS                             "Canvas groups use this text as a visible label".to_string(),
-//RS                             "write a non-empty category, e.g. `category: \"Movement\"`".to_string(),
-//RS                             Some(value.span()),
-//RS                         )),
-//RS                         [StrPart::Lit(_)] => {}
-//RS                         _ => diags.push(Diagnostic::error(
-//RS                             "E0347",
-//RS                             "`#Meta` category needs plain quoted text".to_string(),
-//RS                             "`category` is compile-time tooling data, not a runtime string"
-//RS                                 .to_string(),
-//RS                             "write a string literal, e.g. `category: \"Movement\"`".to_string(),
-//RS                             Some(value.span()),
-//RS                         )),
-//RS                     },
-//RS                     _ => diags.push(Diagnostic::error(
-//RS                         "E0347",
-//RS                         "`#Meta` category needs plain quoted text".to_string(),
-//RS                         "`category` is compile-time tooling data, not a runtime value".to_string(),
-//RS                         "write a string literal, e.g. `category: \"Movement\"`".to_string(),
-//RS                         Some(value.span()),
-//RS                     )),
-//RS                 }
-//RS             }
-//RS             MetaField::Tunable { span } => {
-//RS                 if seen_tunable {
-//RS                     diags.push(Diagnostic::error(
-//RS                         "E0346",
-//RS                         "`#Meta` repeats `tunable`".to_string(),
-//RS                         "`tunable` is a flag; writing it twice does not add meaning".to_string(),
-//RS                         "keep one `tunable` field".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 seen_tunable = true;
-//RS             }
-//RS             MetaField::Maturity { value, span } => {
-//RS                 if seen_maturity {
-//RS                     diags.push(Diagnostic::error(
-//RS                         "E0346",
-//RS                         "`#Meta` repeats `maturity`".to_string(),
-//RS                         "a declaration has one maturity value".to_string(),
-//RS                         "keep one `maturity: .Experimental`, `.Tested`, or `.Hardened` field"
-//RS                             .to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 seen_maturity = true;
-//RS                 let valid = matches!(value,
-//RS                     Expr::EnumLit { type_name, variant, args, .. }
-//RS                         if type_name.is_empty()
-//RS                             && args.is_empty()
-//RS                             && matches!(variant.as_str(),
-//RS                                 Syntax::MARKER_EXPERIMENTAL
-//RS                                     | Syntax::MARKER_TESTED
-//RS                                     | Syntax::MARKER_HARDENED));
-//RS                 if !valid {
-//RS                     diags.push(Diagnostic::error(
-//RS                         "E0352",
-//RS                         "`#Meta` maturity needs a known maturity value".to_string(),
-//RS                         "maturity metadata is a closed documentation scale".to_string(),
-//RS                         "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
-//RS                         Some(value.span()),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             MetaField::Unknown { name, span, .. } => {
-//RS                 let suggestion = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
-//RS                     Some(Syntax::META_FIELD_CATEGORY)
-//RS                 } else if edit_distance(name, Syntax::META_FIELD_TUNABLE) <= 2 {
-//RS                     Some(Syntax::META_FIELD_TUNABLE)
-//RS                 } else if edit_distance(name, Syntax::META_FIELD_MATURITY) <= 2 {
-//RS                     Some(Syntax::META_FIELD_MATURITY)
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 // Borrow the suggestion for the prose so the edit below can
-//RS                 // still own it.
-//RS                 let fix = match suggestion.as_ref() {
-//RS                     Some(suggestion) => format!("did you mean `{suggestion}`?"),
-//RS                     None => format!(
-//RS                         "use one of `{}`, `{}`, `{}`",
-//RS                         Syntax::META_FIELD_CATEGORY,
-//RS                         Syntax::META_FIELD_TUNABLE,
-//RS                         Syntax::META_FIELD_MATURITY
-//RS                     ),
-//RS                 };
-//RS                 let mut diagnostic = Diagnostic::error(
-//RS                     "E0345",
-//RS                     format!("`#Meta` does not have a `{}` field", name),
-//RS                     "`#Meta` fields are owner-ratified tooling metadata".to_string(),
-//RS                     fix,
-//RS                     Some(*span),
-//RS                 );
-//RS                 if let Some(suggestion) = suggestion {
-//RS                     diagnostic = diagnostic.with_edit(TextEdit {
-//RS                         span: *span,
-//RS                         new_text: suggestion.to_string(),
-//RS                     });
-//RS                 }
-//RS                 diags.push(diagnostic);
-//RS             }
-//RS         }
-//RS     }
-//RS     diags
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     /// Can codegen write this folded value back out as Rust?
-//RS     ///
-//RS     /// `CtValue::serialize` renders a struct or enum as `__jet_<Name> { … }`,
-//RS     /// which only names a real Rust type when `<Name>` is a user-declared type.
-//RS     /// The comptime evaluator also models builtins as structs with an internal
-//RS     /// field encoding, and those have no such Rust type. A container is only
-//RS     /// emittable when everything inside it is.
-//RS     /// As `ct_value_is_emittable`, and additionally that the value's literal
-//RS     /// form has the Rust type this binding declares. `Iter<T>` lowers to
-//RS     /// `JetIter<T>` but folds to a plain list, so writing the list back out
-//RS     /// would assign a `Vec` to a `JetIter` binding.
-//RS     pub(crate) fn ct_value_fits_binding(&self, value: &crate::AST::CtValue, ty: &Type) -> bool {
-//RS         use crate::AST::{CtReport, CtValue};
-//RS         // D-PATCH1: patch literals are intentionally partial source values.
-//RS         // Their runtime carrier completes omitted fields, so a raw comptime
-//RS         // struct would erase that shape and emit missing/mismatched fields.
-//RS         if matches!(ty, Type::Named(name) if name.ends_with(".Patch")) {
-//RS             return false;
-//RS         }
-//RS         if !self.ct_value_is_emittable(value) {
-//RS             return false;
-//RS         }
-//RS         match (value, ty) {
-//RS             (CtValue::List(_) | CtValue::Bytes(_), Type::List(_) | Type::FixedList { .. }) => true,
-//RS             (CtValue::List(_) | CtValue::Bytes(_), _) => false,
-//RS             (CtValue::Map(_), Type::Map { .. }) => true,
-//RS             (CtValue::Map(_), _) => false,
-//RS             // D-FAIL-CARRIER1=A: one carrier, so a payload fits either view of
-//RS             // it; only the report says which view the value came from.
-//RS             (CtValue::Present(_), Type::Option(_) | Type::Result { .. }) => true,
-//RS             (CtValue::Present(_), _) => false,
-//RS             (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => true,
-//RS             (CtValue::Failed(CtReport::Clean(_)), _) => false,
-//RS             (CtValue::Failed(CtReport::Told(_)), Type::Result { .. }) => true,
-//RS             (CtValue::Failed(CtReport::Told(_)), _) => false,
-//RS             // A folded Unit is a real value only when the binding is itself
-//RS             // Unit-typed. `CtValue::Unit` also stands in as a placeholder for
-//RS             // constructs the evaluator can't represent as a literal (e.g. a
-//RS             // `scope.guard`/`on_commit`/`on_rollback` closure registration —
-//RS             // eval/exprs.rs pushes the guard and returns `Ok(CtValue::Unit)`
-//RS             // because real execution drains it procedurally at scope exit).
-//RS             // Accepting that placeholder as a fold for a non-Unit binding
-//RS             // would serialize a bare `()` in place of the real construct.
-//RS             (CtValue::Unit, Type::Named(n)) if n == "Unit" => true,
-//RS             (CtValue::Unit, _) => false,
-//RS             _ => true,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
-//RS         use crate::AST::{CtReport, CtValue};
-//RS         match value {
-//RS             CtValue::Struct { type_name, fields } => {
-//RS                 self.registry.is_user_struct(type_name)
-//RS                     // D-MIGRATE1: a `#PublishedSchema` struct's generated Rust
-//RS                     // type carries a hidden `__jet_unknown_fields` carrier the
-//RS                     // comptime value does not model. Serializing the fold would
-//RS                     // emit a literal missing that field (rustc E0063 — an I2
-//RS                     // internal compiler error), so decline and let the ordinary
-//RS                     // runtime literal path build the value (it injects the
-//RS                     // carrier).
-//RS                     && !self.registry.is_published_schema_struct(type_name)
-//RS                     && fields
-//RS                         .iter()
-//RS                         .all(|(_, field)| self.ct_value_is_emittable(field))
-//RS             }
-//RS             CtValue::Enum {
-//RS                 type_name, args, ..
-//RS             } => {
-//RS                 self.registry.is_user_enum(type_name)
-//RS                     && args.iter().all(|(_, arg)| self.ct_value_is_emittable(arg))
-//RS             }
-//RS             CtValue::List(items) => items.iter().all(|item| self.ct_value_is_emittable(item)),
-//RS             CtValue::Map(entries) => entries
-//RS                 .values()
-//RS                 .all(|entry| self.ct_value_is_emittable(entry)),
-//RS             CtValue::Present(inner) | CtValue::Failed(CtReport::Told(inner)) => {
-//RS                 self.ct_value_is_emittable(inner)
-//RS             }
-//RS             // A closure has no literal form at all.
-//RS             CtValue::Closure(_) => false,
-//RS             _ => true,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_meta_attr(&mut self, meta: &mut MetaAttr) {
-//RS         if let Some(mut marker) = self.take_rule_fact(Syntax::MARKER_META, meta.span) {
-//RS             let Some(arguments) = self.validate_rule_signature(&mut marker) else {
-//RS                 return;
-//RS             };
-//RS             let mut normalized = Vec::with_capacity(meta.fields.len());
-//RS             for (source_index, mut field) in meta.fields.drain(..).enumerate() {
-//RS                 let parameter = arguments
-//RS                     .bindings
-//RS                     .iter()
-//RS                     .find(|binding| binding.source_index == source_index)
-//RS                     .and_then(|binding| binding.parameter_index);
-//RS                 match (
-//RS                     parameter,
-//RS                     arguments.constant_for_source(source_index),
-//RS                     &mut field,
-//RS                 ) {
-//RS                     (
-//RS                         Some(0),
-//RS                         Some(crate::Comptime::CtValue::Str(value)),
-//RS                         MetaField::Category {
-//RS                             value: expression, ..
-//RS                         },
-//RS                     ) => {
-//RS                         let span = expression.span();
-//RS                         *expression = Expr::Str(vec![StrPart::Lit(value.clone())], span);
-//RS                         normalized.push(field);
-//RS                     }
-//RS                     (Some(1), Some(crate::Comptime::CtValue::Bool(true)), _) => {
-//RS                         normalized.push(MetaField::Tunable {
-//RS                             span: marker.args[source_index].span(),
-//RS                         })
-//RS                     }
-//RS                     (Some(1), Some(crate::Comptime::CtValue::Bool(false)), _) => {}
-//RS                     _ => normalized.push(field),
-//RS                 }
-//RS             }
-//RS             meta.fields = normalized;
-//RS         }
-//RS         self.diags.extend(check_meta_attr_fields(meta));
-//RS     }
-//RS 
-//RS     /// D-UNINIT-SENTINEL2: `name := Type.{ uninit }` — gate on `use core.mem`,
-//RS     /// restrict to plain-data types (E0423), declare the binding, and record
-//RS     /// it as not-yet-written so the dataflow can prove write-before-read
-//RS     /// (E0420). Reuses D-UNINIT1's engine unchanged; only the surface syntax
-//RS     /// moved (SENTINEL1 annotated RHS → SENTINEL2 typed-literal body).
-//RS     pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
-//RS         let has_mem = self
-//RS             .core_imports
-//RS             .values()
-//RS             .any(|m| m == Syntax::CORE_MEM_MODULE);
-//RS         if !has_mem {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0424",
-//RS                 format!("`{}` needs the low-level memory tier", Syntax::KW_UNINIT),
-//RS                 format!(
-//RS                     "`{}` skips the automatic zero-fill — an expert-tier operation",
-//RS                     Syntax::KW_UNINIT
-//RS                 ),
-//RS                 format!(
-//RS                     "add `use {}` at the top of this file to opt in",
-//RS                     Syntax::CORE_MEM_MODULE
-//RS                 ),
-//RS                 Some(b.name_span),
-//RS             ));
-//RS         }
-//RS         let (ty, ty_span) = match (&b.ty, b.ty_span) {
-//RS             (Some(t), Some(s)) => (self.resolve_type(t.clone()), s),
-//RS             _ => return,
-//RS         };
-//RS         if let Some(slot) = b.ty.as_mut() {
-//RS             *slot = ty.clone();
-//RS         }
-//RS         self.check_declared_type(&ty, ty_span);
-//RS         if !is_pod_uninit_type(&ty) {
-//RS             self.diags.push(Diagnostic::error(
-//RS                     "E0423",
-//RS                     format!("`{}` needs a plain-data type", Syntax::KW_UNINIT),
-//RS                     format!(
-//RS                         "`{}` may own heap memory or need cleanup, so leaving it uninitialized is unsafe",
-//RS                         ty.show()
-//RS                     ),
-//RS                     "use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`)".to_string(),
-//RS                     Some(ty_span),
-//RS                 ));
-//RS         }
-//RS         let state = match &ty {
-//RS             Type::FixedList { len, .. } => super::super::UninitState::fixed(len.require_literal()),
-//RS             _ => super::super::UninitState::scalar(),
-//RS         };
-//RS         self.declare(
-//RS             &b.name,
-//RS             b.name_span,
-//RS             LocalInfo {
-//RS                 def_span: b.name_span,
-//RS                 binding_sigil_span: b.sigil_span,
-//RS                 ty,
-//RS                 mutable: true,
-//RS                 param_conv: None,
-//RS                 decl_loop_depth: self.loop_depth,
-//RS                 interrupt_sendable: false,
-//RS                 reactive_local: false,
-//RS                 reactive_shared: false,
-//RS                 single_use_span: None,
-//RS                 invalid: false,
-//RS             },
-//RS         );
-//RS         self.flow.uninit.set(&b.name, state);
-//RS     }
-//RS 
-//RS     /// A write-convention argument is not a definite-initialization proof:
-//RS     /// Jet has no callee contract that guarantees one scalar, or every fixed
-//RS     /// slot, was written. Keep the state and reject the unproved handoff.
-//RS     pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
-//RS         if self.flow.uninit.is_empty() {
-//RS             return;
-//RS         }
-//RS         for arg in args {
-//RS             if arg.convention == AccessConvention::Write {
-//RS                 if let Expr::Ident(n, span) = &arg.expr {
-//RS                     if self.flow.uninit.contains(n) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0420",
-//RS                                 format!("`{n}` may be read before it is given a value"),
-//RS                                 format!(
-//RS                                     "passing `{n}` with write access does not prove that the callee initializes it"
-//RS                                 ),
-//RS                                 format!(
-//RS                                     "write every value in `{n}` here before passing it to another function"
-//RS                                 ),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-CHOOSE-TEST1=A: lower a subject-first pattern test into one
-//RS     /// statement binding. The pattern validator supplies capture types;
-//RS     /// the route checker proves the failed branch leaves before captures
-//RS     /// enter scope.
-//RS     pub(crate) fn check_refutable_binding(&mut self, b: &mut Binding) {
-//RS         let Some(BindPattern::Refutable {
-//RS             mut pattern,
-//RS             mut fallback,
-//RS             names,
-//RS             span,
-//RS             synthesized,
-//RS         }) = b.pattern.clone()
-//RS         else {
-//RS             return;
-//RS         };
-//RS         let subject_span = b.init.span();
-//RS         let subject = std::mem::replace(&mut b.init, Expr::Absent(subject_span));
-//RS         let mut subject = Box::new(subject);
-//RS         let (subject_ty, bindings) =
-//RS             self.check_pattern_test_typed(&mut subject, &mut pattern, span);
-//RS         b.init = *subject;
-//RS         let Some(subject_ty) = subject_ty else {
-//RS             for name in names.iter() {
-//RS                 self.declare_bound(name.local_name(), name.span, Type::Int, false, b.sigil_span);
-//RS             }
-//RS             return;
-//RS         };
-//RS 
-//RS         self.check_diverging_fallback(&mut fallback, &subject_ty, span);
-//RS         if let Some(BindPattern::Refutable {
-//RS             pattern: stored_pattern,
-//RS             fallback: stored_fallback,
-//RS             ..
-//RS         }) = b.pattern.as_mut()
-//RS         {
-//RS             *stored_pattern = pattern;
-//RS             *stored_fallback = fallback;
-//RS         }
-//RS         for name in names.iter() {
-//RS             let ty = bindings
-//RS                 .get(name.local_name())
-//RS                 .or_else(|| bindings.get(&name.name))
-//RS                 .cloned()
-//RS                 .unwrap_or(Type::Int);
-//RS             // D-FLOWTYPE1=A: sema's rewrite of an exiting `x == None` guard
-//RS             // into `x == .Val(x) ?? { … }` refines the stable Optional `x`
-//RS             // itself, like `if x == .Val(x)` does in a branch; the payload
-//RS             // holds for the rest of this scope. A written binding that
-//RS             // reuses the subject's name is an ordinary shadow (E0118).
-//RS             let refines_subject = synthesized
-//RS                 && matches!(
-//RS                     &b.init,
-//RS                     Expr::Ident(subject, _) if subject == name.local_name()
-//RS                 )
-//RS                 && self.is_optional_flow_refine(name.local_name(), &ty);
-//RS             if refines_subject {
-//RS                 // The payload replaces the tested carrier under the same name.
-//RS                 self.flow.moved.remove(name.local_name());
-//RS                 self.record_optional_flow_narrow(name.local_name(), name.span, ty);
-//RS             } else {
-//RS                 self.declare_bound(name.local_name(), name.span, ty, false, b.sigil_span);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-// END-PORT-PENDING 0367 crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1-1518
+use jet_foundation.[AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt, StrPart, Type, Func, Item, VariantPayload, Diagnostic, Severity, TextEdit, NameLedger, CoreModuleExports, canonicalize_union]
+use jet_sema.[Checker, LocalInfo, ModuleState, UninitState, is_pod_uninit_type, lambda_body_refs_name, lambda_collect_captures, stmt_refs_name, edit_distance, field_read_to_clone, is_task_type, type_fix_hint, source_expr_start, source_expr_end]
+use jet_comptime.[CtValue, CtReport, MirFragmentCoreSourceSignature, MirFragmentNominalFacts, MirFragmentCoreSourceModule]
+use jet_syntax as Syntax
+use std.sync.[Arc]
+use std.slice.[from_raw_parts]
 
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:14
+fn core_source_target(modules: [ModuleState], module: String) -> Int? Never! {
+    if CoreModuleExports.core_source_module(module) != .Val(source) -> return None
+    loop index in 0..<modules.len() { if modules[index].module_alias == source.alias -> return Val(index) }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:21
+fn canonical_fragment_name(owner: Int, name: String, modules: [ModuleState], source_paths: [(Int, String):String], struct_identities: [(Int, String):String], known_identities: [String:Bool]) -> String? Never! {
+    // GATE #4499: tuple keys keep their exact equality/hash, not a string encoding.
+    if known_identities.has_key(name) -> return Val(~name)
+    if source_paths.get((owner, name)) == .Val(identity) -> return Val(~identity)
+    if name.rsplit_once('.') == .Val((namespace, leaf)) {
+        if modules.get(owner) != .Val(state) -> return None
+        target := state.imports.get(namespace)
+        if target.is_none() && state.core_imports.get(namespace) == .Val(module) { target = core_source_target(modules, module) }
+        if target == .Val(index) && struct_identities.get((index, leaf)) == .Val(identity) -> return Val(~identity)
+    }
+    if modules.get(owner) == .Val(state) && state.core_item_imports.get(name) == .Val(original) {
+        if state.core_imports.get(name) != .Val(module) -> return None
+        if core_source_target(modules, module) != .Val(target) -> return None
+        leaf := original
+        if original.rsplit_once('.') == .Val((_, last)) { leaf = last }
+        if struct_identities.get((target, leaf)) == .Val(identity) -> return Val(~identity)
+    }
+    if struct_identities.get((owner, name)) == .Val(identity) -> return Val(~identity)
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:64
+fn canonical_fragment_type(ty: Type, owner: Int, modules: [ModuleState], source_paths: [(Int, String):String], struct_identities: [(Int, String):String], known_identities: [String:Bool]) -> Type Never! {
+    canonical :: |inner: Type| canonical_fragment_type(inner, owner, modules, source_paths, struct_identities, known_identities)
+    map_name :: |name: String| canonical_fragment_name(owner, name, modules, source_paths, struct_identities, known_identities)
+    if ty == {
+        .Named(name) -> { if map_name(name) == .Val(mapped) -> return Type.Named(^mapped); ~ty }
+        .List(inner) -> Type.List(canonical(inner))
+        .Map(key, key_span, value) -> Type.Map(canonical(key), key_span, canonical(value))
+        .Shared(inner) -> Type.Shared(canonical(inner))
+        .Option(inner) -> Type.Option(canonical(inner))
+        .Result(ok, err) -> Type.Result(canonical(ok), canonical(err))
+        .Fn -> {
+            params := [Type]{}
+            loop param in ty.params { params.push(canonical(param)) }
+            ret := Type?{None}
+            if ty.ret == .Val(value) { ret = Val(canonical(value)) }
+            Type.Fn{params: ^params, ret: ^ret, effect_bound: ~ty.effect_bound, param_contract: ~ty.param_contract, call_metadata: ~ty.call_metadata, return_view_provenance: ~ty.return_view_provenance}
+        }
+        .Apply(name, args) -> {
+            mapped := ~name
+            if map_name(name) == .Val(identity) { mapped = ^identity }
+            parameters := [Type]{}
+            loop arg in args { parameters.push(canonical(arg)) }
+            Type.Apply(^mapped, ^parameters)
+        }
+        .Tuple(fields) -> {
+            result := [(String, Type)]{}
+            loop (name, field) in fields { result.push((~name, canonical(field))) }
+            Type.Tuple(^result)
+        }
+        .FixedList(elem, len) -> Type.FixedList(canonical(elem), ~len)
+        .InlineRange(base, lo, hi) -> Type.InlineRange(canonical(base), lo, hi)
+        .Tagged(marker, inner) -> Type.Tagged(~marker, canonical(inner))
+        .Union(members) -> {
+            result := [Type]{}
+            loop member in members { result.push(canonical(member)) }
+            canonicalize_union(^result)
+        }
+        .Quantity(base, dimension) -> Type.Quantity(canonical(base), ~dimension)
+        else -> ~ty
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:285
+fn fragment_signature(function: Func, owner: Int, modules: [ModuleState], source_paths: [(Int, String):String], struct_identities: [(Int, String):String], known_identities: [String:Bool]) -> MirFragmentCoreSourceSignature Never! {
+    canonical :: |ty: Type| canonical_fragment_type(ty, owner, modules, source_paths, struct_identities, known_identities)
+    type_params := [String]{}
+    loop param in function.type_params { type_params.push(~param.name) }
+    params := [(AccessConvention, Type)]{}
+    loop param in function.params {
+        ty :: if param.variadic { Type.List(~param.ty) } else { ~param.ty }
+        params.push((param.convention, canonical(ty)))
+    }
+    return_type := Type?{None}
+    if function.return_type == .Val(ty) { return_type = Val(canonical(ty)) }
+    MirFragmentCoreSourceSignature{type_params: ^type_params, params: ^params, return_type: ^return_type}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:327
+// GATE #4499: the (alias, function) key is a tuple, with canonical map equality.
+type FragmentImportSignatures = [(String, String):MirFragmentCoreSourceSignature]
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:334
+fn fragment_module_imports(owner: Int, modules: [ModuleState], source_paths: [(Int, String):String], struct_identities: [(Int, String):String], known_identities: [String:Bool]) -> ([String:String], [String:(String, String)], FragmentImportSignatures) Never! {
+    module_imports := [String:String]{}
+    imported_functions := [String:(String, String)]{}
+    signatures := FragmentImportSignatures{}
+    if modules.get(owner) != .Val(state) -> return (^module_imports, ^imported_functions, ^signatures)
+    loop (alias, target) in state.imports {
+        if modules.get(target) != .Val(target_state) -> continue
+        if CoreModuleExports.core_source_module_by_alias(target_state.module_alias).is_some() -> continue
+        module_imports[~alias] = ~target_state.module_alias
+        loop item in target_state.items {
+            if item == .Func(function) { signatures[(~alias, ~function.name)] = fragment_signature(function, target, modules, source_paths, struct_identities, known_identities) }
+        }
+    }
+    loop (local, (name, target)) in state.unqualified_file {
+        if modules.get(target) != .Val(target_state) -> continue
+        if CoreModuleExports.core_source_module_by_alias(target_state.module_alias).is_some() -> continue
+        loop item in target_state.items {
+            if item == .Func(function) && function.name == name {
+                imported_functions[~local] = (~target_state.module_alias, ~name)
+                signatures[(~local, ~name)] = fragment_signature(function, target, modules, source_paths, struct_identities, known_identities)
+                break
+            }
+        }
+    }
+    (^module_imports, ^imported_functions, ^signatures)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:405
+fn fragment_module_nominals(owner: Int, modules: [ModuleState], source_paths: [(Int, String):String], struct_identities: [(Int, String):String], known_identities: [String:Bool]) -> [String:String] Never! {
+    identities := [String:String]{}
+    loop identity in known_identities.keys() { identities[~identity] = ~identity }
+    loop ((module, source), path) in source_paths { if module == owner { identities[~source] = ~path } }
+    loop ((module, leaf), identity) in struct_identities { if module == owner { identities[~leaf] = ~identity } }
+    if modules.get(owner) == .Val(state) {
+        loop (alias, target) in state.imports {
+            loop ((module, leaf), identity) in struct_identities {
+                if module == target { identities[alias + "." + leaf] = ~identity }
+            }
+        }
+    }
+    identities
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:469
+fn direct_call_is_name(expr: Expr, name: String) -> Bool Never! {
+    if expr == { .Ident(candidate, _) -> candidate == name; .Paren(inner, _) -> direct_call_is_name(inner, name); else -> false }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:481
+// The identical nested is_name helper uses direct_call_is_name above.
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:442
+fn stmt_uses_name_only_as_direct_call(stmt: Stmt, name: String) -> Bool Never! {
+    nested_capture := false
+    stmt.for_each_expr(|expr: Expr| {
+        if expr != .Lambda(lambda) -> return
+        loop param in lambda.params { if param.name == name -> return }
+        taken := false
+        loop (capture, _) in lambda.take_names { if capture == name { taken = true; break } }
+        if !taken && !lambda_body_refs_name(lambda.body, name) -> return
+        nested_capture = true
+    })
+    if nested_capture -> return false
+    residual := ~stmt
+    residual.for_each_expr_mut(|expr: &Expr| {
+        direct :: if expr == {
+            .Call(call) -> call.name == name
+            .CallValue(callee, _) -> direct_call_is_name(callee, name)
+            .MethodCall -> expr.method == "call" && direct_call_is_name(expr.receiver, name)
+            else -> false
+        }
+        if direct { span :: expr.span(); expr = Expr.Absent(span) }
+    })
+    !stmt_refs_name(residual, name)
+}
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:504
+    fn bound_lambda_escapes(self, name: String, lambda: Lambda) -> Bool Never! {
+        if self.stmt_tail_ptr.is_null() -> return true
+        saw_direct_use := false
+        saw_other_use := false
+        inspect_tail :: |tail: [Stmt]| {
+            loop stmt in tail {
+                if !stmt_refs_name(stmt, name) -> continue
+                if stmt_uses_name_only_as_direct_call(stmt, name) { saw_direct_use = true }
+                else { saw_other_use = true }
+            }
+        }
+        // GATE #4494: frame slices borrow the live Program AST; the recursive checker installs/restores them.
+        #Unsafe("statement tail and liveness frames remain live during checking") {
+            inspect_tail(from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len))
+            loop (ptr, len) in self.liveness_frames.rev() {
+                if !ptr.is_null() && len > 0 { inspect_tail(from_raw_parts(ptr, len)) }
+            }
+        }
+        if saw_other_use || !saw_direct_use -> return true
+        param_names := [String:Bool]{}
+        take_names := [String:Bool]{}
+        loop param in lambda.params { param_names[~param.name] = true }
+        loop (capture, _) in lambda.take_names { take_names[~capture] = true }
+        read_caps := [String:Bool]{}
+        mut_caps := [String:Bool]{}
+        lambda_collect_captures(lambda.body, param_names, &read_caps, &mut_caps)
+        loop (capture, _) in lambda.take_names { read_caps[~capture] = true }
+        written_locals := [String:Bool]{}
+        loop capture in mut_caps.keys() {
+            if param_names.has_key(capture) || take_names.has_key(capture) || self.is_view(capture) -> continue
+            if self.lookup(capture) == .Val(info) && info.mutable && info.ty != .Shared { written_locals[~capture] = true }
+        }
+        loop capture in read_caps.keys().chain(mut_caps.keys()) {
+            if param_names.has_key(capture) || take_names.has_key(capture) || self.is_view(capture) -> continue
+            cap_ty := Type?{None}
+            if self.lookup(capture) == .Val(info) { cap_ty = Val(info.ty) }
+            else if self.consts.get(capture) == .Val(ty) { cap_ty = Val(ty) }
+            if cap_ty != .Val(ty) -> continue
+            if written_locals.has_key(capture) -> continue
+            if written_locals.is_empty() && self.is_cloneable_type(ty) -> return true
+            if self.is_resource_type(ty) && !mut_caps.has_key(capture) -> return true
+        }
+        false
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:600
+    pub fn checked_comptime_nominals(self) -> MirFragmentNominalFacts? Never! {
+        if self.modules != .Val(modules) -> return None
+        checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:611
+pub fn checked_comptime_nominals_for_context(modules: [ModuleState], module_idx: Int, name_ledger: NameLedger) -> MirFragmentNominalFacts? Never! {
+    if modules.get(module_idx) != .Val(current) -> return None
+    reexports :: current.reexports
+    struct_identities := [(Int, String):String]{}
+    known_identities := [String:Bool]{}
+    loop owner in 0..<modules.len() {
+        loop item in modules[owner].items {
+            name :: if item == { .Struct(def) -> def.name; .Enum(def) -> def.name; else -> continue }
+            if name_ledger.nominal_identity(owner, name) != .Val(identity) -> continue
+            struct_identities[(owner, ~name)] = ~identity
+            known_identities[^identity] = true
+        }
+    }
+    source_paths := [(Int, String):String]{}
+    loop owner in 0..<modules.len() {
+        loop (source, path) in name_ledger.canonical_paths(owner) {
+            if known_identities.has_key(path) { source_paths[(owner, ^source)] = ^path }
+        }
+    }
+    // Append-only queue plus cursor retains VecDeque's linear traversal.
+    queue := [Int]{}
+    queued := [Int:Bool]{}
+    enqueue :: |target: Int| {
+        if !queued.has_key(target) { queued[target] = true; queue.push(target) }
+    }
+    loop target in current.imports.values() { enqueue(target) }
+    loop (_, target) in current.unqualified_file.values() { enqueue(target) }
+    loop (_, target) in reexports.values() { enqueue(target) }
+    loop module in current.core_imports.values() {
+        if core_source_target(modules, module) == .Val(target) { enqueue(target) }
+    }
+    // A package is one namespace even before its import table is resolved.
+    siblings :: name_ledger.namespace_siblings(module_idx)
+    loop sibling in siblings { enqueue(sibling) }
+    facts := MirFragmentNominalFacts.default()
+    loop item in current.items {
+        if item == .Enum(def) {
+            row := ~def
+            row.methods.clear()
+            row.trait_impls.clear()
+            row.derives.clear()
+            facts.enums[~row.name] = ^row
+        }
+    }
+    loop (alias, target) in current.imports {
+        if modules.get(target) == .Val(state) { facts.import_modules[~alias] = ~state.module_alias }
+    }
+    loop (alias, module) in current.core_imports {
+        if core_source_target(modules, module) == .Val(target) && modules.get(target) == .Val(state) {
+            facts.import_modules[~alias] = ~state.module_alias
+        }
+    }
+    cursor := 0
+    loop cursor < queue.len() {
+        target :: queue[cursor]
+        cursor += 1
+        if modules.get(target) != .Val(state) -> continue
+        loop nested in state.imports.values() { enqueue(nested) }
+        loop (_, nested) in state.unqualified_file.values() { enqueue(nested) }
+        loop module in state.core_imports.values() {
+            if core_source_target(modules, module) == .Val(nested) { enqueue(nested) }
+        }
+        if target == module_idx -> continue
+        source_module :: CoreModuleExports.core_source_module_by_alias(state.module_alias)
+        module_identity := ~state.module_path
+        if name_ledger.module_identity(target) == .Val(identity) { module_identity = ^identity }
+        body_module := MirFragmentCoreSourceModule{alias: ~state.module_alias, module_identity: ^module_identity, core_imports: ~state.core_imports, functions: [:], constants: [], module_imports: [:], imported_functions: [:], import_signatures: [:], nominal_identities: [:]}
+        loop item in state.items {
+            if item == .Const(constant) { body_module.constants.push(~constant); continue }
+            if item != .Func(function) -> continue
+            body_module.functions[~function.name] = ~function
+            if source_module != .Val(source) -> continue
+            if !function.is_pub || !CoreModuleExports.core_source_owns(source.module, function.name) -> continue
+            facts.core_source_sigs[(~source.module, ~function.name)] = fragment_signature(function, target, modules, source_paths, struct_identities, known_identities)
+        }
+        row_key := ~state.module_alias
+        if source_module == .Val(source) { row_key = ~source.module }
+        else {
+            (module_imports, imported_functions, import_signatures) :: fragment_module_imports(target, modules, source_paths, struct_identities, known_identities)
+            body_module.module_imports = ^module_imports
+            body_module.imported_functions = ^imported_functions
+            body_module.import_signatures = ^import_signatures
+            body_module.nominal_identities = fragment_module_nominals(target, modules, source_paths, struct_identities, known_identities)
+        }
+        // GATE #4494: Arc copy-on-write retains shared body rows and clones only on mutation.
+        Arc.make_mut(&facts.core_source_bodies)[^row_key] = ^body_module
+        source_leaf_visible :: |name: String| {
+            if source_module == .Val(source) -> return CoreModuleExports.core_leaf_kind(source.module, name).is_some()
+            true
+        }
+        canonical :: |ty: Type| canonical_fragment_type(ty, target, modules, source_paths, struct_identities, known_identities)
+        loop item in state.items {
+            if item == .Enum(def) {
+                if !source_leaf_visible(def.name) -> continue
+                if struct_identities.get((target, def.name)) != .Val(identity) -> continue
+                row := ~def
+                row.name = ~identity
+                row.methods.clear()
+                row.trait_impls.clear()
+                row.derives.clear()
+                loop variant in &row.variants {
+                    if variant.payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> ty = canonical(ty)
+                        .Named(fields) -> { loop field in &fields { field.ty = canonical(field.ty) } }
+                    }
+                }
+                facts.foreign_modules[~identity] = ~state.module_alias
+                if !facts.enums.has_key(identity) { facts.enums[~identity] = ^row }
+                continue
+            }
+            if item != .Struct(def) -> continue
+            if !source_leaf_visible(def.name) -> continue
+            if struct_identities.get((target, def.name)) != .Val(identity) -> continue
+            row := ~def
+            row.name = ~identity
+            row.methods.clear()
+            row.trait_impls.clear()
+            row.derives.clear()
+            loop field in &row.fields { field.ty = canonical(field.ty) }
+            facts.foreign_modules[~identity] = ~state.module_alias
+            if !facts.structs.has_key(identity) { facts.structs[~identity] = ^row }
+        }
+    }
+    (_, imported_functions, import_signatures) :: fragment_module_imports(module_idx, modules, source_paths, struct_identities, known_identities)
+    facts.imported_functions = ^imported_functions
+    facts.import_signatures = ^import_signatures
+    foreign_identities := [String:Bool]{}
+    loop identity in facts.foreign_modules.keys() {
+        foreign_identities[~identity] = true
+        facts.nominal_identities[~identity] = ~identity
+    }
+    loop (source, path) in name_ledger.canonical_paths(module_idx) {
+        if foreign_identities.has_key(path) { facts.nominal_identities[^source] = ^path }
+    }
+    loop (alias, target) in current.imports {
+        loop ((owner, leaf), identity) in struct_identities {
+            if owner == target && foreign_identities.has_key(identity) { facts.nominal_identities[alias + "." + leaf] = ~identity }
+        }
+    }
+    loop (alias, module) in current.core_imports {
+        if core_source_target(modules, module) != .Val(target) -> continue
+        loop ((owner, leaf), identity) in struct_identities {
+            if owner == target && foreign_identities.has_key(identity) { facts.nominal_identities[alias + "." + leaf] = ~identity }
+        }
+    }
+    loop (local, original) in current.core_item_imports {
+        if current.core_imports.get(local) != .Val(module) -> continue
+        if core_source_target(modules, module) != .Val(target) -> continue
+        leaf := original
+        if original.rsplit_once('.') == .Val((_, last)) { leaf = last }
+        if struct_identities.get((target, leaf)) == .Val(identity) && foreign_identities.has_key(identity) {
+            facts.nominal_identities[~local] = ~identity
+        }
+    }
+    loop (local, (original, target)) in current.unqualified_file {
+        if struct_identities.get((target, original)) == .Val(identity) && foreign_identities.has_key(identity) {
+            facts.nominal_identities[~local] = ~identity
+        }
+    }
+    loop sibling in siblings {
+        if modules.get(sibling) != .Val(state) -> continue
+        loop item in state.items {
+            name :: if item == { .Struct(def) -> def.name; .Enum(def) -> def.name; else -> continue }
+            if struct_identities.get((sibling, name)) == .Val(identity) && foreign_identities.has_key(identity) && !facts.nominal_identities.has_key(name) {
+                facts.nominal_identities[~name] = ~identity
+            }
+        }
+    }
+    loop (local, (original, target)) in reexports {
+        if struct_identities.get((target, original)) == .Val(identity) && foreign_identities.has_key(identity) {
+            facts.nominal_identities[~local] = ~identity
+        }
+    }
+    Val(^facts)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:989
+fn direct_fixed_constructor(expr: Expr) -> Bool Never! {
+    if expr != .MethodCall -> return false
+    if expr.receiver != .Field(_, name, _) -> return false
+    name == "Fixed" && (expr.method == "new" || expr.method == "over")
+}
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:999
+    fn normalized_path_string_source(self, expr: Expr) -> String? Never! {
+        outer :: expr.without_parens()
+        if outer != .MethodCall || outer.method != "to_string" || !outer.args.is_empty() -> return None
+        normalized :: outer.receiver.without_parens()
+        if normalized != .MethodCall || normalized.method != "normalize" || !normalized.args.is_empty() -> return None
+        if self.registry.contains("Path") -> return None
+        path :: normalized.receiver
+        constructor :: path.without_parens()
+        direct_path_constructor :: constructor == .MethodCall && constructor.method == "from" && constructor.args.len() == 1 && constructor.receiver.without_parens() == .Ident("Path", _) && !self.registry.contains("Path")
+        if normalized.recv_type != Val("Path") && !direct_path_constructor -> return None
+        start :: source_expr_start(path)
+        if source_expr_end(self.source, normalized) != .Val(end) -> return None
+        if self.source.get(start..<end) == .Val(text) -> return Val(text.to_string())
+        None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1053
+fn interrupt_callback_name(expr: Expr) -> String? Never! from expr {
+    if expr == { .Ident(name, _) -> Val(name); .Paren(inner, _) -> interrupt_callback_name(inner); else -> None }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1061
+fn interrupt_callback_lambda(expr: Expr) -> Lambda? Never! from expr {
+    if expr == { .Lambda(lambda) -> Val(lambda); .Paren(inner, _) -> interrupt_callback_lambda(inner); else -> None }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1069
+fn contains_taskgroup(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == Syntax.TYPE_TASKGROUP
+        .List(inner), .Shared(inner), .Option(inner), .FixedList(inner, _), .Tagged(_, inner), .InlineRange(inner, _, _) -> contains_taskgroup(inner)
+        .Map(key, _, value), .Result(key, value) -> contains_taskgroup(key) || contains_taskgroup(value)
+        // Signatures have their own Group parameter/return checks.
+        .Fn -> false
+        .Apply(_, args), .Union(args) -> {
+            loop arg in args { if contains_taskgroup(arg) -> return true }
+            false
+        }
+        .Tuple(fields) -> {
+            loop (_, field) in fields { if contains_taskgroup(field) -> return true }
+            false
+        }
+        .Int, .Float, .Bool, .String, .Char, .TraitObject, .IntN, .Float32, .Quantity, .Measure -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1100
+pub fn check_meta_attr_fields(meta: MetaAttr) -> [Diagnostic] Never! {
+    diags := [Diagnostic]{}
+    seen_category := false
+    seen_tunable := false
+    seen_maturity := false
+    loop field in meta.fields {
+        if field == {
+            .Category(value, span) -> {
+                if seen_category { diags.push(Diagnostic.error("E0346", "`#Meta` repeats `category`", "`category` has one value; writing it twice would make tooling choose between two labels", "keep one `category: \"...\"` field", Val(span))) }
+                seen_category = true
+                if value == .Str(parts, _) {
+                    if parts.len() == 1 && parts[0] == .Lit(s) {
+                        if s.is_empty() { diags.push(Diagnostic.error("E0348", "`#Meta` category cannot be empty", "Canvas groups use this text as a visible label", "write a non-empty category, e.g. `category: \"Movement\"`", Val(value.span()))) }
+                    } else {
+                        diags.push(Diagnostic.error("E0347", "`#Meta` category needs plain quoted text", "`category` is compile-time tooling data, not a runtime string", "write a string literal, e.g. `category: \"Movement\"`", Val(value.span())))
+                    }
+                } else {
+                    diags.push(Diagnostic.error("E0347", "`#Meta` category needs plain quoted text", "`category` is compile-time tooling data, not a runtime value", "write a string literal, e.g. `category: \"Movement\"`", Val(value.span())))
+                }
+            }
+            .Tunable(span) -> {
+                if seen_tunable { diags.push(Diagnostic.error("E0346", "`#Meta` repeats `tunable`", "`tunable` is a flag; writing it twice does not add meaning", "keep one `tunable` field", Val(span))) }
+                seen_tunable = true
+            }
+            .Maturity(value, span) -> {
+                if seen_maturity { diags.push(Diagnostic.error("E0346", "`#Meta` repeats `maturity`", "a declaration has one maturity value", "keep one `maturity: .Experimental`, `.Tested`, or `.Hardened` field", Val(span))) }
+                seen_maturity = true
+                valid :: value == .EnumLit && value.type_name.is_empty() && value.args.is_empty() && (value.variant == Syntax.MARKER_EXPERIMENTAL || value.variant == Syntax.MARKER_TESTED || value.variant == Syntax.MARKER_HARDENED)
+                if !valid { diags.push(Diagnostic.error("E0352", "`#Meta` maturity needs a known maturity value", "maturity metadata is a closed documentation scale", "write `maturity: .Experimental`, `.Tested`, or `.Hardened`", Val(value.span()))) }
+            }
+            .Unknown(name, span, _) -> {
+                suggestion := String?{None}
+                if edit_distance(name, Syntax.META_FIELD_CATEGORY) <= 2 { suggestion = Val(Syntax.META_FIELD_CATEGORY) }
+                else if edit_distance(name, Syntax.META_FIELD_TUNABLE) <= 2 { suggestion = Val(Syntax.META_FIELD_TUNABLE) }
+                else if edit_distance(name, Syntax.META_FIELD_MATURITY) <= 2 { suggestion = Val(Syntax.META_FIELD_MATURITY) }
+                fix :: if suggestion == {
+                    .Val(candidate) -> "did you mean `" + candidate + "`?"
+                    .None -> "use one of `" + Syntax.META_FIELD_CATEGORY + "`, `" + Syntax.META_FIELD_TUNABLE + "`, `" + Syntax.META_FIELD_MATURITY + "`"
+                }
+                diagnostic := Diagnostic.error("E0345", "`#Meta` does not have a `" + name + "` field", "`#Meta` fields are owner-ratified tooling metadata", fix, Val(span))
+                if suggestion == .Val(candidate) { diagnostic = diagnostic.with_edit(TextEdit{span: span, new_text: ~candidate}) }
+                diags.push(^diagnostic)
+            }
+        }
+    }
+    diags
+}
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1241
+    pub fn ct_value_fits_binding(self, value: CtValue, ty: Type) -> Bool Never! {
+        if ty == .Named(name) && name.ends_with(".Patch") -> return false
+        if !self.ct_value_is_emittable(value) -> return false
+        if value == {
+            .List, .Bytes -> ty == .List || ty == .FixedList
+            .Map -> ty == .Map
+            .Present -> ty == .Option || ty == .Result
+            .Failed(.Clean(_)) -> ty == .Option
+            .Failed(.Told(_)) -> ty == .Result
+            // Unit placeholders for procedural guard registrations must not become a non-Unit literal.
+            .Unit -> ty == Type.Named("Unit")
+            else -> true
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1279
+    pub fn ct_value_is_emittable(self, value: CtValue) -> Bool Never! {
+        if value == {
+            .Struct(type_name, fields) -> {
+                if !self.registry.is_user_struct(type_name) || self.registry.is_published_schema_struct(type_name) -> return false
+                loop (_, field) in fields { if !self.ct_value_is_emittable(field) -> return false }
+                true
+            }
+            .Enum(type_name, _, args) -> {
+                if !self.registry.is_user_enum(type_name) -> return false
+                loop (_, arg) in args { if !self.ct_value_is_emittable(arg) -> return false }
+                true
+            }
+            .List(items) -> {
+                loop item in items { if !self.ct_value_is_emittable(item) -> return false }
+                true
+            }
+            .Map(entries) -> {
+                loop entry in entries.values() { if !self.ct_value_is_emittable(entry) -> return false }
+                true
+            }
+            .Present(inner), .Failed(.Told(inner)) -> self.ct_value_is_emittable(inner)
+            .Closure -> false
+            else -> true
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1315
+    pub fn check_meta_attr(&self, meta: &MetaAttr) Never! {
+        if self.take_rule_fact(Syntax.MARKER_META, meta.span) == .Val(marker) {
+            if self.validate_rule_signature(&marker) != .Val(arguments) -> return
+            normalized := [MetaField].with_capacity(meta.fields.len())
+            loop (source_index, field) in meta.fields.drain(..).enumerate() {
+                parameter := Int?{None}
+                loop binding in arguments.bindings {
+                    if binding.source_index == source_index { parameter = binding.parameter_index; break }
+                }
+                constant :: arguments.constant_for_source(source_index)
+                if parameter == Val(0) && constant == .Val(.Str(value)) && field == .Category(expression, _) {
+                    span :: expression.span()
+                    expression = Expr.Str([StrPart.Lit(~value)], span)
+                    normalized.push(^field)
+                } else if parameter == Val(1) && constant == .Val(.Bool(true)) {
+                    normalized.push(MetaField.Tunable(marker.args[source_index].span()))
+                } else if parameter == Val(1) && constant == .Val(.Bool(false)) {
+                    // A known false tunable flag is absent, exactly as in the source.
+                } else { normalized.push(^field) }
+            }
+            meta.fields = ^normalized
+        }
+        self.diags.extend(check_meta_attr_fields(meta))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1362
+    pub fn check_uninit_binding(&self, b: &Binding) Never! {
+        has_mem := false
+        loop module in self.core_imports.values() { if module == Syntax.CORE_MEM_MODULE { has_mem = true; break } }
+        if !has_mem {
+            self.diags.push(Diagnostic.error("E0424", "`" + Syntax.KW_UNINIT + "` needs the low-level memory tier", "`" + Syntax.KW_UNINIT + "` skips the automatic zero-fill — an expert-tier operation", "add `use " + Syntax.CORE_MEM_MODULE + "` at the top of this file to opt in", Val(b.name_span)))
+        }
+        if b.ty != .Val(t) || b.ty_span != .Val(ty_span) -> return
+        ty :: self.resolve_type(~t)
+        b.ty = Val(~ty)
+        self.check_declared_type(ty, ty_span)
+        if !is_pod_uninit_type(ty) {
+            self.diags.push(Diagnostic.error("E0423", "`" + Syntax.KW_UNINIT + "` needs a plain-data type", "`" + ty.show() + "` may own heap memory or need cleanup, so leaving it uninitialized is unsafe", "use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`)", Val(ty_span)))
+        }
+        state :: if ty == { .FixedList(_, len) -> UninitState.fixed(len.require_literal()); else -> UninitState.scalar() }
+        self.declare(b.name, b.name_span, LocalInfo{def_span: b.name_span, binding_sigil_span: b.sigil_span, ty: ^ty, mutable: true, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+        self.flow.uninit.set(b.name, ^state)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1429
+    pub fn clear_uninit_mut_args(&self, args: [CallArg]) Never! {
+        if self.flow.uninit.is_empty() -> return
+        loop arg in args {
+            if arg.convention == AccessConvention.Write && arg.expr == .Ident(n, span) && self.flow.uninit.contains(n) {
+                self.diags.push(Diagnostic.error("E0420", "`" + n + "` may be read before it is given a value", "passing `" + n + "` with write access does not prove that the callee initializes it", "write every value in `" + n + "` here before passing it to another function", Val(span)))
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1458
+    pub fn check_refutable_binding(&self, b: &Binding) Never! {
+        pattern_copy :: ~b.pattern
+        if pattern_copy != .Val(.Refutable(pattern, fallback, names, span, synthesized)) -> return
+        subject_span :: b.init.span()
+        subject := ^b.init
+        b.init = Expr.Absent(subject_span)
+        (subject_ty, bindings) :: self.check_pattern_test_typed(&subject, &pattern, span)
+        b.init = ^subject
+        if subject_ty != .Val(ty) {
+            loop name in names { self.declare_bound(name.local_name(), name.span, Type.Int, false, b.sigil_span) }
+            return
+        }
+        self.check_diverging_fallback(&fallback, ty, span)
+        if b.pattern == .Val(.Refutable(stored_pattern, stored_fallback, _, _, _)) {
+            stored_pattern = ^pattern
+            stored_fallback = ^fallback
+        }
+        loop name in names {
+            binding_ty := Type.Int
+            if bindings.get(name.local_name()) == .Val(found) { binding_ty = ~found }
+            else if bindings.get(name.name) == .Val(found) { binding_ty = ~found }
+            refines_subject :: synthesized && b.init == .Ident(subject_name, _) && subject_name == name.local_name() && self.is_optional_flow_refine(name.local_name(), binding_ty)
+            if refines_subject {
+                self.flow.moved.remove(name.local_name())
+                self.record_optional_flow_narrow(name.local_name(), name.span, ^binding_ty)
+            } else { self.declare_bound(name.local_name(), name.span, ^binding_ty, false, b.sigil_span) }
+        }
+    }
+}

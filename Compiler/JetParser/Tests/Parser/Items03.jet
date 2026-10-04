@@ -1,0 +1,29 @@
+// No inline Rust tests occur in functions_params.rs; these are behavioral
+// controls for its exact recovery diagnostic payloads and byte spans.
+use jet_foundation.[Span, Syntax]
+
+// Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:645
+#Test("guest import body marker teaches symbol binding") {
+    span :: Span.new(12, 14)
+    diag :: Parser.guest_import_body_marker(span)
+    assert(diag.code == "E3261" && diag.span == Val(span))
+    assert(diag.fix == "write `#Import(c) fn name(args) Return = \"symbol\"`")
+}
+// Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:817
+#Test("retired unified arrow retains canonical text edit") {
+    span :: Span.new(3, 5)
+    diag :: Parser.retired_unified_arrow(span)
+    assert(diag.code == "E0070" && diag.span == Val(span))
+    assert(if diag.edit == { .Val(edit) -> edit.span == span && edit.new_text == Syntax.OP_UNIFIED_ARROW else -> false })
+}
+// Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:952,967,987
+#Test("parameter zone recovery preserves order and empty zone explanations") {
+    span :: Span.new(10, 11)
+    repeat :: Parser.repeated_param_zone("/", span, Span.new(2, 3))
+    assert(repeat.code == "E0763" && repeat.what == "`/` appears twice in this parameter list")
+    order :: Parser.zone_out_of_order(span, Span.new(4, 5))
+    assert(order.span == Val(span) && order.fix == "move `/` before `*`")
+    empty :: Parser.empty_param_zone("*", "empty reason", "empty fix", span)
+    assert(empty.what == "`*` marks an empty parameter zone")
+    assert(empty.why == "empty reason" && empty.fix == "empty fix")
+}

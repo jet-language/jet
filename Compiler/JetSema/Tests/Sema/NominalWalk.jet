@@ -1,0 +1,46 @@
+// NominalWalk.rs has no inline tests. These controls use a real empty registry
+// and its native memo locks; #4494/#4499 apply exactly as in the source.
+use jet_foundation.[Type]
+use jet_sema.[TypeRegistry]
+
+fn nominal_walk_registry() -> TypeRegistry Never! {
+    TypeRegistry{types: [:], error_types: [:], unit_types: [:], unit_facts: [:], literal_facts: [:],
+        computed_fields: [:], field_defaults: [:], receipt_sections: [:], nominal_memo: NominalMemoCell.default()}
+}
+// Rust: crates/jet-sema/src/Sema/NominalWalk.rs:123
+#Test("nominal instantiation keys preserve argument order and text") {
+    assert(instantiation_key("Node", []) == "Node")
+    assert(instantiation_key("Pair", [Type]{.Named{name: "Left"}, .Named{name: "Right"}}) == "Pair<Left, Right>")
+}
+// Rust: crates/jet-sema/src/Sema/NominalWalk.rs:92,104,111,169
+#Test("nominal active names terminate growing arguments and neutral rows stay query specific") {
+    registry :: nominal_walk_registry()
+    scope :: registry.open_nominal_memo()
+    assert(scope.opened)
+    walk := NominalWalk.new(.Cloneable, @registry)
+    key :: walk.enter("Node", [Type]{.Int}) ?? panic("first enter")
+    assert(walk.enter("Node", [Type]{.List{element: .Int}}) == None)
+    walk.leave("Node", ~key)
+    assert(walk.enter("Node", [Type]{.Int}) == None)
+    walk.finish(true)
+    assert(registry.nominal_memo_holds(.Cloneable, key))
+    assert(!registry.nominal_memo_holds(.OwnsHeap, key))
+}
+// Rust: crates/jet-sema/src/Sema/NominalWalk.rs:63,152,181,199
+#Test("nested nominal memo scope and registry copies do not retain stale proofs") {
+    registry :: nominal_walk_registry()
+    {
+        outer :: registry.open_nominal_memo()
+        {
+            inner :: registry.open_nominal_memo()
+            assert(!inner.opened)
+            registry.record_neutral_nominals(.CellGuard, [String:Bool]{"Node": true})
+        }
+        assert(registry.nominal_memo_holds(.CellGuard, "Node"))
+        closed_copy :: registry.nominal_memo.clone()
+        assert(closed_copy.lock.read().unwrap_or_else(PoisonError.into_inner).deref() == None)
+    }
+    assert(!registry.nominal_memo_holds(.CellGuard, "Node"))
+    registry.record_neutral_nominals(.CellGuard, [String:Bool]{"Node": true})
+    assert(!registry.nominal_memo_holds(.CellGuard, "Node"))
+}

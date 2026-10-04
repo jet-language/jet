@@ -1,590 +1,327 @@
-// PORT-PENDING 0110 crates-jet-foundation-src-wasmdebug-module-group: crates/jet-foundation/src/WasmDebug.rs:1-586
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Std-only Wasm DWARF line-table reader and `sourceMappingURL` custom section.
-//RS //! Used by the web artifact writer to join rustc code offsets to Jet lines.
-//RS 
-//RS use std::str;
-//RS 
-//RS /// One decoded `.debug_line` row. `address` is the Wasm code-section-relative
-//RS /// offset rustc embeds for `wasm32-unknown-unknown`.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct WasmLineRow {
-//RS     pub address: u64,
-//RS     pub file: String,
-//RS     pub line: u32,
-//RS     pub column: u32,
-//RS     pub is_stmt: bool,
-//RS     pub end_sequence: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum WasmDebugError {
-//RS     Malformed(&'static str),
-//RS }
-//RS 
-//RS /// Payload start of the Wasm Code section (section id 10), if present.
-//RS pub fn code_section_payload_offset(wasm: &[u8]) -> Result<Option<usize>, WasmDebugError> {
-//RS     if wasm.get(..8) != Some(b"\0asm\x01\0\0\0") {
-//RS         return Err(WasmDebugError::Malformed("unsupported Wasm header"));
-//RS     }
-//RS     let mut at = 8usize;
-//RS     while at < wasm.len() {
-//RS         let id = *wasm
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("truncated section id"))?;
-//RS         at += 1;
-//RS         let size = read_uleb(wasm, &mut at)?;
-//RS         let payload_start = at;
-//RS         let end = at
-//RS             .checked_add(size)
-//RS             .ok_or(WasmDebugError::Malformed("section size overflow"))?;
-//RS         if end > wasm.len() {
-//RS             return Err(WasmDebugError::Malformed("section extends past file"));
-//RS         }
-//RS         if id == 10 {
-//RS             return Ok(Some(payload_start));
-//RS         }
-//RS         at = end;
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS /// Read every `.debug_line` custom section in `wasm`.
-//RS pub fn parse_debug_line(wasm: &[u8]) -> Result<Vec<WasmLineRow>, WasmDebugError> {
-//RS     let mut rows = Vec::new();
-//RS     for payload in custom_section_payloads(wasm, b".debug_line")? {
-//RS         decode_debug_line_section(payload, &mut rows)?;
-//RS     }
-//RS     Ok(rows)
-//RS }
-//RS 
-//RS /// Append a relative `sourceMappingURL` custom section (Chrome/Firefox Wasm maps).
-//RS pub fn embed_source_mapping_url(wasm: &mut Vec<u8>, url: &str) -> Result<(), WasmDebugError> {
-//RS     if wasm.get(..8) != Some(b"\0asm\x01\0\0\0") {
-//RS         return Err(WasmDebugError::Malformed("unsupported Wasm header"));
-//RS     }
-//RS     // Touch-parse so a truncated module fails before we append.
-//RS     let _ = custom_section_payloads(wasm, b"")?;
-//RS     const NAME: &str = "sourceMappingURL";
-//RS     let mut payload = Vec::new();
-//RS     put_uleb(&mut payload, NAME.len());
-//RS     payload.extend_from_slice(NAME.as_bytes());
-//RS     payload.extend_from_slice(url.as_bytes());
-//RS     wasm.push(0);
-//RS     put_uleb(wasm, payload.len());
-//RS     wasm.extend_from_slice(&payload);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn custom_section_payloads<'a>(
-//RS     wasm: &'a [u8],
-//RS     want_name: &[u8],
-//RS ) -> Result<Vec<&'a [u8]>, WasmDebugError> {
-//RS     if wasm.get(..8) != Some(b"\0asm\x01\0\0\0") {
-//RS         return Err(WasmDebugError::Malformed("unsupported Wasm header"));
-//RS     }
-//RS     let mut at = 8usize;
-//RS     let mut found = Vec::new();
-//RS     while at < wasm.len() {
-//RS         let id = *wasm
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("truncated section id"))?;
-//RS         at += 1;
-//RS         let size = read_uleb(wasm, &mut at)?;
-//RS         let end = at
-//RS             .checked_add(size)
-//RS             .ok_or(WasmDebugError::Malformed("section size overflow"))?;
-//RS         if end > wasm.len() {
-//RS             return Err(WasmDebugError::Malformed("section extends past file"));
-//RS         }
-//RS         let payload = &wasm[at..end];
-//RS         if id == 0 {
-//RS             let mut name_at = 0usize;
-//RS             let name_len = read_uleb(payload, &mut name_at)?;
-//RS             let name_end = name_at
-//RS                 .checked_add(name_len)
-//RS                 .ok_or(WasmDebugError::Malformed("custom name overflow"))?;
-//RS             if name_end > payload.len() {
-//RS                 return Err(WasmDebugError::Malformed("custom name past payload"));
-//RS             }
-//RS             let name = &payload[name_at..name_end];
-//RS             if want_name.is_empty() || name == want_name {
-//RS                 found.push(&payload[name_end..]);
-//RS             }
-//RS         }
-//RS         at = end;
-//RS     }
-//RS     Ok(found)
-//RS }
-//RS 
-//RS fn decode_debug_line_section(
-//RS     section: &[u8],
-//RS     rows: &mut Vec<WasmLineRow>,
-//RS ) -> Result<(), WasmDebugError> {
-//RS     let mut at = 0usize;
-//RS     while at < section.len() {
-//RS         let unit_start = at;
-//RS         let (unit_len, dwarf64) = read_initial_length(section, &mut at)?;
-//RS         let unit_end = unit_start
-//RS             .checked_add(if dwarf64 { 12 } else { 4 })
-//RS             .and_then(|h| h.checked_add(unit_len))
-//RS             .ok_or(WasmDebugError::Malformed("line unit length overflow"))?;
-//RS         if unit_end > section.len() {
-//RS             return Err(WasmDebugError::Malformed("line unit past section"));
-//RS         }
-//RS         let version = read_u16(section, &mut at)?;
-//RS         if version < 2 || version > 5 {
-//RS             return Err(WasmDebugError::Malformed("unsupported .debug_line version"));
-//RS         }
-//RS         let prologue_length = if dwarf64 {
-//RS             read_u64(section, &mut at)? as usize
-//RS         } else {
-//RS             read_u32(section, &mut at)? as usize
-//RS         };
-//RS         let prologue_end = at
-//RS             .checked_add(prologue_length)
-//RS             .ok_or(WasmDebugError::Malformed("prologue length overflow"))?;
-//RS         if prologue_end > unit_end {
-//RS             return Err(WasmDebugError::Malformed("prologue past unit"));
-//RS         }
-//RS         let minimum_instruction_length = *section
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("missing min_inst_length"))?;
-//RS         at += 1;
-//RS         if minimum_instruction_length == 0 {
-//RS             return Err(WasmDebugError::Malformed("min_inst_length is zero"));
-//RS         }
-//RS         let maximum_operations_per_instruction = if version >= 4 {
-//RS             let v = *section
-//RS                 .get(at)
-//RS                 .ok_or(WasmDebugError::Malformed("missing max_ops_per_inst"))?;
-//RS             at += 1;
-//RS             if v == 0 {
-//RS                 return Err(WasmDebugError::Malformed("max_ops_per_inst is zero"));
-//RS             }
-//RS             v
-//RS         } else {
-//RS             1
-//RS         };
-//RS         let default_is_stmt = *section
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("missing default_is_stmt"))?
-//RS             != 0;
-//RS         at += 1;
-//RS         let line_base = *section
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("missing line_base"))? as i8;
-//RS         at += 1;
-//RS         let line_range = *section
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("missing line_range"))?;
-//RS         at += 1;
-//RS         if line_range == 0 {
-//RS             return Err(WasmDebugError::Malformed("line_range is zero"));
-//RS         }
-//RS         let opcode_base = *section
-//RS             .get(at)
-//RS             .ok_or(WasmDebugError::Malformed("missing opcode_base"))?;
-//RS         at += 1;
-//RS         let mut standard_opcode_lengths = Vec::new();
-//RS         for _ in 1..opcode_base {
-//RS             let len = *section
-//RS                 .get(at)
-//RS                 .ok_or(WasmDebugError::Malformed("truncated opcode lengths"))?;
-//RS             at += 1;
-//RS             standard_opcode_lengths.push(len);
-//RS         }
-//RS         let mut include_directories = vec![String::new()];
-//RS         loop {
-//RS             let dir = read_cstring(section, &mut at)?;
-//RS             if dir.is_empty() {
-//RS                 break;
-//RS             }
-//RS             include_directories.push(dir);
-//RS         }
-//RS         let mut file_names = Vec::new();
-//RS         loop {
-//RS             let name = read_cstring(section, &mut at)?;
-//RS             if name.is_empty() {
-//RS                 break;
-//RS             }
-//RS             let dir_index = read_uleb(section, &mut at)?;
-//RS             let _mod_time = read_uleb(section, &mut at)?;
-//RS             let _length = read_uleb(section, &mut at)?;
-//RS             let dir = include_directories
-//RS                 .get(dir_index)
-//RS                 .cloned()
-//RS                 .unwrap_or_default();
-//RS             let path = if dir.is_empty() {
-//RS                 name
-//RS             } else {
-//RS                 format!("{dir}/{name}")
-//RS             };
-//RS             file_names.push(path);
-//RS         }
-//RS         // Skip any remaining prologue bytes (DWARF5 / producer padding).
-//RS         at = prologue_end;
-//RS 
-//RS         let mut address: u64 = 0;
-//RS         let mut op_index: u32 = 0;
-//RS         let mut file: u32 = 1;
-//RS         let mut line: i64 = 1;
-//RS         let mut column: u32 = 0;
-//RS         let mut is_stmt = default_is_stmt;
-//RS         let mut basic_block = false;
-//RS         let mut prologue_end = false;
-//RS         let mut epilogue_begin = false;
-//RS         let mut discriminator: u32 = 0;
-//RS 
-//RS         let emit = |rows: &mut Vec<WasmLineRow>,
-//RS                     address: u64,
-//RS                     file: u32,
-//RS                     line: i64,
-//RS                     column: u32,
-//RS                     is_stmt: bool,
-//RS                     end_sequence: bool,
-//RS                     file_names: &[String]| {
-//RS             if line <= 0 {
-//RS                 return;
-//RS             }
-//RS             let file_name = file_names
-//RS                 .get(file.saturating_sub(1) as usize)
-//RS                 .cloned()
-//RS                 .unwrap_or_default();
-//RS             rows.push(WasmLineRow {
-//RS                 address,
-//RS                 file: file_name,
-//RS                 line: line as u32,
-//RS                 column,
-//RS                 is_stmt,
-//RS                 end_sequence,
-//RS             });
-//RS         };
-//RS 
-//RS         while at < unit_end {
-//RS             let op = *section
-//RS                 .get(at)
-//RS                 .ok_or(WasmDebugError::Malformed("truncated line op"))?;
-//RS             at += 1;
-//RS             if op == 0 {
-//RS                 let len = read_uleb(section, &mut at)?;
-//RS                 let ext_end = at
-//RS                     .checked_add(len)
-//RS                     .ok_or(WasmDebugError::Malformed("ext op length overflow"))?;
-//RS                 if ext_end > unit_end {
-//RS                     return Err(WasmDebugError::Malformed("ext op past unit"));
-//RS                 }
-//RS                 if len == 0 {
-//RS                     continue;
-//RS                 }
-//RS                 let ext = *section
-//RS                     .get(at)
-//RS                     .ok_or(WasmDebugError::Malformed("missing ext opcode"))?;
-//RS                 at += 1;
-//RS                 match ext {
-//RS                     1 => {
-//RS                         // DW_LNE_end_sequence
-//RS                         emit(
-//RS                             rows,
-//RS                             address,
-//RS                             file,
-//RS                             line,
-//RS                             column,
-//RS                             is_stmt,
-//RS                             true,
-//RS                             &file_names,
-//RS                         );
-//RS                         address = 0;
-//RS                         op_index = 0;
-//RS                         file = 1;
-//RS                         line = 1;
-//RS                         column = 0;
-//RS                         is_stmt = default_is_stmt;
-//RS                         basic_block = false;
-//RS                         prologue_end = false;
-//RS                         epilogue_begin = false;
-//RS                         discriminator = 0;
-//RS                     }
-//RS                     2 => {
-//RS                         // DW_LNE_set_address
-//RS                         let addr_bytes = ext_end - at;
-//RS                         address = match addr_bytes {
-//RS                             4 => read_u32(section, &mut at)? as u64,
-//RS                             8 => read_u64(section, &mut at)?,
-//RS                             _ => {
-//RS                                 return Err(WasmDebugError::Malformed(
-//RS                                     "unsupported set_address size",
-//RS                                 ))
-//RS                             }
-//RS                         };
-//RS                         op_index = 0;
-//RS                     }
-//RS                     3 => {
-//RS                         // DW_LNE_define_file — skip for wasm rustc output.
-//RS                         let _ = read_cstring(section, &mut at)?;
-//RS                         let _ = read_uleb(section, &mut at)?;
-//RS                         let _ = read_uleb(section, &mut at)?;
-//RS                         let _ = read_uleb(section, &mut at)?;
-//RS                     }
-//RS                     4 => {
-//RS                         discriminator = read_uleb(section, &mut at)? as u32;
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 at = ext_end;
-//RS                 let _ = (basic_block, prologue_end, epilogue_begin, discriminator);
-//RS             } else if op < opcode_base {
-//RS                 match op {
-//RS                     1 => {
-//RS                         // DW_LNS_copy
-//RS                         emit(
-//RS                             rows,
-//RS                             address,
-//RS                             file,
-//RS                             line,
-//RS                             column,
-//RS                             is_stmt,
-//RS                             false,
-//RS                             &file_names,
-//RS                         );
-//RS                         basic_block = false;
-//RS                         prologue_end = false;
-//RS                         epilogue_begin = false;
-//RS                         discriminator = 0;
-//RS                     }
-//RS                     2 => {
-//RS                         let op_advance = read_uleb(section, &mut at)? as u32;
-//RS                         advance_pc(
-//RS                             &mut address,
-//RS                             &mut op_index,
-//RS                             op_advance,
-//RS                             minimum_instruction_length,
-//RS                             maximum_operations_per_instruction,
-//RS                         );
-//RS                     }
-//RS                     3 => {
-//RS                         line += read_sleb(section, &mut at)?;
-//RS                     }
-//RS                     4 => {
-//RS                         file = read_uleb(section, &mut at)? as u32;
-//RS                     }
-//RS                     5 => {
-//RS                         column = read_uleb(section, &mut at)? as u32;
-//RS                     }
-//RS                     6 => {
-//RS                         is_stmt = !is_stmt;
-//RS                     }
-//RS                     7 => {
-//RS                         basic_block = true;
-//RS                     }
-//RS                     8 => {
-//RS                         let advance = (255 - opcode_base as u32) / line_range as u32;
-//RS                         advance_pc(
-//RS                             &mut address,
-//RS                             &mut op_index,
-//RS                             advance,
-//RS                             minimum_instruction_length,
-//RS                             maximum_operations_per_instruction,
-//RS                         );
-//RS                     }
-//RS                     9 => {
-//RS                         let operand = read_u16(section, &mut at)? as u64;
-//RS                         address += operand;
-//RS                         op_index = 0;
-//RS                     }
-//RS                     10 => {
-//RS                         prologue_end = true;
-//RS                     }
-//RS                     11 => {
-//RS                         epilogue_begin = true;
-//RS                     }
-//RS                     12 => {
-//RS                         let _isa = read_uleb(section, &mut at)?;
-//RS                     }
-//RS                     _ => {
-//RS                         let idx = (op as usize).saturating_sub(1);
-//RS                         let args = *standard_opcode_lengths
-//RS                             .get(idx)
-//RS                             .ok_or(WasmDebugError::Malformed("unknown standard opcode"))?;
-//RS                         for _ in 0..args {
-//RS                             let _ = read_uleb(section, &mut at)?;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             } else {
-//RS                 let adjusted = op - opcode_base;
-//RS                 let line_delta = line_base as i64 + (adjusted % line_range) as i64;
-//RS                 let op_advance = (adjusted / line_range) as u32;
-//RS                 advance_pc(
-//RS                     &mut address,
-//RS                     &mut op_index,
-//RS                     op_advance,
-//RS                     minimum_instruction_length,
-//RS                     maximum_operations_per_instruction,
-//RS                 );
-//RS                 line += line_delta;
-//RS                 emit(
-//RS                     rows,
-//RS                     address,
-//RS                     file,
-//RS                     line,
-//RS                     column,
-//RS                     is_stmt,
-//RS                     false,
-//RS                     &file_names,
-//RS                 );
-//RS                 basic_block = false;
-//RS                 prologue_end = false;
-//RS                 epilogue_begin = false;
-//RS                 discriminator = 0;
-//RS             }
-//RS         }
-//RS         at = unit_end;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn advance_pc(
-//RS     address: &mut u64,
-//RS     op_index: &mut u32,
-//RS     op_advance: u32,
-//RS     min_inst_length: u8,
-//RS     max_ops: u8,
-//RS ) {
-//RS     let max_ops = max_ops as u32;
-//RS     let new_op = (*op_index as u64) + op_advance as u64;
-//RS     *address += (new_op / max_ops as u64) * min_inst_length as u64;
-//RS     *op_index = (new_op % max_ops as u64) as u32;
-//RS }
-//RS 
-//RS fn read_initial_length(buf: &[u8], at: &mut usize) -> Result<(usize, bool), WasmDebugError> {
-//RS     let first = read_u32(buf, at)?;
-//RS     if first == 0xffff_ffff {
-//RS         Ok((read_u64(buf, at)? as usize, true))
-//RS     } else if first >= 0xffff_fff0 {
-//RS         Err(WasmDebugError::Malformed("reserved initial length"))
-//RS     } else {
-//RS         Ok((first as usize, false))
-//RS     }
-//RS }
-//RS 
-//RS fn read_u16(buf: &[u8], at: &mut usize) -> Result<u16, WasmDebugError> {
-//RS     let end = at
-//RS         .checked_add(2)
-//RS         .ok_or(WasmDebugError::Malformed("u16 overflow"))?;
-//RS     let bytes = buf
-//RS         .get(*at..end)
-//RS         .ok_or(WasmDebugError::Malformed("truncated u16"))?;
-//RS     *at = end;
-//RS     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
-//RS }
-//RS 
-//RS fn read_u32(buf: &[u8], at: &mut usize) -> Result<u32, WasmDebugError> {
-//RS     let end = at
-//RS         .checked_add(4)
-//RS         .ok_or(WasmDebugError::Malformed("u32 overflow"))?;
-//RS     let bytes = buf
-//RS         .get(*at..end)
-//RS         .ok_or(WasmDebugError::Malformed("truncated u32"))?;
-//RS     *at = end;
-//RS     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-//RS }
-//RS 
-//RS fn read_u64(buf: &[u8], at: &mut usize) -> Result<u64, WasmDebugError> {
-//RS     let end = at
-//RS         .checked_add(8)
-//RS         .ok_or(WasmDebugError::Malformed("u64 overflow"))?;
-//RS     let bytes = buf
-//RS         .get(*at..end)
-//RS         .ok_or(WasmDebugError::Malformed("truncated u64"))?;
-//RS     *at = end;
-//RS     Ok(u64::from_le_bytes([
-//RS         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-//RS     ]))
-//RS }
-//RS 
-//RS fn read_uleb(buf: &[u8], at: &mut usize) -> Result<usize, WasmDebugError> {
-//RS     let mut result: u64 = 0;
-//RS     let mut shift = 0u32;
-//RS     loop {
-//RS         let byte = *buf
-//RS             .get(*at)
-//RS             .ok_or(WasmDebugError::Malformed("truncated ULEB"))?;
-//RS         *at += 1;
-//RS         result |= u64::from(byte & 0x7f) << shift;
-//RS         if byte & 0x80 == 0 {
-//RS             break;
-//RS         }
-//RS         shift += 7;
-//RS         if shift > 63 {
-//RS             return Err(WasmDebugError::Malformed("ULEB too large"));
-//RS         }
-//RS     }
-//RS     usize::try_from(result).map_err(|_| WasmDebugError::Malformed("ULEB exceeds usize"))
-//RS }
-//RS 
-//RS fn read_sleb(buf: &[u8], at: &mut usize) -> Result<i64, WasmDebugError> {
-//RS     let mut result: i64 = 0;
-//RS     let mut shift = 0u32;
-//RS     loop {
-//RS         let byte = *buf
-//RS             .get(*at)
-//RS             .ok_or(WasmDebugError::Malformed("truncated SLEB"))?;
-//RS         *at += 1;
-//RS         result |= i64::from(byte & 0x7f) << shift;
-//RS         shift += 7;
-//RS         if byte & 0x80 == 0 {
-//RS             if shift < 64 && (byte & 0x40) != 0 {
-//RS                 result |= !0i64 << shift;
-//RS             }
-//RS             return Ok(result);
-//RS         }
-//RS         if shift >= 64 {
-//RS             return Err(WasmDebugError::Malformed("SLEB too large"));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn read_cstring(buf: &[u8], at: &mut usize) -> Result<String, WasmDebugError> {
-//RS     let start = *at;
-//RS     while *at < buf.len() && buf[*at] != 0 {
-//RS         *at += 1;
-//RS     }
-//RS     if *at >= buf.len() {
-//RS         return Err(WasmDebugError::Malformed("unterminated cstring"));
-//RS     }
-//RS     let s = str::from_utf8(&buf[start..*at])
-//RS         .map_err(|_| WasmDebugError::Malformed("cstring is not utf-8"))?
-//RS         .to_string();
-//RS     *at += 1;
-//RS     Ok(s)
-//RS }
-//RS 
-//RS fn put_uleb(out: &mut Vec<u8>, mut value: usize) {
-//RS     loop {
-//RS         let mut byte = (value & 0x7f) as u8;
-//RS         value >>= 7;
-//RS         if value != 0 {
-//RS             byte |= 0x80;
-//RS         }
-//RS         out.push(byte);
-//RS         if value == 0 {
-//RS             break;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn embed_source_mapping_url_appends_custom_section() {
-//RS         let mut wasm = b"\0asm\x01\0\0\0".to_vec();
-//RS         embed_source_mapping_url(&mut wasm, "app.wasm.map").unwrap();
-//RS         let payloads = custom_section_payloads(&wasm, b"sourceMappingURL").unwrap();
-//RS         assert_eq!(payloads, vec![b"app.wasm.map".as_slice()]);
-//RS     }
-//RS }
-// END-PORT-PENDING 0110 crates/jet-foundation/src/WasmDebug.rs:1-586
+// Std-only Wasm DWARF line-table reader and sourceMappingURL custom section.
+use std.str as str
 
+// Rust: crates/jet-foundation/src/WasmDebug.rs:9
+pub struct WasmLineRow {
+    pub address: U64
+    pub file: String
+    pub line: U32
+    pub column: U32
+    pub is_stmt: Bool
+    pub end_sequence: Bool
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:19
+#Error
+pub enum WasmDebugError { Malformed(String) }
+
+// Rust: crates/jet-foundation/src/WasmDebug.rs:24
+pub fn code_section_payload_offset(wasm: View<U8>) -> Int? WasmDebugError! {
+    if wasm.len() < 8 || wasm[0..<8] != [U8]{0, 97, 115, 109, 1, 0, 0, 0}.view() -> return Err(.Malformed("unsupported Wasm header"))
+    at := 8
+    while at < wasm.len() {
+        id :: wasm.get(at) ?? return Err(.Malformed("truncated section id"))
+        at += 1
+        size :: read_uleb(wasm, &at)
+        payload_start :: at
+        end :: at.checked_add(size) ?? return Err(.Malformed("section size overflow"))
+        if end > wasm.len() -> return Err(.Malformed("section extends past file"))
+        if id == 10 -> return Val(payload_start)
+        at = end
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:51
+pub fn parse_debug_line(wasm: View<U8>) -> [WasmLineRow] WasmDebugError! {
+    rows := [WasmLineRow]{}
+    loop payload in custom_section_payloads(wasm, ".debug_line".bytes()) {
+        decode_debug_line_section(payload, &rows)
+    }
+    ^rows
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:60
+pub fn embed_source_mapping_url(wasm: &[U8], url: String) WasmDebugError! {
+    if wasm.len() < 8 || wasm[0..<8] != [U8]{0, 97, 115, 109, 1, 0, 0, 0}.view() -> return Err(.Malformed("unsupported Wasm header"))
+    _ :: custom_section_payloads(wasm.view(), [U8]{}.view())
+    NAME :: "sourceMappingURL"
+    payload := [U8]{}
+    put_uleb(&payload, NAME.len())
+    payload.extend_from_slice(NAME.bytes())
+    payload.extend_from_slice(url.bytes())
+    wasm.push(0)
+    put_uleb(wasm, payload.len())
+    wasm.extend_from_slice(payload.view())
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:77
+pub fn custom_section_payloads(wasm: View<U8>, want_name: View<U8>) -> [View<U8>] WasmDebugError! from wasm {
+    if wasm.len() < 8 || wasm[0..<8] != [U8]{0, 97, 115, 109, 1, 0, 0, 0}.view() -> return Err(.Malformed("unsupported Wasm header"))
+    at := 8
+    found := [View<U8>]{}
+    while at < wasm.len() {
+        id :: wasm.get(at) ?? return Err(.Malformed("truncated section id"))
+        at += 1
+        size :: read_uleb(wasm, &at)
+        end :: at.checked_add(size) ?? return Err(.Malformed("section size overflow"))
+        if end > wasm.len() -> return Err(.Malformed("section extends past file"))
+        payload :: wasm[at..<end]
+        if id == 0 {
+            name_at := 0
+            name_len :: read_uleb(payload, &name_at)
+            name_end :: name_at.checked_add(name_len) ?? return Err(.Malformed("custom name overflow"))
+            if name_end > payload.len() -> return Err(.Malformed("custom name past payload"))
+            name :: payload[name_at..<name_end]
+            if want_name.is_empty() || name == want_name -> found.push(payload[name_end..])
+        }
+        at = end
+    }
+    ^found
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:118
+fn decode_debug_line_section(section: View<U8>, rows: &[WasmLineRow]) WasmDebugError! {
+    at := 0
+    while at < section.len() {
+        unit_start :: at
+        (unit_len, dwarf64) :: read_initial_length(section, &at)
+        header_end :: unit_start.checked_add(if dwarf64 { 12 } else { 4 }) ?? return Err(.Malformed("line unit length overflow"))
+        unit_end :: header_end.checked_add(unit_len) ?? return Err(.Malformed("line unit length overflow"))
+        if unit_end > section.len() -> return Err(.Malformed("line unit past section"))
+        version :: read_u16(section, &at)
+        if version < 2 || version > 5 -> return Err(.Malformed("unsupported .debug_line version"))
+        prologue_length :: if dwarf64 { read_u64(section, &at) as Int } else { read_u32(section, &at) as Int }
+        prologue_limit :: at.checked_add(prologue_length) ?? return Err(.Malformed("prologue length overflow"))
+        if prologue_limit > unit_end -> return Err(.Malformed("prologue past unit"))
+        minimum_instruction_length :: section.get(at) ?? return Err(.Malformed("missing min_inst_length"))
+        at += 1
+        if minimum_instruction_length == 0 -> return Err(.Malformed("min_inst_length is zero"))
+        maximum_operations_per_instruction :: if version >= 4 {
+            v :: section.get(at) ?? return Err(.Malformed("missing max_ops_per_inst"))
+            at += 1
+            if v == 0 -> return Err(.Malformed("max_ops_per_inst is zero"))
+            v
+        } else { 1 as U8 }
+        default_is_stmt :: (section.get(at) ?? return Err(.Malformed("missing default_is_stmt"))) != 0
+        at += 1
+        line_base :: (section.get(at) ?? return Err(.Malformed("missing line_base"))) as I8
+        at += 1
+        line_range :: section.get(at) ?? return Err(.Malformed("missing line_range"))
+        at += 1
+        if line_range == 0 -> return Err(.Malformed("line_range is zero"))
+        opcode_base :: section.get(at) ?? return Err(.Malformed("missing opcode_base"))
+        at += 1
+        standard_opcode_lengths := [U8]{}
+        loop _ in 1..<opcode_base {
+            len :: section.get(at) ?? return Err(.Malformed("truncated opcode lengths"))
+            at += 1
+            standard_opcode_lengths.push(len)
+        }
+        include_directories := [String]{""}
+        loop {
+            dir :: read_cstring(section, &at)
+            if dir.is_empty() -> break
+            include_directories.push(^dir)
+        }
+        file_names := [String]{}
+        loop {
+            name :: read_cstring(section, &at)
+            if name.is_empty() -> break
+            dir_index :: read_uleb(section, &at)
+            _mod_time :: read_uleb(section, &at)
+            _length :: read_uleb(section, &at)
+            dir :: include_directories.get(dir_index).cloned() ?? ""
+            path :: if dir.is_empty() { ^name } else { "{dir}/{name}" }
+            file_names.push(^path)
+        }
+        // Skip remaining prologue bytes (DWARF5 / producer padding).
+        at = prologue_limit
+        address := 0 as U64
+        op_index := 0 as U32
+        file := 1 as U32
+        line := 1 as I64
+        column := 0 as U32
+        is_stmt := default_is_stmt
+        basic_block := false
+        prologue_end := false
+        epilogue_begin := false
+        discriminator := 0 as U32
+        // Rust: crates/jet-foundation/src/WasmDebug.rs:237
+        emit :: fn(rows: &[WasmLineRow], address: U64, file: U32, line: I64, column: U32,
+                   is_stmt: Bool, end_sequence: Bool, file_names: View<String>) Never! {
+            if line <= 0 -> return
+            file_name :: file_names.get(file.saturating_sub(1) as Int).cloned() ?? ""
+            rows.push(WasmLineRow{address: address, file: file_name, line: line as U32,
+                column: column, is_stmt: is_stmt, end_sequence: end_sequence})
+        }
+        while at < unit_end {
+            op :: section.get(at) ?? return Err(.Malformed("truncated line op"))
+            at += 1
+            if op == 0 {
+                len :: read_uleb(section, &at)
+                ext_end :: at.checked_add(len) ?? return Err(.Malformed("ext op length overflow"))
+                if ext_end > unit_end -> return Err(.Malformed("ext op past unit"))
+                if len == 0 -> continue
+                ext :: section.get(at) ?? return Err(.Malformed("missing ext opcode"))
+                at += 1
+                if ext == {
+                    1 -> {
+                        emit(rows, address, file, line, column, is_stmt, true, file_names.view())
+                        address = 0; op_index = 0; file = 1; line = 1; column = 0
+                        is_stmt = default_is_stmt
+                        basic_block = false; prologue_end = false; epilogue_begin = false; discriminator = 0
+                    }
+                    2 -> {
+                        // DW_LNE_set_address
+                        addr_bytes :: ext_end - at
+                        address = if addr_bytes == {
+                            4 -> read_u32(section, &at) as U64
+                            8 -> read_u64(section, &at)
+                            _ -> return Err(.Malformed("unsupported set_address size"))
+                        }
+                        op_index = 0
+                    }
+                    3 -> {
+                        // DW_LNE_define_file — skip for wasm rustc output.
+                        _ :: read_cstring(section, &at)
+                        _ :: read_uleb(section, &at)
+                        _ :: read_uleb(section, &at)
+                        _ :: read_uleb(section, &at)
+                    }
+                    4 -> { discriminator = read_uleb(section, &at) as U32 }
+                    _ -> {}
+                }
+                at = ext_end
+                _ :: (basic_block, prologue_end, epilogue_begin, discriminator)
+            } else if op < opcode_base {
+                if op == {
+                    1 -> {
+                        emit(rows, address, file, line, column, is_stmt, false, file_names.view())
+                        basic_block = false; prologue_end = false; epilogue_begin = false; discriminator = 0
+                    }
+                    2 -> {
+                        op_advance :: read_uleb(section, &at) as U32
+                        advance_pc(&address, &op_index, op_advance, minimum_instruction_length, maximum_operations_per_instruction)
+                    }
+                    3 -> { line += read_sleb(section, &at) }
+                    4 -> { file = read_uleb(section, &at) as U32 }
+                    5 -> { column = read_uleb(section, &at) as U32 }
+                    6 -> { is_stmt = !is_stmt }
+                    7 -> { basic_block = true }
+                    8 -> {
+                        advance :: (255 - opcode_base as U32) / line_range as U32
+                        advance_pc(&address, &op_index, advance, minimum_instruction_length, maximum_operations_per_instruction)
+                    }
+                    9 -> {
+                        operand :: read_u16(section, &at) as U64
+                        address += operand
+                        op_index = 0
+                    }
+                    10 -> { prologue_end = true }
+                    11 -> { epilogue_begin = true }
+                    12 -> { _isa :: read_uleb(section, &at) }
+                    _ -> {
+                        idx :: (op as Int).saturating_sub(1)
+                        args :: standard_opcode_lengths.get(idx) ?? return Err(.Malformed("unknown standard opcode"))
+                        loop _ in 0..<args { _ :: read_uleb(section, &at) }
+                    }
+                }
+            } else {
+                adjusted :: op - opcode_base
+                line_delta :: line_base as I64 + (adjusted % line_range) as I64
+                op_advance :: (adjusted / line_range) as U32
+                advance_pc(&address, &op_index, op_advance, minimum_instruction_length, maximum_operations_per_instruction)
+                line += line_delta
+                emit(rows, address, file, line, column, is_stmt, false, file_names.view())
+                basic_block = false; prologue_end = false; epilogue_begin = false; discriminator = 0
+            }
+        }
+        at = unit_end
+    }
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:445
+fn advance_pc(address: &U64, op_index: &U32, op_advance: U32, min_inst_length: U8, max_ops: U8) Never! {
+    new_op :: (op_index as U64) + op_advance as U64
+    address += (new_op / max_ops as U64) * min_inst_length as U64
+    op_index = (new_op % max_ops as U64) as U32
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:458
+fn read_initial_length(buf: View<U8>, at: &Int) -> (Int, Bool) WasmDebugError! {
+    first :: read_u32(buf, at)
+    if first == 0xffffffff { (read_u64(buf, at) as Int, true) }
+    else if first >= 0xfffffff0 { Err(.Malformed("reserved initial length")) }
+    else { (first as Int, false) }
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:469
+fn read_u16(buf: View<U8>, at: &Int) -> U16 WasmDebugError! {
+    end :: at.checked_add(2) ?? return Err(.Malformed("u16 overflow"))
+    if at < 0 || end > buf.len() -> return Err(.Malformed("truncated u16"))
+    bytes :: buf[at..<end]
+    at = end
+    (bytes[0] as U16) | ((bytes[1] as U16) << 8)
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:480
+fn read_u32(buf: View<U8>, at: &Int) -> U32 WasmDebugError! {
+    end :: at.checked_add(4) ?? return Err(.Malformed("u32 overflow"))
+    if at < 0 || end > buf.len() -> return Err(.Malformed("truncated u32"))
+    bytes :: buf[at..<end]
+    at = end
+    (bytes[0] as U32) | ((bytes[1] as U32) << 8) | ((bytes[2] as U32) << 16) | ((bytes[3] as U32) << 24)
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:491
+fn read_u64(buf: View<U8>, at: &Int) -> U64 WasmDebugError! {
+    end :: at.checked_add(8) ?? return Err(.Malformed("u64 overflow"))
+    if at < 0 || end > buf.len() -> return Err(.Malformed("truncated u64"))
+    bytes :: buf[at..<end]
+    at = end
+    (bytes[0] as U64) | ((bytes[1] as U64) << 8) | ((bytes[2] as U64) << 16) | ((bytes[3] as U64) << 24)
+        | ((bytes[4] as U64) << 32) | ((bytes[5] as U64) << 40) | ((bytes[6] as U64) << 48) | ((bytes[7] as U64) << 56)
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:504
+fn read_uleb(buf: View<U8>, at: &Int) -> Int WasmDebugError! {
+    result := 0 as U64
+    shift := 0 as U32
+    loop {
+        byte :: buf.get(at) ?? return Err(.Malformed("truncated ULEB"))
+        at += 1
+        result |= (byte & 0x7f) as U64 << shift
+        if byte & 0x80 == 0 -> break
+        shift += 7
+        if shift > 63 -> return Err(.Malformed("ULEB too large"))
+    }
+    // GATE #4483: usize conversion uses the execution target width, not host facts.
+    Int.try_from(result) catch { _ -> return Err(.Malformed("ULEB exceeds usize")) }
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:524
+fn read_sleb(buf: View<U8>, at: &Int) -> I64 WasmDebugError! {
+    result := 0 as I64
+    shift := 0 as U32
+    loop {
+        byte :: buf.get(at) ?? return Err(.Malformed("truncated SLEB"))
+        at += 1
+        result |= (byte & 0x7f) as I64 << shift
+        shift += 7
+        if byte & 0x80 == 0 {
+            if shift < 64 && (byte & 0x40) != 0 -> result |= !(0 as I64) << shift
+            return result
+        }
+        if shift >= 64 -> return Err(.Malformed("SLEB too large"))
+    }
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:546
+fn read_cstring(buf: View<U8>, at: &Int) -> String WasmDebugError! {
+    start :: at
+    while at < buf.len() && buf[at] != 0 { at += 1 }
+    if at >= buf.len() -> return Err(.Malformed("unterminated cstring"))
+    text :: str.from_utf8(buf[start..<at]) catch { _ -> return Err(.Malformed("cstring is not utf-8")) }
+    s :: text.to_string()
+    at += 1
+    s
+}
+// Rust: crates/jet-foundation/src/WasmDebug.rs:561
+fn put_uleb(out: &[U8], value: Int) Never! {
+    remaining := value
+    loop {
+        byte := (remaining & 0x7f) as U8
+        remaining >>= 7
+        if remaining != 0 -> byte |= 0x80
+        out.push(byte)
+        if remaining == 0 -> break
+    }
+}

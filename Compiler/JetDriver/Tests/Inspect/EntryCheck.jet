@@ -1,5 +1,6 @@
 // Rust semindex/lib.rs:217-294 and Loader.rs:2363-2459: actual captured
 // authority -> overlay -> structural import directory -> checked facts.
+use jet_foundation.[MIROSTarget]
 use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_embedded_core_sources, jet_driver_compiler_check_with_overlays, jet_driver_compiler_check_loaded_module_rows]
 use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
 use jet_foundation.[foundation_embedded_core]
@@ -30,7 +31,7 @@ fn entry_check_request(source: String) -> JetDriverCompileRequest Never! {
             }, entry_root_identity: "entrycheck-root", entry_path: entry_check_path("/entrycheck/staged/candidate.jet"),
         },
         canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
-        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("entrycheck-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), loader_host_os: Val(MIROSTarget.Linux), loader_host_triple: Val("x86_64-unknown-linux-gnu"), compiler_identity: Val("entrycheck-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
         eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
         record_store: None, trace_sink: None, mir_lint_every_pass: false,
     }

@@ -1,542 +1,230 @@
-// PORT-PENDING 0397 crates-jet-sema-src-sema-checkerinfer-calls-module-group: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:1-538
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-//RS use crate::Sema::Checker;
-//RS use crate::Sema::Captures::expr_refs_name;
-//RS use crate::AST::{AccessConvention, CtValue, Expr, LValue, LambdaBody, PlaceAccess, Stmt};
-//RS use jet_foundation::MIR::{
-//RS     MirDecisionDisposition, MirDecisionKind, MirDecisionRow,
-//RS };
-//RS 
-//RS const LINT_UNREACHABLE_AFTER_LOOP: &str = "unreachable_after_loop";
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     fn attach_decision_row(
-//RS         &self,
-//RS         diagnostic: Diagnostic,
-//RS         kind: MirDecisionKind,
-//RS         disposition: MirDecisionDisposition,
-//RS         span: Span,
-//RS         rule: &str,
-//RS         reason: &str,
-//RS     ) -> Diagnostic {
-//RS         diagnostic.with_decision_row(MirDecisionRow::new(
-//RS             kind,
-//RS             disposition,
-//RS             None,
-//RS             self.fn_name.clone(),
-//RS             span,
-//RS             rule,
-//RS             reason,
-//RS             "sema.loop-liveness",
-//RS             "static-flow-proof",
-//RS         ))
-//RS     }
-//RS 
-//RS     /// Emit statement-local loop/liveness guidance after the statement has been
-//RS     /// type-checked. The caller supplies the reachability before the statement
-//RS     /// so a constant-true loop can still report its own constant condition.
-//RS     pub(crate) fn emit_loop_liveness_lints_for_stmt(
-//RS         &mut self,
-//RS         stmt: &Stmt,
-//RS         reachable_before: bool,
-//RS         effect_free: bool,
-//RS     ) {
-//RS         if !reachable_before {
-//RS             return;
-//RS         }
-//RS         self.emit_constant_loop_condition_lint(stmt);
-//RS         self.emit_discarded_expression_lint(stmt, effect_free);
-//RS         self.emit_mutable_never_reassigned_lint(stmt);
-//RS         self.emit_state_loop_unchanged_lint(stmt);
-//RS     }
-//RS 
-//RS     /// Report the first statement after an unconditional loop. This runs from
-//RS     /// the block walker before the statement consumes its marker facts, so an
-//RS     /// adjacent `#allow(unreachable_after_loop)` can suppress just this report.
-//RS     pub(crate) fn emit_unreachable_after_loop(&mut self, previous: &Stmt, current: &Stmt) {
-//RS         if self.flow.reachable
-//RS             || !self.is_unconditional_loop(previous)
-//RS             || self.statement_lint_is_allowed(current.span(), LINT_UNREACHABLE_AFTER_LOOP)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let diagnostic = self.attach_decision_row(
-//RS             Diagnostic::from_row("L0525", &[], Some(current.span())).with_edit(TextEdit {
-//RS                 span: current.span(),
-//RS                 new_text: String::new(),
-//RS             }),
-//RS             MirDecisionKind::Unreachable,
-//RS             MirDecisionDisposition::Selected,
-//RS             current.span(),
-//RS             "unreachable-after-loop",
-//RS             "the unconditional loop has no reachable break before this statement",
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn emit_constant_loop_condition_lint(&mut self, stmt: &Stmt) {
-//RS         let (condition, value, removable) = match stmt {
-//RS             Stmt::While { cond, .. } => {
-//RS                 let Some(value) = self.constant_bool(cond) else {
-//RS                     return;
-//RS                 };
-//RS                 (cond, value, true)
-//RS             }
-//RS             Stmt::CountedLoop { cond, .. } => {
-//RS                 let Some(value) = self.constant_bool(cond) else {
-//RS                     return;
-//RS                 };
-//RS                 // A counted/state loop cannot become `loop { … }` by deleting
-//RS                 // its condition: its initializer is part of the loop header.
-//RS                 (cond, value, false)
-//RS             }
-//RS             _ => return,
-//RS         };
-//RS         let span = condition.span();
-//RS         if span.start >= span.end {
-//RS             return;
-//RS         }
-//RS         // Only the literal `true` in a plain conditional loop has a
-//RS         // behavior-preserving header rewrite. Folded expressions still
-//RS         // receive the useful lint, but no automatic edit is guessed for them.
-//RS         let mut diagnostic = Diagnostic::from_row("L0526", &[], Some(span));
-//RS         if removable
-//RS             && value
-//RS             && matches!(condition.without_parens(), Expr::Bool(true, _))
-//RS         {
-//RS             if let Some(header_span) = self.loop_condition_header_span(stmt, span) {
-//RS                 diagnostic = diagnostic.with_edit(TextEdit {
-//RS                     span: header_span,
-//RS                     new_text: "loop".to_string(),
-//RS                 });
-//RS             }
-//RS         }
-//RS         let diagnostic = self.attach_decision_row(
-//RS             diagnostic,
-//RS             MirDecisionKind::LoopInvariant,
-//RS             MirDecisionDisposition::Rejected,
-//RS             span,
-//RS             "constant-loop-condition",
-//RS             "the loop condition is constant under the checked flow facts",
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn emit_discarded_expression_lint(&mut self, stmt: &Stmt, effect_free: bool) {
-//RS         if self.arrow_loop_body || !effect_free {
-//RS             return;
-//RS         }
-//RS         let Stmt::Expr(expr) = stmt else {
-//RS             return;
-//RS         };
-//RS         // D-DISCARD1=A: a lost function tail is the E0433 error instead.
-//RS         if self.lost_tail_span == Some(expr.span()) {
-//RS             return;
-//RS         }
-//RS         let expression = expr.without_parens();
-//RS         let discarded = match expression {
-//RS             Expr::Ident(name, _) => !name.starts_with('\0') && name != "_",
-//RS             Expr::Unary(..) | Expr::Binary(..) | Expr::CompareChain { .. } => true,
-//RS             _ => false,
-//RS         };
-//RS         if !discarded {
-//RS             return;
-//RS         }
-//RS         let span = expr.span();
-//RS         if span.start >= span.end {
-//RS             return;
-//RS         }
-//RS         // `effect_free` is the post-check delta of the canonical effect
-//RS         // accumulators, so removing this expression cannot drop a call or
-//RS         // other recorded ambient effect.
-//RS         let diagnostic = self.attach_decision_row(
-//RS             Diagnostic::from_row("L0527", &[], Some(span)).with_edit(TextEdit {
-//RS                 span,
-//RS                 new_text: String::new(),
-//RS             }),
-//RS             MirDecisionKind::LoopInvariant,
-//RS             MirDecisionDisposition::Rejected,
-//RS             span,
-//RS             "discarded-expression",
-//RS             "the expression has no checked effect and its value is discarded",
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS 
-//RS     }
-//RS 
-//RS     fn emit_mutable_never_reassigned_lint(&mut self, stmt: &Stmt) {
-//RS         let Stmt::Val(binding) = stmt else {
-//RS             return;
-//RS         };
-//RS         // A compiler-generated body (derived impls of a field-less type) has
-//RS         // no authored binding to fix; only user-written code gets the lint.
-//RS         if !binding.mutable || binding.name.is_empty() || self.compiler_generated {
-//RS             return;
-//RS         }
-//RS         let Some((info_mutable, info_sigil_span)) = self
-//RS             .lookup(&binding.name)
-//RS             .map(|info| (info.mutable, info.binding_sigil_span))
-//RS         else {
-//RS             return;
-//RS         };
-//RS         if !info_mutable {
-//RS             return;
-//RS         }
-//RS         let name = binding.name.as_str();
-//RS         let tail_has_write = {
-//RS             let tail = self.current_stmt_tail();
-//RS             tail.iter().any(|stmt| statement_writes_name(stmt, name))
-//RS         };
-//RS         if tail_has_write {
-//RS             return;
-//RS         }
-//RS         // Only a written `:=` can become `::`. Compiler-created locals carry
-//RS         // no sigil and are not the author's to rewrite.
-//RS         let Some(sigil_span) = binding.sigil_span.or(info_sigil_span) else {
-//RS             return;
-//RS         };
-//RS         let diagnostic = Diagnostic::from_row("L0528", &[], Some(binding.name_span)).with_edit(
-//RS             TextEdit {
-//RS                 span: sigil_span,
-//RS                 new_text: "::".to_string(),
-//RS             },
-//RS         );
-//RS         let diagnostic = self.attach_decision_row(
-//RS             diagnostic,
-//RS             MirDecisionKind::LoopInvariant,
-//RS             MirDecisionDisposition::Rejected,
-//RS             binding.name_span,
-//RS             "mutable-never-reassigned",
-//RS             "the mutable binding has no checked write in the remaining block",
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn emit_state_loop_unchanged_lint(&mut self, stmt: &Stmt) {
-//RS         let Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             label,
-//RS             ..
-//RS         } = stmt
-//RS         else {
-//RS             return;
-//RS         };
-//RS         if !init.mutable || init.name.is_empty() || !expr_refs_name(cond, &init.name) {
-//RS             return;
-//RS         }
-//RS         let name = init.name.as_str();
-//RS         if body.iter().any(|statement| statement_writes_name(statement, name))
-//RS             || step
-//RS                 .as_deref()
-//RS                 .is_some_and(|statement| statement_writes_name(statement, name))
-//RS         {
-//RS             return;
-//RS         }
-//RS         let loop_label = label.as_ref().map(|(name, _)| name.as_str());
-//RS         if !state_loop_can_reach_next_turn(body, loop_label) {
-//RS             return;
-//RS         }
-//RS         let diagnostic = self.attach_decision_row(
-//RS             Diagnostic::from_row("L0529", &[], Some(init.name_span)),
-//RS             MirDecisionKind::LoopInvariant,
-//RS             MirDecisionDisposition::Rejected,
-//RS             init.name_span,
-//RS             "state-loop-unchanged",
-//RS             "the state-loop condition reads unchanged header state before another turn",
-//RS         );
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     fn is_unconditional_loop(&self, stmt: &Stmt) -> bool {
-//RS         match stmt {
-//RS             Stmt::Loop { .. } => {
-//RS                 crate::Sema::Diagnostics::block_definitely_exits(std::slice::from_ref(stmt))
-//RS             }
-//RS             Stmt::While { cond, .. } | Stmt::CountedLoop { cond, .. }
-//RS                 if self.constant_bool(cond) == Some(true) =>
-//RS             {
-//RS                 crate::Sema::Diagnostics::block_definitely_exits(std::slice::from_ref(stmt))
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn constant_bool(&self, expr: &Expr) -> Option<bool> {
-//RS         if let Expr::Bool(value, _) = expr.without_parens() {
-//RS             return Some(*value);
-//RS         }
-//RS         match self.evaluate_constant(expr) {
-//RS             Some(CtValue::Bool(value)) => Some(value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     fn loop_condition_header_span(&self, stmt: &Stmt, condition: Span) -> Option<Span> {
-//RS         let statement = stmt.span();
-//RS         let prefix = self.source.get(statement.start..condition.start)?;
-//RS         let loop_keyword = prefix.rfind("loop");
-//RS         let while_keyword = prefix.rfind("while");
-//RS         let keyword = match (loop_keyword, while_keyword) {
-//RS             (Some(loop_keyword), Some(while_keyword)) => loop_keyword.max(while_keyword),
-//RS             (Some(keyword), None) | (None, Some(keyword)) => keyword,
-//RS             (None, None) => return None,
-//RS         };
-//RS         Some(Span::new(statement.start + keyword, condition.end))
-//RS     }
-//RS 
-//RS     fn current_stmt_tail(&self) -> &[Stmt] {
-//RS         if self.stmt_tail_ptr.is_null() || self.stmt_tail_len == 0 {
-//RS             return &[];
-//RS         }
-//RS         // SAFETY: `check_block_inner` sets this pointer and length from the
-//RS         // current block's `stmts[i + 1..]`; the AST outlives this checker and
-//RS         // this helper only reads it while that statement is being checked.
-//RS         unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) }
-//RS     }
-//RS 
-//RS     fn statement_lint_is_allowed(&self, target: Span, lint_name: &str) -> bool {
-//RS         self.rule_facts.iter().any(|application| {
-//RS             if application.marker.name != crate::Syntax::MARKER_ALLOW
-//RS                 || !matches!(
-//RS                     application.site,
-//RS                     Some(crate::Policy::RuleSite::Block | crate::Policy::RuleSite::Statement)
-//RS                 )
-//RS             {
-//RS                 return false;
-//RS             }
-//RS             let target_matches = application.target == Some(target)
-//RS                 || (application.target.is_none()
-//RS                     && application.marker.span.start <= target.start.saturating_add(1)
-//RS                     && target.start <= application.marker.span.start);
-//RS             target_matches
-//RS                 && application
-//RS                     .marker
-//RS                     .args
-//RS                     .iter()
-//RS                     .filter_map(crate::AST::MarkerCallArg::as_expr)
-//RS                     .any(|argument| {
-//RS                         matches!(argument, Expr::Ident(name, _) if name == lint_name)
-//RS                     })
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS fn state_loop_can_reach_next_turn(body: &[Stmt], label: Option<&str>) -> bool {
-//RS     if !crate::Sema::Diagnostics::block_definitely_exits(body) {
-//RS         return true;
-//RS     }
-//RS     // `continue` is an exit from the current body, but it still reaches the
-//RS     // next turn. Keep it distinct from an unconditional `break`/`return`.
-//RS     for statement in body {
-//RS         if statement_contains_current_continue(statement, label) {
-//RS             return true;
-//RS         }
-//RS         if crate::Sema::Diagnostics::block_definitely_exits(std::slice::from_ref(statement)) {
-//RS             return false;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn body_contains_current_continue(body: &[Stmt], label: Option<&str>) -> bool {
-//RS     body.iter()
-//RS         .any(|stmt| statement_contains_current_continue(stmt, label))
-//RS }
-//RS 
-//RS fn statement_contains_current_continue(stmt: &Stmt, label: Option<&str>) -> bool {
-//RS     match stmt {
-//RS         Stmt::Continue(_) => true,
-//RS         Stmt::ContinueLabel(name, _) => label == Some(name.as_str()),
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             arms.iter()
-//RS                 .any(|arm| body_contains_current_continue(&arm.body, label))
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_some_and(|body| body_contains_current_continue(body, label))
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             body_contains_current_continue(then_body, label)
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_some_and(|body| body_contains_current_continue(body, label))
-//RS         }
-//RS         Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => body_contains_current_continue(body, label),
-//RS         // A nested loop owns its unlabelled `next`; do not mistake it for an
-//RS         // iteration of this state loop. Other statements cannot contain the
-//RS         // current loop's control transfer.
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn statement_writes_name(stmt: &Stmt, name: &str) -> bool {
-//RS     let direct = match stmt {
-//RS         Stmt::Assign { target, .. } => lvalue_writes_name(target, name),
-//RS         _ => false,
-//RS     };
-//RS     if direct || nested_direct_assignment(stmt, name) {
-//RS         return true;
-//RS     }
-//RS     let mut writes = false;
-//RS     stmt.for_each_expr(|expr| {
-//RS         writes |= expression_writes_name(expr, name);
-//RS     });
-//RS     writes
-//RS }
-//RS 
-//RS fn expression_writes_name(expr: &Expr, name: &str) -> bool {
-//RS     match expr.without_parens() {
-//RS         Expr::Place(inner, PlaceAccess::Write, _) => expr_root_name(inner) == Some(name),
-//RS         Expr::Call(call) => call.args.iter().any(|arg| {
-//RS             arg.convention == AccessConvention::Write
-//RS                 && expr_root_name(&arg.expr) == Some(name)
-//RS         }),
-//RS         Expr::CallValue { args, .. } => args.iter().any(|arg| {
-//RS             arg.convention == AccessConvention::Write
-//RS                 && expr_root_name(&arg.expr) == Some(name)
-//RS         }),
-//RS         Expr::MethodCall {
-//RS             receiver, args, ..
-//RS         } => {
-//RS             expr_root_name(receiver) == Some(name)
-//RS                 || args.iter().any(|arg| {
-//RS                     arg.convention == AccessConvention::Write
-//RS                         && expr_root_name(&arg.expr) == Some(name)
-//RS                 })
-//RS         }
-//RS         Expr::Lambda(lambda) => match &lambda.body {
-//RS             LambdaBody::Expr(body) => expression_writes_name(body, name),
-//RS             LambdaBody::Block(body) => body.iter().any(|stmt| statement_writes_name(stmt, name)),
-//RS         },
-//RS         Expr::If {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             then_body.iter().any(|stmt| statement_writes_name(stmt, name))
-//RS                 || else_body.iter().any(|stmt| statement_writes_name(stmt, name))
-//RS         }
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => expression_writes_name(value, name) || fallback_writes_name(fallback, name),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn fallback_writes_name(fallback: &crate::AST::OrFallback, name: &str) -> bool {
-//RS     match fallback {
-//RS         crate::AST::OrFallback::Value(value) => expression_writes_name(value, name),
-//RS         crate::AST::OrFallback::Block { body, value, .. } => {
-//RS             body.iter().any(|stmt| statement_writes_name(stmt, name))
-//RS                 || value
-//RS                     .as_deref()
-//RS                     .is_some_and(|value| expression_writes_name(value, name))
-//RS         }
-//RS         crate::AST::OrFallback::Return(Some(value), _) => expression_writes_name(value, name),
-//RS         crate::AST::OrFallback::Panic { args, .. } => args.iter().any(|arg| {
-//RS             arg.convention == AccessConvention::Write
-//RS                 && expr_root_name(&arg.expr) == Some(name)
-//RS         }),
-//RS         crate::AST::OrFallback::Return(None, _)
-//RS         | crate::AST::OrFallback::Break(_)
-//RS         | crate::AST::OrFallback::Continue(_)
-//RS         | crate::AST::OrFallback::BreakLabel(..)
-//RS         | crate::AST::OrFallback::ContinueLabel(..) => false,
-//RS     }
-//RS }
-//RS 
-//RS fn nested_direct_assignment(stmt: &Stmt, name: &str) -> bool {
-//RS     fn body_writes(body: &[Stmt], name: &str) -> bool {
-//RS         body.iter().any(|stmt| statement_writes_name(stmt, name))
-//RS     }
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::Layout { body, .. } => body_writes(body, name),
-//RS         Stmt::CountedLoop { step, body, .. } => {
-//RS             step.as_deref()
-//RS                 .is_some_and(|step| statement_writes_name(step, name))
-//RS                 || body_writes(body, name)
-//RS         }
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             arms.iter().any(|arm| body_writes(&arm.body, name))
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_some_and(|body| body_writes(body, name))
-//RS         }
-//RS         Stmt::TaskGroup { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => body_writes(body, name),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             body_writes(then_body, name)
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_some_and(|body| body_writes(body, name))
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn lvalue_writes_name(target: &LValue, name: &str) -> bool {
-//RS     match target {
-//RS         LValue::Local { name: candidate, .. } => candidate == name,
-//RS         LValue::Field { base, .. } | LValue::Index { base, .. } => {
-//RS             expr_root_name(base) == Some(name)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn expr_root_name(expr: &Expr) -> Option<&str> {
-//RS     crate::Sema::Diagnostics::expr_root_ident(expr.without_parens())
-//RS }
-// END-PORT-PENDING 0397 crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:1-538
+use jet_foundation.[Diagnostic, Span, TextEdit, AccessConvention, CtValue, Expr, LValue, LambdaBody, PlaceAccess, Stmt, OrFallback, TEXT_NUL, MirDecisionDisposition, MirDecisionKind, MirDecisionRow]
+use jet_sema.[Checker, expr_refs_name, block_definitely_exits, expr_root_ident, RuleSite]
+use jet_syntax as Syntax
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:9
+LINT_UNREACHABLE_AFTER_LOOP :: "unreachable_after_loop"
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:12
+    fn attach_decision_row(self: &Self, diagnostic: Diagnostic, kind: MirDecisionKind, disposition: MirDecisionDisposition, span: Span, rule: String, reason: String) -> Diagnostic {
+        diagnostic.with_decision_row(MirDecisionRow.new(kind, disposition, None, self.fn_name.clone(), span, rule, reason, "sema.loop-liveness", "static-flow-proof"))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:37
+    pub fn emit_loop_liveness_lints_for_stmt(self: &Self, stmt: &Stmt, reachable_before: Bool, effect_free: Bool) {
+        if !reachable_before -> return
+        self.emit_constant_loop_condition_lint(stmt)
+        self.emit_discarded_expression_lint(stmt, effect_free)
+        self.emit_mutable_never_reassigned_lint(stmt)
+        self.emit_state_loop_unchanged_lint(stmt)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:55
+    pub fn emit_unreachable_after_loop(self: &Self, previous: &Stmt, current: &Stmt) {
+        if self.flow.reachable || !self.is_unconditional_loop(previous) || self.statement_lint_is_allowed(current.span(), LINT_UNREACHABLE_AFTER_LOOP) -> return
+        diagnostic :: self.attach_decision_row(
+            Diagnostic.from_row("L0525", [], Val(current.span())).with_edit(TextEdit{span: current.span(), new_text: ""}),
+            MirDecisionKind.Unreachable, MirDecisionDisposition.Selected, current.span(),
+            "unreachable-after-loop", "the unconditional loop has no reachable break before this statement")
+        self.diags.push(^diagnostic)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:76
+    fn emit_constant_loop_condition_lint(self: &Self, stmt: &Stmt) {
+        (condition, value, removable) :: if stmt == {
+            .While{cond, ..} -> (cond, self.constant_bool(cond) ?? return, true)
+            .CountedLoop{cond, ..} -> (cond, self.constant_bool(cond) ?? return, false)
+            _ -> return
+        }
+        span :: condition.span()
+        if span.start >= span.end -> return
+        diagnostic := Diagnostic.from_row("L0526", [], Val(span))
+        // Only a literal true in a plain conditional loop admits a header edit.
+        if removable && value && condition.without_parens() == .Bool(true, _) {
+            if self.loop_condition_header_span(stmt, span) == .Val(header_span) {
+                diagnostic = diagnostic.with_edit(TextEdit{span: header_span, new_text: "loop"})
+            }
+        }
+        diagnostic = self.attach_decision_row(^diagnostic, MirDecisionKind.LoopInvariant, MirDecisionDisposition.Rejected, span, "constant-loop-condition", "the loop condition is constant under the checked flow facts")
+        self.diags.push(^diagnostic)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:124
+    fn emit_discarded_expression_lint(self: &Self, stmt: &Stmt, effect_free: Bool) {
+        if self.arrow_loop_body || !effect_free -> return
+        if stmt == .Expr(expr) {
+            if self.lost_tail_span == Val(expr.span()) -> return
+            discarded :: if expr.without_parens() == {
+                .Ident(name, _) -> !name.starts_with(TEXT_NUL) && name != "_"
+                .Unary(..) | .Binary(..) | .CompareChain{..} -> true
+                _ -> false
+            }
+            if !discarded -> return
+            span :: expr.span()
+            if span.start >= span.end -> return
+            diagnostic :: self.attach_decision_row(
+                Diagnostic.from_row("L0527", [], Val(span)).with_edit(TextEdit{span: span, new_text: ""}),
+                MirDecisionKind.LoopInvariant, MirDecisionDisposition.Rejected, span,
+                "discarded-expression", "the expression has no checked effect and its value is discarded")
+            self.diags.push(^diagnostic)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:166
+    fn emit_mutable_never_reassigned_lint(self: &Self, stmt: &Stmt) {
+        if stmt == .Val(binding) {
+            if !binding.mutable || binding.name.is_empty() || self.compiler_generated -> return
+            (info_mutable, info_sigil_span) :: self.lookup(binding.name).map(fn(info) { (info.mutable, info.binding_sigil_span) }) ?? return
+            if !info_mutable -> return
+            name :: binding.name
+            if self.current_stmt_tail().iter().any(fn(stmt) { statement_writes_name(stmt, name) }) -> return
+            sigil_span :: binding.sigil_span.or(info_sigil_span) ?? return
+            diagnostic :: Diagnostic.from_row("L0528", [], Val(binding.name_span)).with_edit(TextEdit{span: sigil_span, new_text: "::"})
+            diagnostic :: self.attach_decision_row(^diagnostic, MirDecisionKind.LoopInvariant, MirDecisionDisposition.Rejected,
+                binding.name_span, "mutable-never-reassigned", "the mutable binding has no checked write in the remaining block")
+            self.diags.push(^diagnostic)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:214
+    fn emit_state_loop_unchanged_lint(self: &Self, stmt: &Stmt) {
+        if stmt == .CountedLoop{init, cond, step, body, label, ..} {
+            if !init.mutable || init.name.is_empty() || !expr_refs_name(cond, init.name) -> return
+            name :: init.name
+            if body.iter().any(fn(stmt) { statement_writes_name(stmt, name) }) || step.as_ref().is_some_and(fn(stmt) { statement_writes_name(stmt, name) }) -> return
+            loop_label :: label.as_ref().map(fn((name, _)) { name })
+            if !state_loop_can_reach_next_turn(&body, loop_label) -> return
+            diagnostic :: self.attach_decision_row(Diagnostic.from_row("L0529", [], Val(init.name_span)),
+                MirDecisionKind.LoopInvariant, MirDecisionDisposition.Rejected, init.name_span,
+                "state-loop-unchanged", "the state-loop condition reads unchanged header state before another turn")
+            self.diags.push(^diagnostic)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:252
+    fn is_unconditional_loop(self: &Self, stmt: &Stmt) -> Bool {
+        if stmt == {
+            .Loop{..} -> block_definitely_exits(std.slice.from_ref(stmt))
+            .While{cond, ..} | .CountedLoop{cond, ..} -> self.constant_bool(cond) == Val(true) && block_definitely_exits(std.slice.from_ref(stmt))
+            _ -> false
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:266
+    fn constant_bool(self: &Self, expr: &Expr) -> Bool? {
+        if expr.without_parens() == .Bool(value, _) -> return Val(value)
+        if self.evaluate_constant(expr) == .Val(.Bool(value)) -> Val(value) else -> None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:275
+    fn loop_condition_header_span(self: &Self, stmt: &Stmt, condition: Span) -> Span? {
+        statement :: stmt.span()
+        prefix :: self.source.get(statement.start..condition.start) ?? return None
+        keyword :: if (prefix.rfind("loop"), prefix.rfind("while")) == {
+            (.Val(loop_keyword), .Val(while_keyword)) -> loop_keyword.max(while_keyword)
+            (.Val(keyword), .None) | (.None, .Val(keyword)) -> keyword
+            (.None, .None) -> return None
+        }
+        Val(Span.new(statement.start + keyword, condition.end))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:288
+    #Unsafe("read the live AST tail installed by check_block_inner; the AST outlives the checker")
+    fn current_stmt_tail(self: &Self) -> &[Stmt] {
+        if self.stmt_tail_ptr.is_null() || self.stmt_tail_len == 0 -> return &[]
+        // GATE #4494: borrowed retained AST slice, never a Rust callback.
+        std.slice.from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:298
+    fn statement_lint_is_allowed(self: &Self, target: Span, lint_name: String) -> Bool {
+        self.rule_facts.iter().any(fn(application) {
+            if application.marker.name != Syntax.MARKER_ALLOW -> return false
+            valid_site :: if application.site == .Val(.Block) | .Val(.Statement) -> true else -> false
+            if !valid_site -> return false
+            target_matches :: application.target == Val(target) || (application.target.is_none() && application.marker.span.start <= target.start.saturating_add(1) && target.start <= application.marker.span.start)
+            target_matches && application.marker.args.iter().filter_map(fn(arg) { arg.as_expr() }).any(fn(argument) {
+                if argument == .Ident(name, _) -> name == lint_name else -> false
+            })
+        })
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:325
+fn state_loop_can_reach_next_turn(body: &[Stmt], label: String?) -> Bool {
+    if !block_definitely_exits(body) -> return true
+    for statement in body {
+        if statement_contains_current_continue(statement, label) -> return true
+        if block_definitely_exits(std.slice.from_ref(statement)) -> return false
+    }
+    false
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:342
+fn body_contains_current_continue(body: &[Stmt], label: String?) -> Bool {
+    body.iter().any(fn(stmt) { statement_contains_current_continue(stmt, label) })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:347
+fn statement_contains_current_continue(stmt: &Stmt, label: String?) -> Bool {
+    if stmt == {
+        .Continue(_) -> true
+        .ContinueLabel(name, _) -> label == Val(name)
+        .Switch{arms, else_body, ..} | .ComptimeSwitch{arms, else_body, ..} -> arms.iter().any(fn(arm) { body_contains_current_continue(&arm.body, label) }) || else_body.as_ref().is_some_and(fn(body) { body_contains_current_continue(body, label) })
+        .ComptimeIf{then_body, else_body, ..} -> body_contains_current_continue(&then_body, label) || else_body.as_ref().is_some_and(fn(body) { body_contains_current_continue(body, label) })
+        .Unsafe{body, ..} | .Impure{body, ..} | .Reactive{body, ..} | .Shield{body, ..} |
+        .Switched{body, ..} | .Region{body, ..} | .Policy{body, ..} | .TaskGroup{body, ..} |
+        .Layout{body, ..} | .AuthorityScope{body, ..} | .ComptimeBlock{body, ..} |
+        .ContextBlock{body, ..} | .Live{body, ..} | .Transact{body, ..} |
+        .AssumeDet{body, ..} | .ScopeMember{body, ..} -> body_contains_current_continue(&body, label)
+        // Nested loops own their unlabelled continue.
+        _ -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:396
+fn statement_writes_name(stmt: &Stmt, name: String) -> Bool {
+    direct :: if stmt == .Assign{target, ..} -> lvalue_writes_name(target, name) else -> false
+    if direct || nested_direct_assignment(stmt, name) -> return true
+    writes := false
+    stmt.for_each_expr(fn(expr) { writes |= expression_writes_name(expr, name) })
+    writes
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:411
+fn expression_writes_name(expr: &Expr, name: String) -> Bool {
+    if expr.without_parens() == {
+        .Place(inner, .Write, _) -> expr_root_name(inner) == Val(name)
+        .Call(call) -> call.args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && expr_root_name(&arg.expr) == Val(name) })
+        .CallValue{args, ..} -> args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && expr_root_name(&arg.expr) == Val(name) })
+        .MethodCall{receiver, args, ..} -> expr_root_name(receiver) == Val(name) || args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && expr_root_name(&arg.expr) == Val(name) })
+        .Lambda(lambda) -> if lambda.body == {
+            .Expr(body) -> expression_writes_name(body, name)
+            .Block(body) -> body.iter().any(fn(stmt) { statement_writes_name(stmt, name) })
+        }
+        .If{then_body, else_body, ..} -> then_body.iter().any(fn(stmt) { statement_writes_name(stmt, name) }) || else_body.iter().any(fn(stmt) { statement_writes_name(stmt, name) })
+        .OrFallback{value, fallback, ..} -> expression_writes_name(value, name) || fallback_writes_name(fallback, name)
+        _ -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:450
+fn fallback_writes_name(fallback: &OrFallback, name: String) -> Bool {
+    if fallback == {
+        .Value(value) -> expression_writes_name(value, name)
+        .Block{body, value, ..} -> body.iter().any(fn(stmt) { statement_writes_name(stmt, name) }) || value.as_ref().is_some_and(fn(value) { expression_writes_name(value, name) })
+        .Return(.Val(value), _) -> expression_writes_name(value, name)
+        .Panic{args, ..} -> args.iter().any(fn(arg) { arg.convention == AccessConvention.Write && expr_root_name(&arg.expr) == Val(name) })
+        .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:472
+fn nested_direct_assignment(stmt: &Stmt, name: String) -> Bool {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:473
+    fn body_writes(body: &[Stmt], name: String) -> Bool { body.iter().any(fn(stmt) { statement_writes_name(stmt, name) }) }
+    if stmt == {
+        .While{body, ..} | .For{body, ..} | .Loop{body, ..} | .Unsafe{body, ..} |
+        .Impure{body, ..} | .Reactive{body, ..} | .Shield{body, ..} | .Switched{body, ..} |
+        .Region{body, ..} | .Policy{body, ..} | .AuthorityScope{body, ..} |
+        .ComptimeBlock{body, ..} | .Live{body, ..} | .Transact{body, ..} |
+        .Layout{body, ..} -> body_writes(&body, name)
+        .CountedLoop{step, body, ..} -> step.as_ref().is_some_and(fn(step) { statement_writes_name(step, name) }) || body_writes(&body, name)
+        .Switch{arms, else_body, ..} | .ComptimeSwitch{arms, else_body, ..} -> arms.iter().any(fn(arm) { body_writes(&arm.body, name) }) || else_body.as_ref().is_some_and(fn(body) { body_writes(body, name) })
+        .TaskGroup{body, ..} | .ContextBlock{body, ..} | .AssumeDet{body, ..} | .ScopeMember{body, ..} -> body_writes(&body, name)
+        .ComptimeIf{then_body, else_body, ..} -> body_writes(&then_body, name) || else_body.as_ref().is_some_and(fn(body) { body_writes(body, name) })
+        _ -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:527
+fn lvalue_writes_name(target: &LValue, name: String) -> Bool {
+    if target == {
+        .Local{name: candidate, ..} -> candidate == name
+        .Field{base, ..} | .Index{base, ..} -> expr_root_name(base) == Val(name)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints/loop_lints.rs:536
+fn expr_root_name(expr: &Expr) -> String? { expr_root_ident(expr.without_parens()) }
 

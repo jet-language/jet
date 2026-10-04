@@ -1,0 +1,34 @@
+use jet_sema.Sema.Bundle.PackageSeal.[encode_summary, decode_summary, map_edges, to_identity, to_alias]
+use jet_sema.Sema.Effects.[EffectSummary]
+use jet_sema.Sema.MemoryFacts.[MemorySummary, MemoryEvent, MemoryEventKind, MemoryCall]
+use jet_sema.Diagnostics.[Span]
+use std.collections.[BTreeSet]
+
+// Rust: crates/jet-sema/src/Sema/Bundle/PackageSeal.rs:1041
+#Test("summary_round_trips_with_stable_edges") {
+    summary := EffectSummary.default()
+    summary.direct = BTreeSet[String].from([String]{"IO"})
+    summary.direct_spans = [String:Span]{"IO": Span.new(3, 9)}
+    summary.edges = BTreeSet[String].from([String]{"util::helper", "__jet_panic__", "bare"})
+    summary.maximal_span = Val(Span.new(1, 2))
+    summary.memory = MemorySummary.default()
+    summary.memory.events = [MemoryEvent]{MemoryEvent.new(MemoryEventKind.ArenaBytes{bytes: Val(U64{64})}, Span.new(4, 5), "arena")}
+    summary.memory.calls = [MemoryCall]{MemoryCall{callee: "util::helper", span: Span.new(6, 7), source: "a.jet", executions: None}}
+    summary.failure_direct = true
+    identities :: [String:String]{"util": "pkg::Source/Util.jet"}
+    stable := summary.clone()
+    map_edges(&stable, fn(edge: String) -> String Never! { to_identity(edge, identities) })
+    assert(stable.edges.contains("{pkg::Source/Util.jet}::helper"))
+    encoded :: encode_summary(stable).unwrap()
+    decoded := decode_summary(encoded).unwrap()
+    // A later bundle names the same module with another loader alias.
+    aliases :: [String:String]{"pkg::Source/Util.jet": "util_2"}
+    seeded := ^decoded
+    map_edges(&seeded, fn(edge: String) -> String Never! { to_alias(edge, aliases) })
+    assert(seeded.edges == BTreeSet[String].from([String]{"util_2::helper", "__jet_panic__", "bare"}))
+    assert(seeded.memory.calls[0].callee == "util_2::helper")
+    assert(seeded.memory.events == summary.memory.events)
+    assert(seeded.direct_spans == summary.direct_spans)
+    assert(seeded.maximal_span == summary.maximal_span)
+    assert(seeded.failure_direct)
+}

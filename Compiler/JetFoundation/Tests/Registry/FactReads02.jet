@@ -1,0 +1,155 @@
+use JetFoundation.Registry.FactReads02.[RowKind, RowTarget, SafeDirection, RegistryRow, Guard, GuardProof, rows, row, fact_declarations, fact_rows, type_plane, type_plane_rows, registered_fact_read, reflection_kind, law_violations, truths, diagnostic_rows, diagnostic, diagnostic_registry_rows]
+use JetFoundation.Registry.FactReads.[fact_read_reflection_kind]
+use JetFoundation.Registry.Diagnostics.[DiagnosticRegistryFix, diagnostic_registry_render, DiagnosticTemplateHole]
+use JetFoundation.Diagnostics.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT]
+
+// Rust: crates/jet-foundation/src/Registry.rs:3695
+#Test("the_one_table_holds_all_five_kinds") {
+    loop kind in [RowKind]{.Marker, .Plane, .Right, .Fact, .Truth, .Diagnostic} {
+        assert(rows().iter().any(fn(candidate) { candidate.kind() == kind }), "no {kind.name()} row in the one table")
+    }
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3713
+#Test("a_target_names_its_kind") {
+    assert(RowTarget.Code([String]{}.view()).kind() == RowKind.Marker)
+    assert(RowTarget.Value.kind() == RowKind.Plane)
+    assert(RowTarget.Scope.kind() == RowKind.Right)
+    assert(RowTarget.Build.kind() == RowKind.Fact)
+    assert(RowTarget.Corpus.kind() == RowKind.Truth)
+    assert(RowTarget.Report.kind() == RowKind.Diagnostic)
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3723
+#Test("type_plane_rows_declare_identity_policy") {
+    assert((row(type_plane("Interval")) ?? panic("interval plane is registered")).is_identity_bearing())
+    assert(!(row(type_plane("Obligation")) ?? panic("obligation plane is registered")).is_identity_bearing())
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3733
+#Test("every_type_plane_has_one_row_from_the_shared_list") {
+    planes :: type_plane_rows().collect()
+    assert(planes.len() == 8)
+    loop candidate in planes {
+        declaration :: fact_declarations().iter().find(fn(declaration) { declaration.name == candidate.name }) ?? panic("type plane has a Prelude declaration")
+        assert(candidate.kind() == RowKind.Plane)
+        assert(candidate.identity_bearing == declaration.identity_bearing)
+        assert(candidate.decision == declaration.decision)
+    }
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3748
+#Test("every_registered_plane_has_one_typed_read_projection") {
+    loop plane in fact_rows() {
+        if plane.kind() != RowKind.Plane -> continue
+        read :: registered_fact_read(plane.name) ?? panic("plane `{plane.name}` has no typed reader")
+        assert(fact_read_reflection_kind(read) == reflection_kind(plane.name))
+        assert(read.registered_planes().any(fn(candidate) { candidate.name == plane.name }), "plane `{plane.name}` resolves to the wrong typed reader")
+    }
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3763
+#Test("every_row_obeys_the_one_way_law") { assert(law_violations() == [String]{}) }
+// Rust: crates/jet-foundation/src/Registry.rs:3769
+#Test("the_guard_names_a_row_that_breaks_the_law") {
+    gate_with_no_direction :: RegistryRow{name: "Wrong", target: .Value, identity_bearing: false,
+        safe_direction: .None, gates: [String]{"approx"}, published_by: None, rule: None,
+        home: None, renderers: [], guard: None, diagnostic: None, decision: "D-TEST"}
+    assert(check([RegistryRow]{gate_with_no_direction}.view()).len() == 1)
+    unspelled := gate_with_no_direction
+    unspelled.gates = [String]{"Trust"}
+    unspelled.safe_direction = .Gain
+    assert(check([RegistryRow]{unspelled}.view())[0].contains("nothing spells"))
+    prover := gate_with_no_direction
+    prover.gates = []
+    prover.safe_direction = .Gain
+    prover.published_by = Val("ownership")
+    assert(check([RegistryRow]{prover}.view())[0].contains("no plane algebra"))
+    structure := gate_with_no_direction
+    structure.name = "Structure.Bad"
+    structure.target = .Build
+    structure.gates = []
+    assert(check([RegistryRow]{structure}.view())[0].contains("structure row"))
+    assert(check([RegistryRow]{gate_with_no_direction, gate_with_no_direction}.view()).len() == 3)
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3820
+#Test("a_registered_truth_with_no_guard_fails_the_lint") {
+    guarded :: RegistryRow{name: "Wrong", target: .Corpus, identity_bearing: false,
+        safe_direction: .None, gates: [], published_by: None, rule: None,
+        home: Val("crates/jet-foundation/src/Registry.rs"), renderers: [String]{"jet explain"},
+        guard: Val(Guard{test: "every_row_states_the_one_way_law", file: "tests/marker_registry_coverage.rs", proof: .CountsSites}),
+        diagnostic: None, decision: "D-TEST"}
+    assert(check([RegistryRow]{guarded}.view()) == [String]{})
+    unguarded := guarded
+    unguarded.guard = None
+    assert(check([RegistryRow]{unguarded}.view())[0].contains("no guard"))
+    homeless := guarded
+    homeless.home = None
+    assert(check([RegistryRow]{homeless}.view())[0].contains("names no home"))
+    unread := guarded
+    unread.renderers = []
+    assert(check([RegistryRow]{unread}.view())[0].contains("names no renderer"))
+    plane := guarded
+    plane.target = .Value
+    assert(check([RegistryRow]{plane}.view())[0].contains("corpus truth"))
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3872
+#Test("every_shipped_truth_is_complete") {
+    names :: truths().map(fn(candidate) { candidate.name }).collect()
+    assert(names.len() >= 7, "the registry is born non-empty")
+    loop candidate in truths() {
+        assert(candidate.home != None, "`{candidate.name}` names no home")
+        assert(!candidate.renderers.is_empty(), "`{candidate.name}` names no renderer")
+        assert(candidate.guard != None, "`{candidate.name}` names no guard")
+    }
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3892
+#Test("a_prover_row_is_read_only") {
+    sendability :: row("Sendability") ?? panic("the prover publishes Sendability")
+    assert(sendability.is_prover_supplied())
+    assert(sendability.safe_direction == SafeDirection.None)
+    assert(sendability.gates.is_empty())
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3900
+#Test("diagnostic_rows_are_typed_and_have_one_source") {
+    assert(diagnostic_rows().len() >= 700)
+    assert((diagnostic("E0102") ?? panic("E0102 row")).severity == DIAGNOSTIC_ERROR)
+    assert((diagnostic("L2001") ?? panic("L2001 row")).severity == DIAGNOSTIC_LINT)
+    loop candidate in diagnostic_rows() {
+        assert(!candidate.code.is_empty())
+        assert(!candidate.what.is_empty())
+        assert(!candidate.why.is_empty())
+        assert(!candidate.fix.is_empty())
+        assert(diagnostic(candidate.code) != None)
+    }
+    assert(diagnostic_registry_rows().count() == diagnostic_rows().len(), "every typed row must be in the shared registration table")
+}
+// Rust: crates/jet-foundation/src/Registry.rs:3925
+#Test("row_templates_and_structured_fixes_are_typed") {
+    layout :: diagnostic("E0959") ?? panic("E0959 row")
+    rendered :: diagnostic_registry_render(layout, [DiagnosticTemplateHole]{
+        DiagnosticTemplateHole{name: "type", value: "Point"}, DiagnosticTemplateHole{name: "member", value: "size"}})
+    assert(rendered.what.contains("Point.size"))
+    crypto :: diagnostic("E2702") ?? panic("E2702 row")
+    assert(crypto.structured_fix == Val(DiagnosticRegistryFix.CryptoMisuse))
+    assert((diagnostic("E0999") ?? panic("E0999 row")).structured_fix == Val(DiagnosticRegistryFix.GeneratedMarkerGroup))
+    loop code in [String]{"E0037", "E0102", "E0111"} {
+        assert((diagnostic(code) ?? panic("{code} row")).structured_fix == Val(DiagnosticRegistryFix.SourceEdit), "{code} must authorize its raise-site edit through the registry")
+    }
+    assert((diagnostic("E0311") ?? panic("E0311 row")).structured_fix == Val(DiagnosticRegistryFix.SuggestedSourceEdit), "E0311 must authorize its suggested raise-site edit through the registry")
+    unsupported :: diagnostic("E0109") ?? panic("E0109 row")
+    assert(unsupported.structured_fix == None, "E0109 must remain conservative until a producer proves a source-derived edit")
+    assert(unsupported.fix_safety == None)
+    assert(unsupported.no_fix_reason != None, "E0109 must retain a reviewed next action for unsupported operands")
+    collection :: diagnostic("E0507") ?? panic("E0507 row")
+    collection_rendered :: diagnostic_registry_render(collection, [DiagnosticTemplateHole]{
+        DiagnosticTemplateHole{name: "name", value: "nums"}, DiagnosticTemplateHole{name: "operation", value: "`nums.push()`"}})
+    assert(collection_rendered.fix.contains("separate result"))
+    assert(collection_rendered.fix.contains("original values"))
+    assert(collection_rendered.fix.contains("explicit work queue"))
+    assert(collection.no_fix_reason != None)
+    assert(collection.structured_fix == None, "E0507 has no machine edit while traversal intent is unknown")
+    assert(collection.fix_safety == None)
+    crypto_rendered :: diagnostic_registry_render(crypto, [DiagnosticTemplateHole]{
+        DiagnosticTemplateHole{name: "why", value: "the bound is 32 bytes"}, DiagnosticTemplateHole{name: "fix", value: "pass 32 bytes"}})
+    assert(crypto_rendered.why == "the bound is 32 bytes")
+    assert(crypto_rendered.fix == "Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass 32 bytes")
+    loop candidate in diagnostic_rows() {
+        if candidate.structured_fix == .Val(fix) { assert(!fix.source_marker().is_empty(), "{candidate.code} has an empty typed fix") }
+    }
+}

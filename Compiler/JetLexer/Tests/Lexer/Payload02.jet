@@ -1,0 +1,20 @@
+// Same-module private-fragment controls for original Strings.rs behavior.
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:111
+#Test("raw_fence_end_requires_the_exact_run_length") {
+    source :: "``a ` {{ }} ``` b``".bytes()
+    assert(raw_fence_end(source, 0, source.len()) == Val(source.len()))
+    assert(raw_fence_end("``open`".bytes(), 0, 7) == None)
+}
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:145
+#Test("interpolation_matching_respects_quotes_and_raw_fences") {
+    source :: "{{`}}` + \"}}\"}}".bytes()
+    assert(string_interpolation_close(source, 0, source.len(), false) == Val(source.len() - 1))
+    source :: "{{value\n}}".bytes()
+    assert(string_interpolation_close(source, 0, source.len(), false) == None)
+    assert(string_interpolation_close(source, 0, source.len(), true) == Val(source.len() - 1))
+}
+// Rust: crates/jet-lexer/src/Lexer/Strings.rs:365
+#Test("triple_close_ignores_delimiters_inside_interpolation") {
+    source :: "\"\"\"{{`\"\"\"`}}\"\"\"".bytes()
+    assert(triple_string_close(source, 0, false) == Val(source.len() - 3))
+}

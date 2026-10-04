@@ -1,1976 +1,301 @@
-// PORT-PENDING 0333 crates-jet-parser-src-parser-items-markers-contracts-module-group: crates/jet-parser/src/Parser/Items/markers_contracts.rs:1-146
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{Diagnostic, Func, Parser, Span, Syntax, TokKind};
-//RS use super::TargetMarker;
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     pub(in crate::Parser) fn func(&mut self) -> Result<Func, Diagnostic> {
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         self.func_with_modifiers(false, false)
-//RS     }
-//RS 
-//RS     /// D-WASM1=A: is the cursor at `#Target(Wasm|JS)`?
-//RS     pub(in crate::Parser) fn at_web_target(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Hash)
-//RS             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TARGET)
-//RS             && matches!(self.peek3().kind, TokKind::LParen)
-//RS     }
-//RS 
-//RS     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#HTML(`.
-//RS     pub(super) fn at_html_marker(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Hash)
-//RS             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_HTML)
-//RS     }
-//RS 
-//RS     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML(Path{"path.html"})` — the file's
-//RS     /// explicit companion host page for `--target=web` builds.
-//RS     pub(super) fn parse_html_marker(
-//RS         &mut self,
-//RS     ) -> Result<(crate::AST::Marker, Option<String>), Diagnostic> {
-//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)?;
-//RS         let path = self.html_from_marker(&marker)?;
-//RS         Ok((marker, path))
-//RS     }
-//RS 
-//RS     pub(super) fn html_from_marker(
-//RS         &self,
-//RS         marker: &crate::AST::Marker,
-//RS     ) -> Result<Option<String>, Diagnostic> {
-//RS         let arguments = self.bound_registered_rule_arguments(marker)?;
-//RS         let Some(path) = arguments.parameter(0) else {
-//RS             return Ok(None);
-//RS         };
-//RS         match path {
-//RS             crate::AST::Expr::TypedLit {
-//RS                 head: Some(crate::AST::Type::Named(name)),
-//RS                 body: crate::AST::TypedLitBody::Value(inner),
-//RS                 ..
-//RS             } if name == Syntax::TYPE_PATH => match inner.as_ref() {
-//RS                 crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-//RS                     crate::AST::StrPart::Lit(s) => Ok(Some(s.clone())),
-//RS                     crate::AST::StrPart::Interp(..) => Ok(None),
-//RS                 },
-//RS                 _ => Ok(None),
-//RS             },
-//RS             crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-//RS                 crate::AST::StrPart::Lit(s) => Ok(Some(s.clone())),
-//RS                 crate::AST::StrPart::Interp(..) => Ok(None),
-//RS             },
-//RS             _ => Ok(None),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-WASM1=A / D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Wasm)` / `#Target(JS)`
-//RS     /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
-//RS     /// backend — a different axis, same marker).
-//RS     pub(in crate::Parser) fn parse_web_target_marker(
-//RS         &mut self,
-//RS     ) -> Result<TargetMarker, Diagnostic> {
-//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)?;
-//RS         self.web_target_from_marker(&marker)
-//RS     }
-//RS 
-//RS     pub(super) fn web_target_from_marker(
-//RS         &self,
-//RS         marker: &crate::AST::Marker,
-//RS     ) -> Result<TargetMarker, Diagnostic> {
-//RS         let arguments = self.bound_registered_rule_arguments(marker)?;
-//RS         let Some(target) = arguments.parameter(0) else {
-//RS             return Err(crate::Policy::marker_argument_shape_error(
-//RS                 Syntax::MARKER_TARGET,
-//RS                 marker.span,
-//RS             ));
-//RS         };
-//RS         let Some(name) = Self::marker_enum_path(target, "Target") else {
-//RS             return Err(crate::Policy::marker_argument_shape_error(
-//RS                 Syntax::MARKER_TARGET,
-//RS                 marker.span,
-//RS             ));
-//RS         };
-//RS         // D-OSTARGET1=A: `#Target(OS.Linux|OS.MacOS|OS.Windows)` — the second,
-//RS         // mutually-exclusive axis (native platform gating on an `impl`).
-//RS         if let Some(os_name) = name.strip_prefix("OS.") {
-//RS             return crate::Syntax::OSTarget::parse(os_name)
-//RS                 .map(TargetMarker::OS)
-//RS                 .ok_or_else(|| {
-//RS                     Diagnostic::error(
-//RS                         "E0003",
-//RS                         format!("`#Target(OS.{os_name})` is not a known native OS"),
-//RS                         "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`".to_string(),
-//RS                         format!(
-//RS                             "write `#Target(OS.{})`, `#Target(OS.{})`, or `#Target(OS.{})`",
-//RS                             Syntax::TARGET_OS_LINUX,
-//RS                             Syntax::TARGET_OS_MACOS,
-//RS                             Syntax::TARGET_OS_WINDOWS,
-//RS                         ),
-//RS                         Some(target.span()),
-//RS                     )
-//RS                 });
-//RS         }
-//RS         if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
-//RS             return Ok(TargetMarker::DefaultWeb);
-//RS         }
-//RS         crate::Syntax::WebBucket::parse(&name)
-//RS                 .map(TargetMarker::Bucket)
-//RS                 .ok_or_else(|| {
-//RS                     Diagnostic::error(
-//RS                     "E0003",
-//RS                         format!("`#Target({name})` is not a known web partition"),
-//RS                     "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)"
-//RS                         .to_string(),
-//RS                     format!(
-//RS                         "write `#Target({})`, `#Target({})`, `#Target({})`, or `#Target(OS.{{Linux|MacOS|Windows}})`",
-//RS                         Syntax::WEB_BUCKET_WASM,
-//RS                         Syntax::WEB_BUCKET_JS,
-//RS                         Syntax::WEB_TARGET_DEFAULT_WEB,
-//RS                     ),
-//RS                     Some(target.span()),
-//RS                 )
-//RS             })
-//RS     }
-//RS 
-//RS     /// E0925: `#Every(…)` without the `#Job` marker it schedules.
-//RS     pub(super) fn e0925_every_without_job(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0925",
-//RS             "`#Every(…)` needs `#Job` on the same function".to_string(),
-//RS             "a schedule only means something on a job — `#Every(…)` names when `#Job` \
-//RS                  runs, it isn't a standalone timer."
-//RS                 .to_string(),
-//RS             "add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
-//RS                  scheduled job."
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS }
-// END-PORT-PENDING 0333 crates/jet-parser/src/Parser/Items/markers_contracts.rs:1-146
+// Private Parser.Items/Entry fragment; canonical declaration AST and parser
+// state stay in their existing owners. Each reused body is mapped explicitly.
+use jet_foundation.[CLICommandBinding, CModuleKind, ConstDef, Diagnostic, EnumLitArg, Expr, Field, Item, Marker, MetaAttr, NamedSpan, RustConstKind, Span, Type, ast_const, diagnostic_from_registry]
+use jet_foundation.Policy.[RuleSite]
+use jet_foundation.Syntax
+use jet_lexer.[TOKEN_AT, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_DOT, TOKEN_EQ, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_COMPTIME, TOKEN_KW_CONST, TOKEN_KW_EXTERN, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_SEMI, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_UNIFIED_ARROW, STRING_PART_TEXT]
 
-// PORT-PENDING 0333 crates-jet-parser-src-parser-items-markers-contracts-module-group: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:1-576
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{describe, Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind};
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// D-ADOPT-GUEST1=A: parse the per-callable C import form. The ordinary
-//RS     /// function parser still owns the Jet signature; its one string body is
-//RS     /// moved into the marker's compile-time symbol fact and never reaches
-//RS     /// expression checking or codegen.
-//RS     pub(super) fn guest_import_fn_from_markers(
-//RS         &mut self,
-//RS         mut markers: Vec<crate::AST::Marker>,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         let function = self.guest_import_func()?;
-//RS         let symbol = match function.body.as_slice() {
-//RS             [crate::AST::Stmt::Expr(crate::AST::Expr::Str(parts, span))]
-//RS                 if parts.len() == 1 => match &parts[0] {
-//RS                     crate::AST::StrPart::Lit(symbol) if !symbol.is_empty() => symbol.clone(),
-//RS                     _ => return Err(Self::guest_import_body_error(*span)),
-//RS                 },
-//RS             _ => return Err(Self::guest_import_body_error(function.span)),
-//RS         };
-//RS         let marker = markers
-//RS             .iter_mut()
-//RS             .find(|marker| Self::is_c_guest_import_marker(marker))
-//RS             .expect("guest import parser branch has a C import marker");
-//RS         marker.ct = Some(crate::AST::CtValue::Str(symbol.clone()));
-//RS         if let Some(application) = self
-//RS             .rule_facts
-//RS             .iter_mut()
-//RS             .rev()
-//RS             .find(|application| application.marker.name_span == marker.name_span)
-//RS         {
-//RS             application.marker.ct = Some(crate::AST::CtValue::Str(symbol));
-//RS         }
-//RS         let mut function = function;
-//RS         function.body.clear();
-//RS         self.apply_function_markers(function, markers)
-//RS     }
-//RS 
-//RS     fn guest_import_body_error(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E3212",
-//RS             "a `#Import(c)` declaration needs one non-empty symbol string".to_string(),
-//RS             "the Jet signature is checked by sema and the string after `=` names the stable C symbol"
-//RS                 .to_string(),
-//RS             "write `#Import(c) fn name(args) Return = \"c_symbol\"`".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn ffi_fn_from_markers(
-//RS         &mut self,
-//RS         markers: Vec<crate::AST::Marker>,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         let decl_start = markers
-//RS             .first()
-//RS             .map_or(self.peek().span.start, |marker| marker.span.start);
-//RS         let Some(ffi) = markers
-//RS             .iter()
-//RS             .find(|marker| marker.name == Syntax::MARKER_FFI)
-//RS         else {
-//RS             return Err(crate::Policy::marker_argument_shape_error(
-//RS                 Syntax::MARKER_FFI,
-//RS                 markers
-//RS                     .first()
-//RS                     .map_or(self.peek().span, |marker| marker.span),
-//RS             ));
-//RS         };
-//RS         let arguments = self.bound_registered_rule_arguments(ffi)?;
-//RS         let Some(crate::AST::Expr::Ident(lang, lang_span)) = arguments.parameter(0) else {
-//RS             return Err(crate::Policy::marker_argument_shape_error(
-//RS                 Syntax::MARKER_FFI,
-//RS                 ffi.span,
-//RS             ));
-//RS         };
-//RS         let lang = lang.clone();
-//RS         let lang_span = *lang_span;
-//RS         let marker_span = ffi.span;
-//RS         // A synthetic `;` may separate the marker line from `fn`/`pub`.
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS         self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
-//RS 
-//RS         // Ordinary Jet signature. Reuse the normal callable result parser
-//RS         // so the retired arrow form and the bare result form agree.
-//RS         let (name, name_span) = self.expect_ident("after `fn`")?;
-//RS         let type_params = self.parse_opt_type_params()?;
-//RS         self.expect(TokKind::LParen, "after the function name")?;
-//RS         let params = self.parse_param_list()?;
-//RS         self.validate_variadic_params(&params);
-//RS         self.validate_param_labels(&params);
-//RS         let (
-//RS             return_type,
-//RS             return_type_span,
-//RS             mut declared_effects,
-//RS             mut effect_via,
-//RS             _prefix_effect_span,
-//RS         ) = self.parse_callable_result_and_prefix_effects()?;
-//RS         if declared_effects.is_none() {
-//RS             let (effects, via) = self.parse_opt_func_effects()?;
-//RS             declared_effects = effects;
-//RS             effect_via = via;
-//RS         }
-//RS 
-//RS         // Value-returning signatures use the canonical callable body arrow.
-//RS         // Unit and unit-fallible signatures keep the no-payload block form.
-//RS         if return_type
-//RS             .as_ref()
-//RS             .is_some_and(Self::return_type_has_value)
-//RS         {
-//RS             self.expect_unified_arrow("before the `#FFI` foreign-source body")?;
-//RS         }
-//RS         self.expect(TokKind::LBrace, "to open the `#FFI` foreign-source body")?;
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         let (source, source_span) = self.expect_inline_foreign_source(&lang, marker_span)?;
-//RS         // The lexer inserts a synthetic `;` statement terminator after the
-//RS         // string; skip it before the closing brace.
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         self.expect(TokKind::RBrace, "to close the `#FFI` foreign-source body")?;
-//RS         let declaration_end = self.toks[self.pos - 1].span.end;
-//RS 
-//RS         let function = Func {
-//RS             span: Span::new(decl_start, declaration_end),
-//RS             is_pub,
-//RS             is_comptime: false,
-//RS             is_package_pub,
-//RS             external_type: None,
-//RS             name,
-//RS             name_span,
-//RS             meta: None,
-//RS             type_params,
-//RS             head_pattern: None,
-//RS             params,
-//RS             return_type,
-//RS             return_type_span,
-//RS             return_view_provenance: None,
-//RS             declared_return_view_provenance: None,
-//RS             gc_return: false,
-//RS             diverges: false,
-//RS             gc_scope: false,
-//RS             is_unsafe: false,
-//RS             unsafe_reason: None,
-//RS             unsafe_span: None,
-//RS             is_pure: false,
-//RS             is_sanitizer: false,
-//RS             scrub_tag: None,
-//RS             is_reactive: false,
-//RS             reactive_upgrades: Vec::new(),
-//RS             is_replayable: false,
-//RS             replayable_span: None,
-//RS             is_job: false,
-//RS             job_span: None,
-//RS             every: None,
-//RS             job_metadata: None,
-//RS             declared_effects,
-//RS             effect_via,
-//RS             state_requires: None,
-//RS             state_transition: None,
-//RS             web_marker: None,
-//RS             is_must_use: false,
-//RS             must_use_span: None,
-//RS             maturity: None,
-//RS             maturity_span: None,
-//RS             kernel: None,
-//RS             is_inline: false,
-//RS             is_inline_always: false,
-//RS             inline_span: None,
-//RS             pre: Vec::new(),
-//RS             post: Vec::new(),
-//RS             inline_foreign: Some(crate::AST::InlineForeign {
-//RS                 lang,
-//RS                 lang_span,
-//RS                 marker_span,
-//RS                 source,
-//RS                 source_span,
-//RS                 asm_contract: None,
-//RS             }),
-//RS             undo: None,
-//RS             markers: Vec::new(),
-//RS             compiler_generated: false,
-//RS             body: Vec::new(),
-//RS         };
-//RS         self.apply_function_markers(function, markers)
-//RS     }
-//RS 
-//RS     /// D-FFI-INLINE1=A (card #501): read the single foreign-source string that
-//RS     /// forms a `#FFI(<lang>) fn` body. Must be exactly one non-interpolated
-//RS     /// string literal (`"""…"""` or `"…"`); anything else — an interpolation,
-//RS     /// a Jet statement, or an empty block — is E0064.
-//RS     fn expect_inline_foreign_source(
-//RS         &mut self,
-//RS         lang: &str,
-//RS         marker_span: Span,
-//RS     ) -> Result<(String, Span), Diagnostic> {
-//RS         let e0064 = |span: Span| {
-//RS             Diagnostic::error(
-//RS                     "E0064",
-//RS                     format!("a `#FFI({lang})` function body must be one string of {lang} source"),
-//RS                     "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract (D-FFI-INLINE1)".to_string(),
-//RS                     format!("write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation"),
-//RS                     Some(span),
-//RS                 )
-//RS         };
-//RS         match &self.peek().kind {
-//RS             TokKind::Str(parts) => {
-//RS                 let parts = parts.clone();
-//RS                 let span = self.bump().span;
-//RS                 match parts.as_slice() {
-//RS                     [StrTokPart::Lit(s)] => Ok((s.clone(), span)),
-//RS                     _ => Err(e0064(span)),
-//RS                 }
-//RS             }
-//RS             TokKind::RawStr(text) => {
-//RS                 let text = text.clone();
-//RS                 let span = self.bump().span;
-//RS                 Ok((text, span))
-//RS             }
-//RS             _ => Err(e0064(marker_span)),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-ADOPT-GUEST1=A: is the cursor at the start of a C FFI module —
-//RS     /// `#Import module …` or `#Bindgen module …`? Retired markers are
-//RS     /// recognized only long enough to teach the move.
-//RS     pub(super) fn at_c_module(&self) -> bool {
-//RS         if !matches!(self.peek().kind, TokKind::Hash) {
-//RS             return false;
-//RS         }
-//RS         let intro_is_c = match &self.peek2().kind {
-//RS             TokKind::KwExtern => true,
-//RS             TokKind::Ident(n) => {
-//RS                 n == Syntax::MARKER_IMPORT
-//RS                     || n == Syntax::MARKER_EXTERN_MODULE_RETIRED
-//RS                     || n == Syntax::MARKER_BINDGEN
-//RS                     || n == Syntax::MARKER_BINDGEN_RETIRED
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
-//RS     }
-//RS 
-//RS     pub(super) fn at_retired_at_c_module(&self) -> bool {
-//RS         if !matches!(self.peek().kind, TokKind::Hash) {
-//RS             return false;
-//RS         }
-//RS         let intro_is_c = match &self.peek2().kind {
-//RS             TokKind::KwExtern => true,
-//RS             TokKind::Ident(n) => n == Syntax::MARKER_BINDGEN_RETIRED,
-//RS             _ => false,
-//RS         };
-//RS         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
-//RS     }
-//RS 
-//RS     /// D-ADOPT-GUEST1=A: parse `#Import module c.<lib> { … }` (overlay) or
-//RS     /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
-//RS     /// declarations share the `extern_fn` shape (`fn name(args) T = "Sym";`).
-//RS     pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
-//RS         use crate::AST::CModuleKind;
-//RS         if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_IMPORT) {
-//RS             // `#Import` is a guest boundary marker, not an applied-rule row.
-//RS             // Keep the module parser on the same path as the per-function
-//RS             // marker while recording its module site for sema.
-//RS             let marker = self.parse_rule_marker()?;
-//RS             let kind = CModuleKind::Extern;
-//RS             let module = self.c_module_after_kind(marker.span, kind)?;
-//RS             self.bind_rule_fact(
-//RS                 marker.name_span,
-//RS                 Some(module.span),
-//RS                 crate::Policy::RuleSite::Module,
-//RS             );
-//RS             return Ok(module);
-//RS         }
-//RS         if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_BINDGEN) {
-//RS             let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Module)?;
-//RS             let kind = CModuleKind::Bindgen;
-//RS             let module = self.c_module_after_kind(marker.span, kind)?;
-//RS             self.bind_rule_fact(
-//RS                 marker.name_span,
-//RS                 Some(module.span),
-//RS                 crate::Policy::RuleSite::Module,
-//RS             );
-//RS             return Ok(module);
-//RS         }
-//RS         let start = self.bump().span; // `#`
-//RS         let kind = match &self.peek().kind {
-//RS             TokKind::KwExtern => {
-//RS                 let span = Span::new(start.start, self.bump().span.end);
-//RS                 let old = format!("#{}", "extern");
-//RS                 self.diags
-//RS                     .push(self.retired_c_module_marker_diag(&old, "#Import", span));
-//RS                 CModuleKind::Extern
-//RS             }
-//RS             TokKind::Ident(n) if n == Syntax::MARKER_IMPORT => {
-//RS                 self.bump();
-//RS                 CModuleKind::Extern
-//RS             }
-//RS             TokKind::Ident(n) if n == Syntax::MARKER_EXTERN_MODULE_RETIRED => {
-//RS                 let span = Span::new(start.start, self.bump().span.end);
-//RS                 self.diags.push(self.retired_c_module_marker_diag(
-//RS                     &format!("#{}", Syntax::MARKER_EXTERN_MODULE_RETIRED),
-//RS                     &format!("#{}", Syntax::MARKER_IMPORT),
-//RS                     span,
-//RS                 ));
-//RS                 CModuleKind::Extern
-//RS             }
-//RS             TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN => {
-//RS                 self.bump();
-//RS                 CModuleKind::Bindgen
-//RS             }
-//RS             TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN_RETIRED => {
-//RS                 let span = Span::new(start.start, self.bump().span.end);
-//RS                 let old = format!("#{}", Syntax::MARKER_BINDGEN_RETIRED);
-//RS                 self.diags
-//RS                     .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
-//RS                 CModuleKind::Bindgen
-//RS             }
-//RS             other => {
-//RS                 return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         format!(
-//RS                             "expected `{}` or `{}` after `@`, found {}",
-//RS                             Syntax::MARKER_IMPORT,
-//RS                             Syntax::MARKER_BINDGEN,
-//RS                             describe(other)
-//RS                         ),
-//RS                         "a C FFI module begins with `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
-//RS                         "write: #Import module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS             }
-//RS         };
-//RS         self.c_module_after_kind(start, kind)
-//RS     }
-//RS 
-//RS     pub(super) fn retired_at_c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
-//RS         use crate::AST::CModuleKind;
-//RS         let start = self.bump().span; // `@`
-//RS         let kind = match &self.peek().kind {
-//RS             TokKind::KwExtern => {
-//RS                 let span = Span::new(start.start, self.bump().span.end);
-//RS                 let old = format!("#{}", "extern");
-//RS                 self.diags
-//RS                     .push(self.retired_c_module_marker_diag(&old, "#Import", span));
-//RS                 CModuleKind::Extern
-//RS             }
-//RS             TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN_RETIRED => {
-//RS                 let span = Span::new(start.start, self.bump().span.end);
-//RS                 let old = format!("#{}", Syntax::MARKER_BINDGEN_RETIRED);
-//RS                 self.diags
-//RS                     .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
-//RS                 CModuleKind::Bindgen
-//RS             }
-//RS             _ => unreachable!("at_retired_at_c_module guards marker spelling"),
-//RS         };
-//RS         self.c_module_after_kind(start, kind)
-//RS     }
-//RS 
-//RS     fn retired_c_module_marker_diag(&self, old: &str, new: &str, span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS                 "E0060",
-//RS                 format!("C FFI modules use `{}`, not `{}`", new, old),
-//RS                 "C FFI rules use the one PascalCase `#Rule` family in generated and hand-written bindings"
-//RS                     .to_string(),
-//RS                 format!("write `{}` before `module c.<lib>`", new),
-//RS                 Some(span),
-//RS             )
-//RS     }
-//RS 
-//RS     fn c_module_after_kind(
-//RS         &mut self,
-//RS         start: Span,
-//RS         kind: crate::AST::CModuleKind,
-//RS     ) -> Result<crate::AST::CModule, Diagnostic> {
-//RS         use crate::AST::CModuleKind;
-//RS         self.expect_kw(TokKind::KwModule, "to declare a C FFI module")?;
-//RS 
-//RS         // Parse the dotted module path: `c` `.` `<lib>` [ `.` `__bindgen__` ].
-//RS         let path_start = self.peek().span;
-//RS         let (root, _) = self.expect_ident("after `module`")?;
-//RS         if root != Syntax::C_MODULE_ROOT {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "a C FFI module path starts with `{}.`, found `{}`",
-//RS                     Syntax::C_MODULE_ROOT,
-//RS                     root
-//RS                 ),
-//RS                 "C libraries live under the `c.` module root — `c.raylib`, `c.sqlite3`".to_string(),
-//RS                 format!(
-//RS                     "write: {} module {}.<lib> {{ … }}",
-//RS                     match kind {
-//RS                         CModuleKind::Extern => "#Import",
-//RS                         CModuleKind::Bindgen => "#Bindgen",
-//RS                     },
-//RS                     Syntax::C_MODULE_ROOT
-//RS                 ),
-//RS                 Some(path_start),
-//RS             ));
-//RS         }
-//RS         self.expect(TokKind::Dot, "after `c` in a C FFI module path")?;
-//RS         let (lib, lib_span) = self.expect_ident("for the C library name")?;
-//RS         let mut has_bindgen_seg = false;
-//RS         let mut path_end = lib_span.end;
-//RS         if matches!(self.peek().kind, TokKind::Dot) {
-//RS             self.bump();
-//RS             let (seg, seg_span) = self.expect_ident("after `.` in a C FFI module path")?;
-//RS             path_end = seg_span.end;
-//RS             if seg == Syntax::C_BINDGEN_SEGMENT {
-//RS                 has_bindgen_seg = true;
-//RS             } else {
-//RS                 return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         format!("a C FFI module path can't have a `.{}` segment", seg),
-//RS                         "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
-//RS                         format!("write: #Import module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
-//RS                         Some(seg_span),
-//RS                     ));
-//RS             }
-//RS         }
-//RS         let path_span = Span::new(path_start.start, path_end);
-//RS 
-//RS         // E3206: a user overlay must not name the reserved `__bindgen__` segment.
-//RS         if kind == CModuleKind::Extern && has_bindgen_seg {
-//RS             return Err(Diagnostic::error(
-//RS                     "E3206",
-//RS                     format!(
-//RS                         "module path `{}.{}.{}` uses the reserved segment `{}`",
-//RS                         Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT, Syntax::C_BINDGEN_SEGMENT
-//RS                     ),
-//RS                     format!(
-//RS                         "autogen lives in `{}.<lib>.{}`; users declare overlays as `#{} module {}.<lib>` only",
-//RS                         Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT
-//RS                     ),
-//RS                     format!(
-//RS                         "drop `{}` from your module path, or use `#{} module {}.{} {{ … }}`",
-//RS                         Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT, lib
-//RS                     ),
-//RS                     Some(path_span),
-//RS                 ));
-//RS         }
-//RS         // A `#Bindgen` module must carry the `__bindgen__` segment (it is the
-//RS         // generated surface). Without it the path is malformed.
-//RS         if kind == CModuleKind::Bindgen && !has_bindgen_seg {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "a `#Bindgen` module path must end in `.{}`",
-//RS                     Syntax::C_BINDGEN_SEGMENT
-//RS                 ),
-//RS                 "the compiler generates `#Bindgen module c.<lib>.__bindgen__` cache files"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "write: #Bindgen module {}.{}.{} {{ … }}",
-//RS                     Syntax::C_MODULE_ROOT,
-//RS                     lib,
-//RS                     Syntax::C_BINDGEN_SEGMENT
-//RS                 ),
-//RS                 Some(path_span),
-//RS             ));
-//RS         }
-//RS 
-//RS         self.expect(TokKind::LBrace, "to open the C FFI module body")?;
-//RS         let mut functions = Vec::new();
-//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-//RS             if matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             let mut function = self.extern_fn(matches!(kind, CModuleKind::Extern))?;
-//RS             let callback_transport = if function.name.starts_with("__jet_native_")
-//RS                 && function
-//RS                     .params
-//RS                     .iter()
-//RS                     .any(|param| matches!(&param.ty, crate::AST::Type::Fn { .. }))
-//RS             {
-//RS                 Some("native-start")
-//RS             } else if function
-//RS                 .params
-//RS                 .iter()
-//RS                 .any(|param| matches!(&param.ty, crate::AST::Type::Fn { .. }))
-//RS             {
-//RS                 Some("managed")
-//RS             } else if function.name == "unsubscribe"
-//RS                 && matches!(
-//RS                     &function.return_type,
-//RS                     Some(crate::AST::Type::Apply { name, .. }) if name == "Task"
-//RS                 )
-//RS             {
-//RS                 Some("managed-close")
-//RS             } else if function.name == "emit_async"
-//RS                 && matches!(
-//RS                     &function.return_type,
-//RS                     Some(crate::AST::Type::Apply { name, .. }) if name == "Task"
-//RS                 )
-//RS             {
-//RS                 Some("emit-task")
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             if let Some(callback_transport) = callback_transport {
-//RS                 let identity = format!("{}.{}", lib, function.name);
-//RS                 let digest_input = format!("jet-ffi-callback-plan-v1\0{identity}");
-//RS                 function.callback_transport = Some(callback_transport.to_string());
-//RS                 function.callback_plan_digest =
-//RS                     Some(jet_foundation::SHA256::sha256_hex(digest_input.as_bytes()));
-//RS                 function.callback_identity = Some(identity);
-//RS             }
-//RS             functions.push(function);
-//RS         }
-//RS         self.expect(TokKind::RBrace, "to close the C FFI module body")?;
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(crate::AST::CModule {
-//RS             kind,
-//RS             lib,
-//RS             path_span,
-//RS             functions,
-//RS             span: Span::new(start.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn expect_plain_string(
-//RS         &mut self,
-//RS         context: &str,
-//RS         why_interp: &str,
-//RS         fix: &str,
-//RS     ) -> Result<(String, Span), Diagnostic> {
-//RS         let parts = match &self.peek().kind {
-//RS             TokKind::Str(parts) => parts.clone(),
-//RS             TokKind::RawStr(text) => vec![StrTokPart::Lit(text.clone())],
-//RS             other => {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!(
-//RS                         "expected a piece of quoted text {}, found {}",
-//RS                         context,
-//RS                         describe(other)
-//RS                     ),
-//RS                     why_interp.to_string(),
-//RS                     fix.to_string(),
-//RS                     Some(self.peek().span),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let span = self.bump().span;
-//RS         if parts.len() != 1 {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected a piece of quoted text {}, found interpolation",
-//RS                     context
-//RS                 ),
-//RS                 why_interp.to_string(),
-//RS                 fix.to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         match &parts[0] {
-//RS             StrTokPart::Lit(s) => Ok((s.clone(), span)),
-//RS             StrTokPart::Byte(_) | StrTokPart::Interp(_) => Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected a piece of quoted text {}, found interpolation",
-//RS                     context
-//RS                 ),
-//RS                 why_interp.to_string(),
-//RS                 fix.to_string(),
-//RS                 Some(span),
-//RS             )),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0333 crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:1-576
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:5
+// Canonical Items.jet:949 parser_parse_function; ordinary modifiers/body path.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:13
+// Canonical Entry.jet:366 parser_file_directive_ahead, Target marker head.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:20
+// Canonical Entry.jet:366 parser_file_directive_ahead, HTML marker head.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:27
+// Canonical Entry.jet:468 parser_apply_file_marker, registered page argument.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:35
+// Canonical Entry.jet:509 parser_html_page_path, Path value or one text literal.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:66
+// Canonical Entry.jet:517 parser_apply_file_target, registered target argument.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:73
+// Canonical Entry.jet:517 parser_apply_file_target: OS enum validation, Web
+// default-backend selection and Wasm/JS ceiling are independent typed axes.
+// Rust: crates/jet-parser/src/Parser/Items/markers_contracts.rs:133
+// Canonical DeclarationMarkers.jet:421 parser_project_function_job_markers;
+// exact E0925 after Every projection, without inventing a job.
 
-// PORT-PENDING 0333 crates-jet-parser-src-parser-items-markers-contracts-module-group: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:1-623
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{
-//RS     CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Expr, Field, Func, Parser, Span,
-//RS     Syntax,
-//RS     TokKind, TraitMethodSig,
-//RS };
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     pub(super) fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
-//RS         let start = self.peek().span;
-//RS         self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
-//RS         let (name, name_span) = self.expect_ident("after `fn`")?;
-//RS         self.expect(TokKind::LParen, "after the method name")?;
-//RS         let params = self.parse_param_list()?;
-//RS         self.validate_variadic_params(&params);
-//RS         self.validate_param_labels(&params);
-//RS         self.reject_root_method_params(&params);
-//RS         let (
-//RS             mut return_type,
-//RS             _return_type_span,
-//RS             mut declared_effects,
-//RS             _effect_via,
-//RS             _prefix_effect_span,
-//RS         ) = self.parse_callable_result_and_prefix_effects()?;
-//RS         // D-SIG-AFTER1=A: `-> Type` is the current trait result. A leftover
-//RS         // bare `->` with no type is the old body marker; trait slots have no
-//RS         // concise body, so ignore it.
-//RS         if return_type.is_none() && self.at_unified_arrow() {
-//RS             let arrow = self.expect_unified_arrow("before a trait result type")?;
-//RS             if self.type_starts_here() {
-//RS                 let (ty, _) = self.return_type()?;
-//RS                 return_type = Some(ty);
-//RS             } else {
-//RS                 self.pos = self.pos.saturating_sub(1);
-//RS                 let _ = arrow;
-//RS             }
-//RS         }
-//RS         let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
-//RS         if declared_effects.is_none() {
-//RS             declared_effects = self.parse_opt_effect_annotation()?;
-//RS         }
-//RS         let is_pure = is_pure
-//RS             || declared_effects
-//RS                 .as_ref()
-//RS                 .is_some_and(|effects| effects.is_empty());
-//RS         if self.at_unified_arrow() {
-//RS             self.bump();
-//RS         }
-//RS         let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             // D-TAIL-RETURN1=A: method default bodies use the same final
-//RS             // expression admission as free functions; sema owns the type
-//RS             // context and diagnostics.
-//RS             let previous_tail_depth = self.callable_tail_block_depth;
-//RS             let previous_tail_value = self.callable_tail_expects_value;
-//RS             self.callable_tail_block_depth = Some(self.block_depth + 1);
-//RS             self.callable_tail_expects_value = return_type
-//RS                 .as_ref()
-//RS                 .is_some_and(Self::return_type_has_value);
-//RS             let stmts = self.block_stmts();
-//RS             self.callable_tail_block_depth = previous_tail_depth;
-//RS             self.callable_tail_expects_value = previous_tail_value;
-//RS             Some(stmts)
-//RS         } else {
-//RS             let end = self.peek().span.end;
-//RS             self.finish_stmt()?;
-//RS             let _ = end;
-//RS             None
-//RS         };
-//RS         let end = self.peek().span.end;
-//RS         Ok(TraitMethodSig {
-//RS             name,
-//RS             name_span,
-//RS             params,
-//RS             return_type,
-//RS             span: Span::new(start.start, end),
-//RS             default_body,
-//RS             is_pure,
-//RS             declared_effects,
-//RS             return_view_provenance: crate::AST::ViewProvenanceCell::new(),
-//RS             declared_return_view_provenance,
-//RS         })
-//RS     }
-//RS 
-//RS     /// S27: method inside a type body or `impl` block.
-//RS     pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
-//RS         let markers = if matches!(self.peek().kind, TokKind::Hash) {
-//RS             match self.parse_method_marker_sequence() {
-//RS                 Ok(markers) => markers,
-//RS                 Err(diagnostic) => {
-//RS                     // Keep the method as the recovery target. The shared
-//RS                     // marker gate already emitted the useful vocabulary
-//RS                     // or site diagnostic; bubbling the error to the type
-//RS                     // parser loses `fn` and creates a secondary E0003 at
-//RS                     // the enclosing `}`.
-//RS                     self.diags.push(diagnostic);
-//RS                     Vec::new()
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             Vec::new()
-//RS         };
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-//RS         // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
-//RS         // `prep` marks a build-time method directly before the ordinary
-//RS         // `fn` keyword. Keep it on the AST instead of folding it into purity;
-//RS         // sema gates its legal site and proves the body is effect-free before
-//RS         // selecting a literal hook. The retired `@fn` head recovers with the
-//RS         // E0388 teaching fix.
-//RS         let is_comptime = if self.at_prep_verb(&TokKind::KwFn) {
-//RS             self.bump();
-//RS             true
-//RS         } else if matches!(self.peek().kind, TokKind::At)
-//RS             && matches!(self.peek2().kind, TokKind::KwFn)
-//RS         {
-//RS             self.retired_at_verb(Syntax::KW_FN);
-//RS             true
-//RS         } else {
-//RS             false
-//RS         };
-//RS         self.expect_kw(TokKind::KwFn, "to start a method")?;
-//RS         let mut function = self.func_after_fn(
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS         )?;
-//RS         function.is_comptime = is_comptime;
-//RS         self.reject_root_method_params(&function.params);
-//RS         self.apply_method_markers(function, markers)
-//RS     }
-//RS 
-//RS     pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
-//RS         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-//RS         let (name, name_span) = self.expect_ident("for a field name")?;
-//RS         // D-META-STAGE1=B: the compile-time mark rides the name, so
-//RS         // `@word` now lexes as one identifier. A field never carries it —
-//RS         // the `@`-marked members belong to the compiler (`T.$layout`).
-//RS         if Syntax::is_comptime_name(&name) {
-//RS             return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!("`{name}` is not a field name"),
-//RS                     "the compile-time mark `@` belongs to the compiler's own members and to compile-time bindings, never to a declared field"
-//RS                         .to_string(),
-//RS                     format!("drop the `@`, or read the compiler fact as `T.{name}`"),
-//RS                     Some(name_span),
-//RS                 ));
-//RS         }
-//RS         self.expect(TokKind::Colon, "after a field name")?;
-//RS         let (ty, ty_span) = self.type_()?;
-//RS         // D-FIELDPOL1: `name: T -> expr` — a computed field. `expr` is a
-//RS         // single expression (no block); sibling field names inside it are
-//RS         // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
-//RS         // to `self.<field>` once every field of the struct is known.
-//RS         // D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence / construction default.
-//RS         let (computed, default) = if self.at_unified_arrow() {
-//RS             self.expect_unified_arrow("before a computed field expression")?;
-//RS             (Some(Box::new(self.expr()?)), None)
-//RS         } else if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             let default = Box::new(self.expr()?);
-//RS             self.expect(TokKind::RBrace, "after a field default")?;
-//RS             (None, Some(default))
-//RS         } else if matches!(self.peek().kind, TokKind::Eq) {
-//RS             let eq = self.bump().span;
-//RS             self.diags
-//RS                 .push(Diagnostic::from_row("E0385", &[], Some(eq)));
-//RS             (None, Some(Box::new(self.expr()?)))
-//RS         } else {
-//RS             (None, None)
-//RS         };
-//RS         Ok(Field {
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             name,
-//RS             name_span,
-//RS             ty,
-//RS             ty_span,
-//RS             serde_markers: Vec::new(),
-//RS             redact: false,
-//RS             computed,
-//RS             default,
-//RS             default_ct: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-CLI-GLOBAL1=E: `name = callable` is a program-struct command
-//RS     /// binding. It uses the existing field marker plane for `#Doc` and
-//RS     /// the ordinary expression parser for the callable target.
-//RS     pub(super) fn cli_binding_starts_here(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::Eq)
-//RS     }
-//RS 
-//RS     pub(super) fn cli_binding(
-//RS         &mut self,
-//RS         markers: Vec<crate::AST::Marker>,
-//RS     ) -> Result<CLICommandBinding, Diagnostic> {
-//RS         let (name, name_span) = self.expect_ident("for a CLI command name")?;
-//RS         self.expect(TokKind::Eq, "between a CLI command name and callable")?;
-//RS         let target = self.expr()?;
-//RS         for marker in &markers {
-//RS             self.bind_rule_fact(
-//RS                 marker.name_span,
-//RS                 Some(name_span),
-//RS                 crate::Policy::RuleSite::Field,
-//RS             );
-//RS         }
-//RS         Ok(CLICommandBinding {
-//RS             name,
-//RS             name_span,
-//RS             markers,
-//RS             target,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-PERSIST1: true at `#Persist` (module top level only — this
-//RS     /// predicate is never consulted by the statement parser, so a local
-//RS     /// binding's `#Persist` falls through to the E0145 teaching diagnostic
-//RS     /// in `Statements.rs` instead).
-//RS     pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
-//RS         matches!(&self.peek().kind, TokKind::Hash)
-//RS             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
-//RS     }
-//RS 
-//RS     /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
-//RS     /// immediately before a constant binding.
-//RS     pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
-//RS         matches!(&self.peek().kind, TokKind::Hash)
-//RS             && self.marker_head_is_followed_by_comptime_target()
-//RS     }
-//RS 
-//RS     /// D-PREP-SURFACE2=A: a word that can name a module constant after a
-//RS     /// storage marker — an ALL_CAPS name, or a retired `@name` that E0388
-//RS     /// respells. The case says nothing about compile time.
-//RS     pub(in crate::Parser) fn names_constant(name: &str) -> bool {
-//RS         name.starts_with(Syntax::RETIRED_COMPTIME_MARK) || Syntax::is_constant_name(name)
-//RS     }
-//RS 
-//RS     /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
-//RS     /// recover by parsing the rest as a comptime binding.
-//RS     pub(in crate::Parser) fn retired_const_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         self.comptime_def()
-//RS     }
-//RS 
-//RS     /// D-PERSIST1: `#Persist name (:: | :=) expr` — module-level bare
-//RS     /// binding that survives a `jet dev` hot reload. Not `#Persist comptime`
-//RS     /// and not `#Persist const`.
-//RS     pub(in crate::Parser) fn persist_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         let item_start = self.peek().span.start;
-//RS         let meta = if self.at_meta_attr() {
-//RS             let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Declaration)?;
-//RS             while matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS             }
-//RS             Some(meta)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Declaration)?;
-//RS         let persist_span = marker.span;
-//RS         if matches!(self.peek().kind, TokKind::KwConst | TokKind::KwComptime) {
-//RS             let bad = self.bump();
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "`#{}` marks a bare binding, not `{}`",
-//RS                     Syntax::MARKER_PERSIST,
-//RS                     match bad.kind {
-//RS                         TokKind::KwConst => Syntax::KW_CONST,
-//RS                         _ => Syntax::KW_COMPTIME,
-//RS                     }
-//RS                 ),
-//RS                 format!(
-//RS                     "`#{}` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)",
-//RS                     Syntax::MARKER_PERSIST
-//RS                 ),
-//RS                 format!(
-//RS                     "write `#{} name := …` (or `::` for an immutable bare bind)",
-//RS                     Syntax::MARKER_PERSIST
-//RS                 ),
-//RS                 Some(Span::new(persist_span.start, bad.span.end)),
-//RS             ));
-//RS         }
-//RS         let (name, name_span) = self.expect_ident("after `#Persist`")?;
-//RS         let mutable = match self.peek().kind {
-//RS             TokKind::ColonColon => {
-//RS                 self.bump();
-//RS                 false
-//RS             }
-//RS             TokKind::ColonEq => {
-//RS                 self.bump();
-//RS                 true
-//RS             }
-//RS             _ => {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!(
-//RS                         "expected `{}` or `{}` after the `#{}` name",
-//RS                         Syntax::SIGIL_BIND_IMMUT,
-//RS                         Syntax::SIGIL_BIND_MUT,
-//RS                         Syntax::MARKER_PERSIST
-//RS                     ),
-//RS                     format!(
-//RS                         "`#{}` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)",
-//RS                         Syntax::MARKER_PERSIST
-//RS                     ),
-//RS                     format!(
-//RS                         "write `#{} {name} := …` (or `{name} :: …`)",
-//RS                         Syntax::MARKER_PERSIST
-//RS                     ),
-//RS                     Some(self.peek().span),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let value = self.expr()?;
-//RS         self.expect(TokKind::Semi, "after a `#Persist` value")?;
-//RS         Ok(ConstDef {
-//RS             span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-//RS             name,
-//RS             name_span,
-//RS             value,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             meta,
-//RS             attrs: Vec::new(),
-//RS             rust_kind: crate::AST::RustConstKind::Const,
-//RS             is_comptime: false,
-//RS             ct: None,
-//RS             ty: None,
-//RS             is_persist: true,
-//RS             persist_span: Some(persist_span),
-//RS             mutable,
-//RS             resolved_output: None,
-//RS         })
-//RS     }
-//RS     /// D-MODULE-BIND1: `name :: expr` / `name := expr` at file scope is a
-//RS     /// declaration, not an executable script statement.
-//RS     pub(in crate::Parser) fn module_binding_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         let item_start = self.peek().span.start;
-//RS         let binding = self.sigil_binding()?;
-//RS         if binding.pattern.is_some() || binding.name.is_empty() {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "module globals bind one name at a time".to_string(),
-//RS                 "a module binding is a named value available to every function in the file"
-//RS                     .to_string(),
-//RS                 "write `name :: value` or `name := value`".to_string(),
-//RS                 Some(binding.name_span),
-//RS             ));
-//RS         }
-//RS         self.finish_stmt()?;
-//RS         Ok(ConstDef {
-//RS             span: Span::new(item_start, self.prev_end()),
-//RS             name: binding.name.clone(),
-//RS             name_span: binding.name_span,
-//RS             value: binding.init,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             meta: binding.meta,
-//RS             attrs: Vec::new(),
-//RS             rust_kind: crate::AST::RustConstKind::Const,
-//RS             // D-PREP-SURFACE2=A (owner ruling, 2026-09-30): compile time is
-//RS             // always explicit, `NAME :: prep { value }`; the name's case
-//RS             // never implies it.
-//RS             is_comptime: binding.is_comptime,
-//RS             ct: binding.ct,
-//RS             ty: binding.ty,
-//RS             is_persist: false,
-//RS             persist_span: None,
-//RS             mutable: binding.mutable,
-//RS             resolved_output: None,
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
-//RS         let mut attrs = Vec::new();
-//RS         while self.at_marker_head() && self.marker_head_is_followed_by_comptime_target() {
-//RS             let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Constant)?;
-//RS             let attr_name = marker.name.clone();
-//RS             match attr_name.as_str() {
-//RS                 Syntax::MARKER_STATIC => attrs.push(ConstAttr::ForceStatic),
-//RS                 Syntax::MARKER_INLINE => attrs.push(ConstAttr::ForceInline),
-//RS                 "static" | "inline" => {
-//RS                     let replacement = crate::Policy::applied_rule(&attr_name)
-//RS                         .and_then(|row| match row.status {
-//RS                             crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
-//RS                             crate::Policy::RuleStatus::Active => None,
-//RS                         })
-//RS                         .unwrap_or("#Static");
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0927",
-//RS                             format!("`#{attr_name}` is retired"),
-//RS                             "comptime markers use the same PascalCase marker plane as other declarations"
-//RS                                 .to_string(),
-//RS                             format!("write `{replacement}`"),
-//RS                             Some(marker.span),
-//RS                         ));
-//RS                     attrs.push(if attr_name == "static" {
-//RS                         ConstAttr::ForceStatic
-//RS                     } else {
-//RS                         ConstAttr::ForceInline
-//RS                     });
-//RS                 }
-//RS                 _ => unreachable!("the constant marker registry accepts only static attributes"),
-//RS             }
-//RS         }
-//RS         Ok(attrs)
-//RS     }
-//RS 
-//RS     /// D-SHAPE-OUTPUT-CALLABLE1 / D-BIND-BARE1: an Output is a bare immutable
-//RS     /// top-level binding whose typed constructor carries `Output`.
-//RS     pub(in crate::Parser) fn output_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         let start = self.peek().span.start;
-//RS         let (name, name_span) = self.expect_ident("for the Output name")?;
-//RS         self.expect(TokKind::ColonColon, "after the Output name")?;
-//RS         let (type_name, type_span) = self.expect_ident("for the Output constructor")?;
-//RS         if type_name != Syntax::TYPE_OUTPUT {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!(
-//RS                     "expected `{}` in an Output constructor",
-//RS                     Syntax::TYPE_OUTPUT
-//RS                 ),
-//RS                 "the Output kind carries its closed sum type".to_string(),
-//RS                 format!("write `{}`.<Kind>{{ ... }}", Syntax::TYPE_OUTPUT),
-//RS                 Some(type_span),
-//RS             ));
-//RS         }
-//RS         self.expect(TokKind::Dot, "between `Output` and its kind")?;
-//RS         let (variant, variant_span) = self.expect_ident("for the Output kind")?;
-//RS         let (args, end) = self.enum_lit_named_fields()?;
-//RS         let value = Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             variant_span: Some(variant_span),
-//RS             args,
-//RS             leading_dot: false,
-//RS             span: Span::new(type_span.start, end),
-//RS         };
-//RS         Ok(ConstDef {
-//RS             span: Span::new(start, end),
-//RS             name,
-//RS             name_span,
-//RS             value,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             meta: None,
-//RS             attrs: Vec::new(),
-//RS             rust_kind: crate::AST::RustConstKind::Const,
-//RS             is_comptime: false,
-//RS             ct: None,
-//RS             ty: Some(crate::AST::Type::Named(Syntax::TYPE_OUTPUT.to_string())),
-//RS             is_persist: false,
-//RS             persist_span: None,
-//RS             mutable: false,
-//RS             resolved_output: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-ECO-OUTPUT-DEFAULT1=A: checked Output defaults keep the ratified
-//RS     /// `defaults: { run: address, ... }` source spelling.
-//RS     pub(in crate::Parser) fn output_defaults_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         let start = self.peek().span.start;
-//RS         let (name, name_span) = self.expect_ident("for Output defaults")?;
-//RS         self.expect(TokKind::Colon, "after `defaults`")?;
-//RS         let value = self.expr()?;
-//RS         if matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         Ok(ConstDef {
-//RS             span: Span::new(start, self.prev_end()),
-//RS             name,
-//RS             name_span,
-//RS             value,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             meta: None,
-//RS             attrs: Vec::new(),
-//RS             rust_kind: crate::AST::RustConstKind::Const,
-//RS             is_comptime: false,
-//RS             ct: None,
-//RS             ty: Some(crate::AST::Type::Named(
-//RS                 Syntax::TYPE_OUTPUT_DEFAULTS.to_string(),
-//RS             )),
-//RS             is_persist: false,
-//RS             persist_span: None,
-//RS             mutable: false,
-//RS             resolved_output: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-CONSTMARK1 / D-PREP-SURFACE2=A: `#Static NAME :: value` /
-//RS     /// `#Inline NAME :: value` — a module constant under a storage marker.
-//RS     /// As everywhere, only `NAME :: prep { value }` is evaluated while
-//RS     /// building.
-//RS     /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
-//RS     pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
-//RS         let item_start = self.peek().span.start;
-//RS         let meta = if self.at_meta_attr() {
-//RS             let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Constant)?;
-//RS             while matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS             }
-//RS             Some(meta)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let attrs = self.parse_comptime_attrs()?;
-//RS         let rust_kind = if attrs.contains(&crate::AST::ConstAttr::ForceStatic) {
-//RS             crate::AST::RustConstKind::Static
-//RS         } else {
-//RS             crate::AST::RustConstKind::Const
-//RS         };
-//RS         let known = self.at_known_lead();
-//RS         match self.peek().kind {
-//RS             TokKind::KwComptime => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E0374",
-//RS                         "`comptime` is retired".to_string(),
-//RS                         "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
-//RS                             .to_string(),
-//RS                         "remove the keyword; a build-time value is written `NAME :: prep { … }`, and `prep { … }` runs other work while building"
-//RS                             .to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS             }
-//RS             TokKind::KwConst => {
-//RS                 let kw = self.bump();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0146",
-//RS                     format!("`{}` is retired — write `NAME :: prep {{ … }}`", Syntax::KW_CONST),
-//RS                     "a compile-time constant is an immutable binding whose value is prepared while building".to_string(),
-//RS                     "write `NAME :: prep { … }` (or `#Persist name := …` for hot-reload state)".to_string(),
-//RS                     Some(kw.span),
-//RS                 ));
-//RS             }
-//RS             // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
-//RS             // of the file still parses, and teach the constant form once.
-//RS             TokKind::Hash if known => {
-//RS                 let head = self.read_marker_head()?;
-//RS                 let fix = match &self.peek().kind {
-//RS                     TokKind::Ident(name) => format!(
-//RS                         "write `{} :: {} {{ … }}`",
-//RS                         Syntax::canonical_name_case(name, Syntax::NameCase::Screaming),
-//RS                         Syntax::KW_PREP
-//RS                     ),
-//RS                     _ => format!("write a prepared constant: `NAME :: {} {{ … }}`", Syntax::KW_PREP),
-//RS                 };
-//RS                 self.diags.push(self.retired_known_error(head.span, fix));
-//RS             }
-//RS             // D-PREP-SURFACE2=A: `NAME :: expr` after `#Static` / `#Inline`;
-//RS             // a retired `@name` recovers below and teaches E0388.
-//RS             TokKind::Ident(ref n) if Self::names_constant(n) => {}
-//RS             _ => {
-//RS                 self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
-//RS             }
-//RS         }
-//RS         let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Self::names_constant(n));
-//RS         let (name, name_span) = self.expect_ident(if known || marked {
-//RS             "for the constant name"
-//RS         } else {
-//RS             "for the compile-time binding name"
-//RS         })?;
-//RS         let retired = self.retired_const_decl_name(&name);
-//RS         let (name, retired) = match retired {
-//RS             Some(new) => (new, Some(name)),
-//RS             None => (name, None),
-//RS         };
-//RS         let (value, prepared) = if known || marked {
-//RS             self.expect(TokKind::ColonColon, "after the constant name")?;
-//RS             self.binding_value(false)?
-//RS         } else {
-//RS             self.expect(TokKind::Eq, "after the retired comptime name")?;
-//RS             (self.expr()?, true)
-//RS         };
-//RS         if let Some(old) = &retired {
-//RS             self.retire_const_decl(old, &name, name_span, &value, prepared, false);
-//RS         }
-//RS         self.finish_stmt()?;
-//RS         Ok(ConstDef {
-//RS             span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-//RS             name,
-//RS             name_span,
-//RS             value,
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             meta,
-//RS             attrs,
-//RS             rust_kind,
-//RS             // A retired `@NAME :: value`, `#Known` or `comptime` form
-//RS             // recovers with its old compile-time meaning.
-//RS             is_comptime: prepared || known || retired.is_some(),
-//RS             ct: None,
-//RS             ty: None,
-//RS             is_persist: false,
-//RS             persist_span: None,
-//RS             mutable: false,
-//RS             resolved_output: None,
-//RS         })
-//RS     }
-//RS }
-// END-PORT-PENDING 0333 crates/jet-parser/src/Parser/Items/type_methods_fields.rs:1-623
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:8
+// Canonical Items.jet:1111 parser_bind_guest_import_symbol: extract exactly one
+// nonempty literal, persist marker CtValue.Str, clear Jet body before sema.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:39
+// Canonical Items.jet:1119 E3212 guest import body diagnostic.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:50
+// Canonical Items.jet:949/1402 parser_parse_function/inline_foreign_body;
+// signature/effects/visibility remain ordinary Jet, source is not Jet body.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:195
+// Canonical Items.jet:1402 parser_parse_inline_foreign_body (one literal source).
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:230
+// Canonical Declarations/ItemHeads.jet:19 parser_c_module_ahead_at.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:247
+fn at_retired_at_c_module(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_HASH -> return false
+    marker :: parser_lookahead(&state, 1)
+    (marker.kind == TOKEN_KW_EXTERN || (marker.kind == TOKEN_IDENT && marker.payload.decoded == Syntax.MARKER_BINDGEN_RETIRED)) && parser_kind_at(&state, 2) == TOKEN_KW_MODULE
+}
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:262
+// Canonical Declarations/Foreign.jet:71 parser_parse_c_module. Import is a
+// guest boundary fact, Bindgen a registered module marker; preserve RuleSite.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:340
+fn retired_at_c_module(state: &JetParserState) -> Item {
+    start :: parser_bump(&state).span
+    marker :: parser_bump(&state)
+    kind :: if marker.kind == {
+        TOKEN_KW_EXTERN -> {
+            &state.diagnostics.push(retired_c_module_marker_diag("#extern", "#Import", parser_cover(start, marker.span)))
+            CModuleKind.Extern
+        }
+        TOKEN_IDENT -> {
+            assert marker.payload.decoded == Syntax.MARKER_BINDGEN_RETIRED
+            &state.diagnostics.push(retired_c_module_marker_diag("#{Syntax.MARKER_BINDGEN_RETIRED}", "#Bindgen", parser_cover(start, marker.span)))
+            CModuleKind.Bindgen
+        }
+        else -> panic("at_retired_at_c_module guards marker spelling")
+    }
+    // Canonical Foreign parser owns the path/body; shared entry begins after
+    // the already consumed intro instead of parsing a second C module grammar.
+    c_module_after_kind(&state, start, kind)
+}
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:363
+fn retired_c_module_marker_diag(old: String, new: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0060", Val(span), "C FFI modules use `{new}`, not `{old}`", "C FFI rules use the one PascalCase `#Rule` family in generated and hand-written bindings", "write `{new}` before `module c.<lib>`")
+}
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:374
+// Canonical Declarations/Foreign.jet:74-120 shared c_module_after_kind body;
+// callback metadata :123 retains precedence native-start/managed/managed-close/
+// emit-task, SHA256 framing with one NUL byte, stable lib.function identity.
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:526
+// Canonical Declarations/Foreign.jet:39 parser_foreign_plain_string; the
+// exact context/why/fix overload below preserves this source's diagnostics.
+fn expect_plain_string(state: &JetParserState, context: String, why_interp: String, fix: String) -> NamedSpan? {
+    token :: parser_current(&state)
+    if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING {
+        parser_add_fatal_code(&state, "E0003", token.span, "expected a piece of quoted text {context}, found {token.payload.text}", why_interp, fix)
+        return None
+    }
+    parser_bump(&state)
+    if token.kind == TOKEN_RAW_STRING -> return Val(NamedSpan{name: token.payload.decoded, span: token.span})
+    if token.payload.string_parts.len() != 1 || token.payload.string_parts[0].kind != STRING_PART_TEXT {
+        parser_add_fatal_code(&state, "E0003", token.span, "expected a piece of quoted text {context}, found interpolation", why_interp, fix)
+        return None
+    }
+    Val(NamedSpan{name: token.payload.string_parts[0].text, span: token.span})
+}
 
-// PORT-PENDING 0333 crates-jet-parser-src-parser-items-markers-contracts-module-group: crates/jet-parser/src/Parser/Items/view_from.rs:1-195
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-MEMPROVENANCE3=A: trailing `from` clause after a return type.
-//RS 
-//RS use crate::Lexer::TokKind;
-//RS use crate::Parser::Parser;
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     Param, ViewProvenance, ViewProvenanceMap, ViewSource, ViewSourcePath, ViewSourceProjection,
-//RS };
-//RS use std::collections::BTreeSet;
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// Parse an optional `from src (| src)*` or `from (slot: srcs, …)` after a
-//RS     /// return type. Parameter names resolve against ordinary (non-`self`) params.
-//RS     pub(crate) fn parse_opt_declared_view_from(
-//RS         &mut self,
-//RS         params: &[Param],
-//RS     ) -> Option<ViewProvenanceMap> {
-//RS         if !self.peek_is_ident(Syntax::VIEW_FROM) {
-//RS             return None;
-//RS         }
-//RS         if !matches!(
-//RS             self.peek2().kind,
-//RS             TokKind::Ident(_) | TokKind::KwSelf | TokKind::LParen
-//RS         ) {
-//RS             return None;
-//RS         }
-//RS         self.bump(); // `from`
-//RS         if matches!(self.peek().kind, TokKind::LParen) {
-//RS             return Some(self.parse_declared_view_from_slots(params));
-//RS         }
-//RS         let sources = self.parse_declared_view_source_union(params);
-//RS         let mut map = ViewProvenanceMap::new();
-//RS         map.insert(
-//RS             Vec::new(),
-//RS             ViewProvenance {
-//RS                 sources,
-//RS                 mutable: false,
-//RS             },
-//RS         );
-//RS         Some(map)
-//RS     }
-//RS 
-//RS     fn parse_declared_view_from_slots(&mut self, params: &[Param]) -> ViewProvenanceMap {
-//RS         self.bump(); // `(`
-//RS         let mut map = ViewProvenanceMap::new();
-//RS         loop {
-//RS             if matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-//RS                 break;
-//RS             }
-//RS             let Some(slot) = self.bump_ident() else {
-//RS                 self.bump();
-//RS                 break;
-//RS             };
-//RS             if !matches!(self.peek().kind, TokKind::Colon) {
-//RS                 break;
-//RS             }
-//RS             self.bump(); // `:`
-//RS             let sources = self.parse_declared_view_source_union(params);
-//RS             map.insert(
-//RS                 vec![slot],
-//RS                 ViewProvenance {
-//RS                     sources,
-//RS                     mutable: false,
-//RS                 },
-//RS             );
-//RS             if matches!(self.peek().kind, TokKind::Comma) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             break;
-//RS         }
-//RS         let _ = self.expect(TokKind::RParen, "to close the `from (…)` slot list");
-//RS         map
-//RS     }
-//RS 
-//RS     fn parse_declared_view_source_union(&mut self, params: &[Param]) -> BTreeSet<ViewSourcePath> {
-//RS         let mut sources = BTreeSet::new();
-//RS         loop {
-//RS             if let Some(path) = self.parse_declared_view_source(params) {
-//RS                 sources.insert(path);
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS             if matches!(self.peek().kind, TokKind::Pipe) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             break;
-//RS         }
-//RS         sources
-//RS     }
-//RS 
-//RS     fn parse_declared_view_source(&mut self, params: &[Param]) -> Option<ViewSourcePath> {
-//RS         let ordinary: Vec<&str> = params
-//RS             .iter()
-//RS             .filter(|param| param.name != Syntax::KW_SELF)
-//RS             .map(|param| param.name.as_str())
-//RS             .collect();
-//RS         let source =
-//RS             if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF) {
-//RS                 self.bump();
-//RS                 ViewSource::Receiver
-//RS             } else if self.peek_is_ident(Syntax::VIEW_FROM_STATIC) {
-//RS                 self.bump(); // `static`
-//RS                 if !matches!(self.peek().kind, TokKind::Dot) {
-//RS                     return None;
-//RS                 }
-//RS                 self.bump();
-//RS                 let mut parts = Vec::new();
-//RS                 let Some(first) = self.bump_ident() else {
-//RS                     return None;
-//RS                 };
-//RS                 parts.push(first);
-//RS                 while matches!(self.peek().kind, TokKind::Dot) {
-//RS                     self.bump();
-//RS                     let Some(next) = self.bump_ident() else {
-//RS                         break;
-//RS                     };
-//RS                     parts.push(next);
-//RS                 }
-//RS                 let name = parts.pop().unwrap_or_default();
-//RS                 let module_path = parts.join(".");
-//RS                 ViewSource::Static { module_path, name }
-//RS             } else {
-//RS                 let Some(name) = self.bump_ident() else {
-//RS                     return None;
-//RS                 };
-//RS                 let index = ordinary.iter().position(|param| *param == name)?;
-//RS                 ViewSource::Parameter(index)
-//RS             };
-//RS         let mut projections = Vec::new();
-//RS         while matches!(self.peek().kind, TokKind::Dot) {
-//RS             self.bump();
-//RS             if let Some(field) = self.bump_ident() {
-//RS                 projections.push(ViewSourceProjection::Field(field));
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         Some(ViewSourcePath {
-//RS             source,
-//RS             projections,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Parse optional `from src (| src)*` after a parameter type. Names stay
-//RS     /// unresolved so a later parameter may be referenced (Rust `'b: 'a`).
-//RS     pub(crate) fn parse_opt_param_view_from_names(&mut self) -> Option<Vec<String>> {
-//RS         if !self.peek_is_ident(Syntax::VIEW_FROM) {
-//RS             return None;
-//RS         }
-//RS         if !matches!(self.peek2().kind, TokKind::Ident(_) | TokKind::KwSelf) {
-//RS             return None;
-//RS         }
-//RS         self.bump(); // `from`
-//RS         let mut names = Vec::new();
-//RS         loop {
-//RS             if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF) {
-//RS                 self.bump();
-//RS                 names.push(Syntax::KW_SELF.to_string());
-//RS             } else if let Some(name) = self.bump_ident() {
-//RS                 names.push(name);
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS             // Projections are allowed in the grammar; param requirements key on
-//RS             // the owner name only for this slice.
-//RS             while matches!(self.peek().kind, TokKind::Dot) {
-//RS                 self.bump();
-//RS                 let _ = self.bump_ident();
-//RS             }
-//RS             if matches!(self.peek().kind, TokKind::Pipe) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             break;
-//RS         }
-//RS         if names.is_empty() {
-//RS             None
-//RS         } else {
-//RS             Some(names)
-//RS         }
-//RS     }
-//RS 
-//RS     fn bump_ident(&mut self) -> Option<String> {
-//RS         match &self.peek().kind {
-//RS             TokKind::Ident(name) => {
-//RS                 let name = name.clone();
-//RS                 self.bump();
-//RS                 Some(name)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0333 crates/jet-parser/src/Parser/Items/view_from.rs:1-195
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:8
+// Canonical Items.jet:2139 parser_parse_trait / :949 parser_parse_function;
+// trait slot projects signature, effects, declared return views, default body.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:85
+// Canonical Items.jet:1772 parser_parse_type_method; marker recovery, prep fn,
+// visibility and checked function signature remain shared with free functions.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:153
+// Canonical Items.jet:1616 parser_parse_struct; field-specific missing admission
+// (computed arrow, retired =, invalid @name) is supplied by field below.
+fn field(state: &JetParserState) -> Field? {
+    modifiers :: parser_parse_item_modifiers(&state, false)
+    name :: parser_expect_name(&state, "for a field name")
+    if Syntax.is_comptime_name(name.payload.decoded) {
+        parser_add_fatal_code(&state, "E0003", name.span, "`{name.payload.decoded}` is not a field name", "the compile-time mark `@` belongs to the compiler's own members and to compile-time bindings, never to a declared field", "drop the `@`, or read the compiler fact as `T.{name.payload.decoded}`")
+        return None
+    }
+    parser_expect(&state, TOKEN_COLON, "after a field name")
+    ty :: parser_parse_type(&state, 0)
+    if parser_aborting(&state) -> return None
+    computed := Expr?{None}
+    default := Expr?{None}
+    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
+        parser_expect_unified_arrow(&state, "before a computed field expression")
+        value :: parser_parse_expression(&state, 1, 0)
+        computed = Val(value.expr)
+    } else if parser_current_kind(&state) == TOKEN_LBRACE {
+        parser_bump(&state)
+        value :: parser_parse_expression(&state, 1, 0)
+        default = Val(value.expr)
+        parser_expect(&state, TOKEN_RBRACE, "after a field default")
+    } else if parser_current_kind(&state) == TOKEN_EQ {
+        eq :: parser_bump(&state).span
+        &state.diagnostics.push(Diagnostic.from_row("E0385", [], Val(eq)))
+        value :: parser_parse_expression(&state, 1, 0)
+        default = Val(value.expr)
+    }
+    if parser_aborting(&state) -> return None
+    Val(Field{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, ty: ty.ty, ty_span: ty.span, serde_markers: [], redact: false, computed: computed, default: default, default_ct: None})
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:210
+// Canonical Items.jet:1648 exact Ident + Eq predicate.
+fn cli_binding_starts_here(state: &JetParserState) -> Bool Never! { parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ }
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:214
+// Canonical Items.jet:1648-1653 owns CLICommandBinding construction. The
+// registered field-site binding below is the missing rule-fact projection.
+fn cli_binding(state: &JetParserState, markers: [Marker]) -> CLICommandBinding {
+    name :: parser_expect_name(&state, "for a CLI command name")
+    parser_expect(&state, TOKEN_EQ, "between a CLI command name and callable")
+    target :: parser_parse_expression(&state, 1, 0)
+    loop marker in markers { bind_rule_fact(&state, marker.name_span, Val(name.span), RuleSite.Field) }
+    CLICommandBinding{name: name.payload.decoded, name_span: name.span, markers: ^markers, target: target.expr}
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:240
+fn at_persist_binding(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == Syntax.MARKER_PERSIST
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:247
+// Canonical Entry.jet:646 parser_marked_const_ahead + marker target lookahead.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:255
+// Canonical Entry.jet:634 parser_constant_name, with retired @name admitted
+// by marked_const_ahead and respelled by the shared constant parser.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:261
+// Canonical Items.jet:1944 parser_parse_const / :1938 parser_report_retired_const.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:268
+fn persist_def(state: &JetParserState) -> ConstDef? {
+    item_start :: parser_current(&state).span.start
+    meta := MetaAttr?{None}
+    if at_meta_attr(&state) {
+        meta = Val(parse_meta_attr_at_site(&state, RuleSite.Declaration))
+        parser_skip_semicolons(&state)
+    }
+    marker :: parse_registered_marker_at_site(&state, RuleSite.Declaration)
+    persist_span :: marker.span
+    if parser_aborting(&state) -> return None
+    if parser_current_kind(&state) == TOKEN_KW_CONST || parser_current_kind(&state) == TOKEN_KW_COMPTIME {
+        bad :: parser_bump(&state)
+        word :: if bad.kind == TOKEN_KW_CONST { "const" } else { "comptime" }
+        parser_add_fatal_code(&state, "E0003", parser_cover(persist_span, bad.span), "`#Persist` marks a bare binding, not `{word}`", "`#Persist` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)", "write `#Persist name := …` (or `::` for an immutable bare bind)")
+        return None
+    }
+    name :: parser_expect_name(&state, "after `#Persist`")
+    mutable :: if parser_current_kind(&state) == {
+        TOKEN_COLON_COLON -> { parser_bump(&state); false }
+        TOKEN_COLON_EQ -> { parser_bump(&state); true }
+        else -> {
+            parser_add_fatal_code(&state, "E0003", parser_current(&state).span, "expected `::` or `:=` after the `#Persist` name", "`#Persist` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)", "write `#Persist {name.payload.decoded} := …` (or `{name.payload.decoded} :: …`)")
+            return None
+        }
+    }
+    value :: parser_parse_expression(&state, 1, 0)
+    close :: parser_expect(&state, TOKEN_SEMI, "after a `#Persist` value")
+    if parser_aborting(&state) -> return None
+    definition := ast_const(name.payload.decoded, name.span, Span{start: item_start, end: close.span.end}, value.expr)
+    definition.is_pub = false
+    definition.is_package_pub = false
+    definition.meta = meta
+    definition.attrs = []
+    definition.rust_kind = RustConstKind.Const
+    definition.is_comptime = false
+    definition.ct = None
+    definition.ty = None
+    definition.is_persist = true
+    definition.persist_span = Val(persist_span)
+    definition.mutable = mutable
+    definition.resolved_output = None
+    Val(^definition)
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:358
+// Canonical Items.jet:2086 parser_module_binding_item: named binding, meta,
+// prepared/ct/type/mutability preserved; no case-implied compile-time demand.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:396
+// Canonical Items.jet:1944 parser_parse_const: Static/Inline marker projection,
+// RustConstKind.Static selection and ordinary prepared binding-value path.
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:433
+fn output_def(state: &JetParserState) -> ConstDef? {
+    start :: parser_current(&state).span.start
+    name :: parser_expect_name(&state, "for the Output name")
+    parser_expect(&state, TOKEN_COLON_COLON, "after the Output name")
+    type_name :: parser_expect_name(&state, "for the Output constructor")
+    if type_name.payload.decoded != Syntax.TYPE_OUTPUT {
+        parser_add_fatal_code(&state, "E0003", type_name.span, "expected `Output` in an Output constructor", "the Output kind carries its closed sum type", "write `Output`.<Kind>{{ ... }}")
+        return None
+    }
+    parser_expect(&state, TOKEN_DOT, "between `Output` and its kind")
+    variant :: parser_expect_name(&state, "for the Output kind")
+    fields :: parser_parse_expression_fields(&state, 1)
+    args :: fields.fields.iter().map(fn(field) { EnumLitArg.Named{label: field.name, expr: field.value} }).collect_vec()
+    if parser_aborting(&state) -> return None
+    end :: parser_lookahead(&state, -1).span.end
+    value :: Expr.EnumLit{type_name: type_name.payload.decoded, variant: variant.payload.decoded, variant_span: Val(variant.span), args: args, leading_dot: false, span: Span{start: type_name.span.start, end: end}}
+    definition := ast_const(name.payload.decoded, name.span, Span{start: start, end: end}, value)
+    definition.is_pub = false
+    definition.is_package_pub = false
+    definition.meta = None
+    definition.attrs = []
+    definition.rust_kind = RustConstKind.Const
+    definition.is_comptime = false
+    definition.ct = None
+    definition.ty = Val(Type.Named{name: Syntax.TYPE_OUTPUT})
+    definition.is_persist = false
+    definition.persist_span = None
+    definition.mutable = false
+    definition.resolved_output = None
+    Val(^definition)
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:483
+fn output_defaults_def(state: &JetParserState) -> ConstDef? {
+    start :: parser_current(&state).span.start
+    name :: parser_expect_name(&state, "for Output defaults")
+    parser_expect(&state, TOKEN_COLON, "after `defaults`")
+    value :: parser_parse_expression(&state, 1, 0)
+    if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+    if parser_aborting(&state) -> return None
+    definition := ast_const(name.payload.decoded, name.span, Span{start: start, end: parser_lookahead(&state, -1).span.end}, value.expr)
+    definition.is_pub = false
+    definition.is_package_pub = false
+    definition.meta = None
+    definition.attrs = []
+    definition.rust_kind = RustConstKind.Const
+    definition.is_comptime = false
+    definition.ct = None
+    definition.ty = Val(Type.Named{name: Syntax.TYPE_OUTPUT_DEFAULTS})
+    definition.is_persist = false
+    definition.persist_span = None
+    definition.mutable = false
+    definition.resolved_output = None
+    Val(^definition)
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:518
+// Canonical Items.jet:1944 parser_parse_const: retired const/comptime,
+// marked/known name recovery, binding value, prepared compile-time state.
 
-// PORT-PENDING 0333 crates-jet-parser-src-parser-items-markers-contracts-module-group: crates/jet-parser/src/Parser/Items/visibility_items.rs:1-416
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{Diagnostic, Func, Item, MetaAttr, Parser, Span, Syntax, TokKind};
-//RS 
-//RS const VISIBILITY_ITEM_FORMS: &str =
-//RS     "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, `#UnitFamily`, or `NAME :: value`";
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// D-VISDEFAULT2=A: parse one top-level item after a visibility qualifier.
-//RS     pub(super) fn item_after_visibility(
-//RS         &mut self,
-//RS         is_pub: bool,
-//RS         is_package_pub: bool,
-//RS     ) -> Result<Item, Diagnostic> {
-//RS         match self.peek().kind.clone() {
-//RS             TokKind::KwStruct => self
-//RS                 .struct_def_after_pub_pkg(is_pub, is_package_pub)
-//RS                 .map(Item::Struct),
-//RS             TokKind::KwEnum => self
-//RS                 .enum_def_after_pub(is_pub, is_package_pub)
-//RS                 .map(Item::Enum),
-//RS             TokKind::KwTrait => self.trait_def(false).map(|mut td| {
-//RS                 td.is_pub = is_pub;
-//RS                 td.is_package_pub = is_package_pub;
-//RS                 Item::Trait(td)
-//RS             }),
-//RS             TokKind::KwTag => self.tag_def(false).map(|mut td| {
-//RS                 td.is_pub = is_pub;
-//RS                 td.is_package_pub = is_package_pub;
-//RS                 Item::Tag(td)
-//RS             }),
-//RS             TokKind::KwFn => self
-//RS                 .bump_then_func_after_fn(
-//RS                     is_pub,
-//RS                     is_package_pub,
-//RS                     false,
-//RS                     false,
-//RS                     false,
-//RS                     None,
-//RS                     None,
-//RS                     None,
-//RS                     None,
-//RS                     false,
-//RS                     None,
-//RS                     None,
-//RS                     None,
-//RS                 )
-//RS                 .map(Item::Func),
-//RS             TokKind::KwModule if self.is_code_module_at(1) => {
-//RS                 self.code_module_with_pkg(is_pub, is_package_pub)
-//RS             }
-//RS             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
-//RS                 self.reject_top_level_state_decl(is_pub, is_package_pub)
-//RS             }
-//RS             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
-//RS                 .protocol_decl_with_pkg(is_pub, is_package_pub)
-//RS                 .map(Item::ProtocolDecl),
-//RS             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
-//RS                 .type_alias_def(is_pub, is_package_pub)
-//RS                 .map(Item::TypeAlias),
-//RS             TokKind::Ident(_) if self.at_distinct_def() => self
-//RS                 .distinct_def(is_pub, is_package_pub)
-//RS                 .map(Item::Distinct),
-//RS             // 3A: `pub NAME :: value` exports an immutable module binding.
-//RS             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::ColonColon) => self
-//RS                 .module_binding_def()
-//RS                 .map(|mut constant| {
-//RS                     constant.is_pub = is_pub;
-//RS                     constant.is_package_pub = is_package_pub;
-//RS                     Item::Const(constant)
-//RS                 }),
-//RS             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
-//RS                 self.unit_family_def(is_pub, is_package_pub)
-//RS                     .map(Item::UnitFamily)
-//RS             }
-//RS             _ => {
-//RS                 let d = Diagnostic::error(
-//RS                     "E0003",
-//RS                     format!(
-//RS                         "expected one of {VISIBILITY_ITEM_FORMS} after a visibility qualifier"
-//RS                     ),
-//RS                     "all visibility qualifiers share one dispatcher for the canonical top-level declaration forms"
-//RS                         .to_string(),
-//RS                     format!(
-//RS                         "write a visibility qualifier before one of {VISIBILITY_ITEM_FORMS}"
-//RS                     ),
-//RS                     Some(self.peek().span),
-//RS                 );
-//RS                 Err(d)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-VISDEFAULT2=A: parse top-level item visibility (`priv`, `pub`, defaults).
-//RS     pub(in crate::Parser) fn parse_item_visibility(&mut self) -> (bool, bool) {
-//RS         if matches!(self.peek().kind, TokKind::KwPub | TokKind::KwPriv)
-//RS             && matches!(self.peek2().kind, TokKind::Colon)
-//RS         {
-//RS             let span = Span::new(self.peek().span.start, self.peek2().span.end);
-//RS             self.bump();
-//RS             self.bump();
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0415",
-//RS                 "section visibility labels like `pub:` / `priv:` are not supported".to_string(),
-//RS                 "moving an item above or below a label would silently change whether it exports"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-//RS                     Syntax::MARKER_PUB_FILE,
-//RS                     Syntax::KW_PRIV
-//RS                 ),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         if let TokKind::Ident(ref n) = self.peek().kind {
-//RS             if (n == Syntax::KW_PUB || n == Syntax::KW_PRIV || n == Syntax::FOREIGN_PRIVATE)
-//RS                 && matches!(self.peek2().kind, TokKind::Colon)
-//RS             {
-//RS                 let span = Span::new(self.peek().span.start, self.peek2().span.end);
-//RS                 self.bump();
-//RS                 self.bump();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E0415",
-//RS                         "section visibility labels like `pub:` / `priv:` are not supported".to_string(),
-//RS                         "moving an item above or below a label would silently change whether it exports"
-//RS                             .to_string(),
-//RS                         format!(
-//RS                             "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-//RS                             Syntax::MARKER_PUB_FILE,
-//RS                             Syntax::KW_PRIV
-//RS                         ),
-//RS                         Some(span),
-//RS                     ));
-//RS             }
-//RS         }
-//RS         if matches!(
-//RS             &self.peek().kind,
-//RS             TokKind::Ident(n) if n == Syntax::FOREIGN_PRIVATE
-//RS         ) {
-//RS             let span = self.peek().span;
-//RS             self.bump();
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0412",
-//RS                 format!(
-//RS                     "write `{}`, not `{}`",
-//RS                     Syntax::KW_PRIV,
-//RS                     Syntax::FOREIGN_PRIVATE
-//RS                 ),
-//RS                 format!(
-//RS                     "inside a `#{}` file, `{}` marks an item that stays private to this file",
-//RS                     Syntax::MARKER_PUB_FILE,
-//RS                     Syntax::KW_PRIV
-//RS                 ),
-//RS                 format!(
-//RS                     "write `{} fn …` instead of `{} fn …`",
-//RS                     Syntax::KW_PRIV,
-//RS                     Syntax::FOREIGN_PRIVATE
-//RS                 ),
-//RS                 Some(span),
-//RS             ));
-//RS             if matches!(self.peek().kind, TokKind::KwPub) {
-//RS                 let span = Span::new(span.start, self.peek().span.end);
-//RS                 self.bump();
-//RS                 let _ = self.try_parse_pub_package_suffix();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0417",
-//RS                     format!(
-//RS                         "`{}` and `{}` can't both apply to one item",
-//RS                         Syntax::KW_PRIV,
-//RS                         Syntax::KW_PUB
-//RS                     ),
-//RS                     "an item is either public or private — pick one qualifier".to_string(),
-//RS                     format!(
-//RS                         "drop `{}` (already public in a `#{}` file) or remove `{}`",
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             if !self.pub_file_default {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0413",
-//RS                     format!(
-//RS                         "`{}` only applies inside a `#{}` file",
-//RS                         Syntax::KW_PRIV,
-//RS                         Syntax::MARKER_PUB_FILE
-//RS                     ),
-//RS                     format!(
-//RS                         "without `#{}`, items are private by default and export with `{}`",
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PUB
-//RS                     ),
-//RS                     format!(
-//RS                         "add `#{}` at the top of the file, or write `{}` instead of `{}`",
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             return (false, false);
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwPriv) {
-//RS             let span = self.peek().span;
-//RS             self.bump();
-//RS             if matches!(self.peek().kind, TokKind::KwPub) {
-//RS                 let span = Span::new(span.start, self.peek().span.end);
-//RS                 self.bump();
-//RS                 let _ = self.try_parse_pub_package_suffix();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0417",
-//RS                     format!(
-//RS                         "`{}` and `{}` can't both apply to one item",
-//RS                         Syntax::KW_PRIV,
-//RS                         Syntax::KW_PUB
-//RS                     ),
-//RS                     "an item is either public or private — pick one qualifier".to_string(),
-//RS                     format!(
-//RS                         "drop `{}` (already public in a `#{}` file) or remove `{}`",
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             if !self.pub_file_default {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0413",
-//RS                     format!(
-//RS                         "`{}` only applies inside a `#{}` file",
-//RS                         Syntax::KW_PRIV,
-//RS                         Syntax::MARKER_PUB_FILE
-//RS                     ),
-//RS                     format!(
-//RS                         "without `#{}`, items are private by default and export with `{}`",
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PUB
-//RS                     ),
-//RS                     format!(
-//RS                         "add `#{}` at the top of the file, or write `{}` instead of `{}`",
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             return (false, false);
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwPub) {
-//RS             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-//RS             if self.pub_file_default && is_pub && !is_package_pub {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0414",
-//RS                     format!(
-//RS                         "`{}` is redundant in a `#{}` file",
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::MARKER_PUB_FILE
-//RS                     ),
-//RS                     format!(
-//RS                         "after `#{}`, top-level items are already public unless marked `{}`",
-//RS                         Syntax::MARKER_PUB_FILE,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     format!(
-//RS                         "drop `{}` or mark exceptions with `{}`",
-//RS                         Syntax::KW_PUB,
-//RS                         Syntax::KW_PRIV
-//RS                     ),
-//RS                     Some(self.toks[self.pos.saturating_sub(1)].span),
-//RS                 ));
-//RS             }
-//RS             return (is_pub, is_package_pub);
-//RS         }
-//RS         if self.pub_file_default {
-//RS             (true, false)
-//RS         } else {
-//RS             (false, false)
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-PUBPKG1=A: parse an optional `pub` or `pub(package)` qualifier.
-//RS     /// Returns `(is_pub, is_package_pub)`. On `pub(other)` pushes E0411 and returns `(true, false)`.
-//RS     /// Non-failing: never returns Err.
-//RS     pub(in crate::Parser) fn parse_pub_qualifier(&mut self) -> (bool, bool) {
-//RS         if !matches!(self.peek().kind, TokKind::KwPub) {
-//RS             return (false, false);
-//RS         }
-//RS         self.bump(); // consume `pub`
-//RS         self.try_parse_pub_package_suffix()
-//RS     }
-//RS 
-//RS     /// Consume optional `(package)` after `pub` was already eaten.
-//RS     fn try_parse_pub_package_suffix(&mut self) -> (bool, bool) {
-//RS         if !matches!(self.peek().kind, TokKind::LParen) {
-//RS             return (true, false);
-//RS         }
-//RS         // pub(…)
-//RS         self.bump(); // consume `(`
-//RS         match self.peek().kind.clone() {
-//RS             TokKind::Ident(ref n) if n == Syntax::PUB_PACKAGE_QUALIFIER => {
-//RS                 self.bump(); // consume `package`
-//RS                              // consume `)` — push error if missing but don't abort
-//RS                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                     self.bump();
-//RS                 } else {
-//RS                     let sp = self.peek().span;
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "expected `)` to close `pub(package)`".to_string(),
-//RS                             "write `pub(package)` with no extra content inside the parentheses".to_string(),
-//RS                             "use `pub(package)` to restrict access to sibling packages in the same payload".to_string(),
-//RS                             Some(sp),
-//RS                         ));
-//RS                 }
-//RS                 (true, true)
-//RS             }
-//RS             _ => {
-//RS                 // pub(something_else) — reject
-//RS                 let sp = self.peek().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0411",
-//RS                     format!("unknown `pub(…)` qualifier — only `pub(package)` is supported"),
-//RS                     "`pub(package)` restricts access to sibling packages in the same payload"
-//RS                         .to_string(),
-//RS                     "write `pub` (public to all) or `pub(package)` (package-scoped)".to_string(),
-//RS                     Some(sp),
-//RS                 ));
-//RS                 // skip to `)`
-//RS                 while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-//RS                     self.bump();
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                     self.bump();
-//RS                 }
-//RS                 (true, false)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Parse a function whose `#Pure`/`#Sanitizer` modifiers are already known.
-//RS     pub(super) fn func_with_modifiers(
-//RS         &mut self,
-//RS         is_pure: bool,
-//RS         is_sanitizer: bool,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         self.func_with_modifiers_full(
-//RS             is_pure,
-//RS             is_sanitizer,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Parse a function whose `#Pure`/`#Sanitizer` and D-STATE1 typestate markers
-//RS     /// are already known.
-//RS     #[allow(clippy::too_many_arguments)]
-//RS     pub(super) fn func_with_modifiers_full(
-//RS         &mut self,
-//RS         is_pure: bool,
-//RS         is_sanitizer: bool,
-//RS         meta: Option<MetaAttr>,
-//RS         state_requires: Option<(String, Span)>,
-//RS         state_transition: Option<crate::AST::StateTransition>,
-//RS         web_marker: Option<crate::Syntax::WebPartitionMarker>,
-//RS         is_must_use: bool,
-//RS         must_use_span: Option<Span>,
-//RS         maturity: Option<crate::AST::MaturityTag>,
-//RS         maturity_span: Option<Span>,
-//RS         is_inline: bool,
-//RS         is_inline_always: bool,
-//RS         inline_span: Option<Span>,
-//RS         is_replayable: bool,
-//RS         replayable_span: Option<Span>,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-//RS         self.func_after_fn(
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             is_pure,
-//RS             is_sanitizer,
-//RS             meta,
-//RS             state_requires,
-//RS             state_transition,
-//RS             false,
-//RS             web_marker,
-//RS             is_must_use,
-//RS             must_use_span,
-//RS             maturity,
-//RS             maturity_span,
-//RS             is_inline,
-//RS             is_inline_always,
-//RS             inline_span,
-//RS             is_replayable,
-//RS             replayable_span,
-//RS             false,
-//RS         )
-//RS     }
-//RS }
-// END-PORT-PENDING 0333 crates/jet-parser/src/Parser/Items/visibility_items.rs:1-416
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:14
+// Canonical Items.jet:1439 parser_parse_opt_declared_view_from: contextual
+// from predicate, Receiver/Parameter/Static owners, immutable root provenance.
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:43
+// Canonical Items.jet:1449-1467 slot list; repeated slots replace previous
+// entries as a typed ordered-map insertion (integration, not array append).
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:76
+// Canonical Items.jet:1470 parser_parse_declared_view_sources: union separator,
+// exact ViewSourcePath ordered-set uniqueness belongs to the AST carrier.
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:93
+// Canonical Items.jet:1485 parser_parse_declared_view_source; static dotted
+// path's final name split and ordinary parameter index exclude self.
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:148
+// Canonical Items.jet:813 parser_parse_param, unresolved owner names permit
+// later-parameter references and discard projection components for this slice.
+// Rust: crates/jet-parser/src/Parser/Items/view_from.rs:185
+// Canonical State.jet parser_expect_name / parser_bump guarded TOKEN_IDENT.
 
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:3
+VISIBILITY_ITEM_FORMS :: "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, `#UnitFamily`, or `NAME :: value`"
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:8
+// Canonical Items.jet:199 parser_parse_item_or_import; one visibility path
+// dispatches fn/struct/enum/trait/tag/code-module/protocol/alias/distinct,
+// immutable named binding and #UnitFamily, rejecting top-level state.
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:93
+// Canonical Items.jet:336 parser_parse_item_modifiers: PubFile default, priv,
+// private E0412, conflicts E0417, section E0415, redundant pub E0414.
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:287
+// Canonical Items.jet:348-370 pub qualifier; missing suffix leaves public.
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:296
+// Canonical Items.jet:352-369 package suffix; E0411 recovery skips to )/EOF.
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:344
+// Canonical Items.jet:949 parser_parse_function via ParsedItemModifiers.
+// Rust: crates/jet-parser/src/Parser/Items/visibility_items.rs:371
+// Canonical Items.jet:949 parser_parse_function, modifier metadata retained
+// in Func by canonical parser_apply_function_markers before ordinary body.

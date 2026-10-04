@@ -1,0 +1,29 @@
+use jet_sema.Sema.CheckerCli.[is_cli_scalar, callable_param_shape, named_leaf, e1305, e1306, e1309, e1318, e1318_invalid, e1308, e1347]
+use jet_sema.AST.[Type]
+use jet_sema.Diagnostics.[Span]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCli.rs:40,237,321
+#Test("cli_scalar_and_callable_shapes") {
+    assert(is_cli_scalar(Type.Int))
+    assert(is_cli_scalar(Type.Float))
+    assert(is_cli_scalar(Type.Bool))
+    assert(is_cli_scalar(Type.String))
+    assert(is_cli_scalar(Type.Named{name: "Path"}))
+    assert(!is_cli_scalar(Type.Named{name: "User"}))
+    assert(!is_cli_scalar(Type.Option{inner: Type.Int}))
+    assert(callable_param_shape(Type.Option{inner: Type.Int}))
+    assert(!callable_param_shape(Type.Option{inner: Type.Named{name: "User"}}))
+    assert(named_leaf(Type.Named{name: "pkg.Program"}) == Val("Program"))
+    assert(named_leaf(Type.Int).is_none())
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCli.rs:106-236
+#Test("cli_shape_diagnostics_keep_exact_contract") {
+    span :: Span.new(2, 8)
+    assert(e1305("input", "User", span).what == "field `input` has no CLI flag mapping (User)")
+    assert(e1306("help", span).what == "two `#[CLI]` fields both derive the flag `--help`")
+    assert(e1309("quiet", span).why == "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with a {{expr}} default already stay flag-only.")
+    assert(e1318("p", "first", "second", span).what == "`#Short(\"p\")` is used by both `first` and `second`")
+    assert(e1318_invalid("pp", span).what == "`#Short(\"pp\")` is not a one-letter option")
+    assert(e1308(None).code == "E1308")
+    assert(e1347(span).fix == "change the receiver to read-only `self`")
+}

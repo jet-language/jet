@@ -1,1364 +1,681 @@
-// PORT-PENDING 0329 crates-jet-parser-src-parser-items-functions-params: crates/jet-parser/src/Parser/Items/functions_params.rs:1-1360
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::{
-//RS     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
-//RS     TokKind, Type,
-//RS };
-//RS use crate::AST::{ParamZone, PatSlot, Pattern};
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// S83: parse either an ordinary parameter list or one bare variant head
-//RS     /// (`Circle(r: Float)`). The head keeps its payload params for sema's
-//RS     /// later table fold; no second pattern dialect is introduced.
-//RS     fn parse_func_params(&mut self) -> Result<(Vec<Param>, Option<Pattern>), Diagnostic> {
-//RS         let is_head = matches!(self.peek().kind, TokKind::Ident(_))
-//RS             && matches!(self.peek2().kind, TokKind::LParen | TokKind::RParen);
-//RS         if !is_head {
-//RS             return Ok((self.parse_param_list()?, None));
-//RS         }
-//RS 
-//RS         let (variant, variant_span) = self.expect_ident("for a multi-head variant")?;
-//RS         let (params, pattern_end) = if matches!(self.peek().kind, TokKind::LParen) {
-//RS             self.bump();
-//RS             let params = self.parse_param_list()?;
-//RS             let pattern_end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS             self.expect(TokKind::RParen, "after a multi-head payload")?;
-//RS             (params, pattern_end)
-//RS         } else {
-//RS             self.expect(TokKind::RParen, "after a unit multi-head variant")?;
-//RS             (Vec::new(), variant_span.end)
-//RS         };
-//RS         let bindings = params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 if param.name == Syntax::PAT_WILDCARD_SLOT {
-//RS                     PatSlot::Wildcard
-//RS                 } else {
-//RS                     PatSlot::Bind {
-//RS                         name: param.name.clone(),
-//RS                         span: param.name_span,
-//RS                     }
-//RS                 }
-//RS             })
-//RS             .collect();
-//RS         Ok((
-//RS             params,
-//RS             Some(Pattern::Variant {
-//RS                 variant,
-//RS                 bindings,
-//RS                 leading_dot: false,
-//RS                 span: Span::new(variant_span.start, pattern_end),
-//RS             }),
-//RS         ))
-//RS     }
-//RS 
-//RS     #[allow(clippy::too_many_arguments)]
-//RS     pub(super) fn func_after_fn(
-//RS         &mut self,
-//RS         is_pub: bool,
-//RS         is_package_pub: bool,
-//RS         is_unsafe: bool,
-//RS         unsafe_reason: Option<String>,
-//RS         unsafe_span: Option<Span>,
-//RS         is_pure: bool,
-//RS         is_sanitizer: bool,
-//RS         meta: Option<MetaAttr>,
-//RS         state_requires: Option<(String, Span)>,
-//RS         state_transition: Option<crate::AST::StateTransition>,
-//RS         is_reactive: bool,
-//RS         web_marker: Option<crate::Syntax::WebPartitionMarker>,
-//RS         is_must_use: bool,
-//RS         must_use_span: Option<Span>,
-//RS         maturity: Option<crate::AST::MaturityTag>,
-//RS         maturity_span: Option<Span>,
-//RS         is_inline: bool,
-//RS         is_inline_always: bool,
-//RS         inline_span: Option<Span>,
-//RS         is_replayable: bool,
-//RS         replayable_span: Option<Span>,
-//RS         allow_guest_import_symbol: bool,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
-//RS         let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
-//RS         let external_type = if (matches!(self.peek().kind, TokKind::Dot)
-//RS             || matches!(self.peek().kind, TokKind::TildeTilde))
-//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
-//RS             && matches!(self.peek3().kind, TokKind::LParen)
-//RS         {
-//RS             let type_name = name;
-//RS             let type_span = name_span;
-//RS             if matches!(self.peek().kind, TokKind::TildeTilde) {
-//RS                 let sep_span = self.peek().span;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0325",
-//RS                     format!(
-//RS                         "external methods attach with `{}`, not `{}`",
-//RS                         Syntax::EXTERNAL_METHOD_CONNECTOR,
-//RS                         Syntax::EXTERNAL_METHOD_CONNECTOR_RETIRED
-//RS                     ),
-//RS                     "the dot connector matches trait impls and ordinary member access".to_string(),
-//RS                     format!("write `fn {}.method(...)`", type_name),
-//RS                     Some(sep_span),
-//RS                 ));
-//RS             }
-//RS             self.bump(); // `.` or retired `~~`
-//RS             let (method_name, method_span) =
-//RS                 self.expect_ident("after the connector in an external method definition")?;
-//RS             name = method_name;
-//RS             name_span = method_span;
-//RS             Some((type_name, type_span))
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let type_params = self.parse_opt_type_params()?;
-//RS         self.expect(TokKind::LParen, "after the function name")?;
-//RS         let (params, head_pattern) = self.parse_func_params()?;
-//RS         self.validate_variadic_params(&params);
-//RS         self.validate_param_labels(&params);
-//RS         if external_type.is_some() {
-//RS             self.reject_root_method_params(&params);
-//RS         }
-//RS 
-//RS         let (
-//RS             mut return_type,
-//RS             mut return_type_span,
-//RS             mut declared_effects,
-//RS             mut effect_via,
-//RS             prefix_effect_span,
-//RS         ) = self.parse_callable_result_and_prefix_effects()?;
-//RS         let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
-//RS         let post_effect_span = (!declared_effects.is_some()
-//RS             && !effect_via.is_some()
-//RS             && self.func_effect_starts_here())
-//RS         .then(|| self.peek().span);
-//RS         if post_effect_span.is_some() {
-//RS             let (effects, via) = self.parse_opt_func_effects()?;
-//RS             declared_effects = effects;
-//RS             effect_via = via;
-//RS         }
-//RS         let effect_body_span = post_effect_span.or_else(|| {
-//RS             (return_type.is_none() && (declared_effects.is_some() || effect_via.is_some()))
-//RS                 .then(|| prefix_effect_span)
-//RS                 .flatten()
-//RS         });
-//RS         let is_pure = is_pure
-//RS             || declared_effects
-//RS                 .as_ref()
-//RS                 .is_some_and(|effects| effects.is_empty());
-//RS 
-//RS         /*
-//RS          * D-SIG-SHAPE1=B: the colon before a bare result is not a valid
-//RS          * signature form. Keep the old branch below as ordinary recovery
-//RS          * while the corpus still contains it.
-//RS          */
-//RS         if matches!(self.peek().kind, TokKind::Colon) {
-//RS             let colon = self.bump();
-//RS             self.diags.push(
-//RS                 Diagnostic::error(
-//RS                     "E0003",
-//RS                     "a function return type uses `:`".to_string(),
-//RS                     "Jet uses `:` for parameter and field types; callable bodies use `->`"
-//RS                         .to_string(),
-//RS                     "replace `:` with `->` before the return type".to_string(),
-//RS                     Some(colon.span),
-//RS                 )
-//RS                 .with_edit(crate::Diagnostics::TextEdit {
-//RS                     span: colon.span,
-//RS                     new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
-//RS                 }),
-//RS             );
-//RS             if self.type_starts_here() {
-//RS                 let (ty, span) = self.return_type()?;
-//RS                 return_type = Some(ty);
-//RS                 return_type_span = Some(span);
-//RS             }
-//RS         }
-//RS 
-//RS         // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line
-//RS         // body. Keep retired `::`/`=` input readable for the migration.
-//RS         let effect_body_marker = effect_body_span.is_some();
-//RS         let body_marker_span = match effect_body_span {
-//RS             Some(span)
-//RS                 if !matches!(
-//RS                     self.peek().kind,
-//RS                     TokKind::UnifiedArrow
-//RS                         | TokKind::LambdaArrow
-//RS                         | TokKind::ColonColon
-//RS                         | TokKind::Eq
-//RS                 ) =>
-//RS             {
-//RS                 Some(span)
-//RS             }
-//RS             _ => self.parse_optional_function_body_marker(allow_guest_import_symbol),
-//RS         };
-//RS         if body_marker_span.is_some() {
-//RS             let value_body = !matches!(self.peek().kind, TokKind::LBrace)
-//RS                 || (!effect_body_marker
-//RS                     && self.brace_starts_record()
-//RS                     && !matches!(self.peek2().kind, TokKind::RBrace));
-//RS             if value_body {
-//RS                 // A one-expression marker accepts a field-led brace as an
-//RS                 // inferred record literal. Statement-shaped braces are
-//RS                 // callable blocks, including `return` bodies.
-//RS                 let (body, end) = if self.function_body_is_missing() {
-//RS                     self.diags
-//RS                         .push(Self::missing_function_body(self.peek().span, &name));
-//RS                     let end = self.peek().span.start;
-//RS                     if matches!(self.peek().kind, TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     (Vec::new(), end)
-//RS                 } else {
-//RS                     let expr = self.expr()?;
-//RS                     let expr_end = expr.span().end;
-//RS                     self.finish_stmt()?;
-//RS                     let end = if self.pos > 0 {
-//RS                         self.toks[self.pos - 1].span.end
-//RS                     } else {
-//RS                         expr_end
-//RS                     };
-//RS                     (vec![crate::AST::Stmt::Expr(expr)], end)
-//RS                 };
-//RS                 return Ok(Func {
-//RS                     span: Span::new(declaration_start, end),
-//RS                     is_pub,
-//RS                     is_package_pub,
-//RS                     is_comptime: false,
-//RS                     external_type,
-//RS                     name,
-//RS                     name_span,
-//RS                     meta,
-//RS                     type_params,
-//RS                     head_pattern,
-//RS                     params,
-//RS                     return_type,
-//RS                     return_type_span,
-//RS                     return_view_provenance: None,
-//RS                     declared_return_view_provenance,
-//RS                     gc_return: false,
-//RS                     diverges: false,
-//RS                     gc_scope: false,
-//RS                     is_unsafe,
-//RS                     unsafe_reason,
-//RS                     unsafe_span,
-//RS                     is_pure,
-//RS                     is_sanitizer,
-//RS                     scrub_tag: None,
-//RS                     is_reactive,
-//RS                     reactive_upgrades: Vec::new(),
-//RS                     is_replayable,
-//RS                     replayable_span,
-//RS                     is_job: false,
-//RS                     job_span: None,
-//RS                     every: None,
-//RS                     job_metadata: None,
-//RS                     declared_effects,
-//RS                     effect_via,
-//RS                     state_requires,
-//RS                     state_transition,
-//RS                     web_marker,
-//RS                     is_must_use,
-//RS                     must_use_span,
-//RS                     maturity,
-//RS                     maturity_span,
-//RS                     kernel: None,
-//RS                     is_inline,
-//RS                     is_inline_always,
-//RS                     inline_span,
-//RS                     pre: Vec::new(),
-//RS                     post: Vec::new(),
-//RS                     inline_foreign: None,
-//RS                     undo: None,
-//RS                     markers: Vec::new(),
-//RS                     compiler_generated: false,
-//RS                     body,
-//RS                 });
-//RS             }
-//RS         }
-//RS         // D-SIG-AFTER1=A: a value-returning named body is `{ … }`. The
-//RS         // retired D-CALLABLE-ONE1 extra `->` before braces is gone.
-//RS         if !matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.diags
-//RS                 .push(Self::missing_function_body(self.peek().span, &name));
-//RS             let end = self.peek().span.start;
-//RS             return Ok(Func {
-//RS                 span: Span::new(declaration_start, end),
-//RS                 is_pub,
-//RS                 is_comptime: false,
-//RS                 is_package_pub,
-//RS                 external_type,
-//RS                 name,
-//RS                 name_span,
-//RS                 meta,
-//RS                 type_params,
-//RS                 head_pattern,
-//RS                 params,
-//RS                 return_type,
-//RS                 return_type_span,
-//RS                 return_view_provenance: None,
-//RS                 declared_return_view_provenance,
-//RS                 gc_return: false,
-//RS                 diverges: false,
-//RS                 gc_scope: false,
-//RS                 is_unsafe,
-//RS                 unsafe_reason,
-//RS                 unsafe_span,
-//RS                 is_pure,
-//RS                 is_sanitizer,
-//RS                 scrub_tag: None,
-//RS                 is_reactive,
-//RS                 reactive_upgrades: Vec::new(),
-//RS                 is_replayable,
-//RS                 replayable_span,
-//RS                 is_job: false,
-//RS                 job_span: None,
-//RS                 every: None,
-//RS                 job_metadata: None,
-//RS                 declared_effects,
-//RS                 effect_via,
-//RS                 state_requires,
-//RS                 state_transition,
-//RS                 web_marker,
-//RS                 is_must_use,
-//RS                 must_use_span,
-//RS                 maturity,
-//RS                 maturity_span,
-//RS                 kernel: None,
-//RS                 is_inline,
-//RS                 is_inline_always,
-//RS                 inline_span,
-//RS                 pre: Vec::new(),
-//RS                 post: Vec::new(),
-//RS                 inline_foreign: None,
-//RS                 undo: None,
-//RS                 markers: Vec::new(),
-//RS                 compiler_generated: false,
-//RS                 body: Vec::new(),
-//RS             });
-//RS         }
-//RS         self.expect(TokKind::LBrace, "to open the function body")?;
-//RS         // D-TAIL-RETURN1=A (amends D-BODY-LAST1): keep the final expression
-//RS         // in the existing statement node. Sema decides whether this callable
-//RS         // expects a value; the parser only admits the unadorned tail shape.
-//RS         let previous_tail_depth = self.callable_tail_block_depth;
-//RS         let previous_tail_value = self.callable_tail_expects_value;
-//RS         self.callable_tail_block_depth = Some(self.block_depth + 1);
-//RS         self.callable_tail_expects_value = return_type
-//RS             .as_ref()
-//RS             .is_some_and(Self::return_type_has_value);
-//RS         let body = self.block_stmts();
-//RS         self.callable_tail_block_depth = previous_tail_depth;
-//RS         self.callable_tail_expects_value = previous_tail_value;
-//RS         let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS         Ok(Func {
-//RS             span: Span::new(declaration_start, declaration_end),
-//RS             is_pub,
-//RS             is_comptime: false,
-//RS             is_package_pub,
-//RS             external_type,
-//RS             name,
-//RS             name_span,
-//RS             meta,
-//RS             type_params,
-//RS             head_pattern,
-//RS             params,
-//RS             return_type,
-//RS             return_type_span,
-//RS             return_view_provenance: None,
-//RS             declared_return_view_provenance,
-//RS             gc_return: false,
-//RS             diverges: false,
-//RS             gc_scope: false,
-//RS             is_unsafe,
-//RS             unsafe_reason,
-//RS             unsafe_span,
-//RS             is_pure,
-//RS             is_sanitizer,
-//RS             scrub_tag: None,
-//RS             is_reactive,
-//RS             reactive_upgrades: Vec::new(),
-//RS             is_replayable,
-//RS             replayable_span,
-//RS             is_job: false,
-//RS             job_span: None,
-//RS             every: None,
-//RS             job_metadata: None,
-//RS             declared_effects,
-//RS             effect_via,
-//RS             state_requires,
-//RS             state_transition,
-//RS             web_marker,
-//RS             is_must_use,
-//RS             must_use_span,
-//RS             maturity,
-//RS             maturity_span,
-//RS             kernel: None,
-//RS             is_inline,
-//RS             is_inline_always,
-//RS             inline_span,
-//RS             pre: Vec::new(),
-//RS             post: Vec::new(),
-//RS             inline_foreign: None,
-//RS             undo: None,
-//RS             markers: Vec::new(),
-//RS             compiler_generated: false,
-//RS             body,
-//RS         })
-//RS     }
-//RS     /// Parse a per-callable `#Import(c)` declaration with its canonical
-//RS     /// symbol-string body marker. The marker is retired for ordinary Jet
-//RS     /// functions, but it is the ratified import spelling at this site.
-//RS     pub(in crate::Parser) fn guest_import_func(&mut self) -> Result<Func, Diagnostic> {
-//RS         while matches!(self.peek().kind, TokKind::Semi) {
-//RS             self.bump();
-//RS         }
-//RS         let (is_pub, is_package_pub) = self.parse_item_visibility();
-//RS         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-//RS         self.func_after_fn(
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             true,
-//RS         )
-//RS     }
-//RS 
-//RS 
-//RS     pub(in crate::Parser) fn foreign_function(&mut self) -> Result<Func, Diagnostic> {
-//RS         self.func_after_fn(
-//RS             false, false, false, None, None, false, false, None, None, None, false, None, false,
-//RS             None, None, None, false, false, None, false, None,
-//RS             false,
-//RS         )
-//RS     }
-//RS 
-//RS     #[allow(clippy::too_many_arguments)]
-//RS     pub(super) fn bump_then_func_after_fn(
-//RS         &mut self,
-//RS         is_pub: bool,
-//RS         is_package_pub: bool,
-//RS         is_unsafe: bool,
-//RS         is_pure: bool,
-//RS         is_sanitizer: bool,
-//RS         meta: Option<MetaAttr>,
-//RS         state_requires: Option<(String, Span)>,
-//RS         state_transition: Option<crate::AST::StateTransition>,
-//RS         web_marker: Option<crate::Syntax::WebPartitionMarker>,
-//RS         is_must_use: bool,
-//RS         must_use_span: Option<Span>,
-//RS         maturity: Option<crate::AST::MaturityTag>,
-//RS         maturity_span: Option<Span>,
-//RS     ) -> Result<Func, Diagnostic> {
-//RS         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-//RS         self.func_after_fn(
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             is_unsafe,
-//RS             None,
-//RS             None,
-//RS             is_pure,
-//RS             is_sanitizer,
-//RS             meta,
-//RS             state_requires,
-//RS             state_transition,
-//RS             false,
-//RS             web_marker,
-//RS             is_must_use,
-//RS             must_use_span,
-//RS             maturity,
-//RS             maturity_span,
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS             None,
-//RS             false,
-//RS         )
-//RS     }
-//RS 
-//RS     /// D-SIG-AFTER1=A: read the result after the one arrow.
-//RS     /// Current forms are `-> T`, `-[E]> T`, unit `-[E]>`, and unit-fallible
-//RS     /// `!E`. Bare type after `)` is retired teaching (E0068).
-//RS     pub(super) fn parse_callable_result_and_prefix_effects(
-//RS         &mut self,
-//RS     ) -> Result<
-//RS         (
-//RS             Option<Type>,
-//RS             Option<Span>,
-//RS             Option<Vec<(String, Span)>>,
-//RS             Option<(String, Span)>,
-//RS             Option<Span>,
-//RS         ),
-//RS         Diagnostic,
-//RS     > {
-//RS         let prefix_effect_span = self.func_effect_starts_here().then(|| self.peek().span);
-//RS         let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
-//RS         let has_prefix_effect = declared_effects.is_some() || effect_via.is_some();
-//RS         let mut arrow_return = false;
-//RS         let (return_type, return_type_span) = if has_prefix_effect {
-//RS             arrow_return = true;
-//RS             if self.result_type_follows_arrow() {
-//RS                 let (ty, span) = self.return_type()?;
-//RS                 (Some(ty), Some(span))
-//RS             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-//RS                 (Some(ty), Some(span))
-//RS             } else {
-//RS                 (None, None)
-//RS             }
-//RS         } else if self.at_unified_arrow() {
-//RS             let arrow = self.bump();
-//RS             if self.result_type_follows_arrow() {
-//RS                 arrow_return = true;
-//RS                 let (ty, span) = self.return_type()?;
-//RS                 (Some(ty), Some(span))
-//RS             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-//RS                 arrow_return = true;
-//RS                 (Some(ty), Some(span))
-//RS             } else {
-//RS                 // `->` with no result is the old body marker. Leave it for
-//RS                 // the body parser so `fn f() -> expr` still recovers.
-//RS                 self.pos = self.pos.saturating_sub(1);
-//RS                 let _ = arrow;
-//RS                 (None, None)
-//RS             }
-//RS         } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-//RS             (Some(ty), Some(span))
-//RS         } else if self.type_starts_here() {
-//RS             let (ty, span) = self.return_type()?;
-//RS             self.diags.push(Self::retired_signature_shape(span));
-//RS             (Some(ty), Some(span))
-//RS         } else {
-//RS             (None, None)
-//RS         };
-//RS         if arrow_return
-//RS             && return_type
-//RS                 .as_ref()
-//RS                 .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-//RS         {
-//RS             self.diags.push(Self::retired_unit_fallible_signature(
-//RS                 return_type_span.unwrap_or(self.peek().span),
-//RS             ));
-//RS         }
-//RS         Ok((
-//RS             return_type,
-//RS             return_type_span,
-//RS             declared_effects,
-//RS             effect_via,
-//RS             prefix_effect_span,
-//RS         ))
-//RS     }
-//RS     /// D-SIG-AFTER1=A: a result after `->` or `-[E]>` is current when a
-//RS     /// declaration-body boundary follows, so `-> n * 2` stays an expression.
-//RS     fn result_type_follows_arrow(&mut self) -> bool {
-//RS         let saved_pos = self.pos;
-//RS         let saved_diags = self.diags.len();
-//RS         let saved_pending_type_gt = self.pending_type_gt;
-//RS         let saved_type_generic_depth = self.type_generic_depth;
-//RS         let saved_type_generic_chain_len = self.type_generic_chain.len();
-//RS         let saved_type_generic_truncated = self.type_generic_truncated;
-//RS         let parsed_span = self.return_type().ok().map(|(_, span)| span);
-//RS         let parsed_end = parsed_span.map(|span| span.end);
-//RS         let result_boundary = parsed_end.is_some_and(|end| {
-//RS             matches!(
-//RS                 self.peek().kind,
-//RS                 TokKind::ColonColon
-//RS                     | TokKind::Eq
-//RS                     | TokKind::UnifiedArrow
-//RS                     | TokKind::LambdaArrow
-//RS                     | TokKind::Semi
-//RS                     | TokKind::Comma
-//RS                     | TokKind::RParen
-//RS             ) || (matches!(self.peek().kind, TokKind::LBrace) && end < self.peek().span.start)
-//RS                 || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
-//RS         });
-//RS         self.pos = saved_pos;
-//RS         self.diags.truncate(saved_diags);
-//RS         self.pending_type_gt = saved_pending_type_gt;
-//RS         self.type_generic_depth = saved_type_generic_depth;
-//RS         self.type_generic_chain
-//RS             .truncate(saved_type_generic_chain_len);
-//RS         self.type_generic_truncated = saved_type_generic_truncated;
-//RS         result_boundary
-//RS     }
-//RS 
-//RS     /// Lookahead shared by signature parsing. `parse_opt_func_effects`
-//RS     /// accepts these old spellings too, so the migration stays readable.
-//RS     pub(in crate::Parser) fn func_effect_starts_here(&self) -> bool {
-//RS         (matches!(self.peek().kind, TokKind::Colon)
-//RS             && matches!(self.peek2().kind, TokKind::LBracket))
-//RS             || (matches!(self.peek().kind, TokKind::Eq)
-//RS                 && matches!(self.peek2().kind, TokKind::LBracket))
-//RS             || (matches!(self.peek().kind, TokKind::Hash)
-//RS                 && matches!(self.peek2().kind, TokKind::LParen))
-//RS             || (matches!(self.peek().kind, TokKind::Minus)
-//RS                 && matches!(self.peek2().kind, TokKind::LBracket))
-//RS             || matches!(self.peek().kind, TokKind::MinusMinus)
-//RS     }
-//RS 
-//RS     fn parse_optional_function_body_marker(
-//RS         &mut self,
-//RS         allow_guest_import_symbol: bool,
-//RS     ) -> Option<Span> {
-//RS         match self.peek().kind {
-//RS             TokKind::UnifiedArrow => {
-//RS                 let span = self.bump().span;
-//RS                 if allow_guest_import_symbol {
-//RS                     self.diags.push(Self::guest_import_body_marker(span));
-//RS                 }
-//RS                 Some(span)
-//RS             }
-//RS             TokKind::LambdaArrow => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Self::retired_unified_arrow(span));
-//RS                 Some(span)
-//RS             }
-//RS             TokKind::ColonColon => {
-//RS                 let span = self.bump().span;
-//RS                 self.diags.push(Self::retired_function_body(span, "::"));
-//RS                 Some(span)
-//RS             }
-//RS             TokKind::Eq => {
-//RS                 let span = self.bump().span;
-//RS                 if !allow_guest_import_symbol {
-//RS                     self.diags.push(Self::retired_function_body(span, "="));
-//RS                 }
-//RS                 Some(span)
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     fn guest_import_body_marker(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E3261",
-//RS             "`#Import(c)` function uses a non-canonical body marker".to_string(),
-//RS             "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol"
-//RS                 .to_string(),
-//RS             "write `#Import(c) fn name(args) Return = \"symbol\"`".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS 
-//RS     /// D-EFF1 / D-SHAPE8 / D-ARROW-RESPELL1: parse an optional
-//RS     /// `-[Net, DB]>` effect bound.
-//RS     /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
-//RS     /// dotted effect path (`FS.Read`); sema validates the root against the
-//RS     /// known effect vocabulary.
-//RS     pub(super) fn parse_opt_effect_annotation(
-//RS         &mut self,
-//RS     ) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
-//RS         // Trait methods (and any caller that can't host a `#(via f)` pass-through)
-//RS         // route through here: a `via` clause is parsed and discarded as a list,
-//RS         // so it surfaces as an unknown-effect E0119 in sema rather than silently
-//RS         // working. The two `Func` sites use `parse_opt_func_effects` instead.
-//RS         Ok(self.parse_opt_func_effects()?.0)
-//RS     }
-//RS 
-//RS     /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-RESPELL1: parse the effect
-//RS     /// arrow, either a declared bound (`-[Net, DB]>`) or a
-//RS     /// `-[via f]>` pass-through. Returns
-//RS     /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
-//RS     /// the cursor is not at `-[` or one of the retired effect forms.
-//RS     pub(in crate::Parser) fn parse_opt_func_effects(
-//RS         &mut self,
-//RS     ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
-//RS         let canonical = matches!(self.peek().kind, TokKind::Minus)
-//RS             && matches!(self.peek2().kind, TokKind::LBracket);
-//RS         let retired_colon = matches!(self.peek().kind, TokKind::Colon)
-//RS             && matches!(self.peek2().kind, TokKind::LBracket);
-//RS         let retired_eq = matches!(self.peek().kind, TokKind::Eq)
-//RS             && matches!(self.peek2().kind, TokKind::LBracket);
-//RS         let retired_hash = matches!(self.peek().kind, TokKind::Hash)
-//RS             && matches!(self.peek2().kind, TokKind::LParen);
-//RS         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
-//RS         if !canonical && !retired_colon && !retired_eq && !retired_double && !retired_hash {
-//RS             return Ok((None, None));
-//RS         }
-//RS         let start = self.peek().span;
-//RS         let (open, close, close_arrow) = if canonical || retired_colon {
-//RS             self.bump(); // `-[` or retired `:[`
-//RS             if retired_colon {
-//RS                 self.diags.push(Self::retired_effect_syntax(start));
-//RS             }
-//RS             (TokKind::LBracket, TokKind::RBracket, TokKind::Gt)
-//RS         } else if retired_eq {
-//RS             self.bump(); // `=`
-//RS             self.diags.push(Self::retired_effect_syntax(start));
-//RS             (TokKind::LBracket, TokKind::RBracket, TokKind::LambdaArrow)
-//RS         } else if retired_hash {
-//RS             self.bump();
-//RS             self.diags.push(Self::retired_effect_syntax(start));
-//RS             (TokKind::LParen, TokKind::RParen, TokKind::UnifiedArrow)
-//RS         } else {
-//RS             self.bump(); // `--`
-//RS             self.diags.push(Self::retired_effect_syntax(start));
-//RS             (TokKind::LBracket, TokKind::RBracket, TokKind::UnifiedArrow)
-//RS         };
-//RS         self.expect(open, "to start an effect row")?;
-//RS         // D-EFF2 `-[via f]>`: tight pass-through publishing param `f`'s effects.
-//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
-//RS             self.bump(); // `via`
-//RS             let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
-//RS             self.expect(close.clone(), "to close the effect row")?;
-//RS             self.finish_effect_arrow(close_arrow.clone(), retired_hash, canonical, start)?;
-//RS             return Ok((None, Some((param, span))));
-//RS         }
-//RS         let mut effects = Vec::new();
-//RS         if self.peek().kind != close {
-//RS             loop {
-//RS                 if matches!(self.peek().kind, TokKind::DotDot) {
-//RS                     self.bump();
-//RS                     let (name, span) = self.expect_ident("for an open effect-row name")?;
-//RS                     effects.push((format!("..{name}"), span));
-//RS                     if self.peek().kind == close {
-//RS                         break;
-//RS                     }
-//RS                     self.expect(TokKind::Comma, "between effects in the row")?;
-//RS                     if self.peek().kind == close {
-//RS                         break;
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 // D-PROP2=A: `!Effect` is a prohibition — the function (and its
-//RS                 // whole reachable call graph) must not use that effect.
-//RS                 let prohibited = matches!(self.peek().kind, TokKind::Bang);
-//RS                 if prohibited {
-//RS                     self.bump(); // consume `!`
-//RS                 }
-//RS                 let (name, span) = self.expect_effect_path_name("for an effect name")?;
-//RS                 if !prohibited && name.contains('(') {
-//RS                     return Err(Diagnostic::error(
-//RS                             "E0119",
-//RS                             format!("`{name}` is only valid as a memory denial"),
-//RS                             "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
-//RS                             format!("write `-[!{name}]>`"),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 let entry = if prohibited {
-//RS                     format!("!{}", name)
-//RS                 } else {
-//RS                     name
-//RS                 };
-//RS                 effects.push((entry, span));
-//RS                 if self.peek().kind == close {
-//RS                     break;
-//RS                 }
-//RS                 self.expect(TokKind::Comma, "between effects in the list")?;
-//RS                 if self.peek().kind == close {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.expect(close, "to close the effect row")?;
-//RS         self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?;
-//RS         Ok((Some(effects), None))
-//RS     }
-//RS 
-//RS     fn finish_effect_arrow(
-//RS         &mut self,
-//RS         close_arrow: TokKind,
-//RS         retired_hash: bool,
-//RS         canonical: bool,
-//RS         start: Span,
-//RS     ) -> Result<(), Diagnostic> {
-//RS         if retired_hash {
-//RS             if Self::at_unified_arrow_token(&self.peek().kind) {
-//RS                 self.bump();
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::Gt) {
-//RS             self.bump();
-//RS             return Ok(());
-//RS         }
-//RS         if canonical && Self::at_unified_arrow_token(&self.peek().kind) {
-//RS             self.bump();
-//RS             self.diags.push(Self::retired_effect_syntax(start));
-//RS             return Ok(());
-//RS         }
-//RS         self.expect(close_arrow, "after the effect row")?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0066",
-//RS             "this function uses the retired effect-arrow spelling".to_string(),
-//RS             "callable results use `->`, and an explicit effect ceiling uses the same arrow"
-//RS                 .to_string(),
-//RS             "write `-[Effects]>`; use `-[]>` for an explicit purity bound".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn retired_signature_shape(span: Span) -> Diagnostic {
-//RS         Diagnostic::from_row("E0068", &[], Some(span))
-//RS     }
-//RS 
-//RS     // D-ARROW-RESPELL1=A: the retired `=>` arrow teaches the canonical
-//RS     // spelling instead of being accepted silently. D-FENCE2=A reclaims `:>`
-//RS     // as the fence close; a stray `:>` teaches `->` in FencedNames.
-//RS     pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0070",
-//RS             "this uses a retired arrow spelling".to_string(),
-//RS             "callables, arms, and lambdas use one arrow: `->`".to_string(),
-//RS             "replace `=>` with `->`".to_string(),
-//RS             Some(span),
-//RS         )
-//RS         .with_edit(crate::Diagnostics::TextEdit {
-//RS             span,
-//RS             new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn retired_function_body(span: Span, marker: &str) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS                 "E0065",
-//RS                 format!("This function uses the retired `{marker}` body marker."),
-//RS                 "Named function bodies use braces. `::` binds a name, and `=` fills a slot inside a definition."
-//RS                     .to_string(),
-//RS                 format!("Replace `{marker}` with `{{ … }}`; `jet fmt` applies this fix."),
-//RS                 Some(span),
-//RS             )
-//RS     }
-//RS 
-//RS 
-//RS     fn function_body_is_missing(&self) -> bool {
-//RS         match &self.peek().kind {
-//RS             // `#Todo` is a value body. Any other `#` here starts the next item.
-//RS             TokKind::Hash => !matches!(
-//RS                 &self.peek2().kind,
-//RS                 TokKind::Ident(name) if name == Syntax::KW_TODO
-//RS             ),
-//RS             TokKind::KwFn
-//RS             | TokKind::KwPub
-//RS             | TokKind::KwPriv
-//RS             | TokKind::KwStruct
-//RS             | TokKind::KwEnum
-//RS             | TokKind::KwModule
-//RS             | TokKind::KwImpl
-//RS             | TokKind::KwTrait
-//RS             | TokKind::KwUse
-//RS             | TokKind::KwExtern
-//RS             | TokKind::Eof
-//RS             | TokKind::RBrace
-//RS             | TokKind::Semi => true,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn missing_function_body(span: Span, name: &str) -> Diagnostic {
-//RS         Diagnostic::from_row("E0081", &[("name", name)], Some(span))
-//RS     }
-//RS 
-//RS     /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone
-//RS     /// separators. `/` closes the positional-only zone — every parameter
-//RS     /// written before it forbids a label. `*` opens the label-only zone —
-//RS     /// every parameter after it requires one. Unmarked parameters between
-//RS     /// them accept either call form.
-//RS     ///
-//RS     /// The caller has already consumed the `(`; this consumes through `)`.
-//RS     pub(super) fn parse_param_list(&mut self) -> Result<Vec<Param>, Diagnostic> {
-//RS         let mut params: Vec<Param> = Vec::new();
-//RS         let mut zone = ParamZone::Either;
-//RS         let mut slash: Option<Span> = None;
-//RS         let mut star: Option<Span> = None;
-//RS         if !matches!(self.peek().kind, TokKind::RParen) {
-//RS             loop {
-//RS                 match self.peek().kind {
-//RS                     TokKind::Slash => {
-//RS                         let span = self.bump().span;
-//RS                         if let Some(first) = slash {
-//RS                             self.diags.push(Self::repeated_param_zone(
-//RS                                 Syntax::PARAM_ZONE_POSITIONAL_ONLY,
-//RS                                 span,
-//RS                                 first,
-//RS                             ));
-//RS                         } else if let Some(star_span) = star {
-//RS                             self.diags.push(Self::zone_out_of_order(span, star_span));
-//RS                         } else if params.is_empty() {
-//RS                             self.diags.push(Self::empty_param_zone(
-//RS                                     Syntax::PARAM_ZONE_POSITIONAL_ONLY,
-//RS                                     "a positional-only zone needs at least one parameter before the `/`",
-//RS                                     "write the positional-only parameters before `/`, or remove the `/`",
-//RS                                     span,
-//RS                                 ));
-//RS                         } else {
-//RS                             slash = Some(span);
-//RS                             for param in params.iter_mut() {
-//RS                                 param.zone = ParamZone::PositionalOnly;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     TokKind::Star => {
-//RS                         let span = self.bump().span;
-//RS                         if let Some(first) = star {
-//RS                             self.diags.push(Self::repeated_param_zone(
-//RS                                 Syntax::PARAM_ZONE_LABEL_ONLY,
-//RS                                 span,
-//RS                                 first,
-//RS                             ));
-//RS                         } else {
-//RS                             star = Some(span);
-//RS                             zone = ParamZone::LabelOnly;
-//RS                         }
-//RS                     }
-//RS                     _ => {
-//RS                         let mut param = self.param()?;
-//RS                         param.zone = zone;
-//RS                         params.push(param);
-//RS                     }
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                     break;
-//RS                 }
-//RS                 self.expect(TokKind::Comma, "between parameters")?;
-//RS                 if matches!(self.peek().kind, TokKind::RParen) {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.expect(TokKind::RParen, "to close the parameter list")?;
-//RS         if let Some(span) = star {
-//RS             if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
-//RS                 self.diags.push(Self::empty_param_zone(
-//RS                     Syntax::PARAM_ZONE_LABEL_ONLY,
-//RS                     "a label-only zone needs at least one parameter after the `*`",
-//RS                     "write the label-only parameters after `*`, or remove the `*`",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(params)
-//RS     }
-//RS 
-//RS     fn repeated_param_zone(sigil: &str, span: Span, first: Span) -> Diagnostic {
-//RS         let _ = first;
-//RS         Diagnostic::error(
-//RS             "E0763",
-//RS             format!("`{sigil}` appears twice in this parameter list"),
-//RS             format!(
-//RS                 "each parameter list has at most one positional-only `{}` and one label-only `{}`",
-//RS                 Syntax::PARAM_ZONE_POSITIONAL_ONLY,
-//RS                 Syntax::PARAM_ZONE_LABEL_ONLY
-//RS             ),
-//RS             format!("remove the extra `{sigil}`"),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic {
-//RS         let _ = star;
-//RS         Diagnostic::error(
-//RS             "E0763",
-//RS             format!(
-//RS                 "`{}` comes after `{}` in this parameter list",
-//RS                 Syntax::PARAM_ZONE_POSITIONAL_ONLY,
-//RS                 Syntax::PARAM_ZONE_LABEL_ONLY
-//RS             ),
-//RS             "the zones read left to right: positional-only, then either, then label-only"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "move `{}` before `{}`",
-//RS                 Syntax::PARAM_ZONE_POSITIONAL_ONLY,
-//RS                 Syntax::PARAM_ZONE_LABEL_ONLY
-//RS             ),
-//RS             Some(slash),
-//RS         )
-//RS     }
-//RS 
-//RS     fn empty_param_zone(sigil: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0763",
-//RS             format!("`{sigil}` marks an empty parameter zone"),
-//RS             why.to_string(),
-//RS             fix.to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
-//RS         let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
-//RS             && matches!(&self.peek2().kind, TokKind::Ident(_))
-//RS         {
-//RS             let marker =
-//RS                 self.parse_registered_marker_at_site(crate::Policy::RuleSite::Parameter)?;
-//RS             (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let root = root_marker_span.is_some();
-//RS         let mut convention = self.parse_access_prefix();
-//RS         let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
-//RS             let span = self.bump().span;
-//RS             (Syntax::KW_SELF.to_string(), span)
-//RS         } else {
-//RS             self.expect_ident("for a parameter name")?
-//RS         };
-//RS         // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
-//RS         // split the public call label from the local parameter name. The
-//RS         // first one parsed is the label; the second is what the body reads.
-//RS         let public_label =
-//RS             if name != Syntax::KW_SELF && matches!(self.peek().kind, TokKind::Ident(_)) {
-//RS                 let (local, local_span) = self.expect_ident("for the local parameter name")?;
-//RS                 let label = (name, name_span);
-//RS                 name = local;
-//RS                 name_span = local_span;
-//RS                 Some(label)
-//RS             } else {
-//RS                 None
-//RS             };
-//RS         let (ty, ty_span, variadic, variadic_bound_list) = if matches!(
-//RS             self.peek().kind,
-//RS             TokKind::Colon
-//RS         ) {
-//RS             self.bump();
-//RS             // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
-//RS             // (Receivers carry it on `self` instead: `&self`, parsed above.)
-//RS             if let Some(type_cap) = self.parse_capability_sigil() {
-//RS                 // A real pre-name marker (not the unmarked `Read` default) plus a
-//RS                 // type-side sigil is two markers (E0029).
-//RS                 if convention != AccessConvention::Read {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                                 "E0029",
-//RS                                 format!("`{}` has two access markers", name),
-//RS                                 format!(
-//RS                                     "{} before the parameter name conflicts with {} on its type; a parameter can declare only one access marker",
-//RS                                     Syntax::access_label(convention.sigil()),
-//RS                                     Syntax::access_label(type_cap.sigil()),
-//RS                                 ),
-//RS                                 "keep one access marker on the type or receiver and remove the other".to_string(),
-//RS                                 Some(name_span),
-//RS                             ));
-//RS                 }
-//RS                 convention = type_cap;
-//RS             }
-//RS             // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
-//RS             if matches!(self.peek().kind, TokKind::DotDotDot) {
-//RS                 self.bump();
-//RS                 // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
-//RS                 // trait-bound list. `[` never starts a legal *concrete* variadic
-//RS                 // element type here (list `[T]` and map `[K:V]` types don't make
-//RS                 // sense as a rest-parameter's own element type spelled this way),
-//RS                 // so this position always means a bound list. Bare `...Trait` /
-//RS                 // `...T` both go through `type_()` unchanged — sema tells a
-//RS                 // trait name from a concrete type the same way `resolve_type_name`
-//RS                 // already does elsewhere.
-//RS                 if matches!(self.peek().kind, TokKind::LBracket) {
-//RS                     let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
-//RS                     (Type::Named(String::new()), bracket_span, true, Some(bounds))
-//RS                 } else {
-//RS                     let (t, ts) = self.type_()?;
-//RS                     (t, ts, true, None)
-//RS                 }
-//RS             } else {
-//RS                 let (t, ts) = self.type_()?;
-//RS                 (t, ts, false, None)
-//RS             }
-//RS         } else if name == Syntax::KW_SELF {
-//RS             // S27: receiver type is the owning struct/enum; sema fills it in.
-//RS             (Type::Named(String::new()), name_span, false, None)
-//RS         } else {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 format!("expected `:` after the parameter `{}`", name),
-//RS                 "every parameter except `self` needs a type after its name".to_string(),
-//RS                 format!("write `{}: Type`", name),
-//RS                 Some(name_span),
-//RS             ));
-//RS         };
-//RS         // D-MEMPROVENANCE3=A: optional `from src (| src)*` after the parameter type.
-//RS         let declared_view_from_names = self.parse_opt_param_view_from_names();
-//RS         // D-DEFAULT-SHAPE1=B: declaration defaults ride the type as
-//RS         // `name: Type{expr}`. Keep the retired `= expr` parse for one
-//RS         // recovery diagnostic so a bad declaration teaches its replacement
-//RS         // without cascading into unrelated errors.
-//RS         let default = if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             let default = Box::new(self.expr()?);
-//RS             self.expect(TokKind::RBrace, "after a parameter default")?;
-//RS             Some(default)
-//RS         } else if matches!(self.peek().kind, TokKind::Eq) {
-//RS             let eq = self.bump().span;
-//RS             self.diags
-//RS                 .push(Diagnostic::from_row("E0385", &[], Some(eq)));
-//RS             Some(Box::new(self.expr()?))
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if variadic && default.is_some() {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E1310",
-//RS                 format!("variadic parameter `{}` can't have a default value", name),
-//RS                 "a `...` rest parameter collects trailing arguments — it can't also be optional"
-//RS                     .to_string(),
-//RS                 "remove the `{…}` default from the variadic parameter".to_string(),
-//RS                 Some(name_span),
-//RS             ));
-//RS         }
-//RS         let param = Param {
-//RS             convention,
-//RS             root,
-//RS             name,
-//RS             name_span,
-//RS             public_label,
-//RS             // `parse_param_list` assigns the real zone; a parameter parsed
-//RS             // outside a zoned list keeps the unmarked default.
-//RS             zone: ParamZone::default(),
-//RS             ty,
-//RS             ty_span,
-//RS             default,
-//RS             variadic,
-//RS             variadic_bound_list,
-//RS             declared_view_from_names,
-//RS         };
-//RS         if let Some(marker_span) = root_marker_span {
-//RS             self.bind_rule_fact(
-//RS                 marker_span,
-//RS                 Some(param.name_span),
-//RS                 crate::Policy::RuleSite::Parameter,
-//RS             );
-//RS         }
-//RS         Ok(param)
-//RS     }
-//RS 
-//RS     /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
-//RS     /// D-APILABEL1=A: two parameters may not publish the same call label.
-//RS     /// A label binds by name, so a repeat makes the second parameter
-//RS     /// unreachable and turns every call into nonsense — the binder would
-//RS     /// report the first one twice and the second one missing.
-//RS     pub(super) fn validate_param_labels(&mut self, params: &[Param]) {
-//RS         for (index, param) in params.iter().enumerate() {
-//RS             if param.name == Syntax::KW_SELF {
-//RS                 continue;
-//RS             }
-//RS             let label = param.call_label();
-//RS             let clash = params
-//RS                 .iter()
-//RS                 .take(index)
-//RS                 .find(|earlier| earlier.name != Syntax::KW_SELF && earlier.call_label() == label);
-//RS             if let Some(earlier) = clash {
-//RS                 let _ = earlier;
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E0770",
-//RS                         format!("two parameters both publish the label `{label}`"),
-//RS                         "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called"
-//RS                             .to_string(),
-//RS                         format!("give one of them a different label, as in `{label}_2 {}: …`", param.name),
-//RS                         Some(param.call_label_span()),
-//RS                     ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
-//RS         for (i, p) in params.iter().enumerate() {
-//RS             if p.variadic && i + 1 != params.len() {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E1310",
-//RS                         format!("variadic parameter `{}` must be last", p.name),
-//RS                         "a `name: ...T` rest parameter collects every trailing argument, so nothing may follow it".to_string(),
-//RS                         format!("move `{}` to the end of the parameter list, or remove the `...`", p.name),
-//RS                         Some(p.name_span),
-//RS                     ));
-//RS             }
-//RS             if p.root && i != 0 {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                         "E0103",
-//RS                         format!("`#{}` must mark the first parameter", Syntax::MARKER_ROOT),
-//RS                         "a reversible dot call has one receiver, and it is always the first value parameter"
-//RS                             .to_string(),
-//RS                         format!("move `#{}` to the first parameter", Syntax::MARKER_ROOT),
-//RS                         Some(p.name_span),
-//RS                     ));
-//RS             }
-//RS             if p.root && p.convention != AccessConvention::Read {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0103",
-//RS                     format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
-//RS                     "dot-call syntax never hides write access or a move behind the receiver"
-//RS                         .to_string(),
-//RS                     format!(
-//RS                         "remove {} or {} from the `#{}` parameter",
-//RS                         Syntax::WRITE_ACCESS_LABEL,
-//RS                         Syntax::MOVE_MARKER_LABEL,
-//RS                         Syntax::MARKER_ROOT
-//RS                     ),
-//RS                     Some(p.name_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn reject_root_method_params(&mut self, params: &[Param]) {
-//RS         for param in params.iter().filter(|param| param.root) {
-//RS             self.diags.push(Diagnostic::error(
-//RS                     "E0103",
-//RS                     format!("`#{}` is only valid on a top-level function", Syntax::MARKER_ROOT),
-//RS                     "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous".to_string(),
-//RS                     format!(
-//RS                         "remove `#{}`, or move the function to module scope",
-//RS                         Syntax::MARKER_ROOT
-//RS                     ),
-//RS                     Some(param.name_span),
-//RS                 ));
-//RS         }
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
-//RS         let (is_pub, is_package_pub) = if nested {
-//RS             (false, false)
-//RS         } else {
-//RS             self.parse_item_visibility()
-//RS         };
-//RS         let item_start = self.peek().span.start;
-//RS         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
-//RS         let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
-//RS         let type_params = self.parse_opt_type_params()?;
-//RS         self.expect(TokKind::LBrace, "to open the struct body")?;
-//RS         let mut fields = Vec::new();
-//RS         let mut state = None;
-//RS         let mut methods = Vec::new();
-//RS         let mut cli_bindings = Vec::new();
-//RS         let mut trait_impls = Vec::new();
-//RS         let derives = Vec::new();
-//RS         let mut validate_block = Vec::new();
-//RS         let mut validate_span = None;
-//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-//RS             if matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             if self.at_state_section() {
-//RS                 let section = self.state_section(name.clone(), name_span)?;
-//RS                 if state.is_some() {
-//RS                     return Err(Diagnostic::from_row(
-//RS                         "E0168",
-//RS                         &[("type", name.as_str())],
-//RS                         Some(section.span),
-//RS                     ));
-//RS                 }
-//RS                 state = Some(section);
-//RS                 continue;
-//RS             }
-//RS             if self.method_starts_here() {
-//RS                 methods.push(self.method_in_type()?);
-//RS                 continue;
-//RS             }
-//RS             if self.cli_binding_starts_here() {
-//RS                 cli_bindings.push(self.cli_binding(Vec::new())?);
-//RS                 if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-//RS                     self.bump();
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             // D-MARK-STACK1: one field rule is bare; two or more share `#[…]`.
-//RS             if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-//RS                 let field_markers = self.parse_field_markers(crate::Policy::RuleSite::Field)?;
-//RS                 if self.cli_binding_starts_here() {
-//RS                     cli_bindings.push(self.cli_binding(field_markers)?);
-//RS                     if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 let mut f = self.field()?;
-//RS                 for marker in &field_markers {
-//RS                     self.bind_rule_fact(
-//RS                         marker.name_span,
-//RS                         Some(f.name_span),
-//RS                         crate::Policy::RuleSite::Field,
-//RS                     );
-//RS                 }
-//RS                 let mut redact = false;
-//RS                 let mut serde_markers = Vec::new();
-//RS                 for m in field_markers {
-//RS                     if m.name == crate::Syntax::MARKER_REDACT {
-//RS                         redact = true;
-//RS                     } else {
-//RS                         serde_markers.push(m);
-//RS                     }
-//RS                 }
-//RS                 f.serde_markers = serde_markers;
-//RS                 f.redact = redact;
-//RS                 fields.push(f);
-//RS                 if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-//RS                     self.bump();
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if matches!(self.peek().kind, TokKind::KwDerive) {
-//RS                 return Err(self.retired_derive_line());
-//RS             } else if matches!(self.peek().kind, TokKind::KwImpl) {
-//RS                 trait_impls.push(self.trait_impl_block()?);
-//RS             } else if self.at_validate_block() {
-//RS                 let (stmts, span) = self.validate_block()?;
-//RS                 validate_block = stmts;
-//RS                 validate_span = Some(span);
-//RS             } else {
-//RS                 fields.push(self.field()?);
-//RS                 if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-//RS                     self.bump();
-//RS                 }
-//RS             }
-//RS         }
-//RS         let item_end = self.bump().span.end; // }
-//RS         Ok(StructDef {
-//RS             span: Span::new(item_start, item_end),
-//RS             is_pub,
-//RS             is_package_pub,
-//RS             name,
-//RS             name_span,
-//RS             type_params,
-//RS             fields,
-//RS             state,
-//RS             methods,
-//RS             cli_bindings,
-//RS             trait_impls,
-//RS             derives,
-//RS             auto_derive_default: true,
-//RS             is_published_schema: false,
-//RS             published_schema_span: None,
-//RS             is_single_use: false,
-//RS             single_use_span: None,
-//RS             is_must_use: false,
-//RS             must_use_span: None,
-//RS             layout: None,
-//RS             layout_span: None,
-//RS             serde_markers: Vec::new(),
-//RS             type_markers: Vec::new(),
-//RS             validate_block,
-//RS             validate_span,
-//RS         })
-//RS     }
-//RS 
-//RS     pub(in crate::Parser) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
-//RS         let (is_pub, is_package_pub) = if nested {
-//RS             (false, false)
-//RS         } else {
-//RS             self.parse_item_visibility()
-//RS         };
-//RS         self.enum_def_after_pub(is_pub, is_package_pub)
-//RS     }
-//RS }
-// END-PORT-PENDING 0329 crates/jet-parser/src/Parser/Items/functions_params.rs:1-1360
+use jet_foundation.[AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, ParamZone, PatSlot, Pattern, Span, StructDef, Type, StateTransition, MaturityTag, WebPartitionMarker, Stmt, TextEdit, Syntax, Expr, Field, StateDecl, CLICommandBinding, TraitImplBlock, Marker, RuleSite]
+use jet_lexer.[TokKind]
 
+// Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:7
+impl Parser {
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:11
+    fn parse_func_params(&self) -> ([Param], Pattern?) Diagnostic! {
+        is_head :: (self.peek().kind == .Ident(_)) && (self.peek2().kind == { .LParen | .RParen -> true else -> false })
+        if !is_head -> return (self.parse_param_list()?, None)
+        (variant, variant_span) :: self.expect_ident("for a multi-head variant")?
+        params := [Param]{}
+        pattern_end := variant_span.end
+        if self.peek().kind == .LParen {
+            self.bump()
+            params = self.parse_param_list()?
+            pattern_end = self.toks[self.pos.saturating_sub(1)].span.end
+            self.expect(.RParen, "after a multi-head payload")?
+        } else {
+            self.expect(.RParen, "after a unit multi-head variant")?
+        }
+        bindings := [PatSlot]{}
+        loop param in params {
+            if param.name == Syntax.PAT_WILDCARD_SLOT {
+                &bindings.push(.Wildcard)
+            } else {
+                &bindings.push(.Bind{name: ~param.name, span: param.name_span})
+            }
+        }
+        (params, Val(Pattern.Variant{variant: variant, bindings: bindings, leading_dot: false, span: Span.new(variant_span.start, pattern_end)}))
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:54
+    pub fn func_after_fn(&self, is_pub: Bool, is_package_pub: Bool, is_unsafe: Bool,
+        unsafe_reason: String?, unsafe_span: Span?, is_pure: Bool, is_sanitizer: Bool,
+        meta: MetaAttr?, state_requires: (String, Span)?, state_transition: StateTransition?,
+        is_reactive: Bool, web_marker: WebPartitionMarker?, is_must_use: Bool, must_use_span: Span?,
+        maturity: MaturityTag?, maturity_span: Span?, is_inline: Bool, is_inline_always: Bool,
+        inline_span: Span?, is_replayable: Bool, replayable_span: Span?, allow_guest_import_symbol: Bool) -> Func Diagnostic! {
+        declaration_start :: self.toks[self.pos.saturating_sub(1)].span.start
+        (name, name_span) := self.expect_ident("after `fn`")?
+        external_type := (String, Span)?{None}
+        connector :: self.peek().kind == { .Dot | .TildeTilde -> true else -> false }
+        if connector && self.peek2().kind == .Ident(_) && self.peek3().kind == .LParen {
+            type_name :: name
+            type_span :: name_span
+            if self.peek().kind == .TildeTilde {
+                sep_span :: self.peek().span
+                &self.diags.push(Diagnostic.error("E0325",
+                    "external methods attach with `{Syntax.EXTERNAL_METHOD_CONNECTOR}`, not `{Syntax.EXTERNAL_METHOD_CONNECTOR_RETIRED}`",
+                    "the dot connector matches trait impls and ordinary member access",
+                    "write `fn {type_name}.method(...)`", Val(sep_span)))
+            }
+            self.bump()
+            (method_name, method_span) :: self.expect_ident("after the connector in an external method definition")?
+            name = method_name
+            name_span = method_span
+            external_type = Val((type_name, type_span))
+        }
+        type_params :: self.parse_opt_type_params()?
+        self.expect(.LParen, "after the function name")?
+        (params, head_pattern) :: self.parse_func_params()?
+        self.validate_variadic_params(params)
+        self.validate_param_labels(params)
+        if external_type != None -> self.reject_root_method_params(params)
+        (return_type, return_type_span, declared_effects, effect_via, prefix_effect_span) := self.parse_callable_result_and_prefix_effects()?
+        declared_return_view_provenance :: self.parse_opt_declared_view_from(params)
+        post_effect_span := Span?{None}
+        if declared_effects == None && effect_via == None && self.func_effect_starts_here() {
+            post_effect_span = Val(self.peek().span)
+            (effects, via) :: self.parse_opt_func_effects()?
+            declared_effects = effects
+            effect_via = via
+        }
+        effect_body_span := post_effect_span
+        if effect_body_span == None && return_type == None && (declared_effects != None || effect_via != None) {
+            effect_body_span = prefix_effect_span
+        }
+        pure := is_pure
+        if declared_effects == .Val(effects) -> pure = pure || effects.is_empty()
+        // D-SIG-SHAPE1=B: retain the Rust colon recovery diagnostic.
+        if self.peek().kind == .Colon {
+            colon :: self.bump()
+            &self.diags.push(Diagnostic.error("E0003", "a function return type uses `:`",
+                "Jet uses `:` for parameter and field types; callable bodies use `->`",
+                "replace `:` with `->` before the return type", Val(colon.span))
+                .with_edit(TextEdit{span: colon.span, new_text: Syntax.OP_UNIFIED_ARROW}))
+            if self.type_starts_here() {
+                (ty, span) :: self.return_type()?
+                return_type = Val(ty)
+                return_type_span = Val(span)
+            }
+        }
+        effect_body_marker :: effect_body_span != None
+        body_marker_span := Span?{None}
+        explicit_marker :: self.peek().kind == { .UnifiedArrow | .LambdaArrow | .ColonColon | .Eq -> true else -> false }
+        if effect_body_span != None && !explicit_marker {
+            body_marker_span = effect_body_span
+        } else {
+            body_marker_span = self.parse_optional_function_body_marker(allow_guest_import_symbol)
+        }
+        body := [Stmt]{}
+        end := self.peek().span.start
+        value_body := false
+        if body_marker_span != None {
+            value_body = self.peek().kind != .LBrace || (!effect_body_marker && self.brace_starts_record() && self.peek2().kind != .RBrace)
+        }
+        if value_body {
+            if self.function_body_is_missing() {
+                &self.diags.push(Parser.missing_function_body(self.peek().span, name))
+                if self.peek().kind == .Semi -> self.bump()
+            } else {
+                expr :: self.expr()?
+                expr_end :: expr.span().end
+                self.finish_stmt()?
+                end = if self.pos > 0 -> self.toks[self.pos - 1].span.end else -> expr_end
+                &body.push(.Expr(expr))
+            }
+        } else if self.peek().kind != .LBrace {
+            &self.diags.push(Parser.missing_function_body(self.peek().span, name))
+        } else {
+            self.expect(.LBrace, "to open the function body")?
+            // D-TAIL-RETURN1=A: restore the enclosing callable's tail state.
+            previous_tail_depth :: self.callable_tail_block_depth
+            previous_tail_value :: self.callable_tail_expects_value
+            self.callable_tail_block_depth = Val(self.block_depth + 1)
+            self.callable_tail_expects_value = if return_type == { .Val(ty) -> Parser.return_type_has_value(ty) else -> false }
+            body = self.block_stmts()
+            self.callable_tail_block_depth = previous_tail_depth
+            self.callable_tail_expects_value = previous_tail_value
+            end = self.toks[self.pos.saturating_sub(1)].span.end
+        }
+        Func{span: Span.new(declaration_start, end), is_pub: is_pub, is_package_pub: is_package_pub,
+            is_comptime: false, external_type: external_type, name: name, name_span: name_span,
+            meta: meta, type_params: type_params, head_pattern: head_pattern, params: params,
+            return_type: return_type, return_type_span: return_type_span, return_view_provenance: None,
+            declared_return_view_provenance: declared_return_view_provenance, gc_return: false,
+            diverges: false, gc_scope: false, is_unsafe: is_unsafe, unsafe_reason: unsafe_reason,
+            unsafe_span: unsafe_span, is_pure: pure, is_sanitizer: is_sanitizer, scrub_tag: None,
+            is_reactive: is_reactive, reactive_upgrades: [], is_replayable: is_replayable,
+            replayable_span: replayable_span, is_job: false, job_span: None, every: None, job_metadata: None,
+            declared_effects: declared_effects, effect_via: effect_via, state_requires: state_requires,
+            state_transition: state_transition, web_marker: web_marker, is_must_use: is_must_use,
+            must_use_span: must_use_span, maturity: maturity, maturity_span: maturity_span, kernel: None,
+            is_inline: is_inline, is_inline_always: is_inline_always, inline_span: inline_span,
+            pre: [], post: [], inline_foreign: None, undo: None, markers: [], compiler_generated: false, body: body}
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:409
+    pub fn guest_import_func(&self) -> Func Diagnostic! {
+        loop self.peek().kind == .Semi { self.bump() }
+        (is_pub, is_package_pub) :: self.parse_item_visibility()
+        self.expect_kw(.KwFn, "to start a function definition")?
+        self.func_after_fn(is_pub, is_package_pub, false, None, None, false, false, None,
+            None, None, false, None, false, None, None, None, false, false, None, false, None, true)?
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:442
+    pub fn foreign_function(&self) -> Func Diagnostic! {
+        self.func_after_fn(false, false, false, None, None, false, false, None, None, None,
+            false, None, false, None, None, None, false, false, None, false, None, false)?
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:451
+    pub fn bump_then_func_after_fn(&self, is_pub: Bool, is_package_pub: Bool, is_unsafe: Bool,
+        is_pure: Bool, is_sanitizer: Bool, meta: MetaAttr?, state_requires: (String, Span)?,
+        state_transition: StateTransition?, web_marker: WebPartitionMarker?, is_must_use: Bool,
+        must_use_span: Span?, maturity: MaturityTag?, maturity_span: Span?) -> Func Diagnostic! {
+        self.expect_kw(.KwFn, "to start a function definition")?
+        self.func_after_fn(is_pub, is_package_pub, is_unsafe, None, None, is_pure, is_sanitizer,
+            meta, state_requires, state_transition, false, web_marker, is_must_use, must_use_span,
+            maturity, maturity_span, false, false, None, false, None, false)?
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:497
+    pub fn parse_callable_result_and_prefix_effects(&self) -> (Type?, Span?, [(String, Span)]?, (String, Span)?, Span?) Diagnostic! {
+        prefix_effect_span :: if self.func_effect_starts_here() -> Val(self.peek().span) else -> None
+        (declared_effects, effect_via) :: self.parse_opt_func_effects()?
+        has_prefix_effect :: declared_effects != None || effect_via != None
+        arrow_return := false
+        return_type := Type?{None}
+        return_type_span := Span?{None}
+        if has_prefix_effect {
+            arrow_return = true
+            if self.result_type_follows_arrow() {
+                (ty, span) :: self.return_type()?
+                return_type = Val(ty)
+                return_type_span = Val(span)
+            } else if self.parse_unit_fallible_return()? == .Val((ty, span)) {
+                return_type = Val(ty)
+                return_type_span = Val(span)
+            }
+        } else if self.at_unified_arrow() {
+            self.bump()
+            if self.result_type_follows_arrow() {
+                arrow_return = true
+                (ty, span) :: self.return_type()?
+                return_type = Val(ty)
+                return_type_span = Val(span)
+            } else if self.parse_unit_fallible_return()? == .Val((ty, span)) {
+                arrow_return = true
+                return_type = Val(ty)
+                return_type_span = Val(span)
+            } else {
+                self.pos = self.pos.saturating_sub(1)
+            }
+        } else if self.parse_unit_fallible_return()? == .Val((ty, span)) {
+            return_type = Val(ty)
+            return_type_span = Val(span)
+        } else if self.type_starts_here() {
+            (ty, span) :: self.return_type()?
+            &self.diags.push(Parser.retired_signature_shape(span))
+            return_type = Val(ty)
+            return_type_span = Val(span)
+        }
+        if arrow_return && return_type == .Val(ty) {
+            if Parser.is_unit_fallible_type(ty) {
+                span :: return_type_span ?? self.peek().span
+                &self.diags.push(Parser.retired_unit_fallible_signature(span))
+            }
+        }
+        (return_type, return_type_span, declared_effects, effect_via, prefix_effect_span)
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:567
+    fn result_type_follows_arrow(&self) -> Bool Never! {
+        saved_pos :: self.pos
+        saved_diags :: self.diags.len()
+        saved_pending_type_gt :: self.pending_type_gt
+        saved_type_generic_depth :: self.type_generic_depth
+        saved_type_generic_chain_len :: self.type_generic_chain.len()
+        saved_type_generic_truncated :: self.type_generic_truncated
+        (_, span) :: self.return_type() ?? {
+            self.pos = saved_pos
+            &self.diags.truncate(saved_diags)
+            self.pending_type_gt = saved_pending_type_gt
+            self.type_generic_depth = saved_type_generic_depth
+            &self.type_generic_chain.truncate(saved_type_generic_chain_len)
+            self.type_generic_truncated = saved_type_generic_truncated
+            return false
+        }
+        result_boundary := false
+        {
+            result_boundary = self.peek().kind == {
+                .ColonColon | .Eq | .UnifiedArrow | .LambdaArrow | .Semi | .Comma | .RParen -> true
+                .LBrace -> span.end < self.peek().span.start
+                .Ident(name) -> name == Syntax.VIEW_FROM
+                else -> false
+            }
+        }
+        self.pos = saved_pos
+        &self.diags.truncate(saved_diags)
+        self.pending_type_gt = saved_pending_type_gt
+        self.type_generic_depth = saved_type_generic_depth
+        &self.type_generic_chain.truncate(saved_type_generic_chain_len)
+        self.type_generic_truncated = saved_type_generic_truncated
+        result_boundary
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:601
+    pub fn func_effect_starts_here(self) -> Bool Never! {
+        second :: self.peek2().kind
+        self.peek().kind == {
+            .Colon | .Eq | .Minus -> second == .LBracket
+            .Hash -> second == .LParen
+            .MinusMinus -> true
+            else -> false
+        }
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:613
+    fn parse_optional_function_body_marker(&self, allow_guest_import_symbol: Bool) -> Span? Never! {
+        if self.peek().kind == {
+            .UnifiedArrow -> {
+                span :: self.bump().span
+                if allow_guest_import_symbol -> &self.diags.push(Parser.guest_import_body_marker(span))
+                Val(span)
+            }
+            .LambdaArrow -> {
+                span :: self.bump().span
+                &self.diags.push(Parser.retired_unified_arrow(span))
+                Val(span)
+            }
+            .ColonColon -> {
+                span :: self.bump().span
+                &self.diags.push(Parser.retired_function_body(span, "::"))
+                Val(span)
+            }
+            .Eq -> {
+                span :: self.bump().span
+                if !allow_guest_import_symbol -> &self.diags.push(Parser.retired_function_body(span, "="))
+                Val(span)
+            }
+            else -> None
+        }
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:645
+    fn guest_import_body_marker(span: Span) -> Diagnostic Never! {
+        Diagnostic.error("E3261", "`#Import(c)` function uses a non-canonical body marker",
+            "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol",
+            "write `#Import(c) fn name(args) Return = \"symbol\"`", Val(span))
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:662
+    pub fn parse_opt_effect_annotation(&self) -> [(String, Span)]? Diagnostic! {
+        (effects, _) :: self.parse_opt_func_effects()?
+        effects
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:677
+    pub fn parse_opt_func_effects(&self) -> ([(String, Span)]?, (String, Span)?) Diagnostic! {
+        canonical :: self.peek().kind == .Minus && self.peek2().kind == .LBracket
+        retired_colon :: self.peek().kind == .Colon && self.peek2().kind == .LBracket
+        retired_eq :: self.peek().kind == .Eq && self.peek2().kind == .LBracket
+        retired_hash :: self.peek().kind == .Hash && self.peek2().kind == .LParen
+        retired_double :: self.peek().kind == .MinusMinus
+        if !canonical && !retired_colon && !retired_eq && !retired_double && !retired_hash -> return (None, None)
+        start :: self.peek().span
+        open := TokKind.LBracket
+        close := TokKind.RBracket
+        close_arrow := TokKind.Gt
+        self.bump()
+        if canonical || retired_colon {
+            if retired_colon -> &self.diags.push(Parser.retired_effect_syntax(start))
+        } else if retired_eq {
+            &self.diags.push(Parser.retired_effect_syntax(start))
+            close_arrow = .LambdaArrow
+        } else if retired_hash {
+            &self.diags.push(Parser.retired_effect_syntax(start))
+            open = .LParen
+            close = .RParen
+            close_arrow = .UnifiedArrow
+        } else {
+            &self.diags.push(Parser.retired_effect_syntax(start))
+            close_arrow = .UnifiedArrow
+        }
+        self.expect(open, "to start an effect row")?
+        if self.peek().kind == .Ident(name) && name == Syntax.KW_VIA {
+            self.bump()
+            (param, span) :: self.expect_ident("for the callback parameter name after `via`")?
+            self.expect(close, "to close the effect row")?
+            self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?
+            return (None, Val((param, span)))
+        }
+        effects := [(String, Span)]{}
+        if self.peek().kind != close {
+            loop {
+                if self.peek().kind == .DotDot {
+                    self.bump()
+                    (name, span) :: self.expect_ident("for an open effect-row name")?
+                    &effects.push(("..{name}", span))
+                    if self.peek().kind == close -> break
+                    self.expect(.Comma, "between effects in the row")?
+                    if self.peek().kind == close -> break
+                    next
+                }
+                prohibited :: self.peek().kind == .Bang
+                if prohibited -> self.bump()
+                (name, span) :: self.expect_effect_path_name("for an effect name")?
+                if !prohibited && name.contains("(") {
+                    throw Diagnostic.error("E0119", "`{name}` is only valid as a memory denial",
+                        "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound",
+                        "write `-[!{name}]>`", Val(span))
+                }
+                entry :: if prohibited -> "!{name}" else -> name
+                &effects.push((entry, span))
+                if self.peek().kind == close -> break
+                self.expect(.Comma, "between effects in the list")?
+                if self.peek().kind == close -> break
+            }
+        }
+        self.expect(close, "to close the effect row")?
+        self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?
+        (Val(effects), None)
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:773
+    fn finish_effect_arrow(&self, close_arrow: TokKind, retired_hash: Bool, canonical: Bool, start: Span) Diagnostic! {
+        if retired_hash {
+            if Parser.at_unified_arrow_token(self.peek().kind) -> self.bump()
+            return
+        }
+        if self.peek().kind == .Gt { self.bump(); return }
+        if canonical && Parser.at_unified_arrow_token(self.peek().kind) {
+            self.bump()
+            &self.diags.push(Parser.retired_effect_syntax(start))
+            return
+        }
+        self.expect(close_arrow, "after the effect row")?
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:799
+    pub fn retired_effect_syntax(span: Span) -> Diagnostic Never! {
+        Diagnostic.error("E0066", "this function uses the retired effect-arrow spelling",
+            "callable results use `->`, and an explicit effect ceiling uses the same arrow",
+            "write `-[Effects]>`; use `-[]>` for an explicit purity bound", Val(span))
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:810
+    pub fn retired_signature_shape(span: Span) -> Diagnostic Never! { Diagnostic.from_row("E0068", [], Val(span)) }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:817
+    pub fn retired_unified_arrow(span: Span) -> Diagnostic Never! {
+        Diagnostic.error("E0070", "this uses a retired arrow spelling",
+            "callables, arms, and lambdas use one arrow: `->`", "replace `=>` with `->`", Val(span))
+            .with_edit(TextEdit{span: span, new_text: Syntax.OP_UNIFIED_ARROW})
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:831
+    pub fn retired_function_body(span: Span, marker: String) -> Diagnostic Never! {
+        Diagnostic.error("E0065", "This function uses the retired `{marker}` body marker.",
+            "Named function bodies use braces. `::` binds a name, and `=` fills a slot inside a definition.",
+            "Replace `{marker}` with `{{ … }}`; `jet fmt` applies this fix.", Val(span))
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:843
+    fn function_body_is_missing(self) -> Bool Never! {
+        self.peek().kind == {
+            .Hash -> !(self.peek2().kind == .Ident(name) && name == Syntax.KW_TODO)
+            .KwFn | .KwPub | .KwPriv | .KwStruct | .KwEnum | .KwModule | .KwImpl | .KwTrait | .KwUse | .KwExtern | .Eof | .RBrace | .Semi -> true
+            else -> false
+        }
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:867
+    fn missing_function_body(span: Span, name: String) -> Diagnostic Never! { Diagnostic.from_row("E0081", [("name", name)], Val(span)) }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:878
+    pub fn parse_param_list(&self) -> [Param] Diagnostic! {
+        params := [Param]{}
+        zone := ParamZone.Either
+        slash := Span?{None}
+        star := Span?{None}
+        if self.peek().kind != .RParen {
+            loop {
+                if self.peek().kind == {
+                    .Slash -> {
+                        span :: self.bump().span
+                        if slash == .Val(first) {
+                            &self.diags.push(Parser.repeated_param_zone(Syntax.PARAM_ZONE_POSITIONAL_ONLY, span, first))
+                        } else if star == .Val(star_span) {
+                            &self.diags.push(Parser.zone_out_of_order(span, star_span))
+                        } else if params.is_empty() {
+                            &self.diags.push(Parser.empty_param_zone(Syntax.PARAM_ZONE_POSITIONAL_ONLY,
+                                "a positional-only zone needs at least one parameter before the `/`",
+                                "write the positional-only parameters before `/`, or remove the `/`", span))
+                        } else {
+                            slash = Val(span)
+                            loop index in 0..<params.len() { params[index].zone = .PositionalOnly }
+                        }
+                    }
+                    .Star -> {
+                        span :: self.bump().span
+                        if star == .Val(first) {
+                            &self.diags.push(Parser.repeated_param_zone(Syntax.PARAM_ZONE_LABEL_ONLY, span, first))
+                        } else { star = Val(span); zone = .LabelOnly }
+                    }
+                    else -> {
+                        param := self.param()?
+                        param.zone = zone
+                        &params.push(param)
+                    }
+                }
+                if self.peek().kind == .RParen -> break
+                self.expect(.Comma, "between parameters")?
+                if self.peek().kind == .RParen -> break
+            }
+        }
+        self.expect(.RParen, "to close the parameter list")?
+        if star == .Val(span) {
+            has_label_only := false
+            loop param in params { if param.zone == .LabelOnly -> has_label_only = true }
+            if !has_label_only -> &self.diags.push(Parser.empty_param_zone(Syntax.PARAM_ZONE_LABEL_ONLY,
+                "a label-only zone needs at least one parameter after the `*`",
+                "write the label-only parameters after `*`, or remove the `*`", span))
+        }
+        params
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:952
+    fn repeated_param_zone(sigil: String, span: Span, first: Span) -> Diagnostic Never! {
+        _ :: first
+        Diagnostic.error("E0763", "`{sigil}` appears twice in this parameter list",
+            "each parameter list has at most one positional-only `{Syntax.PARAM_ZONE_POSITIONAL_ONLY}` and one label-only `{Syntax.PARAM_ZONE_LABEL_ONLY}`",
+            "remove the extra `{sigil}`", Val(span))
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:967
+    fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic Never! {
+        _ :: star
+        Diagnostic.error("E0763", "`{Syntax.PARAM_ZONE_POSITIONAL_ONLY}` comes after `{Syntax.PARAM_ZONE_LABEL_ONLY}` in this parameter list",
+            "the zones read left to right: positional-only, then either, then label-only",
+            "move `{Syntax.PARAM_ZONE_POSITIONAL_ONLY}` before `{Syntax.PARAM_ZONE_LABEL_ONLY}`", Val(slash))
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:987
+    fn empty_param_zone(sigil: String, why: String, fix: String, span: Span) -> Diagnostic Never! {
+        Diagnostic.error("E0763", "`{sigil}` marks an empty parameter zone", why, fix, Val(span))
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:997
+    pub fn param(&self) -> Param Diagnostic! {
+        root_marker_span := Span?{None}
+        if self.peek().kind == .Hash && self.peek2().kind == .Ident(_) {
+            marker :: self.parse_registered_marker_at_site(RuleSite.Parameter)?
+            if marker.name == Syntax.MARKER_ROOT -> root_marker_span = Val(marker.name_span)
+        }
+        root :: root_marker_span != None
+        convention := self.parse_access_prefix()
+        (name, name_span) := if self.peek().kind == .KwSelf -> (Syntax.KW_SELF, self.bump().span) else -> self.expect_ident("for a parameter name")?
+        public_label := (String, Span)?{None}
+        if name != Syntax.KW_SELF && self.peek().kind == .Ident(_) {
+            (local, local_span) :: self.expect_ident("for the local parameter name")?
+            public_label = Val((name, name_span))
+            name = local
+            name_span = local_span
+        }
+        ty := Type.Named("")
+        ty_span := name_span
+        variadic := false
+        variadic_bound_list := [String]?{None}
+        if self.peek().kind == .Colon {
+            self.bump()
+            if self.parse_capability_sigil() == .Val(type_cap) {
+                if convention != .Read {
+                    &self.diags.push(Diagnostic.error("E0029", "`{name}` has two access markers",
+                        "{Syntax.access_label(convention.sigil())} before the parameter name conflicts with {Syntax.access_label(type_cap.sigil())} on its type; a parameter can declare only one access marker",
+                        "keep one access marker on the type or receiver and remove the other", Val(name_span)))
+                }
+                convention = type_cap
+            }
+            if self.peek().kind == .DotDotDot {
+                self.bump()
+                variadic = true
+                if self.peek().kind == .LBracket {
+                    (bounds, bracket_span) :: self.parse_bracket_trait_bound_list()?
+                    ty_span = bracket_span
+                    variadic_bound_list = Val(bounds)
+                } else {
+                    (t, ts) :: self.type_()?
+                    ty = t
+                    ty_span = ts
+                }
+            } else {
+                (t, ts) :: self.type_()?
+                ty = t
+                ty_span = ts
+            }
+        } else if name != Syntax.KW_SELF {
+            throw Diagnostic.error("E0003", "expected `:` after the parameter `{name}`",
+                "every parameter except `self` needs a type after its name", "write `{name}: Type`", Val(name_span))
+        }
+        declared_view_from_names :: self.parse_opt_param_view_from_names()
+        default := Expr?{None}
+        if self.peek().kind == .LBrace {
+            self.bump()
+            default = Val(self.expr()?)
+            self.expect(.RBrace, "after a parameter default")?
+        } else if self.peek().kind == .Eq {
+            eq :: self.bump().span
+            &self.diags.push(Diagnostic.from_row("E0385", [], Val(eq)))
+            default = Val(self.expr()?)
+        }
+        if variadic && default != None {
+            &self.diags.push(Diagnostic.error("E1310", "variadic parameter `{name}` can't have a default value",
+                "a `...` rest parameter collects trailing arguments — it can't also be optional",
+                "remove the `{…}` default from the variadic parameter", Val(name_span)))
+        }
+        param :: Param{convention: convention, root: root, name: name, name_span: name_span,
+            public_label: public_label, zone: ParamZone.default(), ty: ty, ty_span: ty_span,
+            default: default, variadic: variadic, variadic_bound_list: variadic_bound_list,
+            declared_view_from_names: declared_view_from_names}
+        if root_marker_span == .Val(marker_span) -> self.bind_rule_fact(marker_span, Val(param.name_span), RuleSite.Parameter)
+        param
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:1147
+    pub fn validate_param_labels(&self, params: [Param]) Never! {
+        loop index in 0..<params.len() {
+            param :: params[index]
+            if param.name == Syntax.KW_SELF -> next
+            label :: param.call_label()
+            loop earlier_index in 0..<index {
+                earlier :: params[earlier_index]
+                if earlier.name != Syntax.KW_SELF && earlier.call_label() == label {
+                    &self.diags.push(Diagnostic.error("E0770", "two parameters both publish the label `{label}`",
+                        "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called",
+                        "give one of them a different label, as in `{label}_2 {param.name}: …`", Val(param.call_label_span())))
+                    break
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:1171
+    pub fn validate_variadic_params(&self, params: [Param]) Never! {
+        loop index in 0..<params.len() {
+            p :: params[index]
+            if p.variadic && index + 1 != params.len() -> &self.diags.push(Diagnostic.error("E1310",
+                "variadic parameter `{p.name}` must be last",
+                "a `name: ...T` rest parameter collects every trailing argument, so nothing may follow it",
+                "move `{p.name}` to the end of the parameter list, or remove the `...`", Val(p.name_span)))
+            if p.root && index != 0 -> &self.diags.push(Diagnostic.error("E0103",
+                "`#{Syntax.MARKER_ROOT}` must mark the first parameter",
+                "a reversible dot call has one receiver, and it is always the first value parameter",
+                "move `#{Syntax.MARKER_ROOT}` to the first parameter", Val(p.name_span)))
+            if p.root && p.convention != .Read -> &self.diags.push(Diagnostic.error("E0103",
+                "`#{Syntax.MARKER_ROOT}` must mark a bare-read parameter",
+                "dot-call syntax never hides write access or a move behind the receiver",
+                "remove {Syntax.WRITE_ACCESS_LABEL} or {Syntax.MOVE_MARKER_LABEL} from the `#{Syntax.MARKER_ROOT}` parameter", Val(p.name_span)))
+        }
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:1210
+    pub fn reject_root_method_params(&self, params: [Param]) Never! {
+        loop param in params {
+            if param.root -> &self.diags.push(Diagnostic.error("E0103",
+                "`#{Syntax.MARKER_ROOT}` is only valid on a top-level function",
+                "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous",
+                "remove `#{Syntax.MARKER_ROOT}`, or move the function to module scope", Val(param.name_span)))
+        }
+    }
+
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:1225
+    pub fn struct_def(&self, nested: Bool) -> StructDef Diagnostic! {
+        (is_pub, is_package_pub) :: if nested -> (false, false) else -> self.parse_item_visibility()
+        item_start :: self.peek().span.start
+        self.expect_kw(.KwStruct, "to start a struct definition")?
+        (name, name_span) :: self.parse_dotted_type_name("after `struct`")?
+        type_params :: self.parse_opt_type_params()?
+        self.expect(.LBrace, "to open the struct body")?
+        fields := [Field]{}
+        state := StateDecl?{None}
+        methods := [Func]{}
+        cli_bindings := [CLICommandBinding]{}
+        trait_impls := [TraitImplBlock]{}
+        derives :: [String]{}
+        validate_block := [Stmt]{}
+        validate_span := Span?{None}
+        loop self.peek().kind != .RBrace && self.peek().kind != .Eof {
+            if self.peek().kind == .Semi { self.bump(); next }
+            if self.at_state_section() {
+                section :: self.state_section(~name, name_span)?
+                if state != None -> throw Diagnostic.from_row("E0168", [("type", name)], Val(section.span))
+                state = Val(section)
+                next
+            }
+            if self.method_starts_here() { &methods.push(self.method_in_type()?); next }
+            if self.cli_binding_starts_here() {
+                &cli_bindings.push(self.cli_binding([])?)
+                if self.peek().kind == { .Comma | .Semi -> true else -> false } -> self.bump()
+                next
+            }
+            if self.at_marker_list() || self.peek().kind == .Hash {
+                field_markers :: self.parse_field_markers(RuleSite.Field)?
+                if self.cli_binding_starts_here() {
+                    &cli_bindings.push(self.cli_binding(field_markers)?)
+                    if self.peek().kind == { .Comma | .Semi -> true else -> false } -> self.bump()
+                    next
+                }
+                f := self.field()?
+                loop marker in field_markers { self.bind_rule_fact(marker.name_span, Val(f.name_span), RuleSite.Field) }
+                redact := false
+                serde_markers := [Marker]{}
+                loop m in field_markers {
+                    if m.name == Syntax.MARKER_REDACT -> redact = true else -> &serde_markers.push(m)
+                }
+                f.serde_markers = serde_markers
+                f.redact = redact
+                &fields.push(f)
+                if self.peek().kind == { .Comma | .Semi -> true else -> false } -> self.bump()
+                next
+            }
+            if self.peek().kind == .KwDerive {
+                throw self.retired_derive_line()
+            } else if self.peek().kind == .KwImpl {
+                &trait_impls.push(self.trait_impl_block()?)
+            } else if self.at_validate_block() {
+                (stmts, span) :: self.validate_block()?
+                validate_block = stmts
+                validate_span = Val(span)
+            } else {
+                &fields.push(self.field()?)
+                if self.peek().kind == { .Comma | .Semi -> true else -> false } -> self.bump()
+            }
+        }
+        item_end :: self.bump().span.end
+        StructDef{span: Span.new(item_start, item_end), is_pub: is_pub, is_package_pub: is_package_pub,
+            name: name, name_span: name_span, type_params: type_params, fields: fields, state: state,
+            methods: methods, cli_bindings: cli_bindings, trait_impls: trait_impls, derives: derives,
+            auto_derive_default: true, is_published_schema: false, published_schema_span: None,
+            is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None,
+            layout: None, layout_span: None, serde_markers: [], type_markers: [],
+            validate_block: validate_block, validate_span: validate_span}
+    }
+    // Rust: crates/jet-parser/src/Parser/Items/functions_params.rs:1352
+    pub fn enum_def(&self, nested: Bool) -> EnumDef Diagnostic! {
+        (is_pub, is_package_pub) :: if nested -> (false, false) else -> self.parse_item_visibility()
+        self.enum_def_after_pub(is_pub, is_package_pub)?
+    }
+}

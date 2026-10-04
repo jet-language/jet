@@ -1,2463 +1,523 @@
-// PORT-PENDING 0337 crates-jet-parser-src-parser-statements-conditionals: crates/jet-parser/src/Parser/Statements/conditionals.rs:1-2459
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::*;
-//RS use crate::Diagnostics::TextEdit;
-//RS 
-//RS fn value_block_stmt_diverges(stmt: &Stmt) -> bool {
-//RS     crate::Parser::statement_definitely_exits_value_block(stmt)
-//RS }
-//RS 
-//RS fn value_expr_diverges(expr: &Expr) -> bool {
-//RS     matches!(expr.without_parens(), Expr::Todo { .. })
-//RS         || matches!(
-//RS             expr.without_parens(),
-//RS             Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
-//RS         )
-//RS }
-//RS 
-//RS impl<'a> Parser<'a> {
-//RS     /// D-RESULT-DECON2=B: the compact exhaustive Result handler starts only
-//RS     /// after a postfix `?`, payload name, and branch arrow. `?.` and `?(…)`
-//RS     /// remain their existing postfix forms, while a bare `?` keeps propagation.
-//RS     pub(in crate::Parser) fn result_handler_follows(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Question)
-//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
-//RS             && Self::at_unified_arrow_token(&self.peek3().kind)
-//RS     }
-//RS 
-//RS     /// D-RESULT-DECON2=B: lower
-//RS     /// `result ? ok -> success ! error -> failure` to the existing exhaustive
-//RS     /// pattern-test `if` chain. The parser owns only the two fixed roles; all
-//RS     /// typing, flow, effects, ownership, and lowering remain ordinary Result
-//RS     /// pattern handling.
-//RS     pub(in crate::Parser) fn parse_result_handler(
-//RS         &mut self,
-//RS         subject: Expr,
-//RS         question_span: Span,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let check_duplicate_failure = self.result_handler_depth == 0;
-//RS         self.result_handler_depth += 1;
-//RS         let result =
-//RS             self.parse_result_handler_inner(subject, question_span, check_duplicate_failure);
-//RS         self.result_handler_depth -= 1;
-//RS         result
-//RS     }
-//RS 
-//RS     fn parse_result_handler_inner(
-//RS         &mut self,
-//RS         subject: Expr,
-//RS         question_span: Span,
-//RS         check_duplicate_failure: bool,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let (ok_binding, ok_binding_span) =
-//RS             self.expect_ident("for the success payload binding after `?`")?;
-//RS         if ok_binding == Syntax::PAT_WILDCARD_SLOT {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a Result handler success branch needs a payload binding".to_string(),
-//RS                 "the compact handler exposes the success payload inside its branch".to_string(),
-//RS                 "name the payload after `?`, for example `? ok -> ...`".to_string(),
-//RS                 Some(ok_binding_span),
-//RS             ));
-//RS         }
-//RS         self.expect_unified_arrow("after the success payload binding")?;
-//RS         let (ok_body, ok_value) = self.parse_result_handler_branch()?;
-//RS 
-//RS         if !matches!(self.peek().kind, TokKind::Bang) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a Result handler needs a `!` failure branch".to_string(),
-//RS                 "the compact handler is exhaustive: it has one success branch and one failure branch"
-//RS                     .to_string(),
-//RS                 "add `! error -> failure` after the success branch".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         let bang_span = self.bump().span;
-//RS         let (err_binding, err_binding_span) =
-//RS             self.expect_ident("for the failure payload binding after `!`")?;
-//RS         if err_binding == Syntax::PAT_WILDCARD_SLOT {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a Result handler failure branch needs a payload binding".to_string(),
-//RS                 "the compact handler exposes the failure payload inside its branch".to_string(),
-//RS                 "name the payload after `!`, for example `! error -> ...`".to_string(),
-//RS                 Some(err_binding_span),
-//RS             ));
-//RS         }
-//RS         if err_binding == ok_binding {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a Result handler cannot bind both payloads to the same name".to_string(),
-//RS                 "the success and failure payloads are distinct branch-local values".to_string(),
-//RS                 "give the success and failure payloads different names".to_string(),
-//RS                 Some(err_binding_span),
-//RS             ));
-//RS         }
-//RS         self.expect_unified_arrow("after the failure payload binding")?;
-//RS         let (err_body, err_value) = self.parse_result_handler_branch()?;
-//RS 
-//RS         if check_duplicate_failure && self.result_handler_separator_ahead() {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a Result handler cannot have two failure branches".to_string(),
-//RS                 "the compact handler has exactly one success role and one failure role".to_string(),
-//RS                 "keep one `! error -> ...` branch".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS 
-//RS         // Preserve the receiver in both existing pattern-test nodes. This is
-//RS         // the same shape ordinary value dispatch already uses; sema and TIR
-//RS         // remain the owners of receiver typing and lowering.
-//RS         let pattern_subject = subject.clone();
-//RS         let ok_pattern_span = Span::new(question_span.start, ok_binding_span.end);
-//RS         let err_pattern_span = Span::new(bang_span.start, err_binding_span.end);
-//RS         let ok_cond = Expr::PatternTest {
-//RS             subject: Box::new(pattern_subject.clone()),
-//RS             pattern: Pattern::Ok {
-//RS                 binding: ok_binding,
-//RS                 binding_span: ok_binding_span,
-//RS                 inner: None,
-//RS                 span: ok_pattern_span,
-//RS             },
-//RS             span: ok_pattern_span,
-//RS         };
-//RS         let err_cond = Expr::PatternTest {
-//RS             subject: Box::new(pattern_subject),
-//RS             pattern: Pattern::Err {
-//RS                 binding: err_binding,
-//RS                 binding_span: err_binding_span,
-//RS                 inner: None,
-//RS                 span: err_pattern_span,
-//RS             },
-//RS             span: err_pattern_span,
-//RS         };
-//RS         let end = err_value.span().end;
-//RS         let span = Span::new(subject.span().start, end);
-//RS         let err_if = Expr::If {
-//RS             cond: Box::new(err_cond),
-//RS             then_body: err_body,
-//RS             then_value: Box::new(err_value),
-//RS             else_body: Vec::new(),
-//RS             else_value: Box::new(Expr::NoElse(Span::new(end, end))),
-//RS             span,
-//RS         };
-//RS         Ok(Expr::If {
-//RS             cond: Box::new(ok_cond),
-//RS             then_body: ok_body,
-//RS             then_value: Box::new(ok_value),
-//RS             else_body: Vec::new(),
-//RS             else_value: Box::new(err_if),
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     fn parse_result_handler_branch(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             return self.parse_result_handler_block();
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwReturn) {
-//RS             let return_span = self.bump().span;
-//RS             let value = if self.result_handler_separator_ahead()
-//RS                 || matches!(
-//RS                     self.peek().kind,
-//RS                     TokKind::RBrace | TokKind::Semi | TokKind::Eof
-//RS                 ) {
-//RS                 None
-//RS             } else {
-//RS                 Some(self.expr()?)
-//RS             };
-//RS             let end = value
-//RS                 .as_ref()
-//RS                 .map_or(return_span.end, |expr| expr.span().end);
-//RS             return Ok((
-//RS                 vec![Stmt::Return(value, return_span)],
-//RS                 Expr::NoElse(Span::new(end, end)),
-//RS             ));
-//RS         }
-//RS         let value = self.parse_selected_value()?;
-//RS         if matches!(
-//RS             &value.1,
-//RS             Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
-//RS         ) {
-//RS             let end = value.1.span().end;
-//RS             return Ok((vec![Stmt::Expr(value.1)], Expr::NoElse(Span::new(end, end))));
-//RS         }
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn parse_result_handler_block(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
-//RS         self.expect(TokKind::LBrace, "to open this Result handler branch")?;
-//RS         let mut stmts = Vec::new();
-//RS         loop {
-//RS             // S6-R: a nested block statement ends at `}`, so consume the
-//RS             // lexer-inserted zero-width terminator before the next branch item.
-//RS             // Authored semicolons remain visible to the existing diagnostics.
-//RS             if matches!(self.peek().kind, TokKind::Semi)
-//RS                 && self.peek().span.start == self.peek().span.end
-//RS             {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             match self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     let span = self.bump().span;
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "a Result handler branch cannot be empty".to_string(),
-//RS                         "each exhaustive branch must produce a value or diverge".to_string(),
-//RS                         "add a value, `return`, or another diverging tail".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close this Result handler branch".to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             let save = self.pos;
-//RS             let saved_diags = self.diags.len();
-//RS             if let Ok(value) = self.expr() {
-//RS                 if matches!(self.peek().kind, TokKind::Semi)
-//RS                     && matches!(self.peek2().kind, TokKind::RBrace)
-//RS                 {
-//RS                     let semi = self.peek().span;
-//RS                     if semi.start != semi.end {
-//RS                         if value_expr_diverges(&value) {
-//RS                             self.bump();
-//RS                         } else {
-//RS                             return Err(Diagnostic::error(
-//RS                                 "E0114",
-//RS                                 "this Result handler branch ends with a semicolon-terminated expression"
-//RS                                     .to_string(),
-//RS                                 "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit"
-//RS                                     .to_string(),
-//RS                                 "remove the semicolon, or use `return ...` for an early exit"
-//RS                                     .to_string(),
-//RS                                 Some(value.span()),
-//RS                             ));
-//RS                         }
-//RS                     } else {
-//RS                         self.bump();
-//RS                     }
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                     self.bump();
-//RS                     if matches!(
-//RS                         &value,
-//RS                         Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
-//RS                     ) {
-//RS                         let end = value.span().end;
-//RS                         stmts.push(Stmt::Expr(value));
-//RS                         return Ok((stmts, Expr::NoElse(Span::new(end, end))));
-//RS                     }
-//RS                     return Ok((stmts, value));
-//RS                 }
-//RS             }
-//RS             self.pos = save;
-//RS             self.diags.truncate(saved_diags);
-//RS             let stmt = self.stmt()?;
-//RS             let diverges = matches!(
-//RS                 &stmt,
-//RS                 Stmt::Return(..)
-//RS                     | Stmt::Break(..)
-//RS                     | Stmt::BreakValue(..)
-//RS                     | Stmt::Continue(..)
-//RS                     | Stmt::BreakLabel(..)
-//RS                     | Stmt::BreakLabelValue(..)
-//RS                     | Stmt::ContinueLabel(..)
-//RS             ) || matches!(
-//RS                 &stmt,
-//RS                 Stmt::Expr(Expr::Call(Call { name, .. })) if name == Syntax::BUILTIN_PANIC
-//RS             ) || matches!(&stmt, Stmt::Expr(Expr::Todo { .. }));
-//RS             stmts.push(stmt);
-//RS             if diverges && matches!(self.peek().kind, TokKind::RBrace) {
-//RS                 let close = self.bump().span;
-//RS                 return Ok((stmts, Expr::NoElse(Span::new(close.start, close.start))));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn result_handler_separator_ahead(&self) -> bool {
-//RS         matches!(self.peek().kind, TokKind::Bang)
-//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
-//RS             && Self::at_unified_arrow_token(&self.peek3().kind)
-//RS     }
-//RS 
-//RS     /// The compact handler is the only expression-if shape accepted as a
-//RS     /// standalone effect statement. Ordinary value-producing `if` expressions
-//RS     /// keep their existing statement-position rules.
-//RS     pub(in crate::Parser) fn is_result_handler_expr(expr: &Expr) -> bool {
-//RS         let Expr::If {
-//RS             cond, else_value, ..
-//RS         } = expr
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         let Expr::PatternTest {
-//RS             pattern: Pattern::Ok { .. },
-//RS             ..
-//RS         } = cond.as_ref()
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         let Expr::If {
-//RS             cond: err_cond,
-//RS             else_value: terminal,
-//RS             ..
-//RS         } = else_value.as_ref()
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         matches!(
-//RS             err_cond.as_ref(),
-//RS             Expr::PatternTest {
-//RS                 pattern: Pattern::Err { .. },
-//RS                 ..
-//RS             }
-//RS         ) && matches!(terminal.as_ref(), Expr::NoElse(_))
-//RS     }
-//RS 
-//RS     /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
-//RS     /// `.name(args) { … }`. Purely structural — whether `name` is a valid member
-//RS     /// of the enclosing marker (E0614), legal here at all (E0615), correctly
-//RS     /// positioned (E0616), correctly argued (E0617), or un-nested (E0618) is all
-//RS     /// a sema concern. The leading `.` + ident + block/paren shape is guaranteed
-//RS     /// by the caller's guard in `stmt()`.
-//RS     pub(super) fn scope_member_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let dot_span = self.peek().span;
-//RS         self.bump(); // `.`
-//RS         let (name, name_span) = self.expect_ident("for the scope-member name")?;
-//RS         let mut args = Vec::new();
-//RS         let mut args_span = None;
-//RS         if matches!(self.peek().kind, TokKind::LParen) {
-//RS             let lp = self.peek().span;
-//RS             self.bump(); // `(`
-//RS             if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                 loop {
-//RS                     args.push(self.expr()?);
-//RS                     if matches!(self.peek().kind, TokKind::RParen) {
-//RS                         break;
-//RS                     }
-//RS                     self.expect(TokKind::Comma, "between scope-member arguments")?;
-//RS                     if matches!(self.peek().kind, TokKind::RParen) {
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             self.expect(TokKind::RParen, "to close the scope-member arguments")?;
-//RS             let rp_end = self.toks[self.pos - 1].span.end;
-//RS             args_span = Some(Span::new(lp.start, rp_end));
-//RS         }
-//RS         self.expect(TokKind::LBrace, "to open the scope-member block")?;
-//RS         let body = self.block_stmts();
-//RS         let end = self.toks[self.pos - 1].span.end;
-//RS         Ok(Stmt::ScopeMember {
-//RS             name,
-//RS             name_span,
-//RS             args,
-//RS             args_span,
-//RS             body,
-//RS             dsl: false,
-//RS             dot_span,
-//RS             span: Span::new(dot_span.start, end),
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-IF3 / D-IFDIST1: `if subject OP { … }` is multi-arm value/pattern
-//RS     /// dispatch (`OP` is any comparison); a plain `if cond { … }` is a
-//RS     /// conventional boolean test. The comparison marker between the subject and
-//RS     /// `{` is *required* to enter dispatch; an old-style `if subject { head ->
-//RS     /// body }` with no marker is teaching error E0992, which recovers by parsing
-//RS     /// the body as arms so the rest of the file still checks. Multi-arm `if`
-//RS     /// lowers to the same `Stmt::Switch` IR the former `when` used.
-//RS     pub(super) fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let branch_start = self.pos;
-//RS         let span = self.bump().span; // `if`
-//RS 
-//RS         // D-IFGUARD1=A: a leading `{` selects ordered Boolean guards. Reuse the
-//RS         // dispatch AST with a compiler-private `true` subject whose span is the
-//RS         // `if` keyword; source-authored `true` can never carry that span.
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             return self.guard_arms(span);
-//RS         }
-//RS 
-//RS         // Parse the subject below comparison precedence so a trailing compare
-//RS         // marker is left in the token stream (`expr_cmp` would eat it). If
-//RS         // `OP {` follows, this is explicit dispatch (D-IFDIST1).
-//RS         let probe = self.pos;
-//RS         let probe_diags = self.diags.len();
-//RS         if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
-//RS             if let Some(op) = self.peek_dispatch_op() {
-//RS                 self.bump(); // comparison marker
-//RS                 self.expect(TokKind::LBrace, "to open the `if` dispatch body")?;
-//RS                 return self.if_arms(subject, span, op);
-//RS             }
-//RS         }
-//RS         // Not dispatch — rewind and parse the full boolean condition.
-//RS         self.pos = probe;
-//RS         self.diags.truncate(probe_diags);
-//RS 
-//RS         let cond_start = self.peek().span.start;
-//RS         let cond = self.expr_no_struct_lit()?;
-//RS         let cond_span = Span::new(cond_start, self.prev_end());
-//RS         let mut parts = Vec::new();
-//RS         // D-ASSIGNCOND1 / E0322: `if x = 5` — bare `=` is assignment, not equality.
-//RS         if matches!(self.peek().kind, TokKind::Eq) {
-//RS             let eq_span = self.peek().span;
-//RS             return Err(Diagnostic::error(
-//RS                 "E0322",
-//RS                 "assignment `=` cannot appear in an `if` condition".to_string(),
-//RS                 "`=` binds a name; use `==` to compare two values".to_string(),
-//RS                 "replace `=` with `==` to compare, or move the assignment before the `if`"
-//RS                     .to_string(),
-//RS                 Some(eq_span),
-//RS             ));
-//RS         }
-//RS         // D-ONELINE-BODY1=B: an effect-only one-line `if` uses an arrow before
-//RS         // its one statement. Braces remain the multi-statement/scoped form.
-//RS         if self.at_unified_arrow() {
-//RS             self.expect_unified_arrow("after an `if` condition")?;
-//RS             let body_start = self.peek().span.start;
-//RS             let then_body = self.adjacent_effect_body()?;
-//RS             parts.push(BranchPart::Arm {
-//RS                 cond: cond_span,
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             let else_branch = self.adjacent_effect_else(&mut parts)?;
-//RS             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
-//RS                 self.prefer_arm_table_lint(span, &parts, probe_diags);
-//RS             }
-//RS             return Ok(Self::classic_if_switch(IfStmt {
-//RS                 cond,
-//RS                 then_body,
-//RS                 else_branch,
-//RS                 span,
-//RS             }));
-//RS         }
-//RS         if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
-//RS             self.teach_control_braces("if", self.peek().span);
-//RS             let body_start = self.peek().span.start;
-//RS             let then_body = self.adjacent_effect_body()?;
-//RS             parts.push(BranchPart::Arm {
-//RS                 cond: cond_span,
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             let else_branch = self.adjacent_effect_else(&mut parts)?;
-//RS             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
-//RS                 self.prefer_arm_table_lint(span, &parts, probe_diags);
-//RS             }
-//RS             return Ok(Self::classic_if_switch(IfStmt {
-//RS                 cond,
-//RS                 then_body,
-//RS                 else_branch,
-//RS                 span,
-//RS             }));
-//RS         }
-//RS         let body_start = self.peek().span.start;
-//RS         self.expect(TokKind::LBrace, "to open the `if` body")?;
-//RS 
-//RS         // D-IF3 / E0992: an old implicit-dispatch body (first item is `head ->`)
-//RS         // with no comparison marker. Teach the explicit form, then recover by
-//RS         // parsing the body as arms so the rest of the file's errors still surface (S14).
-//RS         if self.if_body_is_arms() {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0992",
-//RS                 format!(
-//RS                     "a multi-arm `{}` needs a comparison between the subject and `{{`",
-//RS                     Syntax::KW_IF
-//RS                 ),
-//RS                 format!(
-//RS                     "`{} subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `{} cond {{ … }}` body is always statements",
-//RS                     Syntax::KW_IF,
-//RS                     Syntax::KW_IF
-//RS                 ),
-//RS                 format!(
-//RS                     "write `{} subject == {{ value {} body }}`",
-//RS                     Syntax::KW_IF,
-//RS                     Syntax::OP_UNIFIED_ARROW
-//RS                 ),
-//RS                 Some(span),
-//RS             ));
-//RS             return self.if_arms(cond, span, BinOp::Eq);
-//RS         }
-//RS 
-//RS         // Conventional `if`: the condition gates a statement body.
-//RS         let then_body = self.block_stmts();
-//RS         parts.push(BranchPart::Arm {
-//RS             cond: cond_span,
-//RS             body: Span::new(body_start, self.prev_end()),
-//RS         });
-//RS         let mut else_branch = None;
-//RS         let mut chained = false;
-//RS         if matches!(self.peek().kind, TokKind::KwElse) {
-//RS             self.bump();
-//RS             if matches!(self.peek().kind, TokKind::KwIf) {
-//RS                 chained = true;
-//RS                 else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt(&mut parts)?)));
-//RS             } else {
-//RS                 let else_start = self.peek().span.start;
-//RS                 self.expect(TokKind::LBrace, "to open the `else` body")?;
-//RS                 else_branch = Some(ElseBranch::Else(self.block_stmts()));
-//RS                 parts.push(BranchPart::Else {
-//RS                     body: Span::new(else_start, self.prev_end()),
-//RS                 });
-//RS             }
-//RS         }
-//RS         if else_branch.is_some()
-//RS             && (chained || self.span_has_authored_line_break(branch_start, self.pos))
-//RS         {
-//RS             self.prefer_arm_table_lint(span, &parts, probe_diags);
-//RS         }
-//RS         Ok(Self::classic_if_switch(IfStmt {
-//RS             cond,
-//RS             then_body,
-//RS             else_branch,
-//RS             span,
-//RS         }))
-//RS     }
-//RS 
-//RS     /// D-BRANCH-AST1=C: classic effect `if` syntax enters the same flat,
-//RS     /// ordered arm-table node as every other branch directly from the parser.
-//RS     fn classic_if_switch(branch: IfStmt) -> Stmt {
-//RS         let IfStmt {
-//RS             cond,
-//RS             then_body,
-//RS             else_branch,
-//RS             span,
-//RS         } = branch;
-//RS         let mut arms = vec![SwitchArm {
-//RS             span: cond.span(),
-//RS             cond,
-//RS             body: then_body,
-//RS         }];
-//RS         let mut else_body = None;
-//RS         let mut next = else_branch;
-//RS         while let Some(branch) = next {
-//RS             match branch {
-//RS                 ElseBranch::Else(body) => {
-//RS                     else_body = Some(body);
-//RS                     break;
-//RS                 }
-//RS                 ElseBranch::ElseIf(next_branch) => {
-//RS                     let IfStmt {
-//RS                         cond,
-//RS                         then_body,
-//RS                         else_branch,
-//RS                         ..
-//RS                     } = *next_branch;
-//RS                     arms.push(SwitchArm {
-//RS                         span: cond.span(),
-//RS                         cond,
-//RS                         body: then_body,
-//RS                     });
-//RS                     next = else_branch;
-//RS                 }
-//RS             }
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject: Expr::Bool(true, span),
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         }
-//RS     }
-//RS 
-//RS     fn adjacent_effect_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::KwIf) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0329",
-//RS                 "a nested one-line `if` needs braces".to_string(),
-//RS                 "an adjacent body owns one non-`if` statement, so direct nesting is ambiguous"
-//RS                     .to_string(),
-//RS                 "wrap the nested `if` in `{ ... }`".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         self.adjacent_if_body_depth += 1;
-//RS         let statement = self.braceless_arm_stmt();
-//RS         self.adjacent_if_body_depth -= 1;
-//RS         Ok(vec![statement?])
-//RS     }
-//RS 
-//RS     /// The one statement of a braceless arm. It shares the enclosing block's
-//RS     /// depth but is never that block's final line, so a trailing
-//RS     /// `loop … -> e` in it keeps statement meaning: D-TAIL-RETURN1=A makes
-//RS     /// only a direct final body line a collecting loop.
-//RS     pub(super) fn braceless_arm_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-//RS         let saved = self.lambda_tail_block_depth.replace(self.block_depth);
-//RS         let statement = self.stmt();
-//RS         self.lambda_tail_block_depth = saved;
-//RS         statement
-//RS     }
-//RS 
-//RS     /// Parse an optional `else` tail. Each body it consumes is appended to
-//RS     /// `parts` so the L0507 fix can rebuild the chain from authored text.
-//RS     fn adjacent_effect_else(
-//RS         &mut self,
-//RS         parts: &mut Vec<BranchPart>,
-//RS     ) -> Result<Option<ElseBranch>, Diagnostic> {
-//RS         if !matches!(self.peek().kind, TokKind::KwElse) {
-//RS             return Ok(None);
-//RS         }
-//RS         self.bump();
-//RS         if matches!(self.peek().kind, TokKind::KwIf) {
-//RS             return Ok(Some(ElseBranch::ElseIf(Box::new(self.if_stmt(parts)?))));
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             let body_start = self.peek().span.start;
-//RS             self.bump();
-//RS             let body = self.block_stmts();
-//RS             parts.push(BranchPart::Else {
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             return Ok(Some(ElseBranch::Else(body)));
-//RS         }
-//RS         if self.at_unified_arrow() {
-//RS             self.expect_unified_arrow("after `else`")?;
-//RS         } else {
-//RS             self.teach_control_braces("else", self.peek().span);
-//RS         }
-//RS         let body_start = self.peek().span.start;
-//RS         let body = self.adjacent_effect_body()?;
-//RS         parts.push(BranchPart::Else {
-//RS             body: Span::new(body_start, self.prev_end()),
-//RS         });
-//RS         Ok(Some(ElseBranch::Else(body)))
-//RS     }
-//RS 
-//RS     pub(super) fn teach_control_braces(&mut self, body: &str, span: Span) {
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0372",
-//RS             format!("This `{body}` body needs braces."),
-//RS             "Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler."
-//RS                 .to_string(),
-//RS             "Write `-> statement` for one statement, or wrap the body in `{ ... }`; `jet fmt` applies this fix."
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// D-IFGUARD1=A: `if { Bool -> body ... [else -> body] }` statement guards.
-//RS     /// The existing switch node preserves first-match dispatch and checked TIR
-//RS     /// lowering; `true` at the keyword span is the compiler-private subject.
-//RS     fn guard_arms(&mut self, span: Span) -> Result<Stmt, Diagnostic> {
-//RS         let mut arms = Vec::new();
-//RS         let mut else_body = None;
-//RS         loop {
-//RS             while matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS             }
-//RS             match self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     if arms.is_empty() {
-//RS                         return Err(Diagnostic::error(
-//RS                             "E0003",
-//RS                             "a statement guard table needs at least one condition".to_string(),
-//RS                             "an empty guard table can never perform an action".to_string(),
-//RS                             "add a `condition -> statement` arm".to_string(),
-//RS                             Some(self.peek().span),
-//RS                         ));
-//RS                     }
-//RS                     self.bump();
-//RS                     break;
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close this guard table, found the end of the file"
-//RS                             .to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::KwElse => {
-//RS                     self.bump();
-//RS                     self.expect_unified_arrow("after `else` in a guard table")?;
-//RS                     else_body = Some(self.guard_arm_body()?);
-//RS                     while matches!(self.peek().kind, TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     self.expect(TokKind::RBrace, "after the final `else` guard arm")?;
-//RS                     break;
-//RS                 }
-//RS                 _ => {
-//RS                     let arm_start = self.peek().span;
-//RS                     let cond = self.subjectless_arm_head()?;
-//RS                     self.expect_unified_arrow("after a guard condition")?;
-//RS                     let body = self.guard_arm_body()?;
-//RS                     let end = body
-//RS                         .last()
-//RS                         .map(Stmt::span)
-//RS                         .map_or(cond.span().end, |s| s.end);
-//RS                     arms.push(SwitchArm {
-//RS                         cond,
-//RS                         body,
-//RS                         span: Span::new(arm_start.start, end),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(Stmt::Switch {
-//RS             subject: Expr::Bool(true, span),
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-CONC-CHAN2=D: a subjectless readiness arm is a binding/source pair
-//RS     /// (`value, receiver`) or a contextual `after duration` head. Keep the
-//RS     /// source expression in the existing one-field tuple carrier; sema and
-//RS     /// TIR recognize this exact parser-created shape.
-//RS     fn subjectless_arm_head(&mut self) -> Result<Expr, Diagnostic> {
-//RS         if let (TokKind::Ident(binding), TokKind::Comma) = (&self.peek().kind, &self.peek2().kind) {
-//RS             let binding = binding.clone();
-//RS             let start = self.bump().span;
-//RS             self.bump();
-//RS             let source = self.expr_no_struct_lit()?;
-//RS             let span = Span::new(start.start, source.span().end);
-//RS             return Ok(Expr::TupleLit(vec![(binding, source)], span, None));
-//RS         }
-//RS         if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::READINESS_AFTER) {
-//RS             let start = self.bump().span;
-//RS             let duration = self.expr_no_struct_lit()?;
-//RS             let span = Span::new(start.start, duration.span().end);
-//RS             return Ok(Expr::TupleLit(
-//RS                 vec![(Syntax::INTERNAL_SELECT_AFTER_FIELD.to_string(), duration)],
-//RS                 span,
-//RS                 None,
-//RS             ));
-//RS         }
-//RS         self.expr_no_struct_lit()
-//RS     }
-//RS 
-//RS     fn guard_arm_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             return Ok(self.block_stmts());
-//RS         }
-//RS         if matches!(self.peek().kind, TokKind::KwIf) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0329",
-//RS                 "a nested guard body needs braces".to_string(),
-//RS                 "a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous".to_string(),
-//RS                 "wrap the nested `if` in `{ ... }`".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         Ok(vec![self.braceless_arm_stmt()?])
-//RS     }
-//RS 
-//RS     /// D-IF1: is the `if` body (cursor just past `{`) a multi-arm dispatch?
-//RS     /// True when the body opens with `else ->`, or with an expression arm head
-//RS     /// immediately followed by `->`. Pure lookahead — restores the cursor.
-//RS     pub(super) fn if_body_is_arms(&mut self) -> bool {
-//RS         // `else ->` catch-all as the first (only) arm.
-//RS         if matches!(self.peek().kind, TokKind::KwElse)
-//RS             && Self::at_unified_arrow_token(&self.peek2().kind)
-//RS         {
-//RS             return true;
-//RS         }
-//RS         // An empty body `{}` is a conventional (empty) if, not arm mode.
-//RS         if matches!(self.peek().kind, TokKind::RBrace) {
-//RS             return false;
-//RS         }
-//RS         // D-PATR: `Int .. Int ->` is a range arm — detect without full expr parse.
-//RS         // Also detect `Int ..= Int ->` (E0318) and `Int .. Int step Int ->` (E0319)
-//RS         // porting hazards so we can emit teaching errors rather than confusing parse failures.
-//RS         if let TokKind::Int(_, _) = &self.peek().kind {
-//RS             if matches!(
-//RS                 self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS                 Some(TokKind::DotDot)
-//RS             ) {
-//RS                 // `lo .. hi ->` (4 tokens: lo, .., hi, ->)
-//RS                 if let Some(tok_after_hi) = self.toks.get(self.pos + 3) {
-//RS                     if Self::at_unified_arrow_token(&tok_after_hi.kind) {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS                 // `lo .. hi step n ->` (6 tokens: lo, .., hi, step, n, ->)  — E0319 porting hazard
-//RS                 if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::RETIRED_LOOP_STEP)
-//RS                 {
-//RS                     if let Some(tok_after_step_n) = self.toks.get(self.pos + 5) {
-//RS                         if Self::at_unified_arrow_token(&tok_after_step_n.kind) {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // `lo ..= hi ->` (5 tokens: lo, .., =, hi, ->)  — E0318 porting hazard
-//RS                 if matches!(
-//RS                     self.toks.get(self.pos + 2).map(|t| &t.kind),
-//RS                     Some(TokKind::Eq)
-//RS                 ) {
-//RS                     if let Some(tok_after_eq_hi) = self.toks.get(self.pos + 4) {
-//RS                         if Self::at_unified_arrow_token(&tok_after_eq_hi.kind) {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         // An arm head is followed by an arrow on its own line, outside any
-//RS         // group. Without one the line is a statement, and the speculative
-//RS         // parse would read a nested body (`if c {`, `loop x in xs {`) only to
-//RS         // undo it: nested `if`/`loop` bodies would parse 2^depth times.
-//RS         if !self.line_arrow_ahead() {
-//RS             return false;
-//RS         }
-//RS         let save = self.pos;
-//RS         let saved_diags = self.diags.len();
-//RS         let is_arm = matches!(self.expr_no_struct_lit(), Ok(_)) && self.at_unified_arrow();
-//RS         self.pos = save;
-//RS         self.diags.truncate(saved_diags);
-//RS         is_arm
-//RS     }
-//RS 
-//RS     /// Pure token scan: does the line at the cursor hold an arrow outside its
-//RS     /// groups before the line ends?
-//RS     fn line_arrow_ahead(&self) -> bool {
-//RS         let mut depth = 0usize;
-//RS         for tok in &self.toks[self.pos.min(self.toks.len())..] {
-//RS             match tok.kind {
-//RS                 TokKind::Eof => return false,
-//RS                 TokKind::UnifiedArrow | TokKind::LambdaArrow if depth == 0 => return true,
-//RS                 TokKind::Semi if depth == 0 => return false,
-//RS                 TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-//RS                 TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-//RS                     if depth == 0 {
-//RS                         return false;
-//RS                     }
-//RS                     depth -= 1;
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// D-IF3 / D-IFDIST1: parse the arms of an `if subject OP { … }` dispatch
-//RS     /// (cursor just past `{`), lowering to `Stmt::Switch`. Each arm is
-//RS     /// `head -> body` where `head` is a bare value compared with `OP`, a bare
-//RS     /// range (`400..499`), a bare pattern (`Active(id)`, … — `==` only), or a
-//RS     /// Boolean expression evaluated as written. The leading `subject OP` is
-//RS     /// dropped and re-bound here. A leftover `subject ==` prefix gets E0994.
-//RS     /// `body` is a braceless single statement or a `{ … }` block (D-IF2 Q2).
-//RS     /// `else -> body` is the catch-all.
-//RS     pub(super) fn if_arms(
-//RS         &mut self,
-//RS         subject: Expr,
-//RS         span: Span,
-//RS         op: BinOp,
-//RS     ) -> Result<Stmt, Diagnostic> {
-//RS         let mut arms: Vec<SwitchArm> = Vec::new();
-//RS         let mut else_body: Option<Vec<Stmt>> = None;
-//RS         // The scrutinee a pattern arm binds to: a simple ident subject is named
-//RS         // directly; a complex subject (call/field) is the synthesised `it` that
-//RS         // sema declares for fallible/dispatch subjects.
-//RS         let pat_subject = match &subject {
-//RS             Expr::Ident(..) => subject.clone(),
-//RS             _ => Expr::Ident(Syntax::KW_IT.to_string(), subject.span()),
-//RS         };
-//RS         loop {
-//RS             // Skip synthetic terminators between arms (S6-R).
-//RS             if matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             match &self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     self.bump();
-//RS                     break;
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close this `if`, found the end of the file".to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::KwElse => {
-//RS                     let arm_start = self.bump().span; // `else`
-//RS                     self.expect_unified_arrow("after `else` in an `if`")?;
-//RS                     let body = self.arm_body()?;
-//RS                     let _ = arm_start;
-//RS                     else_body = Some(body);
-//RS                 }
-//RS                 _ => {
-//RS                     let arm_start = self.peek().span;
-//RS                     // D-PATR / C25: range heads live in `if_arm_head` (shared with
-//RS                     // expression-position value dispatch).
-//RS                     let raw_head = self.if_arm_head(&subject, &pat_subject, op)?;
-//RS                     self.expect_unified_arrow("after an `if` arm value or condition")?;
-//RS                     let body = self.arm_body()?;
-//RS                     let end = self
-//RS                         .toks
-//RS                         .get(self.pos.saturating_sub(1))
-//RS                         .map(|t| t.span.end)
-//RS                         .unwrap_or(arm_start.end);
-//RS                     arms.push(SwitchArm {
-//RS                         cond: raw_head,
-//RS                         body,
-//RS                         span: Span::new(arm_start.start, end),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-PATR / C25: parse `lo..hi` (plus E0318 `..=` / E0319 `step` recovery) as a
-//RS     /// range arm head attached to `subject`. `Ok(None)` when the cursor is not a
-//RS     /// range head — caller falls through to the ordinary arm-head grammar.
-//RS     pub(super) fn try_range_arm_head(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS     ) -> Result<Option<Expr>, Diagnostic> {
-//RS         let TokKind::Int(lo_val, _) = &self.peek().kind.clone() else {
-//RS             return Ok(None);
-//RS         };
-//RS         if !matches!(
-//RS             self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS             Some(TokKind::DotDot)
-//RS         ) {
-//RS             return Ok(None);
-//RS         }
-//RS         let lo = *lo_val;
-//RS         let range_start = self.bump().span; // consume lo
-//RS         self.bump(); // consume `..`
-//RS                      // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
-//RS                      // Push the error, then recover by consuming hi and building a valid range arm.
-//RS         if matches!(self.peek().kind, TokKind::Eq) {
-//RS             self.bump(); // consume `=`
-//RS             if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
-//RS                 let hi = *hi_val;
-//RS                 let range_end = self.bump().span; // consume hi
-//RS                 let pat_span = Span::new(range_start.start, range_end.end);
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0318",
-//RS                     "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
-//RS                     "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
-//RS                     format!("write `{}..{}` — that already includes `{}`", lo, hi, hi),
-//RS                     Some(pat_span),
-//RS                 ));
-//RS                 return Ok(Some(Expr::PatternTest {
-//RS                     subject: Box::new(subject.clone()),
-//RS                     pattern: Pattern::Range {
-//RS                         lo,
-//RS                         hi,
-//RS                         span: pat_span,
-//RS                     },
-//RS                     span: pat_span,
-//RS                 }));
-//RS             }
-//RS             return Err(Diagnostic::error(
-//RS                 "E0318",
-//RS                 "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
-//RS                 "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
-//RS                 "write `lo..hi` — that already includes `hi`".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
-//RS             let hi = *hi_val;
-//RS             let range_end = self.bump().span; // consume hi
-//RS             let pat_span = Span::new(range_start.start, range_end.end);
-//RS             // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
-//RS             // Push the error and skip `step N` so the arm can still be parsed.
-//RS             if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::RETIRED_LOOP_STEP) {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0319",
-//RS                     "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
-//RS                     "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends".to_string(),
-//RS                     format!("remove `step …`, or use a full condition: `subject >= {} && subject <= {} && subject % n == 0 ->`", lo, hi),
-//RS                     Some(pat_span),
-//RS                 ));
-//RS                 self.bump(); // consume `step`
-//RS                 if matches!(self.peek().kind, TokKind::Int(_, _)) {
-//RS                     self.bump(); // consume step value
-//RS                 }
-//RS             }
-//RS             return Ok(Some(Expr::PatternTest {
-//RS                 subject: Box::new(subject.clone()),
-//RS                 pattern: Pattern::Range {
-//RS                     lo,
-//RS                     hi,
-//RS                     span: pat_span,
-//RS                 },
-//RS                 span: pat_span,
-//RS             }));
-//RS         }
-//RS         Err(Diagnostic::error(
-//RS             "E0003",
-//RS             "expected an integer after `..` in a range arm".to_string(),
-//RS             "range arms need both ends: `lo..hi -> body`".to_string(),
-//RS             "write `0..59 -> { body }` for an inclusive range arm".to_string(),
-//RS             Some(self.peek().span),
-//RS         ))
-//RS     }
-//RS 
-//RS     /// D-IF3 / D-MATCHARM1 / D-IFDIST1: parse one bare arm head (no leading
-//RS     /// `subject OP`) and bind it to the subject with the table's comparison.
-//RS     /// - A pattern head (`.Active(id)`, `A(x) | B(x)`) becomes a `PatternTest`
-//RS     ///   (`==` marker only).
-//RS     /// - Values use the D-MATCHARM1 grammar: `|` unions distributed atoms,
-//RS     ///   `&&`/`||` combine booleans, and parens make a distributed group
-//RS     ///   explicit when it is next to a Boolean operator.
-//RS     /// - A leftover redundant `subject ==` prefix emits E0994 and recovers.
-//RS     pub(super) fn if_arm_head(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         pat_subject: &Expr,
-//RS         op: BinOp,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         // D-PATR: `Int .. Int ->` range heads — shared with statement/value dispatch.
-//RS         // Attach `pat_subject` (same as other pattern heads; `it` for non-Ident).
-//RS         if let Some(range) = self.try_range_arm_head(pat_subject)? {
-//RS             return Ok(range);
-//RS         }
-//RS         // A bare pattern head: parse it standalone and attach the subject.
-//RS         let save = self.pos;
-//RS         let save_diags = self.diags.len();
-//RS         if let Some(pattern) = self.try_pattern_rhs(true)? {
-//RS             // A pattern may be followed by a Boolean guard before the arm
-//RS             // arrow (`.Key(key) && key == "b" -> ...`). Keep the pattern as a
-//RS             // PatternTest so sema can put its payload bindings in scope while
-//RS             // checking the guard. Without this branch the fallback value
-//RS             // grammar turns the head into `subject == .Key(key)`, which loses
-//RS             // the binding and makes the guard's name look undefined.
-//RS             let pattern_cond = || Expr::PatternTest {
-//RS                 subject: Box::new(pat_subject.clone()),
-//RS                 pattern: pattern.clone(),
-//RS                 span: pat_span(&pattern),
-//RS             };
-//RS             let combine = |parts: Vec<Expr>, binop: BinOp| {
-//RS                 parts
-//RS                     .into_iter()
-//RS                     .reduce(|a, b| {
-//RS                         let span = Span::new(a.span().start, b.span().end);
-//RS                         Expr::Binary(binop, Box::new(a), Box::new(b), span)
-//RS                     })
-//RS                     .expect("pattern guard has at least one condition")
-//RS             };
-//RS             if self.at_unified_arrow() {
-//RS                 let span = pat_span(&pattern);
-//RS                 if op != BinOp::Eq {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0366",
-//RS                         format!("pattern arms need `==` — this table uses `{}`", op.spell()),
-//RS                         "structural patterns compare by shape under `if subject == { … }` only"
-//RS                             .to_string(),
-//RS                         format!(
-//RS                             "write `{} subject == {{ … }}` for pattern arms, or use a Bool head",
-//RS                             Syntax::KW_IF
-//RS                         ),
-//RS                         Some(span),
-//RS                     ));
-//RS                     // Recover with a Bool false head so the rest of the table
-//RS                     // (and a later `else`) can still parse.
-//RS                     return Ok(Expr::Bool(false, span));
-//RS                 }
-//RS                 return Ok(pattern_cond());
-//RS             }
-//RS             if matches!(self.peek().kind, TokKind::AndAnd | TokKind::OrOr) {
-//RS                 let span = pat_span(&pattern);
-//RS                 if op != BinOp::Eq {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0366",
-//RS                         format!("pattern arms need `==` — this table uses `{}`", op.spell()),
-//RS                         "structural patterns compare by shape under `if subject == { … }` only"
-//RS                             .to_string(),
-//RS                         format!(
-//RS                             "write `{} subject == {{ … }}` for pattern arms, or use a Bool head",
-//RS                             Syntax::KW_IF
-//RS                         ),
-//RS                         Some(span),
-//RS                     ));
-//RS                     return Ok(Expr::Bool(false, span));
-//RS                 }
-//RS                 // Match the normal arm grammar's precedence: `&&` binds more
-//RS                 // tightly than `||`, with the pattern as the first operand.
-//RS                 let mut and_parts = vec![pattern_cond()];
-//RS                 while matches!(self.peek().kind, TokKind::AndAnd) {
-//RS                     self.bump();
-//RS                     and_parts.push(self.parse_arm_bool_operand(subject, op)?);
-//RS                 }
-//RS                 let mut or_parts = vec![combine(and_parts, BinOp::And)];
-//RS                 while matches!(self.peek().kind, TokKind::OrOr) {
-//RS                     self.bump();
-//RS                     let mut and_parts = vec![self.parse_arm_bool_operand(subject, op)?];
-//RS                     while matches!(self.peek().kind, TokKind::AndAnd) {
-//RS                         self.bump();
-//RS                         and_parts.push(self.parse_arm_bool_operand(subject, op)?);
-//RS                     }
-//RS                     or_parts.push(combine(and_parts, BinOp::And));
-//RS                 }
-//RS                 return Ok(combine(or_parts, BinOp::Or));
-//RS             }
-//RS             self.pos = save;
-//RS             self.diags.truncate(save_diags);
-//RS         }
-//RS         // E0994: peek for a redundant `subject ==` prefix before entering the
-//RS         // new grammar (parse-and-rewind so diagnostics don't leak).
-//RS         let save_pos = self.pos;
-//RS         let save_diags = self.diags.len();
-//RS         if let Ok(raw) = self.expr_no_struct_lit() {
-//RS             match &raw {
-//RS                 Expr::PatternTest {
-//RS                     subject: lhs, span, ..
-//RS                 } if Self::same_subject(lhs, subject) => {
-//RS                     self.diags.push(Self::redundant_subject_diag(*span));
-//RS                     return Ok(raw);
-//RS                 }
-//RS                 Expr::Binary(binop, lhs, _, span)
-//RS                     if *binop == op && Self::same_subject(lhs, subject) =>
-//RS                 {
-//RS                     self.diags.push(Self::redundant_subject_diag(*span));
-//RS                     return Ok(raw);
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         // Rewind — the new arm-head grammar re-parses from the saved position.
-//RS         self.pos = save_pos;
-//RS         self.diags.truncate(save_diags);
-//RS         // D-MATCHARM1: value-alternates grammar.
-//RS         self.parse_arm_value_cond(subject, op)
-//RS     }
-//RS 
-//RS     pub(super) fn redundant_subject_diag(span: Span) -> Diagnostic {
-//RS         Diagnostic::error(
-//RS             "E0994",
-//RS             format!(
-//RS                 "drop the `subject OP` — the comparison on the `{}` already applies it to every arm",
-//RS                 Syntax::KW_IF
-//RS             ),
-//RS             format!(
-//RS                 "`{} subject OP {{ … }}` matches each arm head against the subject, so repeating `subject OP` on an arm is redundant",
-//RS                 Syntax::KW_IF
-//RS             ),
-//RS             "delete the `subject OP` prefix; write just the value or pattern".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     }
-//RS 
-//RS     fn distributed_atom_group_diag(&self, span: Span) -> Diagnostic {
-//RS         let mut diagnostic = Diagnostic::from_row("E0386", &[], Some(span));
-//RS         if let Some(source) = self
-//RS             .source
-//RS             .as_deref()
-//RS             .and_then(|source| source.get(span.start..span.end))
-//RS         {
-//RS             diagnostic = diagnostic.with_edit(TextEdit {
-//RS                 span,
-//RS                 new_text: format!("({source})"),
-//RS             });
-//RS         }
-//RS         diagnostic
-//RS     }
-//RS 
-//RS     // ── D-MATCHARM1 arm-head grammar ─────────────────────────────────────────
-//RS 
-//RS     /// `arm_and_expr = arm_alternates ("&&" arm_bool_operand)*`
-//RS     /// D-IFDIST1: after `&&`, a single Ident/field/call is a Bool predicate
-//RS     /// (not `subject OP ident`); a distributed `|` group next to a Boolean
-//RS     /// operator must be parenthesized.
-//RS     pub(super) fn parse_arm_and_cond(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         op: BinOp,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let (lhs_cond, alternate_count, alternate_span) =
-//RS             self.parse_arm_alternates_cond(subject, op, false)?;
-//RS         if alternate_count > 1 && matches!(self.peek().kind, TokKind::AndAnd | TokKind::OrOr) {
-//RS             let diagnostic = self.distributed_atom_group_diag(alternate_span);
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS         if !matches!(self.peek().kind, TokKind::AndAnd) {
-//RS             return Ok(lhs_cond);
-//RS         }
-//RS         let mut parts = vec![lhs_cond];
-//RS         while matches!(self.peek().kind, TokKind::AndAnd) {
-//RS             self.bump();
-//RS             parts.push(self.parse_arm_bool_operand(subject, op)?);
-//RS         }
-//RS         Ok(parts
-//RS             .into_iter()
-//RS             .reduce(|a, b| {
-//RS                 let span = Span::new(a.span().start, b.span().end);
-//RS                 Expr::Binary(BinOp::And, Box::new(a), Box::new(b), span)
-//RS             })
-//RS             .unwrap())
-//RS     }
-//RS 
-//RS     /// Entry point: `arm_bool_expr = arm_and_expr ("||" arm_bool_operand)*`
-//RS     pub(super) fn parse_arm_value_cond(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         op: BinOp,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let lhs = self.parse_arm_and_cond(subject, op)?;
-//RS         if !matches!(self.peek().kind, TokKind::OrOr) {
-//RS             return Ok(lhs);
-//RS         }
-//RS         let mut parts = vec![lhs];
-//RS         while matches!(self.peek().kind, TokKind::OrOr) {
-//RS             self.bump();
-//RS             parts.push(self.parse_arm_bool_operand(subject, op)?);
-//RS         }
-//RS         Ok(parts
-//RS             .into_iter()
-//RS             .reduce(|a, b| {
-//RS                 let span = Span::new(a.span().start, b.span().end);
-//RS                 Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
-//RS             })
-//RS             .unwrap())
-//RS     }
-//RS 
-//RS     /// Operand after `&&` / `||`: a `|` union still distributes; a lone
-//RS     /// predicate (Ident/field/call/…) is left as a Bool expression.
-//RS     pub(super) fn parse_arm_bool_operand(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         op: BinOp,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LParen) {
-//RS             self.bump();
-//RS             let inner = self.parse_arm_value_cond(subject, op)?;
-//RS             self.expect(TokKind::RParen, "to close the arm head group")?;
-//RS             return Ok(inner);
-//RS         }
-//RS         let (cond, alternate_count, alternate_span) =
-//RS             self.parse_arm_alternates_cond(subject, op, true)?;
-//RS         if alternate_count > 1 {
-//RS             let diagnostic = self.distributed_atom_group_diag(alternate_span);
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS         Ok(cond)
-//RS     }
-//RS 
-//RS     /// `arm_alternates = arm_atom ("|" arm_atom)*`
-//RS     /// Returns `(condition_expr, alternate_count, source_span)`.
-//RS     /// `prefer_predicate` is true for a single atom after `&&`/`||`.
-//RS     pub(super) fn parse_arm_alternates_cond(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         op: BinOp,
-//RS         prefer_predicate: bool,
-//RS     ) -> Result<(Expr, usize, Span), Diagnostic> {
-//RS         let group_start = self.peek().span.start;
-//RS         let first = self.parse_arm_atom_cond(subject, op, prefer_predicate)?;
-//RS         let mut group_end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS         let mut alts = vec![first];
-//RS         // Consume single `|` but not `||` (peek at the token after `|`).
-//RS         while matches!(self.peek().kind, TokKind::Pipe)
-//RS             && !matches!(
-//RS                 self.toks.get(self.pos + 1).map(|t| &t.kind),
-//RS                 Some(TokKind::Pipe)
-//RS             )
-//RS         {
-//RS             self.bump(); // consume `|`
-//RS                          // Values in a `|` union always distribute.
-//RS             alts.push(self.parse_arm_atom_cond(subject, op, false)?);
-//RS             group_end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS         }
-//RS         let n = alts.len();
-//RS         if n == 1 {
-//RS             return Ok((
-//RS                 alts.into_iter().next().unwrap(),
-//RS                 1,
-//RS                 Span::new(group_start, group_end),
-//RS             ));
-//RS         }
-//RS         let combined = alts
-//RS             .into_iter()
-//RS             .reduce(|a, b| {
-//RS                 let span = Span::new(a.span().start, b.span().end);
-//RS                 Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
-//RS             })
-//RS             .unwrap();
-//RS         Ok((combined, n, Span::new(group_start, group_end)))
-//RS     }
-//RS 
-//RS     /// `arm_atom` uses the arithmetic/bit-xor layer as its base so a bare `|`
-//RS     /// remains the dispatch-alternates separator. Ordinary expressions still
-//RS     /// use `expr_cmp`, where `|` is bitwise OR; dispatch heads have a distinct
-//RS     /// grammar and must not consume that separator before
-//RS     /// `parse_arm_alternates_cond` can diagnose an unparenthesized group.
-//RS     fn parse_dispatch_atom_expr(&mut self) -> Result<Expr, Diagnostic> {
-//RS         let lhs = self.expr_bitxor(false)?;
-//RS         let op = match &self.peek().kind {
-//RS             TokKind::EqEq => Some(BinOp::Eq),
-//RS             TokKind::NotEq => Some(BinOp::Ne),
-//RS             TokKind::Lt => Some(BinOp::Lt),
-//RS             TokKind::Gt if self.module_arg_expr_depth != Some(self.depth) => Some(BinOp::Gt),
-//RS             TokKind::Le => Some(BinOp::Le),
-//RS             TokKind::Ge => Some(BinOp::Ge),
-//RS             TokKind::Compare => Some(BinOp::Compare),
-//RS             _ => None,
-//RS         };
-//RS         let Some(op) = op else {
-//RS             return Ok(lhs);
-//RS         };
-//RS         let op_span = self.bump().span;
-//RS         if op == BinOp::Eq {
-//RS             if let Some(pattern) = self.try_pattern_rhs(true)? {
-//RS                 let span = Span::new(lhs.span().start, pat_span(&pattern).end.max(op_span.end));
-//RS                 return Ok(Expr::PatternTest {
-//RS                     subject: Box::new(lhs),
-//RS                     pattern,
-//RS                     span,
-//RS                 });
-//RS             }
-//RS         }
-//RS         let rhs = self.expr_bitxor(false)?;
-//RS         let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-//RS         Ok(Expr::Binary(op, Box::new(lhs), Box::new(rhs), span))
-//RS     }
-//RS 
-//RS     /// `arm_atom = "(" arm_bool_expr ")" | single_value`
-//RS     pub(super) fn parse_arm_atom_cond(
-//RS         &mut self,
-//RS         subject: &Expr,
-//RS         op: BinOp,
-//RS         prefer_predicate: bool,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LParen) {
-//RS             self.bump(); // consume `(`
-//RS             let inner = self.parse_arm_value_cond(subject, op)?;
-//RS             self.expect(TokKind::RParen, "to close the arm head group")?;
-//RS             return Ok(inner);
-//RS         }
-//RS         let raw = self.parse_dispatch_atom_expr()?;
-//RS         Ok(Self::arm_atom_to_cond(
-//RS             subject.clone(),
-//RS             raw,
-//RS             op,
-//RS             prefer_predicate,
-//RS         ))
-//RS     }
-//RS 
-//RS     /// Wrap a single value as a condition. Comparisons / PatternTest are kept
-//RS     /// as-is; plain values get `subject OP value` wrapping (D-IFDIST1).
-//RS     /// After `&&`/`||`, Ident/field/call predicates stay unwrapped.
-//RS     pub(super) fn arm_atom_to_cond(
-//RS         subject: Expr,
-//RS         value: Expr,
-//RS         op: BinOp,
-//RS         prefer_predicate: bool,
-//RS     ) -> Expr {
-//RS         match &value {
-//RS             Expr::Binary(binop, ..)
-//RS                 if binop.is_comparison() || matches!(binop, BinOp::And | BinOp::Or) =>
-//RS             {
-//RS                 value
-//RS             }
-//RS             Expr::PatternTest { .. } => value,
-//RS             Expr::Bool(_, _) if prefer_predicate => value,
-//RS             Expr::Unary(crate::AST::UnOp::Not, ..) => value,
-//RS             Expr::Ident(..) | Expr::Field { .. } | Expr::Call { .. } | Expr::MethodCall { .. }
-//RS                 if prefer_predicate =>
-//RS             {
-//RS                 value
-//RS             }
-//RS             _ => {
-//RS                 let span = Span::new(subject.span().start, value.span().end);
-//RS                 Expr::Binary(op, Box::new(subject), Box::new(value), span)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-IFDIST1: a comparison token followed by `{` is the dispatch marker.
-//RS     pub(super) fn peek_dispatch_op(&self) -> Option<BinOp> {
-//RS         if !matches!(self.peek2().kind, TokKind::LBrace) {
-//RS             return None;
-//RS         }
-//RS         match self.peek().kind {
-//RS             TokKind::EqEq => Some(BinOp::Eq),
-//RS             TokKind::NotEq => Some(BinOp::Ne),
-//RS             TokKind::Lt => Some(BinOp::Lt),
-//RS             TokKind::Gt => Some(BinOp::Gt),
-//RS             TokKind::Le => Some(BinOp::Le),
-//RS             TokKind::Ge => Some(BinOp::Ge),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// True when `a` denotes the dispatch subject (a byte-equal ident, or the
-//RS     /// synthesised `it`). Mirrors the formatter's `same_subject`.
-//RS     pub(super) fn same_subject(a: &Expr, subject: &Expr) -> bool {
-//RS         match (a, subject) {
-//RS             (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
-//RS             (Expr::Ident(n, _), Expr::Ident(s, _)) => n == s,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-IF2 Q2: an arm body is a `{ … }` block or a single braceless statement.
-//RS     pub(super) fn arm_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             Ok(self.block_stmts())
-//RS         } else {
-//RS             // Braceless single statement (a call, binding, return, etc.).
-//RS             Ok(vec![self.braceless_arm_stmt()?])
-//RS         }
-//RS     }
-//RS 
-//RS     /// Parse one `else if` link of a classic chain, appending its condition
-//RS     /// and body to `parts` for the L0507 fix.
-//RS     pub(super) fn if_stmt(&mut self, parts: &mut Vec<BranchPart>) -> Result<IfStmt, Diagnostic> {
-//RS         let span = self.bump().span; // `if`
-//RS         let cond_start = self.peek().span.start;
-//RS         let cond = self.expr_no_struct_lit()?;
-//RS         let cond_span = Span::new(cond_start, self.prev_end());
-//RS         // D-ONELINE-BODY1=B: every arm of a chain takes the same body shapes as
-//RS         // the leading `if` — one `->` statement, a braced block, or the
-//RS         // braces-teaching recovery. `fmt` prints `->` for each arm that fits, so
-//RS         // each arm must read it back; a chain that only the first arm could
-//RS         // spell made the formatter write source the parser rejected.
-//RS         let body_start = self.peek().span.start;
-//RS         let then_body = if self.at_unified_arrow() {
-//RS             self.expect_unified_arrow("after an `if` condition")?;
-//RS             let body_start = self.peek().span.start;
-//RS             let body = self.adjacent_effect_body()?;
-//RS             parts.push(BranchPart::Arm {
-//RS                 cond: cond_span,
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             body
-//RS         } else if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
-//RS             self.teach_control_braces("if", self.peek().span);
-//RS             let body = self.adjacent_effect_body()?;
-//RS             parts.push(BranchPart::Arm {
-//RS                 cond: cond_span,
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             body
-//RS         } else {
-//RS             self.expect(TokKind::LBrace, "to open the `if` body")?;
-//RS             let body = self.block_stmts();
-//RS             parts.push(BranchPart::Arm {
-//RS                 cond: cond_span,
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             body
-//RS         };
-//RS         let else_branch = self.adjacent_effect_else(parts)?;
-//RS         Ok(IfStmt {
-//RS             cond,
-//RS             then_body,
-//RS             else_branch,
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     /// `switch` body, after the keyword (S24): either legacy condition arms
-//RS     /// with `->`, or pipe arms where bare terms mean `subject == term`.
-//RS     /// S68 / D-ARROW-CONTROL1: parse an `if` expression —
-//RS     /// `if cond -> value else -> value`.
-//RS     /// Each branch is a value block; `else` is required (an `if` with no value
-//RS     /// is a statement, parsed elsewhere).
-//RS     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
-//RS         self.parse_if_expr_inner(true, &mut Vec::new())
-//RS     }
-//RS 
-//RS     /// `parts` collects each condition and branch value so a linted root can
-//RS     /// rebuild the whole chain as one L0507 arm table.
-//RS     fn parse_if_expr_inner(
-//RS         &mut self,
-//RS         lint_style: bool,
-//RS         parts: &mut Vec<BranchPart>,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         let branch_start = self.pos;
-//RS         let start = self.bump().span; // `if`
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.bump();
-//RS             return self.parse_guard_expr(start);
-//RS         }
-//RS         // D-IFDIST1: `if subject OP { value-arms }` in expression position.
-//RS         let probe = self.pos;
-//RS         let probe_diags = self.diags.len();
-//RS         if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
-//RS             if let Some(op) = self.peek_dispatch_op() {
-//RS                 self.bump(); // comparison marker
-//RS                 self.expect(TokKind::LBrace, "to open the `if` dispatch body")?;
-//RS                 return self.parse_dispatch_expr(subject, op, start);
-//RS             }
-//RS         }
-//RS         self.pos = probe;
-//RS         self.diags.truncate(probe_diags);
-//RS 
-//RS         let cond_start = self.peek().span.start;
-//RS         let cond = self.expr_no_struct_lit()?;
-//RS         let cond_span = Span::new(cond_start, self.prev_end());
-//RS         self.expect_unified_arrow("after the condition of a value-producing `if`")?;
-//RS         let body_start = self.peek().span.start;
-//RS         let (then_body, then_value) = self.parse_selected_value()?;
-//RS         parts.push(BranchPart::Arm {
-//RS             cond: cond_span,
-//RS             body: Span::new(body_start, self.prev_end()),
-//RS         });
-//RS         if !matches!(self.peek().kind, TokKind::KwElse) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "an `if` used as a value needs an `else` branch".to_string(),
-//RS                 "when `if` produces a value, both branches must produce one (S68)".to_string(),
-//RS                 "add `else -> value` so every path has a value".to_string(),
-//RS                 Some(self.peek().span),
-//RS             ));
-//RS         }
-//RS         self.bump(); // `else`
-//RS                      // `else if …` nests directly; a final selected value uses `else ->`.
-//RS         let chained = matches!(self.peek().kind, TokKind::KwIf);
-//RS         let (else_body, else_value) = if chained {
-//RS             (Vec::new(), self.parse_if_expr_inner(false, parts)?)
-//RS         } else {
-//RS             self.expect_unified_arrow("after `else` in a value-producing `if`")?;
-//RS             let body_start = self.peek().span.start;
-//RS             let selected = self.parse_selected_value()?;
-//RS             parts.push(BranchPart::Else {
-//RS                 body: Span::new(body_start, self.prev_end()),
-//RS             });
-//RS             selected
-//RS         };
-//RS         let span = Span::new(start.start, else_value.span().end);
-//RS         if lint_style && (chained || self.span_has_authored_line_break(branch_start, self.pos)) {
-//RS             self.prefer_arm_table_lint(start, parts, probe_diags);
-//RS         }
-//RS         Ok(Expr::If {
-//RS             cond: Box::new(cond),
-//RS             then_body,
-//RS             then_value: Box::new(then_value),
-//RS             else_body,
-//RS             else_value: Box::new(else_value),
-//RS             span,
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-IFDIST1: value-producing `if subject OP { head -> value … else -> value }`.
-//RS     /// Desugars to a nested `Expr::If` chain (same shape as subjectless value guards).
-//RS     fn parse_dispatch_expr(
-//RS         &mut self,
-//RS         subject: Expr,
-//RS         op: BinOp,
-//RS         start: Span,
-//RS     ) -> Result<Expr, Diagnostic> {
-//RS         // Expression dispatch has no separate subject field, so retain the
-//RS         // receiver in each pattern test. The result-handler lowering pass
-//RS         // evaluates the shared receiver once before matching its arms.
-//RS         let pat_subject = subject.clone();
-//RS         let mut arms: Vec<(Expr, Vec<Stmt>, Expr)> = Vec::new();
-//RS         let (else_body, else_value, end) = loop {
-//RS             while matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS             }
-//RS             match self.peek().kind {
-//RS                 TokKind::KwElse => {
-//RS                     self.bump();
-//RS                     self.expect_unified_arrow("after `else` in a value dispatch")?;
-//RS                     let (body, value) = self.guard_value_body()?;
-//RS                     while matches!(self.peek().kind, TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     let close = self.peek().span;
-//RS                     self.expect(TokKind::RBrace, "after the final `else` value dispatch arm")?;
-//RS                     break (body, value, close.end);
-//RS                 }
-//RS                 TokKind::RBrace => {
-//RS                     let close = self.bump().span;
-//RS                     // Card #1440: an all-pattern table may omit `else` — sema
-//RS                     // proves the arms cover the subject's whole type (E0307).
-//RS                     let all_pattern = !arms.is_empty()
-//RS                         && arms
-//RS                             .iter()
-//RS                             .all(|(cond, _, _)| matches!(cond, Expr::PatternTest { .. }));
-//RS                     if all_pattern {
-//RS                         break (Vec::new(), Expr::NoElse(close), close.end);
-//RS                     }
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "a value dispatch needs a final `else` arm".to_string(),
-//RS                         "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm"
-//RS                             .to_string(),
-//RS                         "add `else -> value` so every path produces a value".to_string(),
-//RS                         Some(close),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected a final `else` arm and `}` for this value dispatch".to_string(),
-//RS                         "a value dispatch must produce a value on every path".to_string(),
-//RS                         "add `else -> value` and a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 _ => {
-//RS                     let cond = self.if_arm_head(&subject, &pat_subject, op)?;
-//RS                     self.expect_unified_arrow("after a value dispatch arm head")?;
-//RS                     let (body, value) = self.guard_value_body()?;
-//RS                     arms.push((cond, body, value));
-//RS                 }
-//RS             }
-//RS         };
-//RS         if arms.is_empty() {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a value dispatch needs at least one arm before `else`".to_string(),
-//RS                 "`else` is a fallback, not a condition".to_string(),
-//RS                 "add a `value -> result` arm before `else`".to_string(),
-//RS                 Some(start),
-//RS             ));
-//RS         }
-//RS         let span = Span::new(start.start, end);
-//RS         let mut fallback_body = else_body;
-//RS         let mut fallback_value = else_value;
-//RS         for (cond, then_body, then_value) in arms.into_iter().rev() {
-//RS             fallback_value = Expr::If {
-//RS                 cond: Box::new(cond),
-//RS                 then_body,
-//RS                 then_value: Box::new(then_value),
-//RS                 else_body: fallback_body,
-//RS                 else_value: Box::new(fallback_value),
-//RS                 span,
-//RS             };
-//RS             fallback_body = Vec::new();
-//RS         }
-//RS         Ok(fallback_value)
-//RS     }
-//RS 
-//RS     fn parse_selected_value(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             self.parse_value_block()
-//RS         } else {
-//RS             let value = self.expr()?;
-//RS             Ok((Vec::new(), value))
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-IFGUARD1=A: a value guard is a nested ordinary if-expression chain.
-//RS     /// The final `else` is syntactically mandatory because arbitrary Boolean
-//RS     /// heads are not solver-proved exhaustive.
-//RS     fn parse_guard_expr(&mut self, start: Span) -> Result<Expr, Diagnostic> {
-//RS         let mut arms: Vec<(Expr, Vec<Stmt>, Expr)> = Vec::new();
-//RS         let (else_body, else_value, end) = loop {
-//RS             while matches!(self.peek().kind, TokKind::Semi) {
-//RS                 self.bump();
-//RS             }
-//RS             match self.peek().kind {
-//RS                 TokKind::KwElse => {
-//RS                     self.bump();
-//RS                     self.expect_unified_arrow("after `else` in a value guard")?;
-//RS                     let (body, value) = self.guard_value_body()?;
-//RS                     while matches!(self.peek().kind, TokKind::Semi) {
-//RS                         self.bump();
-//RS                     }
-//RS                     let close = self.peek().span;
-//RS                     self.expect(TokKind::RBrace, "after the final `else` value guard arm")?;
-//RS                     break (body, value, close.end);
-//RS                 }
-//RS                 TokKind::RBrace => {
-//RS                     let close = self.bump().span;
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "a guard table used as a value needs a final `else` arm".to_string(),
-//RS                         "arbitrary Boolean guards cannot prove that one arm always matches"
-//RS                             .to_string(),
-//RS                         "add `else -> value` so every path produces a value".to_string(),
-//RS                         Some(close),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected a final `else` arm and `}` for this value guard".to_string(),
-//RS                         "a value guard must produce a value on every path".to_string(),
-//RS                         "add `else -> value` and a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 _ => {
-//RS                     let cond = self.subjectless_arm_head()?;
-//RS                     self.expect_unified_arrow("after a value guard condition")?;
-//RS                     let (body, value) = self.guard_value_body()?;
-//RS                     arms.push((cond, body, value));
-//RS                 }
-//RS             }
-//RS         };
-//RS         if arms.is_empty() {
-//RS             return Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "a value guard needs at least one condition before `else`".to_string(),
-//RS                 "`else` is a fallback, not a condition".to_string(),
-//RS                 "add a `condition -> value` arm before `else`".to_string(),
-//RS                 Some(start),
-//RS             ));
-//RS         }
-//RS         let span = Span::new(start.start, end);
-//RS         let mut fallback_body = else_body;
-//RS         let mut fallback_value = else_value;
-//RS         for (cond, then_body, then_value) in arms.into_iter().rev() {
-//RS             fallback_value = Expr::If {
-//RS                 cond: Box::new(cond),
-//RS                 then_body,
-//RS                 then_value: Box::new(then_value),
-//RS                 else_body: fallback_body,
-//RS                 else_value: Box::new(fallback_value),
-//RS                 span,
-//RS             };
-//RS             fallback_body = Vec::new();
-//RS         }
-//RS         Ok(fallback_value)
-//RS     }
-//RS 
-//RS     fn guard_value_body(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
-//RS         if matches!(self.peek().kind, TokKind::LBrace) {
-//RS             return self.parse_value_block();
-//RS         }
-//RS         let value = self.expr()?;
-//RS         Ok((Vec::new(), value))
-//RS     }
-//RS 
-//RS     /// S68 (D-SG2): parse `{ stmt* tail-expr }` where the trailing expression
-//RS     /// (no `;`) is the block's value. Leading statements use the ordinary
-//RS     /// statement grammar; the tail is detected by speculatively parsing an
-//RS     /// expression and checking for the closing `}`.
-//RS     pub(super) fn parse_value_block(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
-//RS         self.expect(TokKind::LBrace, "to open this `if` branch")?;
-//RS         let mut stmts = Vec::new();
-//RS         loop {
-//RS             // S6-R: a nested block statement ends at `}`, so consume the
-//RS             // lexer-inserted zero-width terminator before the next value item.
-//RS             // Authored semicolons remain visible to the existing diagnostics.
-//RS             if matches!(self.peek().kind, TokKind::Semi)
-//RS                 && self.peek().span.start == self.peek().span.end
-//RS             {
-//RS                 self.bump();
-//RS                 continue;
-//RS             }
-//RS             match &self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     let span = self.peek().span;
-//RS                     self.bump();
-//RS                     if let Some(stmt) = stmts.last() {
-//RS                         if value_block_stmt_diverges(stmt) {
-//RS                             return Ok((stmts, Expr::NoElse(Span::new(span.start, span.start))));
-//RS                         }
-//RS                         return Err(Diagnostic::error(
-//RS                             "E0114",
-//RS                             "this value branch ends with a statement instead of a value"
-//RS                                 .to_string(),
-//RS                             "a value-expected block must end with one unadorned expression; statements yield unit"
-//RS                                 .to_string(),
-//RS                             "put one unadorned expression last, or use `return ...` for an early exit"
-//RS                                 .to_string(),
-//RS                             Some(stmt.span()),
-//RS                         ));
-//RS                     }
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "this `if` branch is empty but is used as a value".to_string(),
-//RS                         "when `if` produces a value, each branch must end with one (S68)"
-//RS                             .to_string(),
-//RS                         "put a value as the last line, like `{ x }`".to_string(),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close this `if` branch, found the end of the file"
-//RS                             .to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             // Try the current position as the trailing value expression.
-//RS             let save = self.pos;
-//RS             let saved_diags = self.diags.len();
-//RS             if let Ok(e) = self.expr() {
-//RS                 // S6-R: the lexer inserts a zero-width terminator after a tail
-//RS                 // value when the line ends before `}`. An authored `;` is a
-//RS                 // statement tail and therefore yields unit under
-//RS                 // D-TAIL-RETURN1=A; it must not be admitted as the value.
-//RS                 if matches!(self.peek().kind, TokKind::Semi)
-//RS                     && matches!(self.peek2().kind, TokKind::RBrace)
-//RS                 {
-//RS                     let semi = self.peek().span;
-//RS                     if semi.start != semi.end {
-//RS                         if value_expr_diverges(&e) {
-//RS                             self.bump();
-//RS                         } else {
-//RS                             return Err(Diagnostic::error(
-//RS                                 "E0114",
-//RS                                 "this value branch ends with a semicolon-terminated expression"
-//RS                                     .to_string(),
-//RS                                 "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit"
-//RS                                     .to_string(),
-//RS                                 "remove the semicolon, or use `return ...` for an early exit"
-//RS                                     .to_string(),
-//RS                                 Some(e.span()),
-//RS                             ));
-//RS                         }
-//RS                     } else {
-//RS                         self.bump();
-//RS                     }
-//RS                 }
-//RS                 if matches!(self.peek().kind, TokKind::RBrace) {
-//RS                     self.bump();
-//RS                     return Ok((stmts, e));
-//RS                 }
-//RS             }
-//RS             // Not the tail value — rewind and parse an ordinary statement.
-//RS             self.pos = save;
-//RS             self.diags.truncate(saved_diags);
-//RS             match self.stmt() {
-//RS                 Ok(s) => stmts.push(s),
-//RS                 Err(d) => {
-//RS                     self.diags.push(d);
-//RS                     self.sync_stmt();
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn switch_after_kw(&mut self, span: Span) -> Result<Stmt, Diagnostic> {
-//RS         let subject = self.expr_no_struct_lit()?;
-//RS         self.expect(TokKind::LBrace, "to open the `switch` body")?;
-//RS         let mut arms = Vec::new();
-//RS         let mut else_body: Option<Vec<Stmt>> = None;
-//RS         loop {
-//RS             match &self.peek().kind {
-//RS                 TokKind::RBrace => {
-//RS                     self.bump();
-//RS                     break;
-//RS                 }
-//RS                 TokKind::Eof => {
-//RS                     return Err(Diagnostic::error(
-//RS                         "E0003",
-//RS                         "expected `}` to close this `switch`, found the end of the file"
-//RS                             .to_string(),
-//RS                         "every `{` needs a matching `}`".to_string(),
-//RS                         "add a closing `}`".to_string(),
-//RS                         Some(self.peek().span),
-//RS                     ));
-//RS                 }
-//RS                 TokKind::Pipe => {
-//RS                     let arm_start = self.bump().span;
-//RS                     if matches!(self.peek().kind, TokKind::KwElse) {
-//RS                         self.bump();
-//RS                         self.expect(TokKind::LBrace, "to open the `else` arm")?;
-//RS                         let body = self.block_stmts();
-//RS                         if matches!(self.peek().kind, TokKind::Semi) {
-//RS                             self.bump();
-//RS                         }
-//RS                         else_body = Some(body);
-//RS                     } else {
-//RS                         let cond = self.parse_arm_value_cond(&subject, BinOp::Eq)?;
-//RS                         self.expect(TokKind::LBrace, "to open the arm's body")?;
-//RS                         let body = self.block_stmts();
-//RS                         let end = self.peek().span.end;
-//RS                         if matches!(self.peek().kind, TokKind::Semi) {
-//RS                             self.bump();
-//RS                         }
-//RS                         arms.push(SwitchArm {
-//RS                             cond,
-//RS                             body,
-//RS                             span: Span::new(arm_start.start, end),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 TokKind::Ident(name)
-//RS                     if false
-//RS                         && (name == Syntax::FOREIGN_CASE || name == Syntax::FOREIGN_DEFAULT) =>
-//RS                 {
-//RS                     let t = self.bump();
-//RS                     let foreign = if let TokKind::Ident(n) = &t.kind {
-//RS                         n.clone()
-//RS                     } else {
-//RS                         unreachable!()
-//RS                     };
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0023",
-//RS                         format!(
-//RS                             "`{}` arms are written `value {} body`, not `{}`",
-//RS                             Syntax::KW_IF,
-//RS                             Syntax::OP_UNIFIED_ARROW,
-//RS                             foreign
-//RS                         ),
-//RS                         format!(
-//RS                             "choosing one branch from many uses `{}` with `{}` arms (D-IF1)",
-//RS                             Syntax::KW_IF,
-//RS                             Syntax::OP_UNIFIED_ARROW
-//RS                         ),
-//RS                         format!(
-//RS                             "replace `{}` with a value or condition and `{}`, like `1 {} body`",
-//RS                             foreign,
-//RS                             Syntax::OP_UNIFIED_ARROW,
-//RS                             Syntax::OP_UNIFIED_ARROW
-//RS                         ),
-//RS                         Some(t.span),
-//RS                     ));
-//RS                     self.sync_stmt();
-//RS                     continue;
-//RS                 }
-//RS                 TokKind::KwElse => {
-//RS                     self.bump();
-//RS                     self.expect_unified_arrow("after `else` in a `switch`")?;
-//RS                     self.expect(TokKind::LBrace, "to open the `else` arm")?;
-//RS                     let body = self.block_stmts();
-//RS                     self.expect(TokKind::Semi, "after a `switch` arm's closing `}`")?;
-//RS                     else_body = Some(body);
-//RS                 }
-//RS                 _ => {
-//RS                     let arm_start = self.peek().span;
-//RS                     // D-ENUMDOT1: `.Variant` or `.Variant(binding)` as a switch arm head.
-//RS                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
-//RS                     // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
-//RS                     let cond = if matches!(&self.peek().kind, TokKind::Dot)
-//RS                         && self
-//RS                             .toks
-//RS                             .get(self.pos + 1)
-//RS                             .and_then(|token| leading_dot_variant(&token.kind))
-//RS                             .is_some()
-//RS                     {
-//RS                         let dot_span = self.bump().span; // consume `.`
-//RS                         let variant_token = self.bump();
-//RS                         let variant = leading_dot_variant(&variant_token.kind)
-//RS                             .expect("leading-dot variant guard and token must agree");
-//RS                         let variant_span = variant_token.span;
-//RS                         let (bindings, end) = if matches!(self.peek().kind, TokKind::LParen) {
-//RS                             self.bump(); // consume `(`
-//RS                             let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
-//RS                             if !matches!(self.peek().kind, TokKind::RParen) {
-//RS                                 loop {
-//RS                                     bindings.push(self.pattern_slot()?);
-//RS                                     if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                         break;
-//RS                                     }
-//RS                                     self.expect(TokKind::Comma, "between pattern bindings")?;
-//RS                                     if matches!(self.peek().kind, TokKind::RParen) {
-//RS                                         break;
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                             self.expect(TokKind::RParen, "after pattern bindings")?;
-//RS                             let end = self.toks[self.pos.saturating_sub(1)].span.end;
-//RS                             (bindings, end)
-//RS                         } else {
-//RS                             (vec![], variant_span.end)
-//RS                         };
-//RS                         let pat_span = Span::new(dot_span.start, end);
-//RS                         let pattern = Pattern::Variant {
-//RS                             variant,
-//RS                             bindings,
-//RS                             leading_dot: true,
-//RS                             span: pat_span,
-//RS                         };
-//RS                         Expr::PatternTest {
-//RS                             subject: Box::new(subject.clone()),
-//RS                             pattern,
-//RS                             span: pat_span,
-//RS                         }
-//RS                     } else if let Some(range) = self.try_range_arm_head(&subject)? {
-//RS                         range
-//RS                     } else {
-//RS                         self.expr_no_struct_lit()?
-//RS                     };
-//RS                     self.expect_unified_arrow("after a `switch` arm's condition")?;
-//RS                     self.expect(TokKind::LBrace, "to open the arm's body")?;
-//RS                     let body = self.block_stmts();
-//RS                     // Capture the `;` end so SwitchArm.span covers the full arm.
-//RS                     let semi_end = self.peek().span.end;
-//RS                     self.expect(TokKind::Semi, "after a `switch` arm's closing `}`")?;
-//RS                     arms.push(SwitchArm {
-//RS                         cond,
-//RS                         body,
-//RS                         span: Span::new(arm_start.start, semi_end),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod value_block_tests {
-//RS     use crate::AST::{Expr, Item, OrFallback, Program, Stmt};
-//RS     use crate::Diagnostics::{Diagnostic, Span};
-//RS     use crate::Lexer::lex;
-//RS     use crate::Parser::parse;
-//RS 
-//RS     fn parsed(source: &str) -> Program {
-//RS         let (tokens, lex_diagnostics) = lex(source);
-//RS         assert!(
-//RS             lex_diagnostics.is_empty(),
-//RS             "lex diagnostics for valid source: {lex_diagnostics:?}"
-//RS         );
-//RS         parse(&tokens).unwrap_or_else(|diagnostics| panic!("parse diagnostics: {diagnostics:?}"))
-//RS     }
-//RS 
-//RS     fn rejected(source: &str) -> Vec<Diagnostic> {
-//RS         let (tokens, lex_diagnostics) = lex(source);
-//RS         assert!(
-//RS             lex_diagnostics.is_empty(),
-//RS             "lex diagnostics for parser rejection: {lex_diagnostics:?}"
-//RS         );
-//RS         parse(&tokens).expect_err("source should be rejected")
-//RS     }
-//RS 
-//RS     fn binding_init<'a>(program: &'a Program, function_name: &str) -> &'a Expr {
-//RS         let function = program
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 Item::Func(function) if function.name == function_name => Some(function),
-//RS                 _ => None,
-//RS             })
-//RS             .unwrap_or_else(|| panic!("missing function `{function_name}`"));
-//RS         let Some(Stmt::Val(binding)) = function.body.first() else {
-//RS             panic!("function `{function_name}` does not start with a value binding");
-//RS         };
-//RS         &binding.init
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn value_block_accepts_control_statement_before_tail() {
-//RS         let program = parsed(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         loop {
-//RS             break
-//RS         }
-//RS         1
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         let Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             else_value,
-//RS             ..
-//RS         } = binding_init(&program, "run")
-//RS         else {
-//RS             panic!("binding initializer is not an if expression");
-//RS         };
-//RS         assert_eq!(then_body.len(), 1);
-//RS         assert!(matches!(&then_body[0], Stmt::Loop { .. }));
-//RS         assert!(matches!(then_value.as_ref(), Expr::Int(1, ..)));
-//RS         assert!(matches!(else_value.as_ref(), Expr::Int(0, ..)));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn value_block_accepts_multiple_nested_control_statements_before_tail() {
-//RS         let program = parsed(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         loop {
-//RS             if done {
-//RS                 break
-//RS             }
-//RS         }
-//RS         if fallback {
-//RS             notify()
-//RS         }
-//RS         7
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         let Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             ..
-//RS         } = binding_init(&program, "run")
-//RS         else {
-//RS             panic!("binding initializer is not an if expression");
-//RS         };
-//RS         assert_eq!(then_body.len(), 2);
-//RS         assert!(matches!(&then_body[0], Stmt::Loop { .. }));
-//RS         assert!(matches!(
-//RS             &then_body[1],
-//RS             Stmt::Switch { arms, .. } if arms.len() == 1
-//RS         ));
-//RS         assert!(matches!(then_value.as_ref(), Expr::Int(7, ..)));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn value_block_preserves_non_value_and_diverging_tail_rules() {
-//RS         let diagnostics = rejected(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         loop {
-//RS             break
-//RS         }
-//RS         side :: 1
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == "E0114"),
-//RS             "expected E0114 for a non-value tail, got {diagnostics:?}"
-//RS         );
-//RS         assert!(
-//RS             !diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
-//RS             "synthetic terminator must not create a spurious E0003: {diagnostics:?}"
-//RS         );
-//RS 
-//RS         let loop_value = parsed(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         loop {
-//RS             break
-//RS         }
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         let Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             ..
-//RS         } = binding_init(&loop_value, "run")
-//RS         else {
-//RS             panic!("binding initializer is not an if expression");
-//RS         };
-//RS         assert!(then_body.is_empty());
-//RS         assert!(matches!(
-//RS             then_value.as_ref(),
-//RS             Expr::CallValue { callee, .. }
-//RS                 if matches!(
-//RS                     callee.as_ref(),
-//RS                     Expr::Lambda(lambda) if lambda.meta.result_loop
-//RS                 )
-//RS         ));
-//RS 
-//RS         let program = parsed(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         return
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         let Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             ..
-//RS         } = binding_init(&program, "run")
-//RS         else {
-//RS             panic!("binding initializer is not an if expression");
-//RS         };
-//RS         assert!(matches!(then_body.as_slice(), [Stmt::Return(None, _)]));
-//RS         assert!(matches!(then_value.as_ref(), Expr::NoElse(_)));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn value_block_rejects_authored_semicolon_and_incomplete_input() {
-//RS         let diagnostics = rejected(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         1;
-//RS     } else -> 0
-//RS }
-//RS "#,
-//RS         );
-//RS         assert!(
-//RS             diagnostics
-//RS                 .iter()
-//RS                 .any(|diagnostic| diagnostic.code == "E0114"),
-//RS             "authored semicolon must keep the value-tail rejection: {diagnostics:?}"
-//RS         );
-//RS 
-//RS         let diagnostics = rejected(
-//RS             r#"
-//RS fn run() {
-//RS     result :: if ready -> {
-//RS         1
-//RS     } else -> {
-//RS         0
-//RS "#,
-//RS         );
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| {
-//RS                 diagnostic.code == "E0003"
-//RS                     && diagnostic
-//RS                         .what
-//RS                         .contains("Expected `}` to close this `if` branch")
-//RS             }),
-//RS             "incomplete value branch must remain rejected: {diagnostics:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn result_handler_value_block_accepts_control_statement_before_tail() {
-//RS         let program = parsed(
-//RS             r#"
-//RS fn run() {
-//RS     result :: fetch() ? ok -> {
-//RS         loop {
-//RS             break
-//RS         }
-//RS         ok
-//RS     }
-//RS     ! err -> err
-//RS }
-//RS "#,
-//RS         );
-//RS         let Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             ..
-//RS         } = binding_init(&program, "run")
-//RS         else {
-//RS             panic!("binding initializer is not a Result handler");
-//RS         };
-//RS         assert_eq!(then_body.len(), 1);
-//RS         assert!(matches!(&then_body[0], Stmt::Loop { .. }));
-//RS         assert!(matches!(
-//RS             then_value.as_ref(),
-//RS             Expr::Ident(name, _) if name == "ok"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn fallback_block_accepts_nested_control_before_bind_call_return_and_following_declaration() {
-//RS         let source = r#"
-//RS fn run(value: Int?) {
-//RS     result :: value ?? {
-//RS         loop {
-//RS             if done {
-//RS                 break
-//RS             }
-//RS         }
-//RS         if ready {
-//RS             observe()
-//RS         }
-//RS         bound :: 1
-//RS         notify()
-//RS         return
-//RS     }
-//RS     after :: 2
-//RS }
-//RS "#;
-//RS         let program = parsed(source);
-//RS         let Item::Func(function) = &program.items[0] else {
-//RS             panic!("expected run function");
-//RS         };
-//RS         let [Stmt::Val(result), Stmt::Val(after)] = function.body.as_slice() else {
-//RS             panic!("fallback must leave the following declaration in the function body");
-//RS         };
-//RS         assert_eq!(after.name, "after");
-//RS         let Expr::OrFallback {
-//RS             fallback:
-//RS                 OrFallback::Block {
-//RS                     body,
-//RS                     value: None,
-//RS                     ..
-//RS                 },
-//RS             ..
-//RS         } = &result.init
-//RS         else {
-//RS             panic!("binding initializer is not a fallback block");
-//RS         };
-//RS         assert!(matches!(
-//RS             body.as_slice(),
-//RS             [
-//RS                 Stmt::Loop {
-//RS                     body: loop_body,
-//RS                     ..
-//RS                 },
-//RS                 Stmt::Switch { .. },
-//RS                 Stmt::Val(binding),
-//RS                 Stmt::Expr(Expr::Call(call)),
-//RS                 Stmt::Return(None, _),
-//RS             ] if matches!(loop_body.as_slice(), [Stmt::Switch { .. }])
-//RS                 && binding.name == "bound"
-//RS                 && call.name == "notify"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn fallback_block_rejects_authored_semicolon_after_nested_control() {
-//RS         let source = r#"
-//RS fn run(value: Int?) {
-//RS     result :: value ?? {
-//RS         loop {
-//RS             break
-//RS         };
-//RS         1
-//RS     }
-//RS }
-//RS "#;
-//RS         let diagnostics = rejected(source);
-//RS         let semicolon = source.find("};").expect("test source has an authored semicolon");
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| {
-//RS                 diagnostic.code == "E0003"
-//RS                     && diagnostic.span == Some(Span::new(semicolon + 1, semicolon + 2))
-//RS                     && diagnostic.what.contains("found `;`")
-//RS             }),
-//RS             "authored semicolon must not be treated as a synthetic terminator: {diagnostics:?}"
-//RS         );
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod arm_table_fix_tests {
-//RS     use crate::Diagnostics::{Diagnostic, FixApplicability, TextEdit};
-//RS     use crate::Lexer::lex;
-//RS     use crate::Parser::parse_for_check_with_source;
-//RS     use crate::AST::Program;
-//RS 
-//RS     fn checked(source: &str) -> (Program, Vec<Diagnostic>) {
-//RS         let (tokens, lex_diagnostics) = lex(source);
-//RS         assert!(lex_diagnostics.is_empty(), "lex: {lex_diagnostics:?}");
-//RS         parse_for_check_with_source(&tokens, source)
-//RS             .unwrap_or_else(|diagnostics| panic!("parse: {diagnostics:?}"))
-//RS     }
-//RS 
-//RS     fn arm_table_edits(diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
-//RS         diagnostics
-//RS             .iter()
-//RS             .filter(|d| d.code == "L0507")
-//RS             .filter_map(|d| {
-//RS                 let edit = d.edit.clone()?;
-//RS                 assert_eq!(d.applicability, Some(FixApplicability::Safe), "{d:?}");
-//RS                 Some(edit)
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn applied(source: &str, edit: &TextEdit) -> String {
-//RS         let mut out = source.to_string();
-//RS         out.replace_range(edit.span.start..edit.span.end, &edit.new_text);
-//RS         out
-//RS     }
-//RS 
-//RS     /// Apply the first L0507 fix until none remain, as `jet fix` rounds do.
-//RS     /// With `same_tree`, prove the result parses to exactly the original
-//RS     /// program. A table that is a function's last statement becomes the
-//RS     /// function's final expression (D-BODY-LAST1=B), so that case changes node
-//RS     /// shape while keeping its meaning; `tests/tail_return_parity.rs` proves it
-//RS     /// on every hosted tier.
-//RS     fn fix_all(source: &str, same_tree: bool) -> String {
-//RS         let (original, _) = checked(source);
-//RS         let mut text = source.to_string();
-//RS         for _ in 0..8 {
-//RS             let (_, diagnostics) = checked(&text);
-//RS             let Some(edit) = arm_table_edits(&diagnostics).into_iter().next() else {
-//RS                 break;
-//RS             };
-//RS             text = applied(&text, &edit);
-//RS         }
-//RS         let (fixed, diagnostics) = checked(&text);
-//RS         assert!(
-//RS             !diagnostics.iter().any(|d| d.code == "L0507"
-//RS                 || d.severity == crate::Diagnostics::Severity::Error),
-//RS             "fixed source still warns or fails:\n{text}\n{diagnostics:?}"
-//RS         );
-//RS         if same_tree {
-//RS             assert_eq!(
-//RS                 String::from_utf8_lossy(&crate::Formatter::canonical_program(&original)),
-//RS                 String::from_utf8_lossy(&crate::Formatter::canonical_program(&fixed)),
-//RS                 "the arm-table rewrite changed program meaning:\n{text}"
-//RS             );
-//RS         }
-//RS         text
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn braced_else_if_chain_becomes_one_arm_table() {
-//RS         let source = "fn show(score: Int) {\n    if score >= 90 {\n        print(\"a\")\n    } else if score >= 80 {\n        print(\"b\")\n    } else {\n        print(\"c\")\n    }\n    print(\"done\")\n}\n";
-//RS         assert_eq!(
-//RS             fix_all(source, true),
-//RS             "fn show(score: Int) {\n    if {\n        score >= 90 -> {\n            print(\"a\")\n        }\n        score >= 80 -> {\n            print(\"b\")\n        }\n        else -> {\n            print(\"c\")\n        }\n    }\n    print(\"done\")\n}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn value_tail_chain_becomes_the_function_value_table() {
-//RS         let source = "fn grade(score: Int) -> String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
-//RS         assert_eq!(
-//RS             fix_all(source, false),
-//RS             "fn grade(score: Int) -> String {\n    if {\n        score >= 90 -> {\n            return \"a\"\n        }\n        score >= 80 -> {\n            return \"b\"\n        }\n        else -> {\n            return \"c\"\n        }\n    }\n}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn arrow_else_if_chain_becomes_one_arm_table() {
-//RS         let source = "fn run() {\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}\n";
-//RS         assert_eq!(
-//RS             fix_all(source, true),
-//RS             "fn run() {\n    if {\n        false -> print(\"a\")\n        true -> print(\"b\")\n        else -> print(\"c\")\n    }\n}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn multi_line_value_branch_becomes_a_value_table() {
-//RS         let source = "fn run() {\n    answer :: if true -> {\n        value :: 40 + 2\n        value\n    } else -> 0\n    print(answer)\n}\n";
-//RS         assert_eq!(
-//RS             fix_all(source, true),
-//RS             "fn run() {\n    answer :: if {\n        true -> {\n            value :: 40 + 2\n            value\n        }\n        else -> 0\n    }\n    print(answer)\n}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn nested_chains_converge_across_fix_rounds() {
-//RS         let source = "fn run(a: Bool, b: Bool) {\n    if a {\n        if b {\n            print(\"1\")\n        } else if a {\n            print(\"2\")\n        }\n    } else if b {\n        print(\"3\")\n    }\n}\n";
-//RS         let (_, diagnostics) = checked(source);
-//RS         assert_eq!(arm_table_edits(&diagnostics).len(), 2, "{diagnostics:?}");
-//RS         let fixed = fix_all(source, true);
-//RS         assert!(fixed.contains("            b -> {"), "{fixed}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn comment_between_branches_keeps_the_warning_without_an_edit() {
-//RS         let source = "fn run(a: Bool) {\n    if a {\n        print(\"x\")\n    } /* keep */ else if !a {\n        print(\"y\")\n    }\n}\n";
-//RS         let (_, diagnostics) = checked(source);
-//RS         let lint = diagnostics
-//RS             .iter()
-//RS             .find(|d| d.code == "L0507")
-//RS             .expect("the chain still warns");
-//RS         assert!(lint.edit.is_none(), "a comment would be lost: {lint:?}");
-//RS     }
-//RS }
-// END-PORT-PENDING 0337 crates/jet-parser/src/Parser/Statements/conditionals.rs:1-2459
+// Private continuation of Parser/Statements; canonical AST and parser state.
+use jet_foundation.[BinOp, Call, Diagnostic, Expr, Pattern, Span, Stmt, SwitchArm, TextEdit, UnOp, diagnostic_from_registry, diagnostic_with_edit, expr_span, stmt_span]
+use jet_lexer.[TOKEN_AND_AND, TOKEN_BANG, TOKEN_COMMA, TOKEN_COMPARE, TOKEN_DOT, TOKEN_EOF, TOKEN_EQ, TOKEN_EQ_EQ, TOKEN_GE, TOKEN_GT, TOKEN_IDENT, TOKEN_INT, TOKEN_KW_ELSE, TOKEN_KW_IF, TOKEN_LBRACE, TOKEN_LE, TOKEN_LPAREN, TOKEN_LT, TOKEN_NOT_EQ, TOKEN_OR_OR, TOKEN_PIPE, TOKEN_RBRACE, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI]
+use jet_parser.[leading_dot_variant]
 
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:4
+// value_block_stmt_diverges -> Statements.jet::parser_statement_definitely_exits_value_block.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:8
+// value_expr_diverges -> Statements.jet::parser_expression_definitely_diverges
+// (recursive Paren removal, Todo, and Call named panic).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:20
+// result_handler_follows -> ResultHandlers.jet::parser_expression_result_handler_ahead;
+// retired-arrow recognition must use parser_at_unified_arrow_token, as the shared arrow owner does.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:31
+// parse_result_handler -> ResultHandlers.jet::parser_parse_result_handler_form:
+// the canonical wrapper owns result_handler_depth increment/decrement and the root-only duplicate check.
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:44
+fn parse_result_handler_inner(state: &JetParserState, subject: ParsedExpr, question_span: Span, depth: Int, check_duplicate_failure: Bool) -> ParsedExpr {
+    ok_binding :: parser_expect_name(&state, "for the success payload binding after `?`")
+    if ok_binding.payload.decoded == "_" -> parser_add_fatal_code(&state, "E0003", ok_binding.span, "a Result handler success branch needs a payload binding", "the compact handler exposes the success payload inside its branch", "name the payload after `?`, for example `? ok -> ...`")
+    if parser_aborting(&state) -> return subject
+    parser_expect_unified_arrow(&state, "after the success payload binding")
+    if parser_aborting(&state) -> return subject
+    ok_branch :: parse_result_handler_branch(&state, depth + 1)
+    if parser_aborting(&state) -> return subject
+    if parser_current_kind(&state) != TOKEN_BANG {
+        parser_add_fatal_code(&state, "E0003", parser_current(&state).span, "a Result handler needs a `!` failure branch", "the compact handler is exhaustive: it has one success branch and one failure branch", "add `! error -> failure` after the success branch")
+        return subject
+    }
+    bang_span :: parser_bump(&state).span
+    err_binding :: parser_expect_name(&state, "for the failure payload binding after `!`")
+    if err_binding.payload.decoded == "_" -> parser_add_fatal_code(&state, "E0003", err_binding.span, "a Result handler failure branch needs a payload binding", "the compact handler exposes the failure payload inside its branch", "name the payload after `!`, for example `! error -> ...`")
+    if parser_aborting(&state) -> return subject
+    if err_binding.payload.decoded == ok_binding.payload.decoded -> parser_add_fatal_code(&state, "E0003", err_binding.span, "a Result handler cannot bind both payloads to the same name", "the success and failure payloads are distinct branch-local values", "give the success and failure payloads different names")
+    if parser_aborting(&state) -> return subject
+    parser_expect_unified_arrow(&state, "after the failure payload binding")
+    if parser_aborting(&state) -> return subject
+    err_branch :: parse_result_handler_branch(&state, depth + 1)
+    if parser_aborting(&state) -> return subject
+    if check_duplicate_failure && parser_expression_form_result_separator_ahead(&state) {
+        parser_add_fatal_code(&state, "E0003", parser_current(&state).span, "a Result handler cannot have two failure branches", "the compact handler has exactly one success role and one failure role", "keep one `! error -> ...` branch")
+        return subject
+    }
+    ok_span :: parser_cover(question_span, ok_binding.span)
+    err_span :: parser_cover(bang_span, err_binding.span)
+    ok_cond :: Expr.PatternTest{subject: subject.expr, pattern: Pattern.Ok{binding: ok_binding.payload.decoded, binding_span: ok_binding.span, inner: None, span: ok_span}, span: ok_span}
+    err_cond :: Expr.PatternTest{subject: subject.expr, pattern: Pattern.Err{binding: err_binding.payload.decoded, binding_span: err_binding.span, inner: None, span: err_span}, span: err_span}
+    end :: expr_span(err_branch.value).end
+    span :: Span{start: subject.span.start, end: end}
+    err_if :: Expr.If{cond: err_cond, then_body: err_branch.body, then_value: err_branch.value, else_body: [], else_value: Expr.NoElse{span: Span{start: end, end: end}}, span: span}
+    ParsedExpr{expr: Expr.If{cond: ok_cond, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [], else_value: err_if, span: span}, span: span}
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:154
+fn parse_result_handler_branch(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
+    if parser_current_kind(&state) == TOKEN_LBRACE -> return parse_result_handler_block(&state, depth + 1)
+    if parser_current_kind(&state) == TOKEN_RETURN {
+        return_span :: parser_bump(&state).span
+        value := Expr?{None}
+        kind :: parser_current_kind(&state)
+        if !parser_expression_form_result_separator_ahead(&state) && kind != TOKEN_RBRACE && kind != TOKEN_SEMI && kind != TOKEN_EOF -> value = Val(parser_parse_expression(&state, 1, depth + 1).expr)
+        end :: if value == { .Val(expr) -> expr_span(expr).end; .None -> return_span.end }
+        span :: Span{start: return_span.start, end: end}
+        return ParserExpressionFormValueBranch{body: [Stmt]{Stmt.Return{value: value, span: return_span}}, value: Expr.NoElse{span: Span{start: end, end: end}}, span: span}
+    }
+    branch := parse_selected_value(&state, depth + 1)
+    if branch.value == .Call(call) && call.name == "panic" {
+        end :: expr_span(branch.value).end
+        // Rust discards the selected block's earlier body in this exact branch.
+        branch.body = [Stmt]{Stmt.Expr{expr: branch.value}}
+        branch.value = Expr.NoElse{span: Span{start: end, end: end}}
+    }
+    branch
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:188
+fn parse_result_handler_block(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
+    open :: parser_expect(&state, TOKEN_LBRACE, "to open this Result handler branch")
+    stmts := [Stmt]{}
+    loop {
+        if parser_aborting(&state) -> return ParserExpressionFormValueBranch{body: stmts, value: Expr.NoElse{span: parser_current(&state).span}, span: parser_cover(open.span, parser_current(&state).span)}
+        parser_skip_synthetic_semicolons(&state)
+        token :: parser_current(&state)
+        if token.kind == TOKEN_RBRACE {
+            parser_bump(&state)
+            parser_add_fatal_code(&state, "E0003", token.span, "a Result handler branch cannot be empty", "each exhaustive branch must produce a value or diverge", "add a value, `return`, or another diverging tail")
+            next
+        }
+        if token.kind == TOKEN_EOF {
+            parser_add_fatal_code(&state, "E0003", token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            next
+        }
+        save :: state.position
+        diags :: state.diagnostics.len()
+        blocks :: state.block_spans.len()
+        else_arms :: state.else_arms.len()
+        // This scan avoids reparsing nested control bodies exponentially.
+        if parser_value_tail_ahead(state) {
+            value :: parser_parse_expression(&state, 1, depth + 1)
+            if !parser_error_since(state, diags) {
+                if parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE {
+                    semi :: parser_current(&state).span
+                    if semi.start != semi.end && !parser_expression_definitely_diverges(value.expr) {
+                        parser_add_fatal_code(&state, "E0114", value.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit")
+                        next
+                    }
+                    parser_bump(&state)
+                }
+                if parser_current_kind(&state) == TOKEN_RBRACE {
+                    close :: parser_bump(&state).span
+                    if value.expr == .Call(call) && call.name == "panic" {
+                        &stmts.push(Stmt.Expr{expr: value.expr})
+                        end :: value.span.end
+                        return ParserExpressionFormValueBranch{body: stmts, value: Expr.NoElse{span: Span{start: end, end: end}}, span: parser_cover(open.span, close)}
+                    }
+                    return ParserExpressionFormValueBranch{body: stmts, value: value.expr, span: parser_cover(open.span, close)}
+                }
+            }
+            parser_rewind(&state, save, diags, blocks, else_arms)
+        }
+        stmt :: parser_parse_statement(&state)
+        if parser_aborting(&state) -> next
+        diverges :: if stmt == {
+            .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) -> true
+            .Expr(expr) -> if expr == { .Call(call) -> call.name == "panic"; .Todo(_, _) -> true; else -> false }
+            else -> false
+        }
+        &stmts.push(stmt)
+        if diverges && parser_current_kind(&state) == TOKEN_RBRACE {
+            close :: parser_bump(&state).span
+            return ParserExpressionFormValueBranch{body: stmts, value: Expr.NoElse{span: Span{start: close.start, end: close.start}}, span: parser_cover(open.span, close)}
+        }
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:286
+// result_handler_separator_ahead -> ResultHandlers.jet::parser_expression_form_result_separator_ahead.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:295
+// is_result_handler_expr -> Statements.jet::parser_is_result_handler_expr
+// (Ok pattern, nested Err pattern, and terminal NoElse, not a general value if).
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:332
+fn scope_member_stmt(state: &JetParserState, depth: Int) -> Stmt {
+    dot_span :: parser_bump(&state).span
+    name :: parser_expect_name(&state, "for the scope-member name")
+    args := [Expr]{}
+    args_span := Span?{None}
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        lp :: parser_bump(&state).span
+        loop parser_current_kind(&state) != TOKEN_RPAREN && !parser_aborting(&state) {
+            &args.push(parser_parse_expression(&state, 1, depth + 1).expr)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            parser_expect(&state, TOKEN_COMMA, "between scope-member arguments")
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        }
+        parser_expect(&state, TOKEN_RPAREN, "to close the scope-member arguments")
+        args_span = Val(Span{start: lp.start, end: parser_prev_token_end(state)})
+    }
+    body :: parser_parse_block(&state)
+    Stmt.ScopeMember{name: name.payload.decoded, name_span: name.span, args: args, args_span: args_span, body: body.statements, dsl: false, dot_span: dot_span, span: Span{start: dot_span.start, end: parser_prev_token_end(state)}}
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:379
+// if_or_dispatch -> Statements.jet::parser_parse_if_statement, including subject probe/rewind,
+// E0322, implicit dispatch E0992 recovery, arrow/braces teaching, and L0507 authored parts.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:528
+// classic_if_switch -> Statements.jet::parser_parse_if_else_chain + parser_parse_if_statement:
+// the same flat SwitchArm sequence and private true subject are constructed directly.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:572
+// adjacent_effect_body -> Statements.jet::parser_parse_adjacent_effect_body (E0329 and depth restoration).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:593
+fn braceless_arm_stmt(state: &JetParserState) -> Stmt {
+    saved :: state.lambda_tail_block_depth
+    state.lambda_tail_block_depth = Val(state.block_depth)
+    statement :: parser_parse_statement(&state)
+    state.lambda_tail_block_depth = saved
+    statement
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:602
+// adjacent_effect_else -> Statements.jet::parser_parse_if_else_chain + parser_parse_else_body;
+// both braced and adjacent fallback spans are retained in ParserBranchPart.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:635
+// teach_control_braces -> Statements.jet::parser_teach_control_braces (E0372).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:650
+// guard_arms -> Statements.jet::parser_parse_if_guard_arms (empty/EOF/else/condition branches).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:720
+// subjectless_arm_head -> Statements.jet::parser_parse_subjectless_arm_head (binding/source and after carriers).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:742
+// guard_arm_body -> Statements.jet::parser_parse_guard_arm_body, with braceless_arm_stmt below its non-braced path.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:762
+// if_body_is_arms -> Statements.jet::parser_if_body_is_arms (range hazards and linear arrow scan).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:827
+// line_arrow_ahead -> Statements.jet::parser_line_arrow_ahead (balanced groups and terminators).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:855
+// if_arms -> Statements.jet::parser_parse_if_arms (pattern it receiver, repeated else, and full arm spans).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:928
+// try_range_arm_head -> Statements.jet::parser_parse_range_arm_head (E0318, E0319, and exact Range carrier).
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1023
+fn if_arm_head(state: &JetParserState, subject: Expr, pat_subject: Expr, op: BinOp, depth: Int) -> Expr {
+    range :: parser_parse_range_arm_head(&state, pat_subject)
+    if range == .Val(value) -> return value
+    if parser_pattern_rhs_ahead(&state) {
+        save :: state.position
+        diags :: state.diagnostics.len()
+        blocks :: state.block_spans.len()
+        else_arms :: state.else_arms.len()
+        pattern :: parser_parse_pattern(&state, depth + 1, true)
+        if parser_aborting(&state) -> return Expr.PatternTest{subject: pat_subject, pattern: pattern.pattern, span: pattern.span}
+        after :: parser_current_kind(&state)
+        if parser_at_unified_arrow(&state) || after == TOKEN_AND_AND || after == TOKEN_OR_OR {
+            result := parser_expression_form_pattern_condition(&state, pat_subject, pattern, op)
+            if op != BinOp.Eq || parser_at_unified_arrow(&state) -> return result
+            loop parser_current_kind(&state) == TOKEN_AND_AND && !parser_aborting(&state) {
+                parser_bump(&state)
+                result = parser_expression_form_combine(result, parse_arm_bool_operand(&state, subject, op, depth + 1), BinOp.And)
+            }
+            loop parser_current_kind(&state) == TOKEN_OR_OR && !parser_aborting(&state) {
+                parser_bump(&state)
+                group := parse_arm_bool_operand(&state, subject, op, depth + 1)
+                loop parser_current_kind(&state) == TOKEN_AND_AND && !parser_aborting(&state) {
+                    parser_bump(&state)
+                    group = parser_expression_form_combine(group, parse_arm_bool_operand(&state, subject, op, depth + 1), BinOp.And)
+                }
+                result = parser_expression_form_combine(result, group, BinOp.Or)
+            }
+            return result
+        }
+        parser_rewind(&state, save, diags, blocks, else_arms)
+    }
+    save :: state.position
+    diags :: state.diagnostics.len()
+    blocks :: state.block_spans.len()
+    else_arms :: state.else_arms.len()
+    raw :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+    if !parser_error_since(state, diags) {
+        redundant :: if raw.expr == {
+            .PatternTest(lhs, _, _) -> parser_expression_form_same_dispatch_subject(lhs, subject)
+            .Binary(binop, lhs, _, _) -> binop == op && parser_expression_form_same_dispatch_subject(lhs, subject)
+            else -> false
+        }
+        if redundant {
+            &state.diagnostics.push(redundant_subject_diag(raw.span))
+            return raw.expr
+        }
+    }
+    parser_rewind(&state, save, diags, blocks, else_arms)
+    parse_arm_value_cond(&state, subject, op, depth + 1)
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1144
+fn redundant_subject_diag(span: Span) -> Diagnostic {
+    diagnostic_from_registry("E0994", Val(span), "drop the `subject OP` — the comparison on the `if` already applies it to every arm", "`if subject OP {{ … }}` matches each arm head against the subject, so repeating `subject OP` on an arm is redundant", "delete the `subject OP` prefix; write just the value or pattern")
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1160
+fn distributed_atom_group_diag(state: &JetParserState, span: Span) -> Diagnostic {
+    diagnostic := Diagnostic.from_row("E0386", [], Val(span))
+    if span.start >= 0 && span.end >= span.start && span.end <= state.source.len() {
+        source := String.from_bytes(state.source[span.start..<span.end]) // #4303
+        if source == .Val(text) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "({text})"})
+    }
+    diagnostic
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1181
+fn parse_arm_and_cond(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
+    (lhs, count, span) :: parse_arm_alternates_cond(&state, subject, op, false, depth + 1)
+    if count > 1 && (parser_current_kind(&state) == TOKEN_AND_AND || parser_current_kind(&state) == TOKEN_OR_OR) -> &state.diagnostics.push(distributed_atom_group_diag(&state, span))
+    result := lhs
+    loop parser_current_kind(&state) == TOKEN_AND_AND && !parser_aborting(&state) {
+        parser_bump(&state)
+        result = parser_expression_form_combine(result, parse_arm_bool_operand(&state, subject, op, depth + 1), BinOp.And)
+    }
+    result
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1210
+fn parse_arm_value_cond(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
+    result := parse_arm_and_cond(&state, subject, op, depth + 1)
+    loop parser_current_kind(&state) == TOKEN_OR_OR && !parser_aborting(&state) {
+        parser_bump(&state)
+        result = parser_expression_form_combine(result, parse_arm_bool_operand(&state, subject, op, depth + 1), BinOp.Or)
+    }
+    result
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1235
+fn parse_arm_bool_operand(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        inner :: parse_arm_value_cond(&state, subject, op, depth + 1)
+        parser_expect(&state, TOKEN_RPAREN, "to close the arm head group")
+        return inner
+    }
+    (cond, count, span) :: parse_arm_alternates_cond(&state, subject, op, true, depth + 1)
+    if count > 1 -> &state.diagnostics.push(distributed_atom_group_diag(&state, span))
+    cond
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1258
+fn parse_arm_alternates_cond(state: &JetParserState, subject: Expr, op: BinOp, prefer_predicate: Bool, depth: Int) -> (Expr, Int, Span) {
+    start :: parser_current(&state).span.start
+    result := parse_arm_atom_cond(&state, subject, op, prefer_predicate, depth + 1)
+    end := parser_prev_token_end(state)
+    count := 1
+    loop parser_current_kind(&state) == TOKEN_PIPE && parser_kind_at(&state, 1) != TOKEN_PIPE && !parser_aborting(&state) {
+        parser_bump(&state)
+        value :: parse_arm_atom_cond(&state, subject, op, false, depth + 1)
+        result = parser_expression_form_combine(result, value, BinOp.Or)
+        end = parser_prev_token_end(state)
+        count += 1
+    }
+    (result, count, Span{start: start, end: end})
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1303
+fn parse_dispatch_atom_expr(state: &JetParserState, depth: Int) -> ParsedExpr {
+    lhs :: parser_parse_expression_dispatch_atom(&state, depth + 1)
+    kind :: parser_current_kind(&state)
+    op :: if kind == {
+        TOKEN_EQ_EQ -> Val(BinOp.Eq)
+        TOKEN_NOT_EQ -> Val(BinOp.Ne)
+        TOKEN_LT -> Val(BinOp.Lt)
+        TOKEN_GT -> if state.module_arg_expr_depth != Val(depth) -> Val(BinOp.Gt) else -> None
+        TOKEN_LE -> Val(BinOp.Le)
+        TOKEN_GE -> Val(BinOp.Ge)
+        TOKEN_COMPARE -> Val(BinOp.Compare)
+        else -> None
+    } ?? return lhs
+    op_span :: parser_bump(&state).span
+    if op == BinOp.Eq && parser_pattern_rhs_ahead(&state) {
+        pattern :: parser_parse_pattern(&state, depth + 1, true)
+        span :: Span{start: lhs.span.start, end: pattern.span.end.max(op_span.end)}
+        return ParsedExpr{expr: Expr.PatternTest{subject: lhs.expr, pattern: pattern.pattern, span: span}, span: span}
+    }
+    rhs :: parser_parse_expression_dispatch_atom(&state, depth + 1)
+    span :: Span{start: lhs.span.start, end: rhs.span.end.max(op_span.end)}
+    ParsedExpr{expr: Expr.Binary{op: op, left: lhs.expr, right: rhs.expr, span: span}, span: span}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1335
+fn parse_arm_atom_cond(state: &JetParserState, subject: Expr, op: BinOp, prefer_predicate: Bool, depth: Int) -> Expr {
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        inner :: parse_arm_value_cond(&state, subject, op, depth + 1)
+        parser_expect(&state, TOKEN_RPAREN, "to close the arm head group")
+        return inner
+    }
+    raw :: parse_dispatch_atom_expr(&state, depth + 1)
+    arm_atom_to_cond(subject, raw.expr, op, prefer_predicate)
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1359
+fn arm_atom_to_cond(subject: Expr, value: Expr, op: BinOp, prefer_predicate: Bool) -> Expr Never! {
+    predicate :: if value == {
+        .Binary(binop, _, _, _) -> binop == BinOp.Eq || binop == BinOp.Ne || binop == BinOp.Lt || binop == BinOp.Gt || binop == BinOp.Le || binop == BinOp.Ge || binop == BinOp.Compare || binop == BinOp.And || binop == BinOp.Or
+        .PatternTest(_, _, _) -> true
+        .Bool(_, _) -> prefer_predicate
+        .Unary(unary, _, _) -> unary == UnOp.Not
+        .Ident(_, _) | .Field(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _) -> prefer_predicate
+        else -> false
+    }
+    if predicate -> return value
+    Expr.Binary{op: op, left: subject, right: value, span: Span{start: expr_span(subject).start, end: expr_span(value).end}}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1387
+// peek_dispatch_op -> DecisionTables.jet::parser_expression_form_dispatch_op,
+// guarded at both callsites by parser_kind_at(state, 1) == TOKEN_LBRACE.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1404
+// same_subject -> DecisionTables.jet::parser_expression_form_same_dispatch_subject (it or byte-equal Ident).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1413
+// arm_body -> Statements.jet::parser_parse_arm_body, with braceless_arm_stmt on its single-statement path.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1425
+// if_stmt -> Statements.jet::parser_parse_if_else_chain + parser_parse_if_body;
+// directly appends ordered SwitchArm/ParserBranchPart instead of allocating transient IfStmt chains.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1477
+// parse_if_expr -> DecisionTables.jet::parser_parse_expression_form, if arm:
+// fresh ParserBranchPart list and lint_style=true.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1483
+// parse_if_expr_inner -> DecisionTables.jet::parser_expression_form_parse_if:
+// subject probe/rewind, selected branches, else-if recursion, and root-only style lint.
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1556
+// parse_dispatch_expr -> DecisionTables.jet::parser_expression_form_parse_dispatch_table +
+// parser_expression_form_nest_arms (reverse fold, all-pattern exhaustion, and retained receiver).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1646
+fn parse_selected_value(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
+    if parser_current_kind(&state) == TOKEN_LBRACE -> return parse_value_block(&state, depth + 1)
+    value :: parser_parse_expression(&state, 1, depth + 1)
+    ParserExpressionFormValueBranch{body: [], value: value.expr, span: value.span}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1658
+// parse_guard_expr -> DecisionTables.jet::parser_expression_form_parse_guard_table +
+// parser_expression_form_nest_arms (mandatory final else, nonempty heads, reverse fold).
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1730
+// guard_value_body -> parse_selected_value above (identical braced and single-value paths).
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1742
+fn parse_value_block(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
+    open :: parser_expect(&state, TOKEN_LBRACE, "to open this `if` branch")
+    stmts := [Stmt]{}
+    loop {
+        if parser_aborting(&state) -> return ParserExpressionFormValueBranch{body: stmts, value: Expr.NoElse{span: parser_current(&state).span}, span: parser_cover(open.span, parser_current(&state).span)}
+        parser_skip_synthetic_semicolons(&state)
+        token :: parser_current(&state)
+        if token.kind == TOKEN_RBRACE {
+            parser_bump(&state)
+            if stmts.len() > 0 {
+                stmt :: stmts[stmts.len() - 1]
+                if parser_statement_definitely_exits_value_block(stmt) -> return ParserExpressionFormValueBranch{body: stmts, value: Expr.NoElse{span: Span{start: token.span.start, end: token.span.start}}, span: parser_cover(open.span, token.span)}
+                parser_add_fatal_code(&state, "E0114", stmt_span(stmt), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
+            } else {
+                parser_add_fatal_code(&state, "E0003", token.span, "this `if` branch is empty but is used as a value", "when `if` produces a value, each branch must end with one (S68)", "put a value as the last line, like `{{ x }}`")
+            }
+            next
+        }
+        if token.kind == TOKEN_EOF {
+            parser_add_fatal_code(&state, "E0003", token.span, "expected `}}` to close this `if` branch, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            next
+        }
+        save :: state.position
+        diags :: state.diagnostics.len()
+        blocks :: state.block_spans.len()
+        else_arms :: state.else_arms.len()
+        if parser_value_tail_ahead(state) {
+            value :: parser_parse_expression(&state, 1, depth + 1)
+            if !parser_error_since(state, diags) {
+                if parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE {
+                    semi :: parser_current(&state).span
+                    if semi.start != semi.end && !parser_expression_definitely_diverges(value.expr) {
+                        parser_add_fatal_code(&state, "E0114", value.span, "this value branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit")
+                        next
+                    }
+                    parser_bump(&state)
+                }
+                if parser_current_kind(&state) == TOKEN_RBRACE {
+                    close :: parser_bump(&state).span
+                    return ParserExpressionFormValueBranch{body: stmts, value: value.expr, span: parser_cover(open.span, close)}
+                }
+            }
+            parser_rewind(&state, save, diags, blocks, else_arms)
+        }
+        statement :: parser_parse_statement(&state)
+        if parser_aborting(&state) {
+            parser_recover_aborted_statement(&state, save)
+        } else {
+            &stmts.push(statement)
+        }
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:1844
+fn switch_after_kw(state: &JetParserState, span: Span, depth: Int) -> Stmt {
+    subject :: parser_parse_expression_no_struct_lit(&state, depth + 1).expr
+    parser_expect(&state, TOKEN_LBRACE, "to open the `switch` body")
+    arms := [SwitchArm]{}
+    else_body := [Stmt]?{None}
+    loop !parser_aborting(&state) {
+        token :: parser_current(&state)
+        if token.kind == TOKEN_RBRACE {
+            parser_bump(&state)
+            break
+        }
+        if token.kind == TOKEN_EOF {
+            parser_add_fatal_code(&state, "E0003", token.span, "expected `}}` to close this `switch`, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            break
+        }
+        if token.kind == TOKEN_PIPE {
+            arm_start :: parser_bump(&state).span
+            if parser_current_kind(&state) == TOKEN_KW_ELSE {
+                parser_bump(&state)
+                body :: parser_parse_block(&state).statements
+                if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+                else_body = Val(body)
+            } else {
+                cond :: parse_arm_value_cond(&state, subject, BinOp.Eq, depth + 1)
+                body :: parser_parse_block(&state).statements
+                end :: parser_current(&state).span.end
+                if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+                &arms.push(SwitchArm{cond: cond, body: body, span: Span{start: arm_start.start, end: end}})
+            }
+            next
+        }
+        // Rust's FOREIGN_CASE/FOREIGN_DEFAULT arm is guarded by literal false;
+        // no token can enter that branch.
+        if token.kind == TOKEN_KW_ELSE {
+            parser_bump(&state)
+            parser_expect_unified_arrow(&state, "after `else` in a `switch`")
+            body :: parser_parse_block(&state).statements
+            parser_expect(&state, TOKEN_SEMI, "after a `switch` arm's closing `}}`")
+            else_body = Val(body)
+            next
+        }
+        cond := Expr?{None}
+        if token.kind == TOKEN_DOT && leading_dot_variant(parser_lookahead(&state, 1)) != None {
+            dot_span :: parser_bump(&state).span
+            variant_token :: parser_bump(&state)
+            variant :: leading_dot_variant(variant_token) ?? panic("leading-dot variant guard and token must agree")
+            bindings := [jet_foundation.PatSlot]{}
+            end := variant_token.span.end
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                parser_bump(&state)
+                loop parser_current_kind(&state) != TOKEN_RPAREN && !parser_aborting(&state) {
+                    &bindings.push(parser_parse_pattern_slot(&state, depth + 1))
+                    if parser_current_kind(&state) == TOKEN_RPAREN -> break
+                    parser_expect(&state, TOKEN_COMMA, "between pattern bindings")
+                    if parser_current_kind(&state) == TOKEN_RPAREN -> break
+                }
+                parser_expect(&state, TOKEN_RPAREN, "after pattern bindings")
+                end = parser_prev_token_end(state)
+            }
+            pat_span :: Span{start: dot_span.start, end: end}
+            cond = Val(Expr.PatternTest{subject: subject, pattern: Pattern.Variant{variant: variant, bindings: bindings, leading_dot: true, span: pat_span}, span: pat_span})
+        } else {
+            cond = parser_parse_range_arm_head(&state, subject)
+        }
+        head :: cond ?? parser_parse_expression_no_struct_lit(&state, depth + 1).expr
+        parser_expect_unified_arrow(&state, "after a `switch` arm's condition")
+        body :: parser_parse_block(&state).statements
+        semi_end :: parser_current(&state).span.end
+        parser_expect(&state, TOKEN_SEMI, "after a `switch` arm's closing `}}`")
+        &arms.push(SwitchArm{cond: head, body: body, span: Span{start: token.span.start, end: semi_end}})
+    }
+    Stmt.Switch{subject: subject, arms: arms, else_body: else_body, span: span}
+}
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2010-2459
+// Both original test modules are translated in Tests/Parser/Statements03.jet.
+// Native/target/map/IO gates #4494/#4483/#4499/#4409 are not applicable to this parser-only range.

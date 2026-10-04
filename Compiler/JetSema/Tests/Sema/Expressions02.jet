@@ -1,0 +1,52 @@
+use JetSema.Sema.Expressions02.[parse_swizzle_member, SwizzleParse, swizzle_write_overlaps, swizzle_read_type, math_scalar_ty, math_arity, math_binop_result, layout_binop_result, geometry_binop_result, geometry_method_return, geometry_transform_diagnostic, geometry_static_return_with_owner]
+use jet_foundation.[Type, BinOp]
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:113 (behavioral control)
+#Test("swizzle_parse_keeps_lane_error_precedence") {
+    assert(parse_swizzle_member("xy", "Vec2") == SwizzleParse.Ok([0, 1]))
+    assert(parse_swizzle_member("z!", "Vec2") == SwizzleParse.InvalidLane{lane: 'z'})
+    assert(parse_swizzle_member("!z", "Vec2") == SwizzleParse.NotSwizzle)
+    assert(parse_swizzle_member("xy", "Mat3") == SwizzleParse.NotSwizzle)
+    assert(swizzle_write_overlaps([0, 1, 0]))
+    assert(!swizzle_write_overlaps([3, 2, 1, 0]))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:21/137/277 (behavioral control)
+#Test("math_width_and_operator_family_are_preserved") {
+    assert(math_scalar_ty("F32x4") == Type.Float32)
+    assert(math_arity("Mat3") == 9)
+    assert(swizzle_read_type("F32x4", 4) == Type.Named("F32x4"))
+    assert(swizzle_read_type("F32x4", 2) == Type.Named("Vec2"))
+    assert(math_binop_result(BinOp.Mul, "Mat3", "Vec3") == Val(Type.Named("Vec3")))
+    assert(math_binop_result(BinOp.Div, "Vec3", "Vec3") == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:382 (behavioral control)
+#Test("layout_comparison_produces_constraint_and_rejects_cross_axis") {
+    assert(layout_binop_result(BinOp.Ge, Type.Named("HVar"), Type.Float) == Val(Ok(Type.Named("Constraint"))))
+    assert(layout_binop_result(BinOp.Add, Type.Named("HVar"), Type.Named("VVar")) == Val(Err(())))
+    assert(layout_binop_result(BinOp.Add, Type.Int, Type.Float) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:627 (behavioral control)
+#Test("geometry_stock_and_dynamic_carriers_do_not_collapse") {
+    point :: Type.Named("ScreenPoint")
+    delta :: Type.Named("ScreenDelta")
+    assert(geometry_binop_result(BinOp.Sub, point, point) == Val(Ok(delta)))
+    assert(geometry_binop_result(BinOp.Add, point, point) == Val(Err(())))
+    dynamic :: Type.Apply{name: "Delta2", args: [Type.Float, Type.Named("Screen")]}
+    output :: Type.Apply{name: "Point2", args: [Type.Float, Type.Named("Screen")]}
+    assert(geometry_binop_result(BinOp.Add, point, dynamic) == Val(Ok(Type.Result{ok: output, err: Type.Named("TransformError")})))
+    assert(geometry_binop_result(BinOp.Add, point, Type.Named("WorldDelta")) == Val(Err(())))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs:708/868/980 (behavioral control)
+#Test("transform_chaining_checks_middle_space_and_constructor_owner") {
+    first :: Type.Apply{name: "Transform", args: [Type.Named("Screen"), Type.Named("World")]}
+    next :: Type.Apply{name: "Transform", args: [Type.Named("View"), Type.Named("Camera")]}
+    assert(geometry_method_return(first, "then", [next]) == Val(Err(())))
+    assert(geometry_transform_diagnostic(first, "then", [next]).is_some())
+    owner :: [Type.Named("Screen"), Type.Named("World")]
+    assert(geometry_static_return_with_owner("Transform", "affine", 8, owner) == Val(first))
+    assert(geometry_static_return_with_owner("Transform", "affine", 7, owner) == None)
+}

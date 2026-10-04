@@ -1,0 +1,56 @@
+// No original inline tests in the five Items source ranges. These controls
+// exercise the gap bodies using canonical lexer payloads and parser state.
+fn item_packet_state(source: String) -> JetParserState {
+    lexed :: jet_lexer.lex_payload(source.bytes(), false)
+    assert(lexed.diagnostics.is_empty())
+    JetParserState{tokens: lexed.tokens, position: 0, diagnostics: [], source_end: source.len(),
+        block_spans: [], pending_type_gt: false, pending_type_gt_span: Span{start: source.len(), end: source.len()},
+        result_handler_depth: 0, statement_start: -1, source: source.bytes()}
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:210,240
+#Test("CLI binding and Persist predicates are contextual") {
+    command := item_packet_state("run = serve")
+    assert(cli_binding_starts_here(&command))
+    ordinary := item_packet_state("run :: serve")
+    assert(!cli_binding_starts_here(&ordinary))
+    persist := item_packet_state("#Persist state := 1")
+    assert(at_persist_binding(&persist))
+    other := item_packet_state("#Static STATE :: 1")
+    assert(!at_persist_binding(&other))
+}
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:247
+#Test("retired C module predicate excludes canonical introductions") {
+    old := item_packet_state("#extern module c.lib {{}}")
+    assert(at_retired_at_c_module(&old))
+    canonical := item_packet_state("#Import module c.lib {{}}")
+    assert(!at_retired_at_c_module(&canonical))
+    callable := item_packet_state("#extern fn call()")
+    assert(!at_retired_at_c_module(&callable))
+}
+// Rust: crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs:526
+#Test("plain foreign string retains raw text and rejects byte-only string") {
+    raw := item_packet_state("r\"source\"")
+    value :: expect_plain_string(&raw, "for a library", "fixed identity", "use literal") ?? panic("expected literal")
+    assert(value.name == "source")
+    interpolation := item_packet_state("\"{name}\"")
+    assert(expect_plain_string(&interpolation, "for a library", "fixed identity", "use literal") == None)
+    assert(!interpolation.diagnostics.is_empty())
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:153
+#Test("computed field and field default remain distinct") {
+    computed := item_packet_state("size: Int -> 1")
+    value :: field(&computed) ?? panic("expected computed field")
+    assert(value.computed != None && value.default == None)
+    defaulted := item_packet_state("size: Int{{1}}")
+    fallback :: field(&defaulted) ?? panic("expected defaulted field")
+    assert(fallback.computed == None && fallback.default != None)
+}
+// Rust: crates/jet-parser/src/Parser/Items/type_methods_fields.rs:483
+#Test("Output defaults are a typed immutable module binding") {
+    state := item_packet_state("defaults: {{run: server}}")
+    value :: output_defaults_def(&state) ?? panic("expected defaults")
+    assert(value.name == "defaults")
+    assert(value.ty == Val(Type.Named{name: "OutputDefaults"}))
+    assert(!value.mutable && !value.is_comptime && !value.is_persist)
+    assert(value.resolved_output == None)
+}

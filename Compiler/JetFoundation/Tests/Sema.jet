@@ -1,0 +1,36 @@
+use JetFoundation.Sema.[RightsRow, RightsProvenance, ScopeFrame]
+use JetFoundation.Authority.[Holds, Verdict]
+
+// Rust: crates/jet-foundation/src/sema.rs:62,163 (behavioral control; no inline Rust tests)
+#Test("rights_denials_win_over_grants") {
+    row :: RightsRow.invocation(["IO"], ["IO.Write"], RightsProvenance.new("test", "manifest"))
+    assert(row.decide("IO.Write") == Verdict.Denied)
+    assert(row.decide("IO.Read") == Verdict.Allowed)
+    assert(row.decide("Net.Connect") == Verdict.Missing)
+}
+// Rust: crates/jet-foundation/src/sema.rs:77-108 (behavioral control)
+#Test("rights_presets_keep_unbounded_and_explicit_empty_distinct") {
+    callable :: RightsRow.callable(RightsProvenance.new("test", "inferred"))
+    pure :: RightsRow.pure(RightsProvenance.new("test", "pure"))
+    replayable :: RightsRow.replayable(RightsProvenance.new("test", "replayable"))
+    comptime :: RightsRow.comptime(RightsProvenance.new("test", "comptime"))
+    assert(callable.decide("IO.Read") == Verdict.Allowed)
+    assert(pure.decide("Mem") == Verdict.Missing)
+    assert(replayable.decide("IO.Read") == Verdict.Denied)
+    assert(replayable.decide("Mem") == Verdict.Allowed)
+    assert(comptime.decide("Mem") == Verdict.Allowed)
+    assert(comptime.decide("IO.Read") == Verdict.Missing)
+}
+// Rust: crates/jet-foundation/src/sema.rs:179 (behavioral control)
+#Test("rights_walk_retains_all_failures_and_denied_precedence") {
+    row :: RightsRow.invocation(["Mem"], ["IO"], RightsProvenance.new("test", "manifest"))
+    effects :: Holds.from(["Mem", "IO.Read", "Net.Connect"])
+    result :: row.walk(&effects, ["caller", "callee"], [])
+    assert(result.verdict == Verdict.Denied)
+    assert(!result.allowed())
+    assert(result.denials.len() == 2)
+    assert(result.denials[0].right == "IO.Read")
+    assert(result.denials[0].chain.call_chain == ["caller", "callee"])
+    assert(result.denials[1].right == "Net.Connect")
+    assert(result.denials[1].verdict == Verdict.Missing)
+}

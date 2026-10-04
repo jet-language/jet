@@ -1,28 +1,10 @@
-// PORT-PENDING 0397 crates-jet-sema-src-sema-checkerinfer-calls-module-group: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers.rs:1-24
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS 
-//RS /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
-//RS /// call-site argument doesn't implement one of the bound trait(s).
-//RS pub(super) fn e1313(
-//RS     arg_ty_name: &str,
-//RS     trait_name: &str,
-//RS     param_name: &str,
-//RS     fn_name: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1313",
-//RS         format!("`{arg_ty_name}` doesn't implement `{trait_name}`"),
-//RS         format!(
-//RS             "`{param_name}: ...{trait_name}` checks every argument against `{trait_name}` — \
-//RS              that's how `{fn_name}` accepts a mix of types safely"
-//RS         ),
-//RS         format!(
-//RS             "implement `{trait_name}` for `{arg_ty_name}`'s type, or drop the value from this call"
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-// END-PORT-PENDING 0397 crates/jet-sema/src/Sema/CheckerInfer/calls/helpers.rs:1-24
+use jet_foundation.[Diagnostic, Span]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers.rs:5
+pub fn e1313(arg_ty_name: String, trait_name: String, param_name: String, fn_name: String, span: Span) -> Diagnostic {
+    Diagnostic.error("E1313", "`{arg_ty_name}` doesn't implement `{trait_name}`",
+        "`{param_name}: ...{trait_name}` checks every argument against `{trait_name}` — that's how `{fn_name}` accepts a mix of types safely",
+        "implement `{trait_name}` for `{arg_ty_name}`'s type, or drop the value from this call",
+        Val(span))
+}
 

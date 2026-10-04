@@ -1,159 +1,92 @@
-// PORT-PENDING 0357 crates-jet-sema-src-sema-bundle-pipeline-completion-module-group: crates/jet-sema/src/Sema/Bundle/Pipeline/ImplHeads.rs:1-155
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS /// One trait named through a module alias in an `impl` head: the key the
-//RS /// impl now carries, and the owner module plus leaf name to register.
-//RS pub(super) struct QualifiedImplTrait {
-//RS     pub(super) key: String,
-//RS     pub(super) target: usize,
-//RS     pub(super) leaf: String,
-//RS }
-//RS 
-//RS /// D-IMPLDOT1=A splits a dotted `impl` head at its last segment, which cannot
-//RS /// see module aliases: `impl types.Span` parses as type `types` with trait
-//RS /// `Span`. Once imports are resolved, an alias segment binds to the segment
-//RS /// after it, so `impl types.Span` is an inherent impl of `types.Span` and
-//RS /// `impl Local.types.Named` implements `types.Named` for `Local`.
-//RS /// D-MOD-CYCLE1=A: a declaration from another file of the same package lives
-//RS /// in this file's namespace, so it is spelled by its leaf name; a declaration
-//RS /// from another package keeps its qualified spelling (the orphan rule then
-//RS /// judges the impl). Returns, per module, the traits named this way.
-//RS pub(super) fn normalize_qualified_impl_heads(
-//RS     bundle: &mut ProgramBundle,
-//RS ) -> Vec<Vec<QualifiedImplTrait>> {
-//RS     let mut qualified_traits = Vec::with_capacity(bundle.modules.len());
-//RS     for idx in 0..bundle.modules.len() {
-//RS         let module = &bundle.modules[idx];
-//RS         let aliases: HashMap<String, usize> = module
-//RS             .imports
-//RS             .iter()
-//RS             .filter(|import| !matches!(import.kind, ImportKind::Unqualified { .. }))
-//RS             .filter_map(|import| {
-//RS                 bundle
-//RS                     .name_ledger
-//RS                     .import_target(idx, import.span)
-//RS                     .map(|target| (import.import_alias(), target))
-//RS             })
-//RS             .collect();
-//RS         let mut traits = Vec::new();
-//RS         if aliases.is_empty() {
-//RS             qualified_traits.push(traits);
-//RS             continue;
-//RS         }
-//RS         let same_package: HashMap<usize, bool> = aliases
-//RS             .values()
-//RS             .map(|&target| (target, bundle.name_ledger.same_namespace(idx, target)))
-//RS             .collect();
-//RS         let module_identities: HashMap<usize, String> = aliases
-//RS             .values()
-//RS             .filter_map(|&target| {
-//RS                 bundle
-//RS                     .name_ledger
-//RS                     .module_identity(target)
-//RS                     .map(|module| (target, module))
-//RS             })
-//RS             .collect();
-//RS         let mut used_aliases = Vec::new();
-//RS         for item in &mut bundle.modules[idx].items {
-//RS             let Item::Impl(implementation) = item else {
-//RS                 continue;
-//RS             };
-//RS             let Some(trait_name) = implementation.trait_name.as_deref() else {
-//RS                 continue;
-//RS             };
-//RS             let segments: Vec<String> = implementation
-//RS                 .type_name
-//RS                 .split('.')
-//RS                 .chain(trait_name.split('.'))
-//RS                 .map(str::to_string)
-//RS                 .collect();
-//RS             // Each path is (owner module through an alias, spelling as
-//RS             // written, leaf name).
-//RS             let mut paths: Vec<(Option<usize>, String, String)> = Vec::new();
-//RS             let mut at = 0;
-//RS             while at < segments.len() {
-//RS                 match aliases.get(&segments[at]) {
-//RS                     Some(&target) if at + 1 < segments.len() => {
-//RS                         paths.push((
-//RS                             Some(target),
-//RS                             format!("{}.{}", segments[at], segments[at + 1]),
-//RS                             segments[at + 1].clone(),
-//RS                         ));
-//RS                         at += 2;
-//RS                     }
-//RS                     _ => {
-//RS                         paths.push((None, segments[at].clone(), segments[at].clone()));
-//RS                         at += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if paths.len() > 2 || paths.iter().all(|(target, _, _)| target.is_none()) {
-//RS                 continue;
-//RS             }
-//RS             for (target, written, _) in &paths {
-//RS                 if target.is_some() {
-//RS                     if let Some((alias, _)) = written.split_once('.') {
-//RS                         used_aliases.push(alias.to_string());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             let resolved = |(target, written, leaf): &(Option<usize>, String, String)| match target {
-//RS                 Some(target) if same_package[target] => leaf.clone(),
-//RS                 _ => written.clone(),
-//RS             };
-//RS             let start = implementation.type_span.start;
-//RS             let end = implementation
-//RS                 .trait_span
-//RS                 .map_or(implementation.type_span.end, |span| span.end);
-//RS             let first_end = start + paths[0].1.len();
-//RS             let type_name = resolved(&paths[0]);
-//RS             if let Some(trait_path) = paths.get(1) {
-//RS                 // A trait from another package is keyed by its canonical
-//RS                 // nominal identity, the spelling MIR trait references use.
-//RS                 let trait_key = match trait_path.0 {
-//RS                     Some(target) if !same_package[&target] => module_identities
-//RS                         .get(&target)
-//RS                         .map(|module| format!("{module}::{}", trait_path.2))
-//RS                         .unwrap_or_else(|| resolved(trait_path)),
-//RS                     _ => resolved(trait_path),
-//RS                 };
-//RS                 if let Some(target) = trait_path.0 {
-//RS                     traits.push(QualifiedImplTrait {
-//RS                         key: trait_key.clone(),
-//RS                         target,
-//RS                         leaf: trait_path.2.clone(),
-//RS                     });
-//RS                 }
-//RS                 implementation.type_name = type_name;
-//RS                 implementation.type_span = crate::Diagnostics::Span::new(start, first_end);
-//RS                 implementation.trait_name = Some(trait_key);
-//RS                 implementation.trait_span =
-//RS                     Some(crate::Diagnostics::Span::new(end - trait_path.1.len(), end));
-//RS             } else {
-//RS                 implementation.type_name = type_name;
-//RS                 implementation.type_span = crate::Diagnostics::Span::new(start, end);
-//RS                 implementation.trait_name = None;
-//RS                 implementation.trait_span = None;
-//RS             }
-//RS         }
-//RS         // The rewritten head no longer spells the alias, so record the use
-//RS         // here; otherwise the import reads as unused (L0103). Sema has not
-//RS         // rebuilt the alias table yet, so key the use by the import's alias
-//RS         // span, the same loader-owned key the import-edge liveness reads.
-//RS         for alias in used_aliases {
-//RS             let span = bundle.modules[idx]
-//RS                 .imports
-//RS                 .iter()
-//RS                 .find(|import| import.import_alias() == alias)
-//RS                 .map(|import| import.alias_span);
-//RS             if let Some(span) = span {
-//RS                 bundle.name_ledger.record_loader_alias_use(idx, span);
-//RS             }
-//RS         }
-//RS         qualified_traits.push(traits);
-//RS     }
-//RS     qualified_traits
-//RS }
-// END-PORT-PENDING 0357 crates/jet-sema/src/Sema/Bundle/Pipeline/ImplHeads.rs:1-155
+use JetSema.Sema.Bundle.Pipeline.*
+use jet_foundation.Diagnostics.[Span]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/ImplHeads.rs:5
+pub struct QualifiedImplTrait {
+    pub key: String
+    pub target: USize
+    pub leaf: String
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/Pipeline/ImplHeads.rs:20
+pub fn normalize_qualified_impl_heads(bundle: &ProgramBundle) -> [[QualifiedImplTrait]] Never! {
+    qualified_traits := [[QualifiedImplTrait]]{}
+    loop idx in 0..<bundle.modules.len() {
+        aliases := [String:USize]{}
+        loop import in bundle.modules[idx].imports {
+            if import.kind == { .Unqualified{..} -> true else -> false } -> next
+            if bundle.name_ledger.import_target(idx, import.span) is target {
+                aliases.insert(import.import_alias(), target)
+            }
+        }
+        traits := [QualifiedImplTrait]{}
+        if aliases.is_empty() {
+            qualified_traits.push(^traits)
+            next
+        }
+        same_package := [USize:Bool]{}
+        module_identities := [USize:String]{}
+        loop target in aliases.values() {
+            same_package.insert(target, bundle.name_ledger.same_namespace(idx, target))
+            if bundle.name_ledger.module_identity(target) is identity -> module_identities.insert(target, identity)
+        }
+        used_aliases := [String]{}
+        loop item in &bundle.modules[idx].items {
+            if item is .Impl(implementation) {
+                trait_name :: implementation.trait_name ?? next
+                segments := [String]{}
+                loop segment in implementation.type_name.split('.') -> segments.push(segment.to_string())
+                loop segment in trait_name.split('.') -> segments.push(segment.to_string())
+                paths := [(USize?, String, String)]{}
+                at := 0
+                loop at < segments.len() {
+                    target :: aliases.get(segments[at])
+                    if target is owner && at + 1 < segments.len() {
+                        paths.push((Val(owner), "{segments[at]}.{segments[at + 1]}", segments[at + 1]))
+                        at += 2
+                    } else {
+                        paths.push((None, segments[at], segments[at]))
+                        at += 1
+                    }
+                }
+                if paths.len() > 2 || paths.iter().all(fn(path) { path.0 == None }) -> next
+                loop (target, written, _) in paths {
+                    if target != None {
+                        if written.split_once('.') is (alias, _) -> used_aliases.push(alias.to_string())
+                    }
+                }
+                resolved :: fn(path: (USize?, String, String)) -> String Never! {
+                    if path.0 is target && same_package[target] -> return path.2
+                    path.1
+                }
+                start :: implementation.type_span.start
+                end :: implementation.trait_span.map(fn(span) { span.end }) ?? implementation.type_span.end
+                first_end :: start + paths[0].1.len()
+                type_name :: resolved(paths[0])
+                if paths.get(1) is trait_path {
+                    trait_key := resolved(trait_path)
+                    if trait_path.0 is target && !same_package[target] {
+                        if module_identities.get(target) is identity -> trait_key = "{identity}::{trait_path.2}"
+                    }
+                    if trait_path.0 is target -> traits.push(QualifiedImplTrait{key: trait_key, target: target, leaf: trait_path.2})
+                    implementation.type_name = type_name
+                    implementation.type_span = Span.new(start, first_end)
+                    implementation.trait_name = Val(trait_key)
+                    implementation.trait_span = Val(Span.new(end - trait_path.1.len(), end))
+                } else {
+                    implementation.type_name = type_name
+                    implementation.type_span = Span.new(start, end)
+                    implementation.trait_name = None
+                    implementation.trait_span = None
+                }
+            }
+        }
+        // Record rewritten alias uses at the loader-owned alias-span key.
+        loop alias in used_aliases {
+            span :: bundle.modules[idx].imports.iter().find(fn(import) { import.import_alias() == alias }).map(fn(import) { import.alias_span })
+            if span is found -> bundle.name_ledger.record_loader_alias_use(idx, found)
+        }
+        qualified_traits.push(^traits)
+    }
+    qualified_traits
+}
