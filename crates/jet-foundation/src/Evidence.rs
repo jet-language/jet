@@ -1862,13 +1862,16 @@ fn decode_diagnostics(
     for _ in 0..count {
         let code = read_string(bytes, at)?;
         let message = read_string(bytes, at)?;
-        let source = if read_byte(bytes, at)? == 1 {
-            let line = read_u32(bytes, at)?;
-            let column = read_u32(bytes, at)?;
-            let path = read_string(bytes, at)?;
-            Some(EvidenceSource::new(path, line, column))
-        } else {
-            None
+        // Optional source markers follow the same strict 0/1 law as other fields.
+        let source = match read_byte(bytes, at)? {
+            0 => None,
+            1 => {
+                let line = read_u32(bytes, at)?;
+                let column = read_u32(bytes, at)?;
+                let path = read_string(bytes, at)?;
+                Some(EvidenceSource::new(path, line, column))
+            }
+            marker => return Err(format!("unknown evidence diagnostic source marker {marker}")),
         };
         values.push(EvidenceDiagnostic::new(code, message, source));
     }
@@ -2329,5 +2332,27 @@ mod tests {
         assert_eq!(rows[0].source.line, 1);
         assert_eq!(rows[1].source.line, 2);
         assert!(rows[0].name().contains("jet-test"));
+    }
+
+    #[test]
+    fn diagnostic_source_marker_refuses_unknown_values() {
+        for marker in [0, 1, 2, 255] {
+            let mut bytes = Vec::new();
+            write_collection_len(&mut bytes, 1).unwrap();
+            write_string(&mut bytes, "E0001").unwrap();
+            write_string(&mut bytes, "message").unwrap();
+            bytes.push(marker);
+            if marker == 1 {
+                bytes.extend_from_slice(&3u32.to_be_bytes());
+                bytes.extend_from_slice(&4u32.to_be_bytes());
+                write_string(&mut bytes, "source.jet").unwrap();
+            }
+            let result = decode_diagnostics(&bytes, &mut 0);
+            match marker {
+                0 => assert!(result.unwrap()[0].source.is_none()),
+                1 => assert_eq!(result.unwrap()[0].source, Some(EvidenceSource::new("source.jet", 3, 4))),
+                _ => assert_eq!(result.unwrap_err(), format!("unknown evidence diagnostic source marker {marker}")),
+            }
+        }
     }
 }
