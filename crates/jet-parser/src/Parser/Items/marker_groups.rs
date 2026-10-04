@@ -365,6 +365,15 @@ impl<'a> Parser<'a> {
                 let crate::AST::Expr::Ident(name, _) = argument else {
                     continue;
                 };
+                if name == "allow_reason" {
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        "`#allow` cannot suppress `allow_reason`".to_string(),
+                        "the reason check audits the lint allowance itself and cannot be disabled by that allowance".to_string(),
+                        "write the reason slot: `#allow(lint_name, \"why this lint does not apply\")`".to_string(),
+                        Some(argument.span()),
+                    ));
+                }
                 if let Some(diagnostic) = jet_foundation::LintPolicy::selection_code_error(
                     name,
                     "`#allow(...)`",

@@ -241,7 +241,7 @@ fn shared_busy_wait_fix_rewrites_empty_plain_field_loop() {
         "safe busy-loop fix changed the deliberate allow:\n{source}"
     );
     assert!(
-        source.contains("#allow(shared_busy_wait) loop flag.ready == false {}"),
+        source.contains("#allow(shared_busy_wait, \"the fixture exercises suppression of this occurrence\") loop flag.ready == false {}"),
         "safe busy-loop fix removed the deliberate allow:\n{source}"
     );
 

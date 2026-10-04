@@ -211,8 +211,8 @@ fn run() {}
 fn parser_binds_the_authoritative_declaration_site_matrix() {
     let fixtures = [
         (
-            "#allow(float_money) price: Float",
-            "struct Money { #allow(float_money) price: Float }\nfn run() {}",
+            "#allow(float_money, \"deliberate floating-point field\") price: Float",
+            "struct Money { #allow(float_money, \"deliberate floating-point field\") price: Float }\nfn run() {}",
             jet::Policy::RuleSite::Field,
         ),
         (

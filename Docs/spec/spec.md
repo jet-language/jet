@@ -1646,6 +1646,35 @@ before the shared AOT
 or development TIR boundary. See
 [`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
 
+### One audited-gate law
+
+Every deliberate gate uses the same organization → package → module →
+function → block tightening ladder. The policy keys are `unsafe`, `impure`,
+`nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
+`trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
+`precision_demotion`, `structure`, and `lint_allow`. The first three retain
+their existing modes; every added key accepts `.GateOnly` (the default) or
+`.Forbid`. An organization's `.Forbid` cannot be widened by a package
+`.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
+use site, and the owning policy file.
+
+These keys are package/organization settings, not source settings:
+`#Policy(lint_allow)` is E0355. Source writes the concrete gate instead. A
+lint exemption is `#allow(lint_name, "why this lint does not apply")`; its
+reason slot is optional, but omission emits `allow_reason` (L3103).
+`#allow(allow_reason)` cannot suppress that audit and is E0355. Reviewed
+corpus exemptions keep reasons at these source sites, not in manifest rows.
+
+`jet inspect gates` reports every kind, including lint allowances and their
+written reasons. Structure gates record deliberate suppressions such as
+`_name`, not ordinary unused names for which `_name` is merely a suggested
+fix. Durable trust grants, dependency grants and `.Force` pins are checked
+before their writer publishes state; invocation choices are checked before
+dispatch. An ordinary deliberate `jet update jet` is not a forced pin.
+See [`Examples/features/effects/lint_gate_reason.jet`](../../Examples/features/effects/lint_gate_reason.jet).
+(D-GATE-LAW1=A)
+
+
 ### Explicit pointer casts
 
 Jet has no compact cast-and-dereference operator. To reinterpret an address,

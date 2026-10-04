@@ -118,7 +118,7 @@ fn organization_gate_policy_refuses_each_audited_invocation_gate() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     check_snapshot(
         "audited_gate_policy.txt",
-        &scrub(&stderr, &dir.join("main.jet")),
+        &scrub(&stderr.replace(configured.to_str().unwrap(), "ORG_POLICY"), &dir.join("main.jet")),
     );
 }
 

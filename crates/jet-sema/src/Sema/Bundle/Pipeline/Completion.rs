@@ -797,6 +797,11 @@ pub(super) fn complete_bundle_check(
     diags.extend(super::super::super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     bundle.name_ledger = name_ledger.clone();
+    if super::super::super::GateLedger::GateLedger::has_new_refusal(bundle) {
+        let mut ledger = super::super::super::GateLedger::GateLedger::default();
+        ledger.append_structure_facts(&name_ledger);
+        diags.extend(ledger.policy_diagnostics(bundle));
+    }
     // D-BUILDENTRY1 / I2+I3+I9 (Tower card 2008): checking is finished, so the
     // build entry has had every diagnostic it is owed. It is not runtime code,
     // and `BuildContext`/`BuildPlan` have no runtime lowering, so leaving it in

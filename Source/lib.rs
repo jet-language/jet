@@ -49,6 +49,7 @@ pub use jet_driver::{
     FortranBind,
     Generics,
     GoBind,
+    GateWriters,
     JavaBind,
     JavaScriptBind,
     JetLib,
